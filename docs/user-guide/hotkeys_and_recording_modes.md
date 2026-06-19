@@ -32,11 +32,26 @@ Each custom hotkey has:
 - **Hold / Toggle** — same meaning as the built-ins.
 - **Recipe** — the Playbook chain its recordings run. **Default pipeline** = whatever normal recordings run (cleanup → title → summary → tags); pick a named recipe to run a different chain instead (e.g. a "Dictate → prompt" recipe that reshapes a dictation into a polished LLM prompt). Build and edit chains in the **Playbook** settings section.
 - **Whisper model** — optionally transcribe *this* hotkey's recordings with a different speech-to-text model than the configured one — a bigger model for an important dictation, or a tiny one for a throwaway note. Leave it on **Use the configured model** to inherit the global Whisper model.
+- **Audio source** — which audio *this* hotkey captures: **Default (Recording settings)** / **Microphone** / **System audio (loopback) — Windows**. **Default** follows the global source in **Settings → Capture → Recording**, so existing bindings are unchanged. Set it to give one hotkey the microphone and another system audio — each with its own recipe and model. See [Per-hotkey audio source](#per-hotkey-audio-source) below.
 - **In-place options** (when the action is In-place) — fast lane (type the quick transcription immediately) vs. run the recipe first, and how to insert the text (type / paste / off).
 
-The recipe and Whisper-model overrides apply only to recordings created by that hotkey; normal recordings and the three built-ins are unchanged. If a hotkey points at a recipe you later delete, its recordings fall back to the default pipeline.
+The recipe, Whisper-model, and audio-source overrides apply only to recordings created by that hotkey; normal recordings and the three built-ins are unchanged. If a hotkey points at a recipe you later delete, its recordings fall back to the default pipeline.
 
-> Meeting custom hotkeys start a meeting like the built-in Meeting hotkey; the per-hotkey recipe / model overrides apply to single-recording (Record / In-place) hotkeys.
+> Meeting custom hotkeys start a meeting like the built-in Meeting hotkey; the per-hotkey recipe / model / audio-source overrides apply to single-recording (Record / In-place) hotkeys. A meeting always records **both** tracks, so the audio-source override is ignored for Meeting hotkeys.
+
+### Per-hotkey audio source
+
+By default every Record / In-place hotkey captures whatever the global **source** in **Settings → Capture → Recording** is set to (microphone, or system audio via WASAPI loopback). Expanding a hotkey's **▸ Recipe & options** reveals an **Audio source** dropdown that overrides that *for this hotkey only*:
+
+| Choice | What it captures |
+|--------|------------------|
+| **Default (Recording settings)** | Follows the global `[recording].source` — the original behaviour, so untouched bindings never change. |
+| **Microphone** | Your input device, regardless of the global source. |
+| **System audio (loopback) — Windows** | The system's audio output via WASAPI loopback (Windows only). |
+
+This lets a single Phoneme install carry, say, a **mic** hotkey for dictation and a **system-audio** hotkey to grab what's playing — each with its own recipe and Whisper model. The source actually used is stored on the recording and shown in the recordings-list **Source** column (🎤 Microphone / 🔊 System audio), so you can always tell how a clip was captured.
+
+The override is **ignored for Meeting hotkeys** — a meeting always records both the mic and system tracks (see [Meeting Mode](meeting_mode.md)). In config it is the optional per-binding `source` key — see the [configuration reference](../developer-guide/config_reference.md).
 
 ### External hotkey tools
 

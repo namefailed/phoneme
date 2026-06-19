@@ -73,7 +73,7 @@ recording:
   session the message isn't available in the panel; the full story is in
   `%LOCALAPPDATA%\phoneme\logs\daemon.log`.
 - **Retry** re-runs the whole pipeline for that recording (the same path as
-  **Re-transcribe**); **Open** jumps to it in the library.
+  **Re-run**); **Open** jumps to it in the library.
 - **Retry all** walks the list top to bottom, one at a time, with a progress
   count.
 - **Clear failed** resets the badge (the inbox `failed/` quarantine) only —
@@ -90,7 +90,7 @@ queue, or aborted mid-transcription) is marked **Cancelled** — a quiet, gray
 status of its own. It never appears in this panel and never lights the failed
 badge's red. Cancelled recordings stay in the library (find them with the
 status filter's **Cancelled** entry) and can be re-run any time via
-**Re-transcribe**.
+**Re-run**.
 
 ## 🔌 Something else is using port 5809
 

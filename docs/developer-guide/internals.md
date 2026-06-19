@@ -89,7 +89,17 @@ Everything audio converges on the canonical format: **16 kHz, mono, signed
 - **Pre-roll** ([`preroll.rs`](../../crates/phoneme-audio/src/preroll.rs)): a
   ring buffer of the last *N* ms of audio. Idle mic capture runs in the
   background recycling samples; on a record trigger the buffer is prepended so
-  the first word is never clipped.
+  the first word is never clipped. Pre-roll is **mic-only and captured under the
+  global `[recording].source`**, so when a per-keybind capture-source override
+  (below) selects a *different* source, the daemon discards the buffered samples
+  and opens a fresh stream for the override source — the recording captures (and is
+  labelled as) the source the binding asked for, never a stale device's audio.
+- **Per-keybind capture source**: `recorder.start` takes a `source_override`
+  (`Option<CaptureSource>`) from the firing `HotkeyBinding.source` and resolves
+  the effective kind as `source_override.unwrap_or(recording.source)`. It opens
+  the mic (`CpalSource`) or WASAPI loopback accordingly and stores the result on
+  the row's `track`, so one hotkey can record the mic and another system audio.
+  The override is ignored for meetings (both tracks always recorded).
 - **Import decode** ([`decode.rs`](../../crates/phoneme-audio/src/decode.rs)):
   `symphonia` decodes and resamples external files (`.wav`/`.mp3`/`.m4a`/`.flac`),
   behind a size-limit guard against memory exhaustion from a malicious or corrupt
@@ -121,7 +131,11 @@ The catalog lives in `catalog.db` under local app data
 - **`recordings`** — the primary row. Notably it keeps **three transcript
   layers** so nothing is lost: `original_transcript` (raw ASR), `clean_transcript`
   (pipeline LLM output), and the live `transcript` (hand-editable). A hand edit is
-  reversible because the machine layers are preserved.
+  reversible because the machine layers are preserved. The `track` column records
+  the **actual capture source** — `"mic"` / `"system"` for a single recording (set
+  from the effective source at `recorder.start`, including a per-keybind override),
+  or the meeting track label; the list's Source column reads it, and a null `track`
+  on an older row renders as Microphone.
 - **`recordings_fts`** — an FTS5 virtual table indexing transcripts, kept in sync
   by SQLite triggers on insert/update/delete.
 - **`tags` & `recording_tags`** — many-to-many categorization.

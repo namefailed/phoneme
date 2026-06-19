@@ -55,6 +55,31 @@ recording as a favorite. The Library sidebar's **Favorites** filter shows only
 starred recordings, alongside All / Voice Notes / Meetings. Stars are stored in
 the catalog, so they survive restarts and travel with exports.
 
+## 🎙️ The Source column
+
+The recordings list's **Source** column (shown by default; toggle it under
+**Settings → Appearance → Visible Columns**) tells you what each recording was
+**actually captured from**:
+
+| Icon | Source | What it means |
+|------|--------|---------------|
+| 🎤 | **Microphone** | Captured from your microphone. |
+| 🔊 | **System audio** | Captured from the system-audio loopback (what your speakers were playing) — Windows. |
+
+The column reads each recording's **real** capture source, not the setting that
+was in effect when you hit record. Single voice notes and the individual tracks
+of a meeting alike report their own source, so a binding that records the mic and
+one that records system audio are easy to tell apart at a glance. (Older
+recordings made before this was tracked have no stored source and fall back to
+**Microphone**.)
+
+> [!TIP]
+> If you hide the Source column, the source still shows as a small 🎤 / 🔊 icon
+> in front of the transcript preview, so meeting tracks never lose it. Choose
+> what each hotkey records — mic vs system audio — under
+> [Hotkeys & recording modes](hotkeys_and_recording_modes.md); meetings always
+> record **both** tracks (see [Meeting Mode](meeting_mode.md)).
+
 ## 🎭 Named speakers
 
 When a recording is [diarized](diarization_and_whisper.md), its transcript reads

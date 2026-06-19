@@ -136,7 +136,7 @@ Tell the daemon how to execute the command:
 
 ### Step 3: Add the Tauri Bridge Command
 Proxy the command through the Tauri tray process:
-1. Open [`src-tauri/src/commands.rs`](../../src-tauri/src/commands.rs).
+1. Open [`src-tauri/src/commands/mod.rs`](../../src-tauri/src/commands/mod.rs).
 2. Add a Tauri command that forwards the request over the bridge. The shared
    `forward` helper handles connect/auto-spawn and maps `Response::Err` to a
    `CommandError`, so most commands are a one-liner returning `Result<Value, CommandError>`:

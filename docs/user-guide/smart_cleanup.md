@@ -161,3 +161,15 @@ You can re-process an existing recording without re-recording, using one-time ov
 - **Regenerate summary** — re-runs the summary with an optional one-off model / prompt.
 
 These live in each recording's **Re-run** menu. See [Providers & Models](providers_and_models.md#one-time-overrides-re-run-menu).
+
+### Re-running through a different recipe
+
+The **↻ Re-run** modal (the action button in a recording's detail row, and the bulk bar) opens with a **Recipe to run** picker at the top:
+
+- **Default pipeline** *(default)* — re-runs the recording through whatever normal recordings run (your global cleanup → title → summary → tags → hooks chain).
+- **Any other Playbook recipe** — re-runs the recording through that recipe's chain instead, so you can, say, push one note through a "Meeting minutes" recipe and another through a "Quick clean" recipe without touching your defaults. Build and edit chains in the **Playbook** settings section.
+
+The per-step **model tabs** below the picker (Transcription / Post-processing / Title / Summary / Auto-tag) are **one-time overrides layered on top** of whichever recipe you choose — they don't replace the recipe, they tweak the models it uses for this run only. Nothing here is written to your config; the chosen recipe and models apply to that single re-run.
+
+> [!NOTE]
+> The **same modal** opened from the header — the **Quick Model Switcher** in its **Save as default** mode — is the unchanged global-model path: it persists your default models and has **no** recipe picker. Only the Re-run (Run once) mode chooses a recipe.

@@ -95,6 +95,13 @@ exits 0. `--oneshot` / `--duration` modify the blocking default.
 > `--toggle`, `--cancel`, `--pause`, `--resume`) were **removed** — use the
 > subcommands. Update any hotkey bindings or scripts accordingly.
 
+> **Capture source:** `phoneme record` always records the **global**
+> `[recording].source` (microphone by default; `system_audio` for WASAPI
+> loopback) — there's **no `--source` flag**. The per-keybind capture-source
+> override (`[[hotkeys]].source`) is a **GUI/config-only** feature for custom
+> hotkeys, not the CLI; set it in **Settings → Hotkeys** or in `config.toml`.
+> See the [config reference](config_reference.md).
+
 ### 👥 `phoneme meeting`
 
 Start a dual-track Meeting Mode recording.
@@ -209,6 +216,12 @@ phoneme retranscribe 20260519T143500823 --no-run-hooks
 # Skip the LLM cleanup step for this run only (produces the raw transcript)
 phoneme retranscribe 20260519T143500823 --no-post-process
 ```
+
+> **Note:** `retranscribe` always runs the recording through the **`default`
+> recipe** — there is **no `--recipe` flag**. To re-run a recording through a
+> *different* Playbook recipe, use the GUI's **↻ Re-run** modal ("Recipe to run"
+> picker); see [Plugins and Hooks](plugins_and_hooks.md). The `--model` override
+> here still applies as a one-time transcription-model override.
 
 ### ✨ `phoneme cleanup <ID>`
 
@@ -574,6 +587,12 @@ phoneme doctor --fix
 # before deleting catalog.db (plus its -wal/-shm sidecars) — if the daemon
 # won't die in time, the command fails and leaves the catalog untouched.
 phoneme doctor --rebuild-catalog
+
+# NON-destructive recovery: ask the running daemon to scan the audio folder and
+# re-link any .wav files that have no catalog row (re-importing + re-transcribing
+# them), leaving every existing recording untouched. Prefer this over
+# --rebuild-catalog when you've just lost rows, not the whole catalog.
+phoneme doctor --reimport
 ```
 
 With `--json`, each check object keeps the original `name`/`ok`/`detail` keys

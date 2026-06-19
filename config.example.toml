@@ -295,6 +295,48 @@ mode = "toggle"
 
 
 # -----------------------------------------------------------------------------
+# [[hotkeys]] — custom global hotkeys (beyond the three built-ins above)
+# -----------------------------------------------------------------------------
+# An array-of-tables: each entry binds a combo to an action and carries its own
+# Playbook recipe, Whisper model, and capture source. Add as many as you like.
+# The GUI (Settings → Hotkeys → Custom Hotkeys) is the easiest way to manage
+# these; the examples below are commented out.
+#
+#   action         "record" (voice note) | "in_place" (dictation typed at the
+#                  cursor) | "meeting" (records mic + system audio together)
+#   mode           "hold" (record while held) | "toggle" (press to start/stop)
+#   recipe_id      Playbook recipe id this binding's recordings run. "" = the
+#                  global `default` recipe. Ignored for action = "meeting".
+#   whisper_model  per-binding transcription model. "" = the configured model.
+#                  Ignored for action = "meeting".
+#   source         capture source for this binding: "microphone" | "system_audio".
+#                  Omit to follow the global [recording].source. Ignored for
+#                  action = "meeting" (a meeting always records both tracks).
+#
+# A mic dictation that runs a custom "prompt_capture" recipe and pastes:
+# [[hotkeys]]
+# label = "Dictate to prompt"
+# enabled = true
+# combo = "Ctrl+Alt+P"
+# mode = "toggle"
+# action = "in_place"
+# recipe_id = "prompt_capture"
+# source = "microphone"
+# [hotkeys.in_place]
+# full_pipeline = true
+# type_mode = "paste"
+#
+# A one-tap voice note that records SYSTEM audio (e.g. capture a video's audio):
+# [[hotkeys]]
+# label = "Capture system audio"
+# enabled = true
+# combo = "Ctrl+Alt+S"
+# mode = "hold"
+# action = "record"
+# source = "system_audio"
+
+
+# -----------------------------------------------------------------------------
 # [tray] — OS tray behavior
 # -----------------------------------------------------------------------------
 [tray]

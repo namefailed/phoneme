@@ -224,6 +224,20 @@ OR a two-track meeting, never both), **toggle atomicity** (a double-tapped
 hotkey can't race two starts/stops), and **no slow await under a state lock**
 (so control IPC stays responsive mid-stop).
 
+**Per-keybind capture source.** `RecordStart` / `RecordToggle` carry an optional
+`source_override` (`HotkeyBinding.source`), threaded into `recorder.start(…,
+source_override)`. The effective kind is `source_override.unwrap_or(
+recording.source)` — a binding can record the mic while another records WASAPI
+system loopback, each with its own recipe and model. The recorder writes the
+*real* source onto the row's `track` (`"mic"` / `"system"`), which is what the
+list's **Source** column and its 🎤/🔊 hover icon read — single recordings no
+longer assume "microphone" (older rows with no `track` default to mic). The
+override is ignored for meetings (a meeting always records both tracks). One edge
+case the code handles: **pre-roll is dropped when the override differs from the
+global source** — the idle ring buffer is mic-only audio captured under the
+global source, so on a mismatch the buffered samples are discarded and a fresh
+stream is opened for the override source ([`recorder.rs`](../../bin/phoneme-daemon/src/recorder.rs) `start`).
+
 ### The fast-lane-vs-queue decision
 
 On `stop`, the recorder finalizes the WAV and makes the one branching decision
@@ -301,6 +315,20 @@ item), and **transient-vs-permanent failure** handling. The same helpers
 (`run_llm_stage`, `generate_summary`, `suggest_tags`, `embed_and_store`) back the
 on-demand re-run IPC handlers, so a manual re-run behaves byte-for-byte like the
 pipeline.
+
+**Recipe selection (which chain runs).** The stage list isn't hardcoded — it's
+the result of `resolve_recipe(cfg, recipe_id)`, which expands a named
+[Playbook](../../crates/phoneme-core/src/config.rs) recipe into ordered steps
+(falling back to the `default` recipe for an empty or unknown id, never a panic).
+A custom hotkey's recipe and a **Re-run → "Recipe to run"** pick reach the
+pipeline by the *same* path: the id is stashed per-job in the `pending_recipe`
+ledger ([`app_state.rs`](../../bin/phoneme-daemon/src/app_state.rs)) when the job
+is created, claimed by `pipeline::run` *before* transcription (so a transcribe
+failure can't strand a stale entry), and never written to global config. The
+Re-run modal's per-step model tabs layer one-time overrides *on top of* whichever
+recipe you pick — `apply_rerun_overrides` mutates the matching cleanup / summary /
+title Playbook entries on a per-job config **clone** (the executor reads each
+step's model/prompt from its entry), then the clone is discarded.
 
 ### Catalog & UI refresh
 

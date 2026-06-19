@@ -54,12 +54,22 @@ here, because those drift; the field names below are just enough to orient you.
 
 **Recording control** (`record_start` requires a `mode`: `"hold"`, `"oneshot"`, or
 `{ "duration": secs }`, and an optional `in_place` bool). `record_start` and
-`record_toggle` also take optional `recipe_id` (run a named Playbook recipe instead
-of the default for this recording) and `whisper_model` (transcribe it with a
-specific STT model) — both omitted = the global default recipe + configured model;
-these are how Custom Hotkeys carry their per-binding recipe/model:
-- `record_start`, `record_stop`, `record_cancel`, `record_pause`, `record_resume`
-- `record_toggle` (`in_place`, `recipe_id`, `whisper_model` optional), `record_status`
+`record_toggle` also take three optional one-time overrides — `recipe_id` (run a
+named Playbook recipe instead of the default for this recording), `whisper_model`
+(transcribe it with a specific STT model), and `source`
+(`"microphone"` / `"system_audio"`, the capture source for this single recording).
+All three omitted = the global default recipe + configured model + the global
+`[recording].source`; these are how Custom Hotkeys carry their per-binding recipe /
+model / source. None of the three is ever written to global config: `recipe_id`
+rides the `pending_recipe` ledger (claimed by `pipeline::run` → `resolve_recipe`,
+same mechanism the re-run override below uses), `whisper_model` the
+`pending_overrides` model-override ledger, and `source` is applied at recorder
+start — the recording's `track` then records which source it actually used. `source`
+is **ignored for meetings** (a meeting always records both tracks). On
+`record_toggle` all three apply only to the **start** half (a toggle that stops the
+active recording has nothing new to attach them to):
+- `record_start` (`in_place`, `recipe_id`, `whisper_model`, `source` optional), `record_stop`, `record_cancel`, `record_pause`, `record_resume`
+- `record_toggle` (`in_place`, `recipe_id`, `whisper_model`, `source` optional), `record_status`
 
 **Meeting control:**
 - `start_meeting`, `stop_meeting`, `meeting_toggle`
@@ -109,7 +119,7 @@ failures but means the **user** stopped the run (`cancel_queued`,
 as a failure.
 
 **Re-processing** (one-time overrides, never persisted to config):
-- `retranscribe_recording` (optional `model`, `run_hooks`, `post_process`)
+- `retranscribe_recording` (optional `model`, `run_hooks`, `post_process`, `recipe_id`). `recipe_id` re-runs the recording through any named Playbook recipe (empty/omitted = the global `default` recipe); it is stashed in the `pending_recipe` ledger for this job only and claimed by `pipeline::run` → `resolve_recipe` — the **same** one-time mechanism a custom hotkey's recipe uses, never persisted. The Re-run modal's per-step model tabs layer on top as separate one-time overrides.
 - `rerun_cleanup` (re-runs only LLM cleanup against the preserved original; optional `model`/`provider`/`prompt`/`api_url`/`api_key`)
 - `rerun_summary` (generate/regenerate an LLM summary; optional `model`/`prompt`)
 - `refire_hook` (optional `command`, restricted to the configured allowlist)

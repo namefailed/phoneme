@@ -203,6 +203,26 @@ These overrides apply to that single run only and are never written back to
 `config.toml`. See [Smart Cleanup](smart_cleanup.md) and
 [Search & Organization](search_and_organization.md).
 
+### Picking a recipe in the Re-run modal
+
+The full **↻ Re-run** modal (the action button in a recording's detail row, and
+the bulk bar) adds a **Recipe to run** picker above the model tabs:
+
+- **Default pipeline** *(default)* runs the recording through the same chain
+  normal recordings use.
+- Pick any other **Playbook recipe** to run the recording through that chain
+  instead — handy for reshaping one recording differently without changing your
+  defaults.
+
+The per-step model tabs (Transcription / Post-processing / Title / Summary /
+Auto-tag) are **one-time overrides layered on top** of whichever recipe you
+choose. Nothing — recipe or models — is saved to `config.toml`.
+
+> [!NOTE]
+> The header **Quick Model Switcher** is the same modal in its **Save as
+> default** mode: it *persists* your global default models and has **no** recipe
+> picker. Only Re-run (Run once) chooses a recipe.
+
 ---
 
 ## Making the picker readable — interface size & font

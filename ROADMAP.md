@@ -38,6 +38,32 @@ move at least one of these personas closer to "done":
 
 Landed most recently — verified against current code:
 
+- [x] **The Playbook owns post-processing AND hooks — the cutover** — recipes are
+  now one ordered chain of LLM steps (cleanup / title / summary / tags) **and**
+  Hook steps (shell command and/or webhook), each reading its own Playbook entry's
+  config. A Hook entry can be **keyword-gated** and flagged **"fail the recording"**
+  (default: non-fatal). A one-time `hooks_migrated` migration folds legacy `[hook]`
+  config into Hook entries on the `default` recipe and clears `[hook]`. The
+  Integrations settings tab is now **Inbound** (REST + MCP) + a global **Outbound**
+  webhook *policy* only; the actual hooks live in the Playbook. Per-hotkey recipes
+  carry their own chain. *(branch `feat/playbook`; the dead `HotkeyBinding.hooks`/
+  `pipeline` fields were deleted.)*
+- [x] **Per-keybind audio source** — a custom hotkey can capture the **microphone**
+  or **system audio** independently of the global `[recording].source`
+  (`[[hotkeys]].source`; UI under a hotkey's Recipe & options). Meeting hotkeys
+  ignore it (a meeting always records both tracks). The source actually used is
+  stored on the recording's `track` and shown in the list's Source column.
+- [x] **Source column reflects the real capture source** — single recordings stored
+  `track: None` and always showed "Microphone"; the recorder now records the real
+  source (mic / system) on `track`, so the list's Source column + 🎤/🔊 icon are
+  accurate for single recordings and meeting tracks alike.
+- [x] **Re-run through a recipe** — the Re-run / Quick-Model-Switcher modal gained a
+  **Recipe to run** picker: re-run a recording through any Playbook recipe, with the
+  per-step model tabs layered on as one-time overrides (`RetranscribeRecording`
+  gained a one-time `recipe_id`, claimed from the recipe ledger like a hotkey's).
+- [x] **Transcript editor scrolling & focus** — the wheel over the editor scrolls
+  the detail pane when the editor has nothing left to scroll (CodeMirror used to
+  trap it), and keyboard-focusing the editor no longer re-centers the transcript.
 - [x] **Auto-tagging** — a `Tagging` pipeline stage where an LLM suggests tags for
   approval (✓/✕ per tag, ✓ All / ✕ All), with its own `[auto_tag]` provider/model/
   prompt (inheriting `[llm_post_process]` where blank), a max-tags cap, and an
@@ -662,10 +688,15 @@ graduate someday live in the [Idea Parking Lot](docs/IDEAS.md) instead.)
 ## 🔬 Audit follow-ups (June 2026 code audits)
 
 Two line-by-line audits (a combined module pass + a net-new pass on the newest
-code). **Not started** — these land in waves once kicked off. *Already resolved:* DPAPI
-at-rest, the masked-config WebView boundary, diarization coalescing, list-pane
-fill + scroll-extend, the detail-pane overhaul. The transcript-diff,
-saved-searches, and curated-models features audited **clean**.
+code). **Status: Wave 1 done; Waves 2–5 largely closed** by the June 2026
+consolidated + ultracode audit passes (security / UX / CLI / hygiene / perf) — the
+checklist below is kept for traceability and reflects what's verified in code.
+*Already resolved:* DPAPI at-rest, the masked-config WebView boundary, diarization
+coalescing, list-pane fill + scroll-extend, the detail-pane overhaul. The
+transcript-diff, saved-searches, and curated-models features audited **clean**.
+The one item still explicitly open is the model-override readiness race **A2-M7**
+(below); a few low-severity Wave 5 doc/DX items may remain — verify against the
+audit docs in `archive_internal/plans/` before re-opening anything.
 
 **Wave 1 — High (correctness & security)**
 - [x] whisper-server stdout/stderr never drained → pipe fills (~64 KB) → hung transcription / false timeout — both spawn sites now use `Stdio::null()` (`whisper_supervisor.rs`) *(A2-H1)*

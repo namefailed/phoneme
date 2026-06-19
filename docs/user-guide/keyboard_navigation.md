@@ -101,6 +101,20 @@ The list zoom is clamped to 60–200% and remembered per device.
 Transcripts and notes never auto-save — leaving with unsaved changes always
 prompts first.
 
+**In the transcript editor** two rough edges are gone:
+
+- **The wheel scrolls the pane when the editor can't.** The transcript editor
+  (CodeMirror) used to trap the mouse wheel: if its own text already fit, or you
+  were at the top/bottom of it, scrolling over the editor did nothing and the
+  page froze. Now the wheel scrolls the editor's own content whenever it has more
+  to show, and **hands the scroll back to the detail pane** the moment the editor
+  reaches its boundary — so the page never gets stuck under the editor.
+- **Focusing the editor no longer re-centers the transcript.** Keyboard-focusing
+  the transcript — the `e` (`edit`) action, or stepping the cursor onto the
+  editor cell in arrow/vim navigation — keeps the focus behavior but **no longer
+  yanks the transcript to the middle of the pane**. The view stays where it was;
+  only the abrupt jump is gone.
+
 ## Arrow-key navigation (`interface.arrow_nav`)
 
 The friendly counterpart to vim navigation — same idea, but driven entirely by

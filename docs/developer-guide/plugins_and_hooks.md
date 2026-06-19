@@ -152,6 +152,15 @@ Optionally set a per-hook **Timeout**, and tick **"Fail the recording if this
 hook errors"** when a non-zero exit should quarantine the recording (the default
 surfaces failures but keeps the recording usable).
 
+> **Running a recipe on demand.** A recipe isn't just for live recordings: the
+> detail-pane **↻ Re-run** modal (and the bulk re-run bar) has a **"Recipe to
+> run"** picker, so you can push any existing recording back through a chosen
+> recipe — hooks included — without re-recording. Pick **"Default pipeline"** for
+> the normal chain. The choice is a **one-time** override for that run (it rides
+> the same `pending_recipe` ledger a custom hotkey uses and is never saved to
+> config). The CLI's `phoneme retranscribe` always runs the `default` recipe —
+> there's no `--recipe` flag yet.
+
 > **Migrating from `[hook]`?** Older configs used a top-level `[hook]` section
 > (`commands` / `keyword_rules` / `webhook_url`). On first launch Phoneme
 > **auto-migrates** those into Hook entries on the Default recipe and clears the

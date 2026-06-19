@@ -34,6 +34,24 @@ Yes — **Pause** during an active recording, then **Resume**. Same catalog row.
 
 Use **Cancel** in the UI or `phoneme record cancel`.
 
+### Can one hotkey record my microphone and another record system audio?
+
+Yes. By default every Record / in-place hotkey follows the global **Settings →
+Capture → Recording** source, but each binding can override it. Open
+**Settings → Hotkeys → Custom Hotkeys**, expand a Record or in-place hotkey, and
+set its **Audio source** to *Microphone* or *System audio (loopback)* — so you
+can have one combo capture the mic and another capture system audio, each with
+its own recipe and model. (The override is ignored for **Meeting** hotkeys —
+a meeting always records both tracks.) See
+[Hotkeys & Recording Modes](hotkeys_and_recording_modes.md).
+
+### Why does a recording show 🔊 System audio instead of 🎤 Microphone?
+
+The **Source** column (and its hover icon) now reflects the *actual* capture
+source of each recording, so a binding set to record system audio is labelled
+🔊 System audio rather than always showing Microphone. Older recordings made
+before this was tracked fall back to Microphone.
+
 ---
 
 ## Transcription
@@ -50,7 +68,11 @@ Use the wizard's **Recommended** badge. Rule of thumb:
 
 ### Can I re-transcribe with a better model later?
 
-Yes — select a recording → **Re-transcribe** → pick a model. Original transcript is preserved under "View original".
+Yes — select a recording → **Re-run** → pick a model. The Re-run modal also has
+a **Recipe to run** picker, so you can push the recording through any Playbook
+recipe (or *Default pipeline* for the normal chain); the per-step model tabs
+apply as one-time overrides on top of it, and nothing is saved to config. The
+original transcript is preserved under "View original".
 
 ### Does Phoneme support languages other than English?
 
