@@ -62,7 +62,7 @@
   white-space: nowrap;
   color: var(--fg-muted);
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition: color var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease;
 }
 .mp-tab:hover {
   color: var(--fg-default);

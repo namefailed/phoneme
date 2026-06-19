@@ -91,7 +91,7 @@
 }
 
 .rec-row {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--ui-motion) cubic-bezier(0.4, 0, 0.2, 1);
   padding: 10px 16px 10px 6px;
   border-bottom: 1px solid var(--border-subtle);
   display: grid;
@@ -203,7 +203,7 @@
 .rec-dur {
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
-  transition: color 0.2s ease;
+  transition: color var(--ui-motion) ease;
 }
 .rec-row:hover .rec-time,
 .rec-row:hover .rec-dur {
@@ -215,7 +215,7 @@
   white-space: nowrap;
   color: var(--fg-muted);
   font-size: 0.9286rem;
-  transition: color 0.2s ease;
+  transition: color var(--ui-motion) ease;
 }
 .rec-row:hover .rec-preview {
   color: var(--fg-default);
@@ -335,7 +335,7 @@ mark.search-hit {
   flex-wrap: wrap;
 }
 .action-row button {
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   background: var(--bg-elevated);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
@@ -383,7 +383,7 @@ mark.search-hit {
      (Re-transcribe / Re-fire) can escape this container instead of being
      clipped. Inner button corners are rounded individually below. */
   overflow: visible;
-  transition: border-color 0.15s ease-out;
+  transition: border-color var(--ui-motion-fast) ease-out;
 }
 .action-row .split-btn:hover {
   border-color: var(--accent);
@@ -427,7 +427,7 @@ mark.search-hit {
   font-weight: 500;
   color: var(--fg-default);
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
 }
 .inline-button:hover {
   background: var(--bg-surface);
@@ -477,7 +477,7 @@ mark.search-hit {
   font-weight: 500;
   color: var(--fg-default);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .view-btn:hover {
   background: var(--bg-surface);
@@ -495,7 +495,7 @@ mark.search-hit {
   flex: 1;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.15s ease;
+  transition: border-color var(--ui-motion-fast) ease;
 }
 .notes-block {
   /* Bottom margin matches transcript-block so the notes→footer gap mirrors the
@@ -507,7 +507,7 @@ mark.search-hit {
   padding: 14px;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.15s ease;
+  transition: border-color var(--ui-motion-fast) ease;
 }
 /* The editors are now chrome-less; show the focus ring on the box that wraps
    them so focusing the transcript/notes still reads as "active". */
@@ -538,7 +538,7 @@ mark.search-hit {
   color: var(--fg-faded);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease,
+  transition: opacity var(--ui-motion-fast) ease, background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease,
     border-color 0.15s ease;
 }
 .notes-copy-overlay svg { display: block; }
@@ -646,7 +646,7 @@ mark.search-hit {
   border-radius: 8px;
   color: var(--fg-muted);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 /* Block display + explicit size so the icon is crisply centered in the button
    (an inline SVG otherwise sits a hair off-center on its text baseline). */
@@ -683,7 +683,7 @@ mark.search-hit {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  animation: speakersFadeIn 0.12s ease-out;
+  animation: speakersFadeIn var(--ui-motion) ease-out;
 }
 @keyframes speakersFadeIn { from { opacity: 0; } to { opacity: 1; } }
 .speakers-modal {
@@ -783,14 +783,14 @@ mark.search-hit {
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-  transition: transform 0.12s ease, border-color 0.12s ease;
+  transition: transform var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease;
 }
 .thinking-fab:hover { transform: translateY(-1px); border-color: var(--accent); }
 .thinking-fab.live { border-color: var(--accent); }
 /* Crossfade when the sidebar toggle moves the button's default anchor: it fades
    out at the old spot, snaps to the new one while hidden, then fades back in —
    instead of jumping across the layout. */
-.thinking-fab { transition: opacity 150ms ease; }
+.thinking-fab { transition: opacity var(--ui-motion-fast) ease; }
 .thinking-fab--moving { opacity: 0; pointer-events: none; }
 .thinking-dot {
   position: absolute;
@@ -825,7 +825,7 @@ mark.search-hit {
      default FAB it hangs off) — matches the FAB's fade. Only opacity transitions,
      so the reposition itself is instant (hidden) and never reads as a slide.
      Dragging/resizing the panel never adds `--moving`, so those stay live. */
-  transition: opacity 150ms ease;
+  transition: opacity var(--ui-motion-fast) ease;
 }
 .thinking-popout--moving { opacity: 0; pointer-events: none; }
 /* Resize handles — thin strips on each edge and small squares at the corners.
@@ -888,7 +888,7 @@ mark.search-hit {
   border-radius: 10px;
   padding: 10px 11px;
   background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--ui-motion-fast) ease, box-shadow var(--ui-motion-fast) ease;
 }
 .thinking-entry.live {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
@@ -929,18 +929,18 @@ mark.search-hit {
   padding: 3px 5px; border-radius: 6px;
   font-size: 0.7143rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--fg-muted);
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .thinking-fold-sum::-webkit-details-marker { display: none; }
 .thinking-fold-sum:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--fg-default); }
-.thinking-chevron { display: inline-flex; color: var(--fg-faded); transition: transform 0.15s ease; }
+.thinking-chevron { display: inline-flex; color: var(--fg-faded); transition: transform var(--ui-motion-fast) ease; }
 .thinking-fold[open] > .thinking-fold-sum .thinking-chevron { transform: rotate(90deg); }
 .thinking-fold-label { flex: 1; }
 .thinking-copy {
   display: inline-flex; align-items: center; justify-content: center;
   background: none; border: none; cursor: pointer; padding: 2px;
   color: var(--fg-faded); border-radius: 5px;
-  opacity: 0; transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+  opacity: 0; transition: opacity var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease, background var(--ui-motion-fast) ease;
 }
 .thinking-fold-sum:hover .thinking-copy,
 .thinking-copy:focus-visible { opacity: 1; }
@@ -1039,7 +1039,7 @@ mark.search-hit {
   font-size: 0.7857rem;
   color: var(--fg-muted);
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  transition: color var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease, background var(--ui-motion-fast) ease;
 }
 .detail-pipeline-btn:hover {
   color: var(--accent);
@@ -1133,7 +1133,7 @@ mark.search-hit {
 .tags { display: flex; flex-direction: column; gap: 8px; padding: 0 18px 12px; }
 .tags-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .tag-chip {
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   background: var(--tag-color, rgba(203,166,247,0.15));
   color: inherit;
   padding: 2px 10px;
@@ -1150,7 +1150,7 @@ mark.search-hit {
   cursor: pointer;
 }
 .tag-add {
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1195,7 +1195,7 @@ mark.search-hit {
   cursor: pointer;
   font-size: 0.8571rem;
   color: var(--fg-default);
-  transition: background 0.15s ease-out;
+  transition: background var(--ui-motion-fast) ease-out;
 }
 .tag-dropdown-item:hover {
   background: var(--bg-surface);
@@ -1222,7 +1222,7 @@ mark.search-hit {
 /* Manage tags / Suggest: match the app's standard inline buttons (accent-tinted
    border, deep surface, readable text) instead of the old muted pills. */
 .tag-manage {
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   background: var(--bg-surface);
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   color: var(--fg-default);
@@ -1312,7 +1312,7 @@ mark.search-hit {
   width: 6px;
   height: 100%;
   z-index: 100;
-  transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
+  transition: background var(--ui-motion-fast) ease-out, box-shadow var(--ui-motion-fast) ease-out;
 }
 .rv-splitter:hover {
   background: var(--accent);
@@ -1366,7 +1366,7 @@ mark.search-hit {
   opacity: 0;
   transform: translate(-50%, 8px);
   pointer-events: none;
-  transition: opacity 0.18s ease-out, transform 0.18s ease-out,
+  transition: opacity var(--ui-motion) ease-out, transform var(--ui-motion) ease-out,
     color 0.15s ease-out, border-color 0.15s ease-out, background 0.15s ease-out;
 }
 .back-to-top.visible {
@@ -1476,7 +1476,7 @@ ph-sidebar:focus-visible,
   border-radius: 3px;
   background: var(--bg-deep);
   cursor: pointer;
-  transition: background 0.15s ease-out, border-color 0.15s ease-out;
+  transition: background var(--ui-motion-fast) ease-out, border-color var(--ui-motion-fast) ease-out;
   flex-shrink: 0;
   position: relative;
 }
@@ -1607,7 +1607,7 @@ body.phoneme-hide-header ph-header-bar {
   font-size: 0.7857rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
 }
 .tag-suggest-all--ok {
   border-color: color-mix(in srgb, var(--ok) 55%, transparent);
@@ -1674,7 +1674,7 @@ body.phoneme-hide-header ph-header-bar {
   border: var(--popup-border);
   border-radius: 12px;
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
-  animation: bulk-bar-in 0.16s ease-out;
+  animation: bulk-bar-in var(--ui-motion) ease-out;
 }
 @keyframes bulk-bar-in {
   from { opacity: 0; }
@@ -1749,7 +1749,7 @@ body.phoneme-hide-header ph-header-bar {
   align-items: center;
 }
 .bulk-btn {
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
@@ -1811,7 +1811,7 @@ body.phoneme-hide-header ph-header-bar {
   font-size: 0.9286rem;
   font-weight: 600;
   color: var(--fg-default);
-  transition: background 0.15s ease-out;
+  transition: background var(--ui-motion-fast) ease-out;
 }
 .rec-group-head:hover {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
@@ -1841,7 +1841,7 @@ body.phoneme-hide-header ph-header-bar {
   justify-content: center;
   /* Rotate the whole centered glyph box so it pivots cleanly about its middle,
      not around a triangle's tip. Slight overshoot for a polished feel. */
-  transition: transform 0.18s cubic-bezier(0.34, 1.3, 0.7, 1), color 0.15s ease;
+  transition: transform var(--ui-motion) cubic-bezier(0.34, 1.3, 0.7, 1), color var(--ui-motion-fast) ease;
   transform-origin: center;
 }
 .rec-group-chevron svg {
@@ -1890,7 +1890,7 @@ body.phoneme-hide-header ph-header-bar {
   font-size: 0.8571rem;
   padding: 2px 4px;
   border-radius: 4px;
-  transition: opacity 0.15s ease-out, color 0.15s ease-out, background 0.15s ease-out;
+  transition: opacity var(--ui-motion-fast) ease-out, color var(--ui-motion-fast) ease-out, background var(--ui-motion-fast) ease-out;
 }
 .rec-group-head:hover .rec-group-rename {
   opacity: 0.7;
@@ -1969,7 +1969,7 @@ body.phoneme-hide-header ph-header-bar {
   font-size: 0.8571rem;
   font-weight: 500;
   color: var(--fg-muted);
-  transition: color 0.2s ease;
+  transition: color var(--ui-motion) ease;
 }
 
 /* Dictation marker in the detail-pane header — a small accent pill next to the
@@ -2097,7 +2097,7 @@ ph-sidebar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.15s ease;
+  transition: transform var(--ui-motion-fast) ease;
 }
 .queue-chevron svg { display: block; }
 /* Points up when open — the panel expands upward. */
@@ -2131,7 +2131,7 @@ ph-sidebar {
   white-space: nowrap;
   background: color-mix(in srgb, var(--err) 18%, transparent);
   color: var(--err);
-  transition: background 0.12s ease;
+  transition: background var(--ui-motion-fast) ease;
 }
 .queue-failed:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 30%, transparent); }
 .queue-failed:disabled { opacity: 0.6; cursor: default; }
@@ -2159,7 +2159,7 @@ ph-sidebar {
   line-height: 1;
   padding: 0;
   border-radius: 6px;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .queue-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .queue-action.active { color: var(--warn); }
@@ -2212,7 +2212,7 @@ ph-sidebar {
   height: 3px;
   border-radius: 3px;
   background: var(--border-subtle);
-  transition: background 0.15s ease, width 0.15s ease;
+  transition: background var(--ui-motion-fast) ease, width var(--ui-motion-fast) ease;
 }
 .queue-resizer:hover::before {
   background: var(--accent);
@@ -2260,7 +2260,7 @@ ph-sidebar {
 .queue-move {
   background: transparent; border: none; color: var(--fg-faded);
   width: 20px; height: 13px; line-height: 1; font-size: 0.6429rem; padding: 0;
-  border-radius: 4px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
+  border-radius: 4px; cursor: pointer; transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .queue-move:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
 .queue-move:disabled { opacity: 0.25; cursor: default; }
@@ -2276,7 +2276,7 @@ ph-sidebar {
   width: 22px;
   height: 22px;
   border-radius: 6px;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .queue-cancel:hover { background: color-mix(in srgb, var(--err) 18%, transparent); color: var(--err); }
 .queue-spin {
@@ -2309,7 +2309,7 @@ ph-sidebar {
   font-size: 1.0714rem;
   line-height: 1;
   padding: 3px 5px;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition: border-color var(--ui-motion-fast) ease, background var(--ui-motion-fast) ease;
 }
 .rec-icon-btn:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .rec-icon-popover {
@@ -2334,7 +2334,7 @@ ph-sidebar {
   font-size: 1.1429rem;
   line-height: 1;
   padding: 4px;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease;
 }
 .rec-icon-choice:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .rec-icon-choice.sel {
@@ -2390,7 +2390,7 @@ ph-sidebar {
   background: transparent;
   z-index: 100;
   position: relative;
-  transition: background 0.15s ease-out;
+  transition: background var(--ui-motion-fast) ease-out;
 }
 /* Invisible wider hit area so the thin handle is easy to grab. */
 .rv-sidebar-resizer::after {
@@ -2412,7 +2412,7 @@ ph-sidebar {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: color 0.12s ease;
+  transition: color var(--ui-motion-fast) ease;
 }
 .sidebar-header:hover { color: var(--accent); }
 .sidebar-chevron {
@@ -2423,7 +2423,7 @@ ph-sidebar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.15s ease, color 0.15s ease;
+  transition: transform var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .sidebar-chevron svg { display: block; }
 .sidebar-chevron.open { transform: rotate(90deg); color: var(--accent); }
@@ -2440,7 +2440,7 @@ ph-sidebar {
   color: var(--fg-muted);
   font-size: 0.9286rem;
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2543,7 +2543,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   border-radius: 4px;
   border: 1px solid transparent;
   outline: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color var(--ui-motion-fast) ease, background var(--ui-motion-fast) ease;
   /* Don't let a long meeting name push the actions off the row; ellipsize it. */
   min-width: 0;
   overflow: hidden;
@@ -2625,7 +2625,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   gap: 11px;
   padding: 8px 10px;
   border-radius: 10px;
-  transition: background 0.12s ease;
+  transition: background var(--ui-motion-fast) ease;
 }
 .merged-turn:hover {
   background: color-mix(in srgb, var(--spk, var(--accent)) 8%, transparent);
@@ -2683,7 +2683,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   padding: 1px 5px;
   margin-left: -5px;
   border-radius: 5px;
-  transition: background 0.12s ease;
+  transition: background var(--ui-motion-fast) ease;
 }
 .merged-speaker-button:hover {
   background: color-mix(in srgb, var(--spk, var(--accent)) 16%, transparent);
@@ -2768,7 +2768,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   font-weight: 600;
   padding: 4px 10px;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .tdiff-mode + .tdiff-mode {
   border-left: 1px solid var(--border-subtle);
@@ -2894,7 +2894,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   color: var(--fg-muted);
   font-size: 0.9286rem;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease;
 }
 .tdiff-swap:hover {
   background: var(--bg-surface);
@@ -2919,7 +2919,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   align-items: center;
   justify-content: center;
   padding: 4vh 4vw;
-  animation: speakersFadeIn 0.12s ease-out;
+  animation: speakersFadeIn var(--ui-motion) ease-out;
 }
 .tdiff-modal {
   width: min(960px, 100%);

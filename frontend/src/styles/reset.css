@@ -81,7 +81,7 @@ input[type="checkbox"].toggle-switch {
   background: var(--border);
   cursor: pointer;
   vertical-align: middle;
-  transition: background 0.2s ease;
+  transition: background var(--ui-motion) ease;
 }
 input[type="checkbox"].toggle-switch::before {
   content: "";
@@ -93,7 +93,7 @@ input[type="checkbox"].toggle-switch::before {
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform var(--ui-motion) cubic-bezier(0.22, 1, 0.36, 1);
 }
 input[type="checkbox"].toggle-switch:checked {
   background: var(--accent);

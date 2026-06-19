@@ -193,7 +193,7 @@ body.phoneme-hide-header-instant #hdr {
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.9286rem;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .hb-like-clear:hover {
   background: color-mix(in srgb, var(--fg-default) 14%, transparent);
@@ -306,7 +306,7 @@ body.phoneme-hide-header-instant #hdr {
   font-size: 0.9286rem;
   /* Only fade colours — NOT `all`, which animated the focus box-shadow ring
      (0 → 1px) so the border looked like it grew/shrank ("fitting"). */
-  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
+  transition: background-color var(--ui-motion-fast) ease-out, border-color var(--ui-motion-fast) ease-out, color var(--ui-motion-fast) ease-out;
 }
 .headerbar .search:focus {
   outline: none;
@@ -326,7 +326,7 @@ body.phoneme-hide-header-instant #hdr {
   align-items: center;
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: pointer;
-  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
+  transition: background-color var(--ui-motion-fast) ease-out, border-color var(--ui-motion-fast) ease-out, color var(--ui-motion-fast) ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 /* The status <select> shares the pill look; keep its text centered too. */
@@ -398,7 +398,7 @@ input[type="date"].filter-pill {
 input[type="date"].filter-pill::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 0.6;
-  transition: 0.2s;
+  transition: var(--ui-motion);
 }
 input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
   opacity: 1;
@@ -412,7 +412,7 @@ input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
   font-size: 1.1429rem;
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: pointer;
-  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
+  transition: background-color var(--ui-motion-fast) ease-out, border-color var(--ui-motion-fast) ease-out, color var(--ui-motion-fast) ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 .headerbar .icon-btn:hover {
@@ -466,7 +466,7 @@ select {
   outline: none;
   font-size: 0.7857rem;
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 select:hover {
@@ -490,7 +490,7 @@ option {
   font-size: 0.8571rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s ease-out;
+  transition: all var(--ui-motion) ease-out;
   box-shadow: 0 1px 4px rgba(243, 139, 168, 0.1);
   display: flex;
   align-items: center;
@@ -545,7 +545,7 @@ option {
   background: var(--fg-muted);
   opacity: 0.4;
   flex-shrink: 0;
-  transition: background 0.3s, opacity 0.3s;
+  transition: background var(--ui-motion), opacity var(--ui-motion);
 }
 .hb-whisper-dot.reachable {
   background: var(--ok);
@@ -603,7 +603,7 @@ option {
   opacity: 0;
   pointer-events: none;
   z-index: 80;
-  transition: opacity 0.25s ease, transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity var(--ui-motion) ease, transform var(--ui-motion) cubic-bezier(0.22, 1, 0.36, 1);
 }
 .hb-preview.visible {
   opacity: 1;
@@ -653,7 +653,7 @@ option {
   color: var(--fg-muted);
   /* Smooth, GPU-friendly scroll when HeaderBar nudges the box to its end. */
   scroll-behavior: smooth;
-  transition: opacity 0.18s ease;
+  transition: opacity var(--ui-motion) ease;
 }
 
 /* Small "BETA" pill for features that ship default-off while they mature

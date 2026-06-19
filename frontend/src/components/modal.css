@@ -143,7 +143,7 @@
   font-size: 0.9286rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   color: var(--fg-default);
@@ -289,7 +289,7 @@
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
-.doctor-passing-chev { flex-shrink: 0; color: var(--fg-faded); transition: transform 0.18s ease; }
+.doctor-passing-chev { flex-shrink: 0; color: var(--fg-faded); transition: transform var(--ui-motion) ease; }
 .doctor-passing[open] > summary .doctor-passing-chev { transform: rotate(90deg); }
 .doctor-passing > summary:hover .doctor-passing-chev { color: var(--accent); }
 .doctor-passing-mark { color: var(--ok); font-weight: 700; }

@@ -56,7 +56,7 @@ ph-settings-view {
   color: var(--fg-default);
   font-size: 0.9286rem;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--ui-motion-fast) ease, box-shadow var(--ui-motion-fast) ease;
 }
 .settings-search::placeholder {
   color: var(--fg-faded);
@@ -88,7 +88,7 @@ ph-settings-view {
   font-size: 0.7857rem;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .sv-search-clear:hover {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -169,7 +169,7 @@ mark.settings-hit {
   color: var(--fg-muted);
   font-size: 0.7857rem;
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  transition: border-color var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease, background var(--ui-motion-fast) ease;
 }
 .sv-result-breadcrumb:hover {
   border-color: var(--accent);
@@ -194,7 +194,7 @@ mark.settings-hit {
   }
 }
 .settings-section.sv-flash {
-  animation: sv-flash-pulse 1.2s ease-out;
+  animation: sv-flash-pulse var(--ui-motion) ease-out;
 }
 .sv-tab {
   padding: 10px 20px;
@@ -202,7 +202,7 @@ mark.settings-hit {
   color: var(--fg-muted);
   font-size: 1rem;
   border-left: 3px solid transparent;
-  transition: all 0.2s;
+  transition: all var(--ui-motion);
 }
 .sv-tab:hover {
   background: rgba(255, 255, 255, 0.05);
@@ -267,7 +267,7 @@ mark.settings-hit {
   /* Transition only the hover colours — NOT `all`, which would animate the box's
      size/padding as it mounts into the height-pinned group and make the button
      visibly shrink on entry. Matches the header split button's transition. */
-  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
+  transition: background-color var(--ui-motion-fast) ease-out, border-color var(--ui-motion-fast) ease-out, color var(--ui-motion-fast) ease-out;
 }
 /* Hovering EITHER half highlights the whole split button (matches the header
    split button). */
@@ -298,7 +298,7 @@ mark.settings-hit {
   color: var(--fg-muted);
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
+  transition: background-color var(--ui-motion-fast) ease-out, border-color var(--ui-motion-fast) ease-out, color var(--ui-motion-fast) ease-out;
 }
 .settings-float-caret:hover,
 .settings-float-caret.active {
@@ -317,7 +317,7 @@ mark.settings-hit {
   padding-top: 0;
   padding-bottom: 0;
 }
-.settings-float-caret .ph-caret-ico { transition: transform 0.15s ease; }
+.settings-float-caret .ph-caret-ico { transition: transform var(--ui-motion-fast) ease; }
 .settings-float-caret .ph-caret-ico.open { transform: rotate(180deg); }
 /* Self-contained menu styling (don't depend on the header's inline <style>). */
 .settings-float-group .hb-menu-item {
@@ -333,7 +333,7 @@ mark.settings-hit {
   border-radius: 7px;
   cursor: pointer;
   font-size: 0.9286rem;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
 }
 .settings-float-group .hb-menu-item:hover {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -376,7 +376,7 @@ mark.settings-hit {
   color: var(--fg-default);
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease;
 }
 .settings-float-actions button:hover {
   background: var(--bg-surface);
@@ -412,7 +412,7 @@ mark.settings-hit {
   font-size: 0.9286rem;
   color: var(--fg-default);
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 .settings-toolbar button:hover {
@@ -553,7 +553,7 @@ mark.settings-hit {
   font-size: 0.8571rem;
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 
@@ -592,7 +592,7 @@ select[data-key="daemon.log_level"] {
   background: var(--bg-deep);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  transition: border-color 0.15s;
+  transition: border-color var(--ui-motion-fast);
 }
 .tag-mgr-row:hover {
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
@@ -609,7 +609,7 @@ select[data-key="daemon.log_level"] {
   font-size: 0.8571rem;
   color: var(--fg-default);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--ui-motion-fast);
   white-space: nowrap;
 }
 .tag-mgr-row button:hover {
@@ -688,7 +688,7 @@ select[data-key="daemon.log_level"] {
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   color: var(--fg-default);
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
 }
 .model-actions button:hover:not(:disabled) {
   background: var(--bg-surface);
@@ -781,7 +781,7 @@ select[data-key="daemon.log_level"] {
 .settings-advanced-chev {
   flex-shrink: 0;
   color: var(--fg-faded);
-  transition: transform 0.18s ease;
+  transition: transform var(--ui-motion) ease;
 }
 .settings-advanced[open] > summary .settings-advanced-chev {
   transform: rotate(90deg);
@@ -926,7 +926,7 @@ select[data-key="daemon.log_level"] {
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--ui-motion-fast);
 }
 .tag-mgr-add-row button.primary:hover {
   opacity: 0.85;
@@ -966,7 +966,7 @@ select[data-key="daemon.log_level"] {
   font-weight: 600;
   color: var(--err);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--ui-motion-fast);
 }
 .tag-mgr-bulk-delete:hover {
   background: rgba(243, 139, 168, 0.16);
@@ -1197,7 +1197,7 @@ select[data-key="daemon.log_level"] {
   border-radius: 8px;
   padding: 14px 16px;
   background: var(--bg-surface);
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  transition: border-color var(--ui-motion-fast) ease, box-shadow var(--ui-motion-fast) ease;
 }
 .pb-card:hover,
 .pb-recipe:hover,
@@ -1232,7 +1232,7 @@ select[data-key="daemon.log_level"] {
   text-overflow: ellipsis;
   outline: none;
   cursor: default;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease;
 }
 .pb-idcol .pb-name,
 .pb-idcol .pb-r-name {
@@ -1271,7 +1271,7 @@ select[data-key="daemon.log_level"] {
 }
 .pb-chev {
   flex-shrink: 0;
-  transition: transform 0.15s ease;
+  transition: transform var(--ui-motion-fast) ease;
   transform: rotate(-90deg);
 }
 .pb-expand[aria-expanded="true"] .pb-chev,
