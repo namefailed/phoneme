@@ -351,6 +351,19 @@ trust boundary. Verified against current code.*
 
 ### Playbook & Custom Hotkeys
 
+- [x] **The Playbook now owns hooks too — the cutover** — post-transcription
+  side-effects (shell commands + webhooks) are **Hook entries** on a recipe, run
+  by the recipe executor alongside the LLM steps, not the old top-level `[hook]`
+  config. A Hook entry gained a **keyword trigger** (run only when the transcript
+  contains a phrase, optional case-matching) and a **"fail the recording"** flag
+  (default: failures are surfaced but non-fatal). On first launch a one-time
+  `hooks_migrated` migration folds your existing `[hook]` `commands` /
+  `keyword_rules` / `webhook_url` into Hook entries on the `default` recipe and
+  clears the `[hook]` table — your hooks keep firing, now editable in the Playbook
+  and runnable per-hotkey via that recipe. The legacy in-pipeline `[hook]`
+  execution is gone; `run_on_transcribe` still gates whether a pass fires its
+  hooks, and the global `[webhook]` SSRF/HMAC policy still guards outbound POSTs.
+  The detail-pane Pipeline popover now shows the real Playbook-hook provenance.
 - [x] **The Playbook is now the source of truth for the LLM-over-transcript
   pipeline** — every recording's cleanup, title, summary, and tag suggestions are
   driven by the built-in Playbook entries and the `default` recipe, not the old

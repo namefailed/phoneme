@@ -64,13 +64,19 @@ An optional, **independent** transcription provider used only for the live previ
 
 ## `[hook]`
 
+> **Legacy.** `commands` / `keyword_rules` / `webhook_url` are **read once** by
+> the `hooks_migrated` migration (below), folded into Hook `[[playbook]]` entries
+> on the `default` recipe, then cleared — hooks now live in the **Playbook**. New
+> setups should add Hook entries there, not here. `run_on_transcribe` still gates
+> whether the recipe's Hook steps fire on a given pass.
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `commands` | string[] | `to-stdout.ps1` | Always-run scripts (stdin = JSON payload) |
+| `commands` | string[] | `to-stdout.ps1` | *(legacy, migrated)* Always-run scripts (stdin = JSON payload) |
 | `timeout_secs` | u64 | `30` | Per-hook kill timeout |
-| `webhook_url` | string? | `null` | Optional HTTP POST target |
-| `run_on_transcribe` | bool | `true` | Auto-run hooks after transcription |
-| `keyword_rules` | array | `[]` | `{ pattern, command, case_sensitive? }` |
+| `webhook_url` | string? | `null` | *(legacy, migrated)* Optional HTTP POST target |
+| `run_on_transcribe` | bool | `true` | Fire post-transcription hooks (incl. recipe Hook steps) — off skips them on re-transcribe |
+| `keyword_rules` | array | `[]` | *(legacy, migrated)* `{ pattern, command, case_sensitive? }` |
 
 ---
 
@@ -273,7 +279,7 @@ Settings → Capture → Dictation, including the `stt` picker (Automatic ↔ Cu
 
 ## `[[playbook]]`
 
-Reusable AI "moves" — the building blocks the recording pipeline and Custom Hotkeys run. An array-of-tables: each `[[playbook]]` block is one entry. Curated `builtin` entries (`cleanup`, `title`, `summary`, `auto_tag`) are seeded into a fresh config and are editable; users add their own. The Playbook is the **source of truth** for the LLM-over-transcript pipeline — the built-in entries drive each step, replacing the legacy `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` sections at run time (a one-time migration, below, copies a user's existing values across). Edited in Settings → Playbook.
+Reusable AI "moves" — the building blocks the recording pipeline and Custom Hotkeys run. An array-of-tables: each `[[playbook]]` block is one entry. Curated `builtin` entries (`cleanup`, `title`, `summary`, `auto_tag`) are seeded into a fresh config and are editable; users add their own. The Playbook is the **source of truth** for the whole post-transcription pipeline — the built-in entries drive each LLM step (replacing the legacy `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` sections), and `hook` entries run shell/webhook side-effects (replacing the legacy `[hook]` config). Both are migrated once (see `playbook_migrated` / `hooks_migrated` below). Edited in Settings → 🎭 Playbook.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -292,6 +298,9 @@ Reusable AI "moves" — the building blocks the recording pipeline and Custom Ho
 | `hook.command` | `""` | For `hook` only: shell command / script (receives the recording JSON on stdin) |
 | `hook.webhook_url` | `""` | For `hook` only: webhook URL to POST the recording payload to (governed by `[webhook]` policy) |
 | `hook.timeout_secs` | `60` | For `hook` only: max execution time before the hook is killed |
+| `hook.keyword` | `""` | For `hook` only: **trigger** — run only when the (post-processed) transcript contains this substring; empty = always run |
+| `hook.case_sensitive` | `false` | For `hook` only: case-sensitive `keyword` matching (ignored when `keyword` is empty) |
+| `hook.required` | `false` | For `hook` only: when `true`, a hook failure (non-zero exit / webhook error) **fails the recording**; default surfaces it but is non-fatal |
 
 ---
 
@@ -305,15 +314,16 @@ Named, ordered chains of `[[playbook]]` entry ids — what the default recording
 | `name` | `""` | User-facing name |
 | `description` | `""` | One-line description |
 | `builtin` | `false` | Seeded by Phoneme vs. user-created |
-| `steps` | `[]` | Ordered list of `[[playbook]]` entry ids to run. A dangling id (entry deleted) or a `hook` entry is skipped with a warning; an empty list is a bare transcribe-only run. |
+| `steps` | `[]` | Ordered list of `[[playbook]]` entry ids to run — `transform`/`enrichment` (LLM) **and** `hook` (shell/webhook) steps, in order. A dangling id (entry deleted) is skipped with a warning; an empty list is a bare transcribe-only run. |
 
 ---
 
-## `playbook_migrated`
+## `playbook_migrated` · `hooks_migrated`
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `playbook_migrated` | `false` | One-time migration latch (top-level bool). On first load Phoneme copies a user's LIVE `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` values into the matching built-in `[[playbook]]` entries and rebuilds the `default` recipe from the legacy enable flags, then sets this to `true` so the reconcile never runs again. Idempotent — leave it alone. |
+| `hooks_migrated` | `false` | One-time hooks-cutover latch (top-level bool). On first load Phoneme folds the legacy `[hook]` `commands` / `keyword_rules` / `webhook_url` into Hook `[[playbook]]` entries appended to the `default` recipe, clears the `[hook]` fields, and sets this `true`. Idempotent — leave it alone. |
 
 ---
 

@@ -126,50 +126,50 @@ environment variables*), or per-hook in your `config.toml` command — though fo
 secrets like `PHONEME_TODOIST_TOKEN` a system/user env var is preferable so the
 token stays out of your config file.
 
-### 🎯 Pointing a hook at a bundled script
+### 🎯 Adding a hook (the Playbook)
 
-Set the `commands` list in `config.toml` (or **Settings → Action Hook**) to run
-a bundled script. The recommended invocation:
+Hooks live in the **Playbook** now (**Settings → 🎭 Playbook**). Add a **Hook
+entry**, set its **Command** to run a bundled script, then add the entry to a
+**recipe** (the *Default pipeline*, or a custom one wired to a hotkey):
 
-```toml
-[hook]
-commands = [
-  "powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-clipboard.ps1",
-]
-```
+1. **Settings → 🎭 Playbook → + Hook**.
+2. Set **Command** — the recommended invocation for a bundled script:
 
-- `%APPDATA%` is expanded by Phoneme to your roaming app-data folder, so this
-  resolves to `…\phoneme\hooks\to-clipboard.ps1` (`~/` also works).
-- `-NoProfile` skips loading your PowerShell profile (faster, no surprises).
-- `-ExecutionPolicy Bypass` lets the unsigned bundled script run regardless of
-  your machine's execution policy.
+   ```
+   powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-clipboard.ps1
+   ```
 
-`commands` is a list, so you can chain several — they run sequentially, each
-receiving the same payload on stdin:
+   - `%APPDATA%` is expanded by Phoneme to your roaming app-data folder, so this
+     resolves to `…\phoneme\hooks\to-clipboard.ps1` (`~/` also works).
+   - `-NoProfile` skips loading your PowerShell profile (faster, no surprises).
+   - `-ExecutionPolicy Bypass` lets the unsigned bundled script run regardless of
+     your machine's execution policy.
+3. Under **Recipes**, add the Hook entry to a recipe. A recipe is an ordered
+   chain, so you can include **several hooks** (each receives the same payload on
+   stdin) alongside the AI steps — they run in order.
 
-```toml
-commands = [
-  "powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-clipboard.ps1",
-  "powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-markdown-daily.ps1",
-]
-```
+Optionally set a per-hook **Timeout**, and tick **"Fail the recording if this
+hook errors"** when a non-zero exit should quarantine the recording (the default
+surfaces failures but keeps the recording usable).
 
-## ⚡ Keyword-Triggered Hooks
+> **Migrating from `[hook]`?** Older configs used a top-level `[hook]` section
+> (`commands` / `keyword_rules` / `webhook_url`). On first launch Phoneme
+> **auto-migrates** those into Hook entries on the Default recipe and clears the
+> `[hook]` table — a one-time `hooks_migrated` latch. Edit them in the Playbook
+> from then on.
 
-You can run specific plugins **only when the transcript matches a phrase**. Configure them in **Settings → Action Hook**, or directly in your `config.toml`:
+## ⚡ Keyword-triggered hooks
 
-```toml
-[[hook.keyword_rules]]
-pattern = "action item:"
-command = "powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1"
+A Hook entry can run **only when the transcript matches a phrase**. In the entry
+editor, set **"Trigger — only run when the transcript contains…"** to a phrase
+(leave it blank to always run), and optionally tick **Match case**:
 
-[[hook.keyword_rules]]
-pattern = "TODO"
-command = "powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-file.ps1"
-case_sensitive = true
-```
+- Trigger `Action Item:` → a Hook that files the task in Todoist.
+- Trigger `TODO` + Match case → a Hook that appends to a file.
 
-Now, saying *"…action item: send Sarah the contract"* runs the Todoist plugin (which files the task), while ordinary notes are ignored. 
+Now saying *"…action item: send Sarah the contract"* runs the Todoist Hook,
+while ordinary notes are ignored. (The seeded **Capture to-dos** example shows
+this with a `Todo:` trigger.)
 
 ## ⌨️ Writing Your Own Plugin
 
