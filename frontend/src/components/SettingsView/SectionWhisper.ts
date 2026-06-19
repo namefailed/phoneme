@@ -430,13 +430,20 @@ export class SectionWhisper {
     // Live character counter for the custom-vocabulary box. Whisper only uses
     // the last ~224 tokens of the prompt, so the textarea is capped (maxlength)
     // and the counter warns as it fills — the user sees when it's "too long".
+    const VOCAB_MAX = 900;
     const vocabInput = container.querySelector<HTMLTextAreaElement>("#vocab-input");
     const vocabCount = container.querySelector<HTMLElement>("#vocab-count");
     const updateVocabCount = () => {
       if (!vocabInput || !vocabCount) return;
+      // Hard cap in JS too (not just the maxlength attr) so paste / IME / any
+      // path can't exceed it — Whisper only uses ~the last 224 tokens anyway.
+      if (vocabInput.value.length > VOCAB_MAX) {
+        vocabInput.value = vocabInput.value.slice(0, VOCAB_MAX);
+        this.config.whisper.initial_prompt = vocabInput.value;
+      }
       const n = vocabInput.value.length;
-      vocabCount.textContent = `${n} / 900`;
-      vocabCount.style.color = n >= 900 ? "var(--err)" : n > 800 ? "var(--warn)" : "var(--fg-faded)";
+      vocabCount.textContent = `${n} / ${VOCAB_MAX}`;
+      vocabCount.style.color = n >= VOCAB_MAX ? "var(--err)" : n > VOCAB_MAX - 100 ? "var(--warn)" : "var(--fg-faded)";
     };
     vocabInput?.addEventListener("input", updateVocabCount);
     updateVocabCount();

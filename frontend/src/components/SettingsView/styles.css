@@ -1226,7 +1226,7 @@ select[data-key="daemon.log_level"] {
 }
 .pb-idcol input:focus {
   outline: none;
-  background: var(--bg-elevated);
+  background: var(--bg-deep);
   border-color: var(--accent);
   color: var(--fg-default);
 }
@@ -1297,8 +1297,8 @@ select[data-key="daemon.log_level"] {
 .pb-hook-timeout,
 .hk-label,
 .hk-combo {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 10px;
   color: var(--fg-default);
@@ -1384,8 +1384,8 @@ select[data-key="daemon.log_level"] {
 }
 .pp-step .pp-step-knobs input[type="number"] {
   width: 64px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 8px;
 }
