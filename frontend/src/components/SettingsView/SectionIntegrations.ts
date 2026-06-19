@@ -9,7 +9,8 @@ import { renderField, bindFieldEvents } from "./form";
  *    (`rest_api.enabled` / `rest_api.port`) — this section is where the user
  *    turns it on and picks the port; the binary still has to be launched.
  *  - **MCP server** (`phoneme-mcp`): a Model Context Protocol stdio server that
- *    lets MCP-aware AI clients (Claude Desktop, etc.) drive recording and search.
+ *    lets MCP-aware AI clients (Claude Desktop, etc.) drive recording, search,
+ *    AI re-runs, and library management (16 tools).
  *    It has no config of its own — it's enabled by adding the binary to the
  *    client's MCP config — so this is an info card, not editable fields.
  *
@@ -73,12 +74,13 @@ export class SectionIntegrations {
               <code>phoneme-mcp</code> binary and it can drive Phoneme through the running daemon —
               no extra config in Phoneme, so there's nothing to switch on here.
             </p>
-            <p style="margin: 0 0 6px;">It exposes five tools:</p>
+            <p style="margin: 0 0 6px;">It exposes 16 tools:</p>
             <ul style="margin: 0 0 8px; padding-left: 18px;">
-              <li><code>start_recording</code> · <code>stop_recording</code> — control capture</li>
-              <li><code>get_transcript</code> — fetch one recording's transcript</li>
-              <li><code>search_recordings</code> — semantic + lexical search over the library</li>
-              <li><code>list_recent</code> — list the latest recordings</li>
+              <li><b>Capture</b> — <code>start_recording</code> · <code>stop_recording</code></li>
+              <li><b>Browse</b> — <code>list_recent</code> · <code>search_recordings</code> (semantic + lexical) · <code>more_like_this</code> · <code>list_tags</code></li>
+              <li><b>Read</b> — <code>get_transcript</code> · <code>get_words</code> (word-level timings)</li>
+              <li><b>AI &amp; re-runs</b> — <code>summarize</code> · <code>suggest_tags</code> · <code>rerun_cleanup</code> · <code>retranscribe</code></li>
+              <li><b>Manage</b> — <code>set_title</code> · <code>set_favorite</code> · <code>delete_recording</code> · <code>delete_tag</code></li>
             </ul>
             <p style="margin: 0; color: var(--fg-faded); font-size: 0.7857rem;">
               Add it to your client's MCP config as a stdio server whose command is the
