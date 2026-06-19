@@ -970,17 +970,15 @@ export class RecordingDetail {
           const input = rowEl?.querySelector<HTMLInputElement>(".speaker-name-input");
           // Skip a speaker the user has already named (race: named since load).
           if (!rowEl || !input || input.value.trim()) continue;
+          const pct = Math.round((s.score ?? 0) * 100);
           const chip = document.createElement("div");
           chip.className = "speaker-suggest";
-          chip.style.cssText =
-            "flex-basis:100%;display:flex;gap:6px;align-items:center;margin-top:4px;font-size:0.8214rem;color:var(--fg-muted);";
-          const pct = Math.round((s.score ?? 0) * 100);
           chip.innerHTML = `
-            <span>Sounds like <b style="color:var(--fg-default);">${escapeHtml(s.name)}</b>?
-              <span style="opacity:0.65;">· ${pct}% match</span></span>
-            <button class="inline-button sp-suggest-yes" title="Use this name">✓ Yes</button>
-            <button class="inline-button sp-suggest-no" title="Not them — don't suggest again">✗</button>`;
-          rowEl.appendChild(chip);
+            <span class="ss-text">Sounds like <span class="ss-name">${escapeHtml(s.name)}</span><span class="ss-pct">· ${pct}% match</span></span>
+            <button class="sp-suggest-yes" type="button" title="Use this name">Use name</button>
+            <button class="sp-suggest-no" type="button" title="Not them — don't suggest again">Not them</button>`;
+          // A sibling line under the row (the row itself is a non-wrapping flex).
+          rowEl.insertAdjacentElement("afterend", chip);
           chip.querySelector(".sp-suggest-yes")?.addEventListener("click", async () => {
             input.value = s.name;
             await this.commitSpeakerName(r.id, s.speaker_label, s.name, input.defaultValue);

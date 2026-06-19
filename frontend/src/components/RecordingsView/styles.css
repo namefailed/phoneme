@@ -630,6 +630,60 @@ mark.search-hit {
   background: var(--bg-surface);
 }
 
+/* Named-speaker recognition (#9): a suggestion sits on its own line just under
+   the speaker it's for — "Sounds like <name> · NN%  [Use name] [Not them]". */
+.speakers-block .speaker-suggest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: -2px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  font-size: 0.8214rem;
+  color: var(--fg-muted);
+}
+.speakers-block .speaker-suggest .ss-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.speakers-block .speaker-suggest .ss-name {
+  color: var(--fg-default);
+  font-weight: 600;
+}
+.speakers-block .speaker-suggest .ss-pct {
+  margin-left: 4px;
+  opacity: 0.6;
+}
+.speakers-block .speaker-suggest button {
+  flex: 0 0 auto;
+  padding: 3px 11px;
+  border-radius: 6px;
+  font-size: 0.7857rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.speakers-block .sp-suggest-yes {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+}
+.speakers-block .sp-suggest-yes:hover {
+  filter: brightness(1.1);
+}
+.speakers-block .sp-suggest-no {
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--fg-muted);
+}
+.speakers-block .sp-suggest-no:hover {
+  color: var(--fg-default);
+  border-color: var(--fg-muted);
+}
+
 /* Focus-mode toggle in the detail header — collapses the list for full-width
    editing. */
 .detail-focus-btn {
