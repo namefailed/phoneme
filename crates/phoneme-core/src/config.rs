@@ -3160,7 +3160,7 @@ pub(crate) fn expand_path(s: &str) -> Result<String> {
 /// `~/`) in a shell command string. Shell-variable references like `$payload`
 /// or `$input` are left untouched — they are runtime variables for the hook
 /// process, not OS environment variables for Phoneme to resolve.
-fn expand_cmd(s: &str) -> String {
+pub fn expand_cmd(s: &str) -> String {
     expand_home_tokens(s)
 }
 

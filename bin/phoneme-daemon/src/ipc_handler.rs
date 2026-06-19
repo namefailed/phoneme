@@ -919,9 +919,25 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 };
                 let cfg = state.config.load();
                 let timeout = std::time::Duration::from_secs(cfg.hook.timeout_secs);
-                let configured = match cfg.expanded() {
-                    Ok(c) => c.hook.commands,
-                    Err(_) => cfg.hook.commands.clone(),
+                // Post-cutover, the "configured hooks" are the `default` recipe's
+                // Hook-step commands (where migrate_hooks moved [hook].commands),
+                // each with the Phoneme path tokens expanded — same allowlist
+                // semantics as before. Webhook-only Hook steps have no command and
+                // are skipped (RefireHook only re-runs commands, as it always has).
+                let configured: Vec<String> = {
+                    use phoneme_core::config::{expand_cmd, PlaybookKind};
+                    let mut cmds = Vec::new();
+                    if let Some(recipe) = cfg.recipes.iter().find(|r| r.id == "default") {
+                        for step_id in &recipe.steps {
+                            if let Some(e) = cfg.playbook.iter().find(|e| &e.id == step_id) {
+                                let c = e.hook.command.trim();
+                                if e.kind == PlaybookKind::Hook && !c.is_empty() {
+                                    cmds.push(expand_cmd(c));
+                                }
+                            }
+                        }
+                    }
+                    cmds
                 };
                 drop(cfg);
                 let commands = if let Some(cmd) = command {

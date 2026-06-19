@@ -1715,10 +1715,12 @@ async fn run_hook_steps(
         }
         let timeout = Duration::from_secs(hook.timeout_secs);
 
-        // Shell command half.
+        // Shell command half. Expand the Phoneme path tokens (%APPDATA%, ~/) the
+        // same way the legacy [hook] path did via cfg.expanded().
         let cmd = hook.command.trim();
         if !cmd.is_empty() {
-            let runner = HookRunner::new(cmd.to_string(), timeout);
+            let runner =
+                HookRunner::new(phoneme_core::config::expand_cmd(cmd), timeout);
             match runner.run(payload).await {
                 Ok(result) if result.exit_code != 0 => {
                     if hook.required {

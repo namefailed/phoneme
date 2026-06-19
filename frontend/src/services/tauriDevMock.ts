@@ -388,6 +388,7 @@ let config: Record<string, unknown> = {
     { id: "prompt_capture", name: "Dictate → prompt", description: "Clean up the dictation, then reshape it into a polished LLM prompt.", builtin: false, steps: ["cleanup", "prompt_polish"] },
   ],
   playbook_migrated: false,
+  hooks_migrated: false,
   tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: false },
   editor: { vim_mode: false, vimrc: "", vimrc_path: "", resync_views_on_edit: true },
   diarization: { provider: "none", local_model_path: "", models_dir: "", solo_one_speaker: false, merge_gap_secs: 0.25, speaker_keep_threshold: 0.0000001, reconstruct_method: "smoothed", reconstruct_method_epsilon: 0.1, preload_at_startup: false },

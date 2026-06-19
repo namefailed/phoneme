@@ -331,9 +331,14 @@ async fn main() -> Result<()> {
 /// reload retries (mirrors the startup block).
 pub fn load_config() -> anyhow::Result<phoneme_core::Config> {
     let mut cfg = phoneme_core::Config::load_resolved()?;
-    if cfg.migrate_playbook() {
+    // Run BOTH one-time migrations (non-short-circuiting `|` so both always run),
+    // playbook FIRST: it rebuilds the `default` recipe's step list from the legacy
+    // enable flags, then `migrate_hooks` APPENDS the migrated Hook steps to it.
+    // Both are idempotent; persist once if either actually migrated so the on-disk
+    // config freezes in its migrated form (self-heals on every reload path).
+    if cfg.migrate_playbook() | cfg.migrate_hooks() {
         if let Err(e) = cfg.write_resolved() {
-            tracing::warn!(error = %e, "failed to persist Playbook migration; will retry next reload");
+            tracing::warn!(error = %e, "failed to persist config migration; will retry next reload");
         }
     }
     Ok(cfg)
