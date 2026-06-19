@@ -497,6 +497,26 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
             .then(|| "Fix the command path in hook.commands (Settings → Post-Processing), or clear it if you no longer use a hook.".into()),
     });
 
+    // yt-dlp for URL imports (`phoneme import <url>`). Purely optional — local
+    // file imports never touch it — so it's Info either way and never dings the
+    // health summary; it just tells you whether URL import is available.
+    let ytdlp_found = which::which("yt-dlp").is_ok();
+    out.push(CheckResult {
+        name: "yt-dlp (URL import)".into(),
+        ok: ytdlp_found,
+        detail: if ytdlp_found {
+            "found on PATH".into()
+        } else {
+            "not installed (optional — only `phoneme import <url>` needs it)".into()
+        },
+        fix_action: None,
+        category: category_for(ytdlp_found, CheckCategory::Info),
+        explanation: "Checks for yt-dlp, used to import audio straight from a URL (e.g. YouTube) with `phoneme import <url>`. Optional — importing local files doesn't need it.".into(),
+        fix_hint: (!ytdlp_found).then(|| {
+            "Install it with `python -m pip install -U yt-dlp` (and keep ffmpeg on PATH) to enable URL imports.".into()
+        }),
+    });
+
     // Main transcription model (only relevant when the LOCAL provider runs a
     // bundled server — the supervisor spawns one whenever the mode isn't
     // External). Cloud and custom-endpoint providers never read a local model
@@ -2133,6 +2153,7 @@ mod tests {
                 "Disk space (recordings)",
                 "Disk space (app data)",
                 "Hook command",
+                "yt-dlp (URL import)",
                 "Whisper model file",
             ]
         );

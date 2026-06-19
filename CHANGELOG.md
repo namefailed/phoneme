@@ -72,7 +72,9 @@ trust boundary. Verified against current code.*
   (Phoneme keeps only its decoded copy). A `--format` flag (`m4a` default, or
   `mp3`/`flac`/`wav`) picks the extracted format. Makes it easy to pull real-world
   clips and A/B transcription settings via `retranscribe` + the compare-versions
-  view. Requires yt-dlp + ffmpeg on PATH.
+  view. Auto-detects an installed JS runtime (deno/node/bun) for YouTube's
+  extractor. Requires yt-dlp + ffmpeg on PATH, and `phoneme doctor` reports
+  whether yt-dlp is available (informational — only URL imports need it).
 
 ### Recording
 
