@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
-import { escapeAttr } from "../../utils/format";
+import { escapeAttr, escapeHtml } from "../../utils/format";
 import { sttMeta, curatedSttModels } from "../../services/sttProviders";
 import { mountConnectionField } from "./connectionField";
 import { mountModelField } from "./modelField";
@@ -408,20 +408,38 @@ export class SectionWhisper {
         </div>
         <div class="settings-field">
           <label>Custom vocabulary</label>
-          <div>${renderField(
-            { key: "whisper.initial_prompt", label: "", kind: "textarea" },
-            this.config.whisper.initial_prompt ?? "",
-          )}</div>
-          <span style="${HELP}">
-            Names, jargon, and acronyms the transcriber keeps mis-hearing — list them here and Whisper will lean toward them
-            (e.g. <code>Phoneme, pyannote, WebView2, Namef</code>). Sent as the prompt to <b>Whisper-based</b> providers (the local
-            <code>whisper.cpp</code> server, OpenAI, Groq, and Custom endpoints); keep it short — only the last ~224 tokens are used.
-            Deepgram, AssemblyAI, and ElevenLabs ignore it for now.
-          </span>
+          <div style="width: 100%;">
+            <textarea data-key="whisper.initial_prompt" id="vocab-input" maxlength="900" rows="6"
+              style="resize: vertical; min-height: 120px; font-size: 0.9286rem; padding: 8px; width: 100%;"
+              placeholder="Names, jargon, acronyms…">${escapeHtml(this.config.whisper.initial_prompt ?? "")}</textarea>
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px;">
+              <span style="${HELP}">
+                Names, jargon, and acronyms the transcriber keeps mis-hearing — list them here and Whisper will lean toward them
+                (e.g. <code>Phoneme, pyannote, WebView2</code>). Sent as the prompt to <b>Whisper-based</b> providers (the local
+                <code>whisper.cpp</code> server, OpenAI, Groq, and Custom endpoints); only the last <b>~224 tokens (≈900 characters)</b>
+                are used. Deepgram, AssemblyAI, and ElevenLabs ignore it for now.
+              </span>
+              <span id="vocab-count" style="font-size: 0.7143rem; color: var(--fg-faded); white-space: nowrap; flex-shrink: 0;"></span>
+            </div>
+          </div>
         </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
+
+    // Live character counter for the custom-vocabulary box. Whisper only uses
+    // the last ~224 tokens of the prompt, so the textarea is capped (maxlength)
+    // and the counter warns as it fills — the user sees when it's "too long".
+    const vocabInput = container.querySelector<HTMLTextAreaElement>("#vocab-input");
+    const vocabCount = container.querySelector<HTMLElement>("#vocab-count");
+    const updateVocabCount = () => {
+      if (!vocabInput || !vocabCount) return;
+      const n = vocabInput.value.length;
+      vocabCount.textContent = `${n} / 900`;
+      vocabCount.style.color = n >= 900 ? "var(--err)" : n > 800 ? "var(--warn)" : "var(--fg-faded)";
+    };
+    vocabInput?.addEventListener("input", updateVocabCount);
+    updateVocabCount();
 
     // Curated STT model dropdown (+ "Other…" free-text) for cloud providers,
     // re-mounted whenever the provider changes so the list matches it.

@@ -57,7 +57,7 @@ export class SectionEditor {
             <button class="inline-button" id="pick-vimrc" style="white-space: nowrap;">Browse…</button>
           </div>
           <span style="font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.4;">
-            Absolute path to a <code>.vimrc</code> file on your computer (e.g., <code>~/.vimrc</code> or <code>C:\\Users\\Namef\\.vimrc</code>). Phoneme will read and apply these mappings automatically.
+            Absolute path to a <code>.vimrc</code> file on your computer (e.g., <code>~/.vimrc</code> or <code>%USERPROFILE%\\.vimrc</code>). Phoneme will read and apply these mappings automatically.
           </span>
         </div>
 

@@ -35,6 +35,11 @@ const BUILTIN_TARGETS = ["title", "summary", "tags"] as const;
 const DEFAULT_LLM = () => ({ provider: "", model: "", prompt: "", api_url: "", api_key: "", timeout_secs: 30 });
 const DEFAULT_HOOK = () => ({ command: "", webhook_url: "", timeout_secs: 60 });
 
+/** The app's chevron (matches the select chevron). `currentColor` so it tracks
+ *  the button text + theme; `.pb-chev` rotates it to point down when open. */
+const CHEVRON =
+  `<svg class="pb-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+
 /** TS mirror of the Rust `default_playbook()` seeds — used to seed a config that
  *  somehow arrives without entries, and to "Reset to default" a builtin. Keep in
  *  sync with crates/phoneme-core/src/config.rs. */
@@ -230,7 +235,7 @@ export class SectionPlaybook {
             <input type="text" class="pb-desc" value="${escapeAttr(e.description)}" placeholder="What this does (shown as a hint)" aria-label="Entry description" />
           </div>
           ${e.builtin ? `<span class="pb-badge" title="A built-in example — editable; Reset restores the original.">built-in</span>` : `<span></span>`}
-          <button class="inline-button pb-expand" type="button" aria-expanded="${open}">${open ? "▾" : "▸"} Edit</button>
+          <button class="inline-button pb-expand" type="button" aria-expanded="${open}">${CHEVRON} Edit</button>
           <button class="inline-button pb-del" type="button" title="Delete entry" aria-label="Delete entry">✕</button>
         </div>
         <div class="pb-detail" style="display: ${open ? "block" : "none"}; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
@@ -455,7 +460,7 @@ export class SectionPlaybook {
               <input type="text" class="pb-r-desc" value="${escapeAttr(r.description)}" placeholder="What this chain does" aria-label="Recipe description" />
             </div>
             ${r.builtin ? `<span class="pb-badge">built-in</span>` : `<span></span>`}
-            <button class="inline-button pb-r-expand" type="button" aria-expanded="${open}">${open ? "▾" : "▸"} Steps</button>
+            <button class="inline-button pb-r-expand" type="button" aria-expanded="${open}">${CHEVRON} Steps</button>
             <button class="inline-button pb-r-del" type="button" title="Delete recipe" aria-label="Delete recipe">✕</button>
           </div>
           <div class="pb-r-detail" style="display: ${open ? "block" : "none"}; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">

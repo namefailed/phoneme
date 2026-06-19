@@ -1173,7 +1173,7 @@ select[data-key="daemon.log_level"] {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 14px 16px;
-  background: var(--bg-elevated);
+  background: var(--bg-surface);
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .pb-card:hover,
@@ -1226,9 +1226,26 @@ select[data-key="daemon.log_level"] {
 }
 .pb-idcol input:focus {
   outline: none;
-  background: var(--bg-surface);
+  background: var(--bg-elevated);
   border-color: var(--accent);
   color: var(--fg-default);
+}
+/* Edit / Steps disclosure buttons carry the app chevron, which rotates to point
+   down when the card is open (collapsed = points right). */
+.pb-expand,
+.pb-r-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pb-chev {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+  transform: rotate(-90deg);
+}
+.pb-expand[aria-expanded="true"] .pb-chev,
+.pb-r-expand[aria-expanded="true"] .pb-chev {
+  transform: rotate(0deg);
 }
 .pb-card .pb-badge,
 .pb-recipe .pb-badge {
@@ -1246,7 +1263,7 @@ select[data-key="daemon.log_level"] {
   align-items: center;
   gap: 6px;
   padding: 6px 8px 6px 10px;
-  background: var(--bg-surface);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
 }
@@ -1280,7 +1297,7 @@ select[data-key="daemon.log_level"] {
 .pb-hook-timeout,
 .hk-label,
 .hk-combo {
-  background: var(--bg-surface);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 6px 10px;
