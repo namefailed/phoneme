@@ -440,10 +440,18 @@ pub async fn merge_named_voices(
     forward(&bridge, Request::MergeNamedVoices { from_id, into_id }).await
 }
 
-/// Forget a named voice (unlink its captures, delete the entry).
+/// Forget a named voice — reversibly (soft-delete; unlink its captures). Undo with
+/// [`undo_forget_named_voice`].
 #[tauri::command]
 pub async fn forget_named_voice(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
     forward(&bridge, Request::ForgetNamedVoice { id }).await
+}
+
+/// Undo a [`forget_named_voice`] — restore the soft-deleted voice and re-link its
+/// captures.
+#[tauri::command]
+pub async fn undo_forget_named_voice(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    forward(&bridge, Request::UndoForgetNamedVoice { id }).await
 }
 
 /// Remove ALL still-pending items from the queue ("clear queue").

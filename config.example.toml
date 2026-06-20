@@ -407,6 +407,15 @@ voiceprint_score_norm = "off"
 # std-devs above the probe's cohort mean — a different scale than the cosine bar,
 # so typical values ~1.5–3.0 (not 0–1). Ignored when norm is "off". Default 2.0.
 voiceprint_score_norm_threshold = 2.0
+# What to do with PAST recordings when you name a speaker (V5 back-fill). Naming a
+# speaker enrolls their voice; this controls whether that name is also applied to
+# the SAME voice where it appears UNNAMED in other recordings. "ask" (default)
+# gathers the matching unnamed speakers and returns them so the UI can confirm —
+# nothing past is changed automatically. "auto" back-fills every match at once.
+# "off" never back-fills (naming only affects the recording you named in).
+# Candidates clear voiceprint_match_threshold (the same recognition bar); an
+# already-named speaker is never overwritten. Local diarization only.
+name_propagation = "ask"
 
 
 # -----------------------------------------------------------------------------

@@ -94,6 +94,24 @@ trust boundary.*
   legacy captures default to `0`, which falls back to equal weighting, so a library
   built before this recomputes to the identical centroid until new captures arrive.
   Local diarization only.
+- [x] **Name propagation + reversible forget (V5, backend)** — naming a speaker can
+  now back-fill that name onto the **same unnamed voice in past recordings**.
+  `catalog::propagation_candidates` scans every unnamed, un-display-named capture in
+  other recordings and scores it against the named voice with the recognizer's own
+  scorer (score-norm aware), at/above `voiceprint_match_threshold`;
+  `apply_propagation` then applies each like a normal naming (display name +
+  enrollment), **never overwriting an already-named speaker** and idempotent on
+  re-run. Routed by `[diarization].name_propagation` (`ask` \| `auto` \| `off`,
+  **default `ask`** = surface candidates, change no past recording automatically;
+  `auto` back-fills and reports the count; `off` no-ops). The `SetSpeakerName`
+  response now carries a `propagation` block (policy + applied count + candidates).
+  **Forget is now reversible** — `forget_named_voice` soft-deletes (new `deleted_at`
+  column + an undo log of the captures it unlinked; migration `20260620000001`)
+  instead of hard-deleting, every read path filters `deleted_at IS NULL`, and a new
+  `undo_forget` / `UndoForgetNamedVoice` IPC restores the voice and re-links its
+  captures (skipping any re-enrolled onto another voice since). The confirm prompt +
+  "don't ask again" toggle, and full **merge**-undo (needs a move-log), are
+  follow-ups. Local diarization only.
 - [x] **Custom local diarization models** — `[diarization].models_dir` points the local
   diarizer at a folder holding your own speakrs bundle (segmentation + embedding ONNX),
   loaded via `OwnedDiarizationPipeline::from_dir` instead of the pretrained download;

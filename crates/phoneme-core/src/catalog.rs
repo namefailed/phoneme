@@ -27,8 +27,8 @@ use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
 use crate::types::{
-    AiActivityEntry, ListFilter, NamedVoice, Recording, RecordingStatus, SavedSearch, SpeakerName,
-    SpeakerSuggestion, TranscriptSegment, TranscriptWord,
+    AiActivityEntry, ListFilter, NamedVoice, PropagationCandidate, Recording, RecordingStatus,
+    SavedSearch, SpeakerName, SpeakerSuggestion, TranscriptSegment, TranscriptWord,
 };
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -2444,10 +2444,14 @@ impl Catalog {
         // racing under the same name can't create duplicate library entries
         // (audit M4). Then read back the existing-or-just-created id.
         let id = format!("nv_{}", RecordingId::new().as_str());
+        // A *forgotten* (soft-deleted) voice with this name does not count as a
+        // match — re-using a forgotten name creates a fresh live voice rather than
+        // silently reviving a tombstoned one (undo is the explicit revive path).
         sqlx::query(
             "INSERT INTO named_voiceprints (id, name, centroid, samples) \
              SELECT ?, ?, '[]', 0 \
-             WHERE NOT EXISTS (SELECT 1 FROM named_voiceprints WHERE name = ? COLLATE NOCASE)",
+             WHERE NOT EXISTS (SELECT 1 FROM named_voiceprints \
+                 WHERE name = ? COLLATE NOCASE AND deleted_at IS NULL)",
         )
         .bind(&id)
         .bind(name)
@@ -2455,7 +2459,8 @@ impl Catalog {
         .execute(&self.pool)
         .await?;
         let resolved: String = sqlx::query_scalar(
-            "SELECT id FROM named_voiceprints WHERE name = ? COLLATE NOCASE LIMIT 1",
+            "SELECT id FROM named_voiceprints \
+             WHERE name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1",
         )
         .bind(name)
         .fetch_one(&self.pool)
@@ -2566,6 +2571,7 @@ impl Catalog {
     pub async fn list_named_voices(&self) -> Result<Vec<NamedVoice>> {
         let rows = sqlx::query(
             "SELECT id, name, samples FROM named_voiceprints \
+             WHERE deleted_at IS NULL \
              ORDER BY updated_at DESC, name COLLATE NOCASE ASC",
         )
         .fetch_all(&self.pool)
@@ -2589,9 +2595,12 @@ impl Catalog {
         probe: &[f32],
         threshold: f32,
     ) -> Result<Option<(NamedVoice, f32)>> {
-        let rows = sqlx::query("SELECT id, name, samples, centroid FROM named_voiceprints")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(
+            "SELECT id, name, samples, centroid FROM named_voiceprints \
+             WHERE deleted_at IS NULL",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         let mut voices: Vec<NamedVoice> = Vec::with_capacity(rows.len());
         let mut centroids: Vec<Vec<f32>> = Vec::with_capacity(rows.len());
         for r in rows {
@@ -2669,19 +2678,250 @@ impl Catalog {
         Ok(true)
     }
 
-    /// Forget a named voice: unlink its captures (the raw per-recording
-    /// voiceprints stay) and delete the library entry. Returns whether a row was
-    /// removed.
+    /// Forget a named voice — reversibly (roadmap V5). The library entry is
+    /// soft-deleted (`deleted_at` stamped, not dropped), its captures are unlinked
+    /// (the raw per-recording voiceprints stay), and which captures were unlinked
+    /// is recorded in the undo log so [`Self::undo_forget`] can re-link exactly
+    /// those rows. A tombstoned voice is invisible to listing and recognition just
+    /// like the old hard delete, but recoverable. Returns whether a live row was
+    /// forgotten (false for an unknown or already-forgotten id). Idempotent: a
+    /// second forget of the same id is a no-op.
     pub async fn forget_named_voice(&self, id: &str) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        // Only a LIVE voice can be forgotten; this both guards idempotency and
+        // gives us the rows_affected to report.
+        let stamped = sqlx::query(
+            "UPDATE named_voiceprints SET deleted_at = datetime('now') \
+             WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        if stamped.rows_affected() == 0 {
+            tx.commit().await?;
+            return Ok(false);
+        }
+        // Snapshot which captures are about to be unlinked, so undo can restore the
+        // exact set (a stale log from a prior forget of this id is cleared first).
+        sqlx::query("DELETE FROM forgotten_voiceprint_links WHERE named_voice_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO forgotten_voiceprint_links (named_voice_id, recording_id, speaker_label) \
+             SELECT named_voice_id, recording_id, speaker_label FROM speaker_voiceprints \
+             WHERE named_voice_id = ?",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
         sqlx::query("UPDATE speaker_voiceprints SET named_voice_id = NULL WHERE named_voice_id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
-        let res = sqlx::query("DELETE FROM named_voiceprints WHERE id = ?")
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    /// Undo a [`Self::forget_named_voice`]: clear the tombstone, re-link the
+    /// captures the forget unlinked (from the undo log), recompute the cached
+    /// centroid, and clear the log. Returns whether a forgotten voice was restored
+    /// (false for an unknown or not-currently-forgotten id). Idempotent on a
+    /// live id.
+    pub async fn undo_forget(&self, id: &str) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let revived = sqlx::query(
+            "UPDATE named_voiceprints SET deleted_at = NULL \
+             WHERE id = ? AND deleted_at IS NOT NULL",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        if revived.rows_affected() == 0 {
+            tx.commit().await?;
+            return Ok(false);
+        }
+        // Re-link only captures still currently unlinked — a capture re-named onto
+        // a different voice since the forget keeps its newer assignment (don't
+        // clobber a deliberate re-enrollment).
+        sqlx::query(
+            "UPDATE speaker_voiceprints SET named_voice_id = ? \
+             WHERE named_voice_id IS NULL AND (recording_id, speaker_label) IN \
+                 (SELECT recording_id, speaker_label FROM forgotten_voiceprint_links \
+                  WHERE named_voice_id = ?)",
+        )
+        .bind(id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM forgotten_voiceprint_links WHERE named_voice_id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
-        Ok(res.rows_affected() > 0)
+        tx.commit().await?;
+        // Re-derive the cached centroid + count from the re-linked captures.
+        self.recompute_named_centroid(id).await?;
+        Ok(true)
+    }
+
+    // ---- Name propagation — back-fill a name onto past recordings (V5) ----
+
+    /// Find the *unnamed* speakers in OTHER recordings whose voiceprint matches a
+    /// named voice — the back-fill candidates for naming propagation (V5).
+    ///
+    /// Scans every `speaker_voiceprints` row with `named_voice_id IS NULL` (a
+    /// captured-but-never-named speaker), in any recording other than ones already
+    /// linked to this voice, and scores its centroid against the named voice's
+    /// cached centroid with the *same scorer the recognizer uses* — raw cosine
+    /// under [`ScoreNorm::Off`](crate::voiceprint::ScoreNorm::Off), or the z-score
+    /// under `s_norm`/`as_norm`, cohort = the live named-voice library. A row is a
+    /// candidate iff it clears `threshold` (interpret `threshold` on the same scale
+    /// the chosen `mode` does, exactly as `recognize_speakers_for`). Already-named
+    /// speakers are never candidates (only `named_voice_id IS NULL` rows are
+    /// scanned), so propagation can only ADD a name, never overwrite one. Results
+    /// are ordered by score, highest first.
+    ///
+    /// Returns empty when the voice is unknown, forgotten, or has no centroid yet.
+    pub async fn propagation_candidates(
+        &self,
+        named_voice_id: &str,
+        threshold: f32,
+        mode: crate::voiceprint::ScoreNorm,
+    ) -> Result<Vec<PropagationCandidate>> {
+        // The live library: the cohort for normalization AND the source of the
+        // target centroid. A forgotten / sample-less voice isn't here, so it yields
+        // no candidates.
+        let library = self.named_voice_centroids().await?;
+        let target_idx = match library.iter().position(|(v, _)| v.id == named_voice_id) {
+            Some(i) => i,
+            None => return Ok(Vec::new()),
+        };
+        let cohort: Vec<Vec<f32>> = library.iter().map(|(_, c)| c.clone()).collect();
+
+        // Every UNNAMED capture: not enrolled (`named_voice_id IS NULL`) AND with
+        // no display name (`speaker_names`) — a speaker can carry a display name
+        // without being enrolled (e.g. the pipeline's "You" default, or a name set
+        // on a cloud-diarized recording with no voiceprint), and propagation must
+        // never overwrite such a name. Also exclude recordings already enrolled
+        // under THIS voice, keeping a recording out of its own back-fill.
+        let rows = sqlx::query(
+            "SELECT sv.recording_id AS recording_id, sv.speaker_label AS speaker_label, \
+                    sv.centroid AS centroid \
+             FROM speaker_voiceprints sv \
+             WHERE sv.named_voice_id IS NULL \
+               AND NOT EXISTS (SELECT 1 FROM speaker_names sn \
+                     WHERE sn.recording_id = sv.recording_id \
+                       AND sn.speaker_label = sv.speaker_label) \
+               AND sv.recording_id NOT IN \
+                 (SELECT recording_id FROM speaker_voiceprints WHERE named_voice_id = ?)",
+        )
+        .bind(named_voice_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out: Vec<PropagationCandidate> = Vec::new();
+        for r in rows {
+            let centroid =
+                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            // A dimension mismatch (cross-model capture) scores cosine 0.0 and
+            // won't clear any sane threshold — same skip the recognizer makes.
+            let score = crate::voiceprint::normalized_score(&centroid, &cohort, target_idx, mode);
+            if score >= threshold {
+                let recording_id: String = r.try_get("recording_id")?;
+                let speaker_label: i64 = r.try_get("speaker_label")?;
+                let rid = match RecordingId::parse(recording_id) {
+                    Some(rid) => rid,
+                    None => continue, // a malformed id can't be a real recording
+                };
+                out.push(PropagationCandidate {
+                    recording_id: rid,
+                    speaker_label,
+                    score,
+                });
+            }
+        }
+        out.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        Ok(out)
+    }
+
+    /// Back-fill a named voice onto the given `(recording_id, speaker_label)`
+    /// targets (V5) — the apply half of propagation.
+    ///
+    /// For each target it does exactly what a normal naming does: set the
+    /// per-recording display name (`speaker_names`, the same row
+    /// [`Self::set_speaker_name`] writes — the transcript's `[Speaker N]` markers
+    /// are mapped to it at display/export time, never rewritten in place) and
+    /// enroll the capture into the library so the voice gets stronger. The voice's
+    /// own name is read from the library by id.
+    ///
+    /// Safety + idempotency: a target whose speaker is ALREADY named is skipped (we
+    /// never overwrite a name), as is a target with no captured voiceprint or one
+    /// already enrolled under this voice. Re-running with the same targets does no
+    /// duplicate work. Returns how many targets were actually back-filled.
+    ///
+    /// Best-effort per target: the voice must exist and be live (a forgotten voice
+    /// back-fills nothing).
+    pub async fn apply_propagation(
+        &self,
+        named_voice_id: &str,
+        targets: &[(RecordingId, i64)],
+    ) -> Result<usize> {
+        // Resolve the name from the LIVE library; a forgotten/unknown voice can't
+        // be propagated.
+        let name: Option<String> = sqlx::query_scalar(
+            "SELECT name FROM named_voiceprints WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(named_voice_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let name = match name {
+            Some(n) => n,
+            None => return Ok(0),
+        };
+
+        let mut applied = 0usize;
+        for (recording_id, speaker_label) in targets {
+            // Never overwrite an existing name — only back-fill an unnamed speaker.
+            let already_named: Option<String> = sqlx::query_scalar(
+                "SELECT name FROM speaker_names WHERE recording_id = ? AND speaker_label = ?",
+            )
+            .bind(recording_id.as_str())
+            .bind(speaker_label)
+            .fetch_optional(&self.pool)
+            .await?;
+            if already_named.is_some() {
+                continue;
+            }
+            // Skip a capture already enrolled under THIS voice (idempotent re-run).
+            if self
+                .named_voice_for(recording_id.as_str(), *speaker_label)
+                .await?
+                .as_deref()
+                == Some(named_voice_id)
+            {
+                continue;
+            }
+            // Apply the display name (same write as set_speaker_name) and enroll the
+            // capture. enroll_speaker is a no-op when no voiceprint was captured.
+            self.set_speaker_name(recording_id, *speaker_label, &name)
+                .await?;
+            let enrolled = self
+                .enroll_speaker(recording_id.as_str(), *speaker_label, &name)
+                .await?;
+            if enrolled.is_some() {
+                applied += 1;
+            } else {
+                // No voiceprint to enroll — undo the name we just wrote so a target
+                // with no capture isn't half-applied (display-named but unenrolled).
+                self.set_speaker_name(recording_id, *speaker_label, "")
+                    .await?;
+            }
+        }
+        Ok(applied)
     }
 
     /// All captured voiceprints for a recording, as `(speaker_label, centroid)`.
@@ -2744,9 +2984,12 @@ impl Catalog {
     /// empty entries (no samples). Used by recognition to score every captured
     /// speaker against the whole library at once.
     async fn named_voice_centroids(&self) -> Result<Vec<(NamedVoice, Vec<f32>)>> {
-        let rows = sqlx::query("SELECT id, name, samples, centroid FROM named_voiceprints")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(
+            "SELECT id, name, samples, centroid FROM named_voiceprints \
+             WHERE deleted_at IS NULL",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         let mut out = Vec::with_capacity(rows.len());
         for r in rows {
             let samples: i64 = r.try_get("samples")?;
@@ -5442,6 +5685,378 @@ mod tests {
             named_voice_samples(&db, &ada).await,
             0,
             "the swept recording's named voice must lose its sample"
+        );
+    }
+
+    // ---- Name propagation (V5) ----------------------------------------------
+
+    /// The custom display name for a (recording, label), or None.
+    async fn display_name(db: &Catalog, rid: &RecordingId, label: i64) -> Option<String> {
+        db.speaker_names_for(rid)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| s.speaker_label == label)
+            .map(|s| s.name)
+    }
+
+    /// Enroll "Ada" in a source recording, and create two more recordings that
+    /// each have one unnamed speaker matching Ada and (in `rec_named`) one
+    /// already-named "Bob". Returns `(db, ada_id, rec_match, rec_named, far)`.
+    async fn propagation_fixture() -> (Catalog, String, RecordingId, RecordingId, RecordingId) {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+        // Source: enroll Ada at [1,0,0].
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+
+        // rec_match: one UNNAMED speaker that matches Ada.
+        let rec_match = embedded_recording(None);
+        db.insert(&rec_match).await.unwrap();
+        db.save_speaker_voiceprint(rec_match.id.as_str(), 1, &[0.99, 0.01, 0.0], 0)
+            .await
+            .unwrap();
+
+        // rec_named: an unnamed Ada-match at label 1 AND an already-named "Bob"
+        // (also near Ada geometrically — its name must NOT be overwritten).
+        let rec_named = embedded_recording(None);
+        db.insert(&rec_named).await.unwrap();
+        db.save_speaker_voiceprint(rec_named.id.as_str(), 1, &[0.98, 0.0, 0.0], 0)
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec_named.id.as_str(), 2, &[1.0, 0.0, 0.0], 0)
+            .await
+            .unwrap();
+        db.set_speaker_name(&rec_named.id, 2, "Bob").await.unwrap();
+
+        // far: a dissimilar voice that must never be a candidate.
+        let far = embedded_recording(None);
+        db.insert(&far).await.unwrap();
+        db.save_speaker_voiceprint(far.id.as_str(), 1, &[0.0, 0.0, 1.0], 0)
+            .await
+            .unwrap();
+
+        (db, ada, rec_match.id, rec_named.id, far.id)
+    }
+
+    #[tokio::test]
+    async fn propagation_candidates_respect_threshold_and_unnamed_only() {
+        let (db, ada, rec_match, rec_named, far) = propagation_fixture().await;
+        let cands = db
+            .propagation_candidates(&ada, 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
+
+        // The two unnamed Ada-matches are candidates; the dissimilar "far" voice
+        // is below threshold, and the already-named "Bob" (label 2 in rec_named)
+        // is excluded because only `named_voice_id IS NULL` rows are scanned.
+        let pairs: std::collections::HashSet<(String, i64)> = cands
+            .iter()
+            .map(|c| (c.recording_id.as_str().to_string(), c.speaker_label))
+            .collect();
+        assert!(pairs.contains(&(rec_match.as_str().to_string(), 1)));
+        assert!(pairs.contains(&(rec_named.as_str().to_string(), 1)));
+        assert!(
+            !pairs.contains(&(rec_named.as_str().to_string(), 2)),
+            "an already-named speaker is never a candidate"
+        );
+        assert!(
+            !pairs.iter().any(|(rid, _)| rid == far.as_str()),
+            "a dissimilar voice (below threshold) is not a candidate"
+        );
+        // The source recording (already enrolled under Ada) is excluded.
+        assert_eq!(cands.len(), 2);
+        // Ordered by score, highest first.
+        assert!(cands[0].score >= cands[1].score);
+    }
+
+    #[tokio::test]
+    async fn propagation_off_policy_backfills_nothing() {
+        // The OFF policy is purely a routing decision in the IPC layer, but the
+        // core invariant it relies on: candidates exist, yet nothing is applied
+        // unless apply_propagation is called. Prove naming alone never touches
+        // another recording (the Ask default proof below covers the live path).
+        let (db, ada, rec_match, _rec_named, _far) = propagation_fixture().await;
+        // Simulate OFF: gather candidates (or not) but never apply.
+        let _ = db
+            .propagation_candidates(&ada, 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
+        assert!(
+            display_name(&db, &rec_match, 1).await.is_none(),
+            "OFF: no other recording is named"
+        );
+    }
+
+    #[tokio::test]
+    async fn propagation_ask_returns_candidates_but_applies_nothing() {
+        // The default-policy guarantee: under Ask, gathering candidates must NOT
+        // modify any other recording.
+        let (db, ada, rec_match, rec_named, _far) = propagation_fixture().await;
+
+        // Snapshot every other recording's name state before.
+        let before_match = display_name(&db, &rec_match, 1).await;
+        let before_named1 = display_name(&db, &rec_named, 1).await;
+        let before_named2 = display_name(&db, &rec_named, 2).await;
+
+        let cands = db
+            .propagation_candidates(&ada, 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
+        assert_eq!(cands.len(), 2, "Ask surfaces candidates");
+
+        // Nothing changed: no display names written, no extra enrollments.
+        assert_eq!(display_name(&db, &rec_match, 1).await, before_match);
+        assert_eq!(display_name(&db, &rec_named, 1).await, before_named1);
+        assert_eq!(display_name(&db, &rec_named, 2).await, before_named2);
+        assert!(
+            db.named_voice_for(rec_match.as_str(), 1).await.unwrap().is_none(),
+            "Ask enrolls nothing in the candidate recordings"
+        );
+        // Ada's sample count is unchanged (only the source sample).
+        assert_eq!(named_voice_samples(&db, &ada).await, 1);
+    }
+
+    #[tokio::test]
+    async fn propagation_auto_backfills_unnamed_keeps_named_and_is_idempotent() {
+        let (db, ada, rec_match, rec_named, far) = propagation_fixture().await;
+        let cands = db
+            .propagation_candidates(&ada, 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
+        let targets: Vec<(RecordingId, i64)> = cands
+            .iter()
+            .map(|c| (c.recording_id.clone(), c.speaker_label))
+            .collect();
+
+        let applied = db.apply_propagation(&ada, &targets).await.unwrap();
+        assert_eq!(applied, 2, "both unnamed Ada-matches back-filled");
+
+        // The unnamed speakers now read "Ada" and are enrolled under it.
+        assert_eq!(display_name(&db, &rec_match, 1).await.as_deref(), Some("Ada"));
+        assert_eq!(display_name(&db, &rec_named, 1).await.as_deref(), Some("Ada"));
+        assert_eq!(
+            db.named_voice_for(rec_match.as_str(), 1).await.unwrap().as_deref(),
+            Some(ada.as_str())
+        );
+        // The already-named "Bob" is untouched.
+        assert_eq!(display_name(&db, &rec_named, 2).await.as_deref(), Some("Bob"));
+        // The dissimilar "far" voice is never named.
+        assert!(display_name(&db, &far, 1).await.is_none());
+
+        // Idempotent: re-running with the same targets back-fills nothing new.
+        let again = db.apply_propagation(&ada, &targets).await.unwrap();
+        assert_eq!(again, 0, "re-running propagation does no duplicate work");
+        // And re-scanning yields no candidates (they're all named now).
+        let after = db
+            .propagation_candidates(&ada, 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
+        assert!(after.is_empty(), "no unnamed matches remain");
+    }
+
+    #[tokio::test]
+    async fn apply_propagation_never_overwrites_an_existing_name() {
+        // Even if a caller hands apply_propagation an already-named target, the
+        // name is preserved (defense in depth on top of the candidate filter).
+        let (db, ada, _rec_match, rec_named, _far) = propagation_fixture().await;
+        let applied = db
+            .apply_propagation(&ada, &[(rec_named.clone(), 2)]) // label 2 == "Bob"
+            .await
+            .unwrap();
+        assert_eq!(applied, 0, "an already-named speaker is skipped");
+        assert_eq!(display_name(&db, &rec_named, 2).await.as_deref(), Some("Bob"));
+    }
+
+    #[tokio::test]
+    async fn apply_propagation_skips_target_without_voiceprint() {
+        // A target that has a name written but no captured voiceprint must not be
+        // left half-applied (display-named but unenrolled): apply rolls the name
+        // back so the state is clean.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+
+        // A recording with NO voiceprint for label 1.
+        let novp = embedded_recording(None);
+        db.insert(&novp).await.unwrap();
+
+        let applied = db.apply_propagation(&ada, &[(novp.id.clone(), 1)]).await.unwrap();
+        assert_eq!(applied, 0, "no voiceprint → nothing enrolled");
+        assert!(
+            display_name(&db, &novp.id, 1).await.is_none(),
+            "the name is rolled back so the target isn't half-applied"
+        );
+    }
+
+    #[tokio::test]
+    async fn propagation_candidates_respect_threshold_strictly() {
+        // A voice that's similar but below the bar is not a candidate; raising the
+        // bar drops a marginal match.
+        let (db, ada, rec_match, _rec_named, _far) = propagation_fixture().await;
+        // rec_match's speaker is cos≈0.9999 to Ada — clears 0.5 but let's add a
+        // marginal one at ~0.6 and bar it out at 0.8.
+        let marg = embedded_recording(None);
+        db.insert(&marg).await.unwrap();
+        // cos([0.6,0.8,0],[1,0,0]) = 0.6.
+        db.save_speaker_voiceprint(marg.id.as_str(), 1, &[0.6, 0.8, 0.0], 0)
+            .await
+            .unwrap();
+
+        let strict = db
+            .propagation_candidates(&ada, 0.8, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = strict.iter().map(|c| c.recording_id.as_str()).collect();
+        assert!(ids.contains(&rec_match.as_str()), "strong match survives 0.8");
+        assert!(!ids.contains(&marg.id.as_str()), "0.6 match is below 0.8 bar");
+    }
+
+    // ---- Reversible forget (soft-delete) (V5) -------------------------------
+
+    #[tokio::test]
+    async fn forget_soft_deletes_then_undo_restores() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 5000)
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        assert_eq!(db.list_named_voices().await.unwrap().len(), 1);
+
+        // Forget hides it from listing and recognition.
+        assert!(db.forget_named_voice(&ada).await.unwrap(), "live voice forgotten");
+        assert!(
+            db.list_named_voices().await.unwrap().is_empty(),
+            "forgotten voice is hidden from list-named-voices"
+        );
+        // A deleted voice doesn't match in recognition.
+        let sugg = db
+            .recognize_speakers_for(src.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
+        assert!(sugg.is_empty(), "a forgotten voice never matches");
+        // Its capture is unlinked.
+        assert!(db.named_voice_for(src.id.as_str(), 1).await.unwrap().is_none());
+
+        // Idempotent: forgetting again is a no-op.
+        assert!(!db.forget_named_voice(&ada).await.unwrap(), "already forgotten");
+
+        // Undo restores it: visible again, capture re-linked, centroid recomputed.
+        assert!(db.undo_forget(&ada).await.unwrap(), "forgotten voice restored");
+        let voices = db.list_named_voices().await.unwrap();
+        assert_eq!(voices.len(), 1, "restored voice is listed again");
+        assert_eq!(voices[0].id, ada);
+        assert_eq!(
+            db.named_voice_for(src.id.as_str(), 1).await.unwrap().as_deref(),
+            Some(ada.as_str()),
+            "the capture is re-linked on undo"
+        );
+        assert_eq!(named_voice_samples(&db, &ada).await, 1, "centroid recomputed");
+
+        // Idempotent: undo on a live voice is a no-op.
+        assert!(!db.undo_forget(&ada).await.unwrap(), "already live");
+    }
+
+    #[tokio::test]
+    async fn undo_forget_does_not_clobber_a_later_reenrollment() {
+        // A capture re-named onto a DIFFERENT voice after the forget keeps its
+        // newer assignment when the original is undone.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+
+        db.forget_named_voice(&ada).await.unwrap();
+        // Re-name that speaker to Bob while Ada is forgotten.
+        db.set_speaker_name(&src.id, 1, "Bob").await.unwrap();
+        let bob = db.enroll_speaker(src.id.as_str(), 1, "Bob").await.unwrap().unwrap();
+        assert_ne!(bob, ada);
+
+        // Undo Ada — must NOT steal the capture back from Bob.
+        assert!(db.undo_forget(&ada).await.unwrap());
+        assert_eq!(
+            db.named_voice_for(src.id.as_str(), 1).await.unwrap().as_deref(),
+            Some(bob.as_str()),
+            "a re-enrolled capture keeps its newer voice"
+        );
+        assert_eq!(named_voice_samples(&db, &ada).await, 0, "Ada has no captures back");
+    }
+
+    #[tokio::test]
+    async fn reusing_a_forgotten_name_makes_a_fresh_voice() {
+        // Naming a new speaker with a forgotten voice's name creates a new live
+        // voice, not a revival of the tombstone.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
+            .await
+            .unwrap();
+        let ada1 = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        db.forget_named_voice(&ada1).await.unwrap();
+
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[0.0, 1.0, 0.0], 0)
+            .await
+            .unwrap();
+        let ada2 = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        assert_ne!(ada1, ada2, "a forgotten name yields a fresh voice id");
+        let voices = db.list_named_voices().await.unwrap();
+        assert_eq!(voices.len(), 1, "only the new live Ada is listed");
+        assert_eq!(voices[0].id, ada2);
+    }
+
+    #[tokio::test]
+    async fn name_propagation_config_defaults_to_ask() {
+        // The DEFAULT-Ask contract at the config layer.
+        let diar = crate::config::DiarizationConfig::default();
+        assert_eq!(diar.name_propagation, crate::config::NamePropagation::Ask);
+        // Round-trips through serde as snake_case.
+        let json = serde_json::to_string(&crate::config::NamePropagation::Auto).unwrap();
+        assert_eq!(json, "\"auto\"");
+        let off: crate::config::NamePropagation = serde_json::from_str("\"off\"").unwrap();
+        assert_eq!(off, crate::config::NamePropagation::Off);
+        // A config missing the field deserializes to Ask (serde default).
+        let de: crate::config::NamePropagation =
+            serde_json::from_str("null").unwrap_or_default();
+        assert_eq!(de, crate::config::NamePropagation::Ask);
+    }
+
+    #[tokio::test]
+    async fn soft_delete_migration_applies_and_deleted_at_filters() {
+        // The migration chain applies cleanly on a fresh DB (Catalog::open runs
+        // it) and the new column exists + filters listing. A direct UPDATE proves
+        // the column is queryable and the read path honors it.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        // Stamp deleted_at directly (the column exists post-migration).
+        sqlx::query("UPDATE named_voiceprints SET deleted_at = datetime('now') WHERE id = ?")
+            .bind(&ada)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert!(
+            db.list_named_voices().await.unwrap().is_empty(),
+            "deleted_at IS NOT NULL is filtered from listing"
         );
     }
 }

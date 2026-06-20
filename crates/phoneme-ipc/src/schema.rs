@@ -578,11 +578,21 @@ pub enum Request {
     /// `[Speaker N]` marker. A blank `name` clears the mapping (the label
     /// reverts to the default "Speaker N"). The stored transcript is never
     /// rewritten — names are applied at display/export time — so a rename is
-    /// reversible. Ok `null` (an error for a label < 1). The updated name map
-    /// is delivered back to clients via the recording DTO
-    /// (`Recording::speaker_names` on `GetRecording`/`ListRecordings`/
-    /// `ListMeeting`); a [`DaemonEvent::SpeakerNameUpdated`] event signals
-    /// the change. GUI speaker chips.
+    /// reversible. (An error for a label < 1.) The updated name map is delivered
+    /// back to clients via the recording DTO (`Recording::speaker_names` on
+    /// `GetRecording`/`ListRecordings`/`ListMeeting`); a
+    /// [`DaemonEvent::SpeakerNameUpdated`] event signals the change. GUI speaker
+    /// chips.
+    ///
+    /// Ok = `{"propagation": {"policy": "ask"|"auto"|"off", "applied": N,
+    /// "candidates": [PropagationCandidate]}}` (V5 name back-fill). When naming
+    /// enrolls a voice and `[diarization].name_propagation` is `auto`, the name is
+    /// back-filled onto matching UNNAMED speakers in other recordings and
+    /// `applied` is the count; under `ask` (default) the matches are returned in
+    /// `candidates` and **nothing past is changed** (the UI confirms, then applies
+    /// each via `SetSpeakerName` on that recording); under `off`, or when nothing
+    /// enrolled (cleared name / cloud-diarized / recognition off), it's an empty
+    /// `off` block.
     SetSpeakerName {
         /// The recording whose speaker map to edit.
         id: RecordingId,
@@ -628,11 +638,23 @@ pub enum Request {
         /// The voice to merge INTO (kept).
         into_id: String,
     },
-    /// Forget a named voice — unlink its captures (the raw voiceprints stay) and
-    /// delete the library entry. Ok = `{"removed":bool}`. GUI Speaker Library
-    /// manager.
+    /// Forget a named voice — REVERSIBLY (V5). Soft-deletes the library entry
+    /// (it vanishes from `ListNamedVoices` and recognition) and unlinks its
+    /// captures, recording which it unlinked so the forget can be undone. The raw
+    /// per-recording voiceprints stay. Ok = `{"removed":bool}` (false for an
+    /// unknown or already-forgotten id). GUI Speaker Library manager. Undo via
+    /// [`Request::UndoForgetNamedVoice`].
     ForgetNamedVoice {
         /// The named-voice id to forget.
+        id: String,
+    },
+    /// Undo a [`Request::ForgetNamedVoice`] (V5) — un-soft-delete the voice,
+    /// re-link the captures the forget unlinked (skipping any re-named onto
+    /// another voice since), and recompute its centroid. Ok = `{"restored":bool}`
+    /// (false for an unknown or not-currently-forgotten id). GUI Speaker Library
+    /// undo.
+    UndoForgetNamedVoice {
+        /// The named-voice id to restore.
         id: String,
     },
 

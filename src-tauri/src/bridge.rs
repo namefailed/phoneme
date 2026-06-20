@@ -232,6 +232,7 @@ fn is_retry_safe(req: &Request) -> bool {
         | RenameNamedVoice { .. }
         | MergeNamedVoices { .. }
         | ForgetNamedVoice { .. }
+        | UndoForgetNamedVoice { .. }
         | CancelAllQueued
         | CancelProcessing { .. }
         // Daemon lifecycle & config.

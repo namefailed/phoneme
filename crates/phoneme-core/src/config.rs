@@ -329,6 +329,39 @@ pub struct DiarizationConfig {
     /// Default 2.0. Tune with the EER harness on your own enrolled voices.
     #[serde(default = "default_voiceprint_score_norm_threshold")]
     pub voiceprint_score_norm_threshold: f64,
+    /// What to do with PAST recordings when you name a speaker (V5 back-fill
+    /// policy). Naming a speaker enrolls their voiceprint; this controls whether
+    /// that name is also applied to the *same* voice where it appears unnamed in
+    /// other recordings. `ask` (default) gathers the matching unnamed speakers and
+    /// returns them so the UI can confirm before changing anything — nothing past
+    /// is touched automatically. `auto` back-fills every match immediately. `off`
+    /// never back-fills. Only matches at or above
+    /// [`voiceprint_match_threshold`](Self::voiceprint_match_threshold) (the same
+    /// bar recognition uses) are candidates, and an already-named speaker is never
+    /// overwritten.
+    #[serde(default)]
+    pub name_propagation: NamePropagation,
+}
+
+/// Back-fill policy for naming a speaker (V5). When a speaker is named, the same
+/// voice may appear *unnamed* in earlier recordings; this decides what happens to
+/// those.
+///
+/// Default `ask`, so the out-of-the-box behavior never silently edits a past
+/// recording — it surfaces candidates for the UI to confirm. (The confirm prompt
+/// itself, and the "don't ask again → switch this policy to `auto`" toggle, are a
+/// frontend follow-up; the backend only exposes the candidates.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NamePropagation {
+    /// Gather the matching unnamed speakers in other recordings and return them
+    /// for the UI to confirm; apply nothing automatically. The default.
+    #[default]
+    Ask,
+    /// Back-fill the name onto every matching unnamed speaker immediately.
+    Auto,
+    /// Never back-fill; naming only affects the recording you named in.
+    Off,
 }
 
 /// Score-normalization mode for speaker matching (config mirror of
@@ -396,6 +429,7 @@ impl Default for DiarizationConfig {
             voiceprint_match_threshold: default_voiceprint_threshold(),
             voiceprint_score_norm: VoiceprintScoreNorm::default(),
             voiceprint_score_norm_threshold: default_voiceprint_score_norm_threshold(),
+            name_propagation: NamePropagation::default(),
         }
     }
 }
