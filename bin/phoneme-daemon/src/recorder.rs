@@ -53,7 +53,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
-/// How often the streaming-preview loop transcribes the in-progress recording.
+/// Base cadence for the streaming-preview loop on a CLOUD transcription provider,
+/// where each tick pays HTTP + file-write overhead and we don't want to hammer the
+/// API. This is NOT the universal cadence: a native (in-process) provider drops the
+/// base to 1000 ms inside `start_preview` for smoother real-time captions, since it
+/// has no network round-trip. The adaptive throttle (`preview_adaptive`) can stretch
+/// either base up to `PREVIEW_INTERVAL_CEIL` when a tick overruns.
 const PREVIEW_INTERVAL: Duration = Duration::from_millis(2000);
 
 /// How long to keep a recording's capture stream alive after a stop is
@@ -64,9 +69,12 @@ const PREVIEW_INTERVAL: Duration = Duration::from_millis(2000);
 const STOP_TAIL_GRACE: Duration = Duration::from_millis(150);
 
 /// Minimum number of *new* samples (beyond the previous preview) before we spend
-/// a transcription on a fresh tick. At 16 kHz this is ~1.0 s — below that a
-/// re-transcription rarely changes the text enough to be worth the round trip.
-const PREVIEW_MIN_NEW_SAMPLES: usize = 16_000;
+/// a transcription on a fresh tick. At 16 kHz this is ~0.5 s, so the caption
+/// advances about twice as smoothly as the old ~1.0 s gate (the "chunky/laggy"
+/// complaint). A tick that can't get the whisper permit still skips and a heavy
+/// tick still backs off via the adaptive cadence, so weak boxes never thrash —
+/// this only lets capable machines update more often.
+const PREVIEW_MIN_NEW_SAMPLES: usize = 8_000;
 
 /// The streaming preview transcribes only the last `PREVIEW_WINDOW_SAMPLES` of
 /// captured audio each tick — a rolling "live caption" — so per-tick work stays
@@ -146,13 +154,39 @@ fn rms_level_01(samples: &[i16]) -> f32 {
 /// words *into* the window (`MAX_LEADING_SKIP`) so a revised/inserted leading
 /// word doesn't defeat the match. Each tick's tail is therefore sourced once,
 /// from the newest transcription, so a word run can never duplicate.
-fn stitch_preview(committed: &str, window: &str) -> String {
+/// Uppercase the first alphabetic character of `s`, leaving the rest untouched.
+/// Streaming-type only: the first word is stable once committed, so this keeps the
+/// live-typed text aligned with the polished final's capitalized start — making the
+/// stop reconcile a minimal tail patch instead of a full rewrite. No-op when the
+/// first letter is already uppercase or there is no letter.
+fn capitalize_first(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut done = false;
+    for c in s.chars() {
+        if !done && c.is_alphabetic() {
+            out.extend(c.to_uppercase());
+            done = true;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Returns the merged caption (committed's words kept verbatim — never rewritten
+/// — plus only the genuinely-new window tail), or `None` when no overlap and no
+/// containment was found. `None` is the caller's cue to pick a phase-aware
+/// fallback: while the take still fits the audio window the fresh transcription
+/// is authoritative (replace), once it has slid the window is a post-silence tail
+/// (append). Either way committed is never rewritten mid-caption, which is what
+/// keeps the live preview from visibly reshuffling words already shown.
+fn stitch_preview(committed: &str, window: &str) -> Option<String> {
     let window = window.trim();
     if window.is_empty() {
-        return committed.to_string();
+        return Some(committed.to_string());
     }
     if committed.is_empty() {
-        return window.to_string();
+        return Some(window.to_string());
     }
 
     let committed_words: Vec<&str> = committed.split_whitespace().collect();
@@ -175,7 +209,7 @@ fn stitch_preview(committed: &str, window: &str) -> String {
     if window_norm.len() <= committed_norm.len()
         && committed_norm[committed_norm.len() - window_norm.len()..] == window_norm[..]
     {
-        return committed.to_string();
+        return Some(committed.to_string());
     }
 
     // How many leading window words we'll allow to be skipped when anchoring: a
@@ -218,13 +252,37 @@ fn stitch_preview(committed: &str, window: &str) -> String {
         // they are dropped — no run is ever duplicated.
         let mut out: Vec<&str> = committed_words.clone();
         out.extend_from_slice(&window_words[skip + overlap..]);
-        return out.join(" ");
+        return Some(out.join(" "));
     }
 
-    // No overlap found (e.g. a long silence split the speech, or whisper produced
-    // a wholly different window). Append the window as a new segment so we never
-    // lose newly-spoken words; a leading separator keeps it readable.
-    format!("{committed} {window}")
+    // No overlap and no containment (a long silence split the speech, or whisper
+    // re-transcribed the window wholly differently). Ambiguous — the caller picks
+    // the phase-aware fallback rather than blindly appending (which would
+    // duplicate a re-transcribed tail).
+    None
+}
+
+/// Fold a fresh window transcription into the committed caption for one preview
+/// tick: stitch when an anchor is found, otherwise pick the phase-aware fallback
+/// `stitch_preview` defers to the caller. `window_slid` is whether the rolling
+/// audio window has started sliding (the take no longer fits a single window).
+///
+/// On a no-overlap, no-containment `None`:
+/// - **slid** → the window is a post-silence tail, so append it.
+/// - **not slid** → the take still fits the window, so a `None` means whisper
+///   re-transcribed the whole (still-short) take differently. KEEP `committed`
+///   untouched and let the next tick re-anchor, rather than replacing it wholesale
+///   and reshuffling every already-shown word. This upholds the subsystem's
+///   "committed never rewrites" invariant. Pulled out as a pure function so the
+///   fallback branches are unit-testable without an audio/whisper round trip.
+fn merge_preview_tick(committed: &str, window: &str, window_slid: bool) -> String {
+    stitch_preview(committed, window).unwrap_or_else(|| {
+        if window_slid {
+            format!("{committed} {window}")
+        } else {
+            committed.to_string()
+        }
+    })
 }
 
 /// Open a [`Source`] for the current recording: returns a real CPAL source in
@@ -601,8 +659,11 @@ impl DaemonRecorder {
         id: RecordingId,
         snapshot: phoneme_audio::recorder::SnapshotHandle,
         secondary: bool,
+        stream_type: bool,
     ) {
-        if !state.config.load().recording.streaming_preview {
+        // Streaming-type forces the loop on even when the visible preview caption
+        // is off — it needs the loop's committed words as its live-typing source.
+        if !state.config.load().recording.streaming_preview && !stream_type {
             return;
         }
         let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
@@ -665,6 +726,9 @@ impl DaemonRecorder {
             // the whole take (authoritative), so we replace this wholesale; once
             // the window slides we stitch the new tail onto it (see stitch_preview).
             let mut committed = String::new();
+            // Streaming-type only: what we've typed at the cursor so far (clean
+            // extensions of the committed caption, first letter capitalized).
+            let mut typed = String::new();
             let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
 
             loop {
@@ -672,6 +736,14 @@ impl DaemonRecorder {
                     _ = &mut stop_rx => break,
                     _ = tokio::time::sleep(current_wait) => {}
                 }
+
+                // Start the cadence clock here so the adaptive throttle measures the
+                // TRUE per-tick wall cost it is meant to self-throttle on — snapshot +
+                // WAV encode + write + transcribe — not the transcribe call alone. A
+                // tick that skips (not enough new audio, or no free whisper permit)
+                // `continue`s before reaching `next_preview_interval`, so it never
+                // feeds this clock; only a tick that actually does the work does.
+                let tick_start = std::time::Instant::now();
 
                 // Snapshot only the trailing window of audio captured so far (the
                 // recorder also tells us the full captured length so we can still
@@ -725,28 +797,51 @@ impl DaemonRecorder {
 
                 // Use the cached provider to avoid re-resolving on every tick.
                 // Config changes during recording will take effect on the next recording.
-                let tick_start = std::time::Instant::now();
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
                         let text = text.trim();
                         if !text.is_empty() {
-                            // While the take still fits inside the audio window the
-                            // transcription covers everything from the start, so it
-                            // is the authoritative full caption — show it directly.
-                            // Once the window has begun sliding (longer take), the
-                            // transcription only covers the tail, so stitch it onto
-                            // the committed caption to keep the preview growing
-                            // forward instead of rewinding its start each tick.
+                            // Always stitch, so words already shown are never
+                            // rewritten mid-caption — the old early-phase wholesale
+                            // replace was exactly what made the preview visibly
+                            // reshuffle words as whisper revised the growing take.
+                            // On a no-overlap stitch, fall back by phase: once the
+                            // window has slid it is a post-silence tail, so append;
+                            // while the take still fits the window a no-overlap result
+                            // means whisper re-transcribed the whole (still-short) take
+                            // differently — KEEP committed untouched this tick and let
+                            // the next tick re-anchor, rather than replacing it
+                            // wholesale and reshuffling every shown word (the
+                            // "committed never rewrites" invariant the subsystem is
+                            // built on).
                             let window_slid = total_len > PREVIEW_WINDOW_SAMPLES;
-                            committed = if window_slid {
-                                stitch_preview(&committed, text)
-                            } else {
-                                text.to_string()
-                            };
+                            committed = merge_preview_tick(&committed, text, window_slid);
                             state.events.emit(DaemonEvent::TranscriptionPartial {
                                 id: id.clone(),
                                 text: committed.clone(),
                             });
+                            // Streaming-type (`[in_place].stream_type`): type the
+                            // newly-finalized words live. Only CLEAN forward
+                            // extensions (`backspaces == 0`) are typed mid-stream
+                            // — never a backspace — so the cursor doesn't churn as
+                            // the caption revises; the stop reconcile fixes the
+                            // rest against the accurate final transcript. The first
+                            // letter is capitalized so that stop patch is a small
+                            // tail edit, not a full rewrite vs the polished final.
+                            if stream_type {
+                                let target = capitalize_first(&committed);
+                                let (backspaces, insert) =
+                                    phoneme_core::dictation::reconcile_edit(&typed, &target);
+                                if backspaces == 0
+                                    && !insert.is_empty()
+                                    && crate::in_place::type_at_cursor(&insert, "type")
+                                        .await
+                                        .is_ok()
+                                {
+                                    typed = target;
+                                    *state.stream_typed.lock().await = typed.clone();
+                                }
+                            }
                         }
                     }
                     Err(e) => {
@@ -907,7 +1002,7 @@ impl DaemonRecorder {
         // The source toggle always feeds the primary preview server (secondary =
         // false): the 2nd server only exists to run BOTH tracks at once, never
         // for a one-track toggle.
-        self.start_preview(state, id, snapshot, false).await;
+        self.start_preview(state, id, snapshot, false, false).await;
         state
             .events
             .emit(DaemonEvent::PreviewSourceChanged { track });
@@ -967,6 +1062,18 @@ impl DaemonRecorder {
             (exe, title.map(|a| a.window_title))
         } else {
             (None, None)
+        };
+
+        // Whether this dictation streams its text live (`[in_place].stream_type`):
+        // in-place, the flag on, and the focused app resolves to typed (not paste/
+        // off) delivery. Computed here, before `focused_app` moves into the active
+        // slot below; the stop reconcile re-checks the same conditions so both
+        // agree on whether streaming happened.
+        let stream_type = {
+            let c = state.config.load();
+            in_place
+                && c.in_place.stream_type
+                && c.in_place.resolve_type_mode(focused_app.as_deref()) == "type"
         };
 
         // Reserve the active slot immediately so concurrent starts fail.
@@ -1077,6 +1184,16 @@ impl DaemonRecorder {
             // `RecorderConfig::mode` is `phoneme_core::RecordMode` (re-exported
             // by phoneme-audio as `RecordingMode`), so no conversion is needed.
             mode,
+            // The auto-stop budget is measured against the recorder's TOTAL sample
+            // count, which `start_with_prepend` has already seeded with the
+            // pre-rolled `prepend` audio (up to `pre_roll_ms`). So when pre-roll is
+            // on, a `max_duration_secs` of N yields N seconds of audio INCLUDING the
+            // prepended lead-in — i.e. slightly fewer than N seconds of freshly
+            // captured speech. This is the intended trade: pre-roll exists to keep
+            // the very start of the utterance, and counting it keeps the finalized
+            // WAV's length matching the configured cap exactly. Separating the
+            // fresh-capture length would mean threading a new field through the
+            // phoneme-audio `Recorder`, which is out of scope here.
             max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
             silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
             silence_window_ms: state.config.load().recording.silence_window_ms,
@@ -1133,7 +1250,16 @@ impl DaemonRecorder {
         // an in-flight tick simply skips. The dictation stop path tears this
         // preview down WITHOUT awaiting (see `stop`), so a preview tick can
         // never delay the paste ("constantly listening, never pastes").
-        self.start_preview(state, id.clone(), preview_snapshot, false)
+        // Streaming-type (`stream_type`, computed above before `focused_app`
+        // moved into the active slot): force the preview loop on; it then types
+        // committed words live and the stop reconcile patches them to the final.
+        // ALWAYS reset the rolling typed state at the start of EVERY recording
+        // (not just streaming ones), so the stop path can use "is it non-empty?"
+        // as the did-we-stream signal — robust even if the user toggles
+        // stream_type mid-recording (audit M3) and clearing any leaked write from
+        // a prior dictation (audit M2).
+        *state.stream_typed.lock().await = String::new();
+        self.start_preview(state, id.clone(), preview_snapshot, false, stream_type)
             .await;
         // The live audio-level waveform runs for every capture (including
         // in-place dictation), gated only on `recording.preview_waveform`. It's
@@ -1384,6 +1510,17 @@ impl DaemonRecorder {
                 // Stop the preview loop before tearing down the recorder. No-op
                 // when off.
                 self.stop_preview(false).await;
+                // Clear the rolling streaming-type state so a cancelled
+                // streaming-type dictation can't leak its live-typed words into a
+                // later recording's reconcile (the stop path keys "did we stream?"
+                // off this being non-empty). We deliberately do NOT auto-backspace
+                // the already-typed text on cancel: the focus may have moved since
+                // the words were typed, so a blind backspace could delete from the
+                // wrong window (the same wrong-window risk the stop reconcile guards
+                // against, and the focus guard lives in another lane). Any live text
+                // the user already saw typed is intentionally left in place; only the
+                // rolling state is reset here.
+                *state.stream_typed.lock().await = String::new();
                 if let Some(recorder) = recorder {
                     if let Err(e) = recorder.cancel().await {
                         tracing::warn!("failed to cancel recorder: {e}");
@@ -1846,7 +1983,7 @@ impl DaemonRecorder {
             );
             for (idx, (id, _, snapshot)) in sources.into_iter().enumerate() {
                 let secondary = dual && idx > 0;
-                self.start_preview(state, id, snapshot, secondary).await;
+                self.start_preview(state, id, snapshot, secondary, false).await;
             }
         } else {
             // "toggle": start on the mic (the dense local voice the user is
@@ -1858,7 +1995,7 @@ impl DaemonRecorder {
                 .or_else(|| sources.first())
                 .cloned();
             if let Some((id, track, snapshot)) = start {
-                self.start_preview(state, id, snapshot, false).await;
+                self.start_preview(state, id, snapshot, false, false).await;
                 state
                     .events
                     .emit(DaemonEvent::PreviewSourceChanged { track });
@@ -2145,6 +2282,33 @@ mod tests {
     use phoneme_audio::source::{GeneratorSource, SyntheticSource};
     use phoneme_core::{Config, ListFilter};
 
+    /// RAII guard that sets an env var for a test and restores its prior value (or
+    /// removes it) on drop — even if the test panics. Honors the repo's
+    /// no-bare-`set_var` convention: a forgotten/early-aborted `remove_var` can't
+    /// leak a global into a sibling test. Hold it in a `let _guard = …;` binding for
+    /// the duration of the test.
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     // ── meeting pause → active-clock folding ──────────────────────────────
 
     #[test]
@@ -2183,7 +2347,7 @@ mod tests {
         let window = "brown fox jumps over";
         assert_eq!(
             stitch_preview(committed, window),
-            "the quick brown fox jumps over"
+            Some("the quick brown fox jumps over".to_string())
         );
     }
 
@@ -2192,16 +2356,32 @@ mod tests {
         // The window is entirely a suffix of the committed text — nothing new.
         let committed = "hello world how are you";
         let window = "how are you";
-        assert_eq!(stitch_preview(committed, window), committed);
+        assert_eq!(stitch_preview(committed, window), Some(committed.to_string()));
     }
 
     #[test]
     fn stitch_preview_handles_empty_inputs() {
-        assert_eq!(stitch_preview("", "hello world"), "hello world");
-        assert_eq!(stitch_preview("already here", ""), "already here");
-        assert_eq!(stitch_preview("", ""), "");
+        assert_eq!(stitch_preview("", "hello world"), Some("hello world".to_string()));
+        assert_eq!(stitch_preview("already here", ""), Some("already here".to_string()));
+        assert_eq!(stitch_preview("", ""), Some(String::new()));
         // Whitespace-only window is treated as empty.
-        assert_eq!(stitch_preview("keep me", "   "), "keep me");
+        assert_eq!(stitch_preview("keep me", "   "), Some("keep me".to_string()));
+    }
+
+    #[test]
+    fn stitch_preview_freezes_committed_when_whisper_revises_an_early_word() {
+        // The #21 fix: the loop now ALWAYS stitches (no early-phase wholesale
+        // replace), so a word already shown is never rewritten even when the next
+        // full re-transcription revises it — here whisper changed "meeting" ->
+        // "meaning". Committed's "meeting" is kept (the preview doesn't reshuffle),
+        // and only the genuinely-new tail word is appended. The accurate final
+        // transcript corrects the word later.
+        let committed = "the meeting went";
+        let revised_full = "the meaning went well";
+        assert_eq!(
+            stitch_preview(committed, revised_full),
+            Some("the meeting went well".to_string())
+        );
     }
 
     // ── next_preview_interval (adaptive cadence — the record-time crash fix) ──
@@ -2252,15 +2432,14 @@ mod tests {
     }
 
     #[test]
-    fn stitch_preview_appends_disjoint_window_as_new_segment() {
-        // No overlap at all (e.g. a pause split the speech): never drop the new
-        // words — append them so the caption still advances.
+    fn stitch_preview_returns_none_on_disjoint_window() {
+        // No overlap and no containment (e.g. a pause split the speech): stitch
+        // can't safely merge, so it returns None and the loop picks the phase-aware
+        // fallback (append when the window has slid, replace while the take still
+        // fits it) — never a blind append that could duplicate a re-transcription.
         let committed = "first sentence done";
         let window = "completely different words";
-        assert_eq!(
-            stitch_preview(committed, window),
-            "first sentence done completely different words"
-        );
+        assert_eq!(stitch_preview(committed, window), None);
     }
 
     #[test]
@@ -2271,7 +2450,7 @@ mod tests {
         let window = "The cafe yesterday";
         assert_eq!(
             stitch_preview(committed, window),
-            "we met at the cafe yesterday"
+            Some("we met at the cafe yesterday".to_string())
         );
     }
 
@@ -2283,7 +2462,7 @@ mod tests {
         let window = "to be that is the question";
         assert_eq!(
             stitch_preview(committed, window),
-            "to be or not to be that is the question"
+            Some("to be or not to be that is the question".to_string())
         );
     }
 
@@ -2298,7 +2477,7 @@ mod tests {
         let committed = "hello there my friend how are you";
         // Same speech, leading words revised, plus two new words at the end.
         let window = "um How are you doing today";
-        let out = stitch_preview(committed, window);
+        let out = stitch_preview(committed, window).expect("overlap found");
         assert_eq!(out, "hello there my friend how are you doing today");
 
         // Hard guarantee against the actual symptom ("text comes up multiple
@@ -2324,19 +2503,70 @@ mod tests {
         let first_window = "the meeting will start at noon today";
         // First tick (take fits the window) replaces wholesale — modeled by
         // stitching onto an empty caption.
-        let committed = stitch_preview("", first_window);
+        let committed = stitch_preview("", first_window).expect("seeds from empty");
         assert_eq!(committed, first_window);
 
         // Second (sliding) tick: whisper re-cased "The" and dropped "the meeting",
         // re-stating from "will start" with two new trailing words.
         let second_window = "Will start at noon today in room five";
-        let out = stitch_preview(&committed, second_window);
+        let out = stitch_preview(&committed, second_window).expect("overlap found");
         assert_eq!(out, "the meeting will start at noon today in room five");
         assert_eq!(
             out.matches("at noon today").count(),
             1,
             "duplicated in {out:?}"
         );
+    }
+
+    #[test]
+    fn merge_preview_tick_non_slid_none_keeps_committed() {
+        // The bug this guards: on a no-overlap `None` while the take still FITS the
+        // window (window_slid == false), the old fallback replaced the caption with
+        // the bare `window`, throwing away everything shown and reshuffling every
+        // word. With the fix, committed is kept verbatim this tick (the next tick
+        // re-anchors) — committed is never wholesale-replaced.
+        let committed = "the quick brown fox jumps";
+        // A wholly different transcription with no overlapping run → `stitch_preview`
+        // returns None.
+        let window = "completely unrelated words here";
+        assert!(
+            stitch_preview(committed, window).is_none(),
+            "test needs a genuinely-disjoint window to drive the None branch"
+        );
+        let out = merge_preview_tick(committed, window, /* window_slid */ false);
+        assert_eq!(
+            out, committed,
+            "a non-slid no-overlap tick must keep committed, not replace it with the window"
+        );
+    }
+
+    #[test]
+    fn merge_preview_tick_slid_none_appends() {
+        // The slid fallback must NOT regress: once the window has slid a no-overlap
+        // result is a post-silence tail and is appended after committed.
+        let committed = "the quick brown fox jumps";
+        let window = "over the lazy dog";
+        assert!(
+            stitch_preview(committed, window).is_none(),
+            "test needs a disjoint window to reach the fallback"
+        );
+        let out = merge_preview_tick(committed, window, /* window_slid */ true);
+        assert_eq!(out, "the quick brown fox jumps over the lazy dog");
+    }
+
+    #[test]
+    fn merge_preview_tick_overlap_stitches_regardless_of_phase() {
+        // When an anchor IS found, the stitch result wins in either phase — the
+        // window_slid flag only governs the no-overlap fallback.
+        let committed = "the quick brown fox";
+        let window = "brown fox jumps over";
+        for slid in [false, true] {
+            assert_eq!(
+                merge_preview_tick(committed, window, slid),
+                "the quick brown fox jumps over",
+                "slid={slid}"
+            );
+        }
     }
 
     /// Build an `AppState` whose catalog/inbox/audio all live under a temp dir,
@@ -2842,7 +3072,7 @@ mod tests {
         // preview teardown — a slow in-flight preview tick (here a stand-in
         // task that takes 1.5 s to wind down) used to block every status and
         // control IPC for its whole duration.
-        std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+        let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(tmp.path()).await;
 
@@ -2880,7 +3110,6 @@ mod tests {
 
         let stopped = stop_task.await.expect("join stop task");
         assert!(stopped.is_ok(), "stop must still succeed: {stopped:?}");
-        std::env::remove_var("PHONEME_AUDIO_BACKEND");
     }
 
     /// The fast-lane routing rule (custom-hotkey FIX 1): a NON-EMPTY recipe on an
@@ -2936,7 +3165,7 @@ mod tests {
     /// the spawn.
     #[tokio::test]
     async fn fast_lane_in_place_leaves_no_pending_ledger_entry() {
-        std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+        let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(tmp.path()).await;
 
@@ -2969,7 +3198,6 @@ mod tests {
             state.pending_recipe.lock().unwrap().get(&id).is_none(),
             "a fast-lane in-place recording must not leave a pending recipe entry"
         );
-        std::env::remove_var("PHONEME_AUDIO_BACKEND");
     }
 
     /// LEDGER LEAK (custom-hotkey FIX, cancel path): a custom-hotkey recording
@@ -2980,7 +3208,7 @@ mod tests {
     /// `fast_lane_in_place_leaves_no_pending_ledger_entry` for the cancel arm.
     #[tokio::test]
     async fn cancel_leaves_no_pending_ledger_entry() {
-        std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+        let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(tmp.path()).await;
 
@@ -3015,6 +3243,5 @@ mod tests {
             state.pending_recipe.lock().unwrap().get(&id).is_none(),
             "a canceled recording must not leave a pending recipe entry"
         );
-        std::env::remove_var("PHONEME_AUDIO_BACKEND");
     }
 }

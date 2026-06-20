@@ -7,6 +7,15 @@ import { showToast } from "../../utils/toast";
 import { fuzzyFilter } from "../../utils/fuzzy";
 import { seedCursorGlow } from "../../services/cursorAnimation";
 
+/** A tag color is user-supplied (Tag Manager / the inline recolor picker) and
+ *  gets spliced into `style="..."`, so it can't be trusted raw — a value like
+ *  `red; background:url(x)` would inject extra CSS. Pass only a `#rgb`/`#rrggbb`
+ *  (with optional alpha) hex through; anything else falls back to `fallback`
+ *  (default the accent var). Shared by the chips and the list's tag pills. */
+export function safeTagColor(color: string | null | undefined, fallback = "var(--accent)"): string {
+  return color && /^#[0-9a-fA-F]{3,8}$/.test(color) ? color : fallback;
+}
+
 /** Black or white (#11111b / #ffffff), whichever reads better on `hexColor`
  *  (YIQ luma threshold). `""` for non-hex input — callers then inherit the
  *  CSS default. Shared with the list's tag pills. */
@@ -495,7 +504,7 @@ export class TagChipsElement extends LitElement {
       <div class="tags">
         ${this.attached.length ? html`<div class="tags-row tags-applied">${this.attached.map((t) => {
           const contrast = t.color ? getContrastColor(t.color) : '';
-          const style = t.color ? `--tag-color: ${t.color}; color: ${contrast};` : '';
+          const style = t.color ? `--tag-color: ${safeTagColor(t.color)}; color: ${contrast};` : '';
           const editing = this.editingTagId === t.id;
           return html`
             <span class="tag-chip-wrap ${this.exitingTags.has(t.id) ? "tag-exiting" : ""}" style="position: relative; display: inline-flex;">
@@ -573,7 +582,7 @@ export class TagChipsElement extends LitElement {
                     role="option" aria-selected=${i === this.activeIndex ? "true" : "false"}
                     @mouseenter=${() => this.activeIndex = i}
                     @mousedown=${(e: Event) => { e.preventDefault(); void this.attachByName(t.name); }}>
-                    <span class="tag-dropdown-dot" style="background: ${t.color || 'var(--accent)'}"></span>
+                    <span class="tag-dropdown-dot" style="background: ${safeTagColor(t.color)}"></span>
                     ${t.name}
                   </div>
                 `;

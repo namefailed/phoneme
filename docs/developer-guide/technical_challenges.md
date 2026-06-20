@@ -640,8 +640,10 @@ sticky ledger decided at first probe, and the tray itself must optionally hold t
 a job (decided at spawn time) so even End-task reaps the whole tree.
 
 **Solution.** The daemon holds a kill-on-close Job Object that every spawned child joins
-(`assign_to_daemon_job`, best-effort); `sweep_stray_servers` additionally kills every
-whisper-server on the box before a respawn. An ownership ledger marks an already-running
+(`assign_to_daemon_job`, best-effort); `sweep_stray_servers` also kills the whisper-server
+processes it identifies by their transcription command line (the `/v1/audio/transcriptions`
+marker every spawned server carries) before a respawn, so an unrelated `whisper.cpp` is spared.
+An ownership ledger marks an already-running
 Ollama `NotOurs` forever (never killed); only a daemon-launched one is `Owned` and reaped,
 with single-flight spawn so concurrent steps can't double-spawn.
 

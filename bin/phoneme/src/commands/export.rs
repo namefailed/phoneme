@@ -125,6 +125,28 @@ async fn run_captions(
 
 // ── library zip export ─────────────────────────────────────────────────────────
 
+/// Zip-entry name for one audio file, preserving its day folder.
+///
+/// Recordings live at `<audio_dir>/<YYYY-MM-DD>/<HHmmssMMM>.wav` and the stem is
+/// time-of-day only, so two recordings at the same ms-of-day on different days
+/// share a stem. Naming the entry from the path RELATIVE to `audio_dir` (with
+/// backslashes normalized to `/` for a portable archive) keeps the day folder,
+/// so the two never collide to one entry. Falls back to the bare filename if the
+/// path isn't under `audio_dir` (shouldn't happen — every path came from walking
+/// it — but better a flat name than a dropped file).
+fn audio_entry_name(audio_dir: &std::path::Path, path: &std::path::Path) -> String {
+    match path.strip_prefix(audio_dir) {
+        Ok(rel) => format!("audio/{}", rel.to_string_lossy().replace('\\', "/")),
+        Err(_) => {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            format!("audio/{name}")
+        }
+    }
+}
+
 async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
     let mut conn = match crate::client::Client::connect(cfg).await {
         Ok(c) => c,
@@ -200,9 +222,11 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
                     } else if path.is_file() {
                         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
                             if file_name.ends_with(".wav") {
-                                if let Err(e) =
-                                    zip.start_file(format!("audio/{}", file_name), options)
-                                {
+                                // Entry name preserves the day folder so two same-
+                                // ms-different-day recordings don't collide — see
+                                // `audio_entry_name`.
+                                let entry_name = audio_entry_name(audio_dir, &path);
+                                if let Err(e) = zip.start_file(entry_name, options) {
                                     eprintln!("failed to write {file_name} to zip: {e}");
                                     continue;
                                 }
@@ -232,4 +256,54 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
 
     println!("exported to {}", zip_path);
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::audio_entry_name;
+    use std::path::Path;
+
+    #[test]
+    fn entry_name_preserves_the_day_folder() {
+        let audio_dir = Path::new("/data/audio");
+        let path = Path::new("/data/audio/2026-05-19/143500042.wav");
+        assert_eq!(
+            audio_entry_name(audio_dir, path),
+            "audio/2026-05-19/143500042.wav"
+        );
+    }
+
+    #[test]
+    fn same_ms_different_day_files_get_distinct_entries() {
+        // The H1 data-loss case: two recordings at the same ms-of-day on
+        // different days share a `143500042.wav` stem. The bare-filename naming
+        // collapsed them to one `audio/143500042.wav` entry and the second
+        // clobbered the first on restore. Preserving the day folder keeps both.
+        let audio_dir = Path::new("/data/audio");
+        let day1 = Path::new("/data/audio/2026-05-19/143500042.wav");
+        let day2 = Path::new("/data/audio/2026-05-20/143500042.wav");
+        let a = audio_entry_name(audio_dir, day1);
+        let b = audio_entry_name(audio_dir, day2);
+        assert_ne!(a, b, "same-ms-different-day files must not collide");
+        assert_eq!(a, "audio/2026-05-19/143500042.wav");
+        assert_eq!(b, "audio/2026-05-20/143500042.wav");
+    }
+
+    #[test]
+    fn windows_separators_are_normalized_to_forward_slashes() {
+        // Zip entry names use `/` regardless of host so the archive is portable;
+        // strip_prefix on Windows yields `2026-05-19\143500042.wav`.
+        let audio_dir = Path::new(r"C:\data\audio");
+        let path = Path::new(r"C:\data\audio\2026-05-19\143500042.wav");
+        let name = audio_entry_name(audio_dir, path);
+        assert!(!name.contains('\\'), "no backslashes in entry name: {name}");
+        assert_eq!(name, "audio/2026-05-19/143500042.wav");
+    }
+
+    #[test]
+    fn path_outside_audio_dir_falls_back_to_flat_name() {
+        let audio_dir = Path::new("/data/audio");
+        let path = Path::new("/elsewhere/143500042.wav");
+        assert_eq!(audio_entry_name(audio_dir, path), "audio/143500042.wav");
+    }
 }

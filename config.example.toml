@@ -181,6 +181,12 @@ cleanup = "fast"
 #             long text)
 type_mode = "type"
 
+# EXPERIMENTAL. Type dictated words live as they finalize (instead of all at once
+# when you stop), then quietly patch them up to the accurate final transcript on
+# stop. Only applies with type_mode = "type". It types the live preview's rolling
+# words, so it reads best with a fast preview model (see [preview_whisper]).
+stream_type = false
+
 # Keep the dictation in the library after typing (transcript, segments,
 # embeddings persist like any recording). false = ephemeral: the row and audio
 # are deleted once typed.
@@ -263,6 +269,13 @@ allow_http = false
 # from this Phoneme install. Encrypted at rest (DPAPI) and masked in the UI.
 # Empty (default) = signing off.
 hmac_secret = ""
+
+# How many times to RETRY a failed webhook POST (after the first attempt), with
+# exponential backoff (~250ms, 500ms, 1s, capped at 2s). Retries only TRANSIENT
+# failures — a timeout, connection error, HTTP 429, or 5xx; a 4xx (the receiver
+# refusing) and an SSRF-policy block fail immediately. Default 2 (up to 3
+# attempts); 0 disables retries.
+max_retries = 2
 
 # Extra HTTP headers attached to every outbound webhook POST (name = "value").
 # Use for receiver-specific auth/routing (e.g. Authorization, X-Api-Key). A
@@ -367,8 +380,22 @@ vimrc_path = ""
 # Backend that assigns speakers:
 #   "none" (default) | "local" (Pyannote ONNX) | "deepgram" | "assemblyai"
 provider = "none"
-# Absolute path to the local Pyannote ONNX model file (used when provider="local").
+# Optional folder holding a CUSTOM speakrs diarization bundle (segmentation +
+# embedding ONNX) to load instead of the pretrained models (used when
+# provider="local"). Empty = auto-download/use the defaults (Hugging Face cache).
+models_dir = ""
+# Deprecated / unused — superseded by models_dir (it was never wired into the load
+# path). Kept so older configs keep parsing.
 local_model_path = ""
+# Recognize named speakers across recordings: capture a voiceprint per diarized
+# speaker and, once you've named a speaker, suggest that name on later recordings
+# where the voice matches. Naming enrolls the voice into a cross-recording library.
+# Local diarization only. On by default.
+recognize_speakers = true
+# Cosine-similarity bar (0–1) a voiceprint must clear to be suggested as a known
+# speaker. Higher = stricter (fewer false matches, more misses). Default 0.5 —
+# tune to your own recordings.
+voiceprint_match_threshold = 0.5
 
 
 # -----------------------------------------------------------------------------

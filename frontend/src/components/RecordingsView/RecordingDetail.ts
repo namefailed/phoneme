@@ -8,6 +8,8 @@ import {
   rerunSummary,
   setRecordingTitle,
   setSpeakerName,
+  recognizeSpeakers,
+  dismissSpeakerSuggestion,
   type Recording,
 } from "../../services/ipc";
 import {
@@ -963,6 +965,48 @@ export class RecordingDetail {
     });
 
     overlay.querySelector<HTMLInputElement>(".speaker-name-input")?.focus();
+
+    // Named-speaker recognition (#9): offer a recognized name for any still-
+    // unnamed speaker whose voiceprint matched a known voice. Async + best-effort
+    // — the modal is usable whether or not recognition returns anything (and it
+    // returns nothing when recognition is off or on cloud-diarized recordings).
+    void recognizeSpeakers(r.id)
+      .then((suggestions) => {
+        for (const s of suggestions) {
+          const rowEl = overlay.querySelector<HTMLElement>(
+            `.speaker-row[data-label="${s.speaker_label}"]`,
+          );
+          const input = rowEl?.querySelector<HTMLInputElement>(".speaker-name-input");
+          // Skip a speaker the user has already named (race: named since load).
+          if (!rowEl || !input || input.value.trim()) continue;
+          const pct = Math.round((s.score ?? 0) * 100);
+          const chip = document.createElement("div");
+          chip.className = "speaker-suggest";
+          chip.innerHTML = `
+            <span class="ss-text">Sounds like <span class="ss-name">${escapeHtml(s.name)}</span><span class="ss-pct">· ${pct}% match</span></span>
+            <button class="sp-suggest-yes" type="button" title="Use this name">Use name</button>
+            <button class="sp-suggest-no" type="button" title="Not them — don't suggest again">Not them</button>`;
+          // A sibling line under the row (the row itself is a non-wrapping flex).
+          rowEl.insertAdjacentElement("afterend", chip);
+          chip.querySelector(".sp-suggest-yes")?.addEventListener("click", async () => {
+            input.value = s.name;
+            await this.commitSpeakerName(r.id, s.speaker_label, s.name, input.defaultValue);
+            input.defaultValue = s.name;
+            chip.remove();
+          });
+          chip.querySelector(".sp-suggest-no")?.addEventListener("click", async () => {
+            try {
+              await dismissSpeakerSuggestion(r.id, s.speaker_label);
+            } catch {
+              /* dismissal is best-effort */
+            }
+            chip.remove();
+          });
+        }
+      })
+      .catch(() => {
+        /* recognition is a convenience; ignore failures */
+      });
   }
 
   /** Persist a speaker rename for the current recording and REWRITE the stored

@@ -1,17 +1,12 @@
 //! Wizard-only backend helpers — connection tests for the first-run wizard
 //! and the Settings "test" buttons.
 //!
-//! Two probes, both returning the WebView-friendly [`TestConnectResult`]
-//! `{ok, message}` instead of an error type: `test_whisper_endpoint` GETs an
-//! external whisper URL (any HTTP answer, even 4xx, proves something is
-//! listening and speaking HTTP), and `test_hook` runs `HookTest` through the
-//! daemon bridge so the command executes with the daemon's environment and
-//! redaction, not the tray's. The wizard's download commands live in
-//! `commands` (they need the Tauri app handle) with their integrity pins in
-//! `checksums`.
+//! `test_whisper_endpoint` GETs an external whisper URL (any HTTP answer, even a
+//! 4xx, proves something is listening and speaking HTTP) and returns the
+//! WebView-friendly [`TestConnectResult`] `{ok, message}` instead of an error
+//! type. The wizard's download commands live in `commands` (they need the Tauri
+//! app handle) with their integrity pins in `checksums`.
 
-use crate::bridge::Bridge;
-use phoneme_ipc::{Request, Response};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -43,33 +38,6 @@ pub async fn test_whisper_endpoint(url: &str) -> TestConnectResult {
         Err(e) => TestConnectResult {
             ok: false,
             message: format!("{e}"),
-        },
-    }
-}
-
-/// Run the configured hook with a sample payload via the daemon.
-pub async fn test_hook(
-    bridge: Option<&Bridge>,
-    custom_command: Option<String>,
-) -> TestConnectResult {
-    let Some(bridge) = bridge else {
-        return TestConnectResult {
-            ok: false,
-            message: "daemon not reachable".into(),
-        };
-    };
-    match bridge.request(Request::HookTest { custom_command }).await {
-        Ok(Response::Ok(v)) => TestConnectResult {
-            ok: v["exit_code"].as_i64() == Some(0),
-            message: format!("exit {} in {}ms", v["exit_code"], v["duration_ms"]),
-        },
-        Ok(Response::Err(e)) => TestConnectResult {
-            ok: false,
-            message: e.message,
-        },
-        Err(e) => TestConnectResult {
-            ok: false,
-            message: e.to_string(),
         },
     }
 }

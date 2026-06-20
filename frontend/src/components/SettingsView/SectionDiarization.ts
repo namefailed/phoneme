@@ -102,13 +102,13 @@ export class SectionDiarization {
             </div>
           </div>
           <div class="settings-field long-input">
-            <label>Model Path</label>
+            <label>Models folder</label>
             <div>${renderField(
-              { key: "diarization.local_model_path", label: "", kind: "text", placeholder: "Managed automatically by Hugging Face cache" },
-              this.config.diarization?.local_model_path ?? "",
+              { key: "diarization.models_dir", label: "", kind: "text", placeholder: "Leave blank to use the bundled/pretrained models" },
+              this.config.diarization?.models_dir ?? "",
             )}</div>
             <span style="${HELP}">
-              Optional. Leave blank to use the default speakrs models automatically downloaded to the Hugging Face cache (located at %USERPROFILE%\\.cache\\huggingface\\hub).
+              Optional. Point this at a folder holding a custom speakrs diarization bundle (segmentation + embedding ONNX models) to load it instead of the defaults. Leave blank to use the pretrained models, auto-downloaded to the Hugging Face cache (%USERPROFILE%\\.cache\\huggingface\\hub).
             </span>
           </div>
 
@@ -134,6 +134,17 @@ export class SectionDiarization {
             </span>
           </div>
 
+          <div class="settings-field">
+            <label>Recognize known speakers</label>
+            <div>${renderField(
+              { key: "diarization.recognize_speakers", label: "", kind: "checkbox" },
+              this.config.diarization?.recognize_speakers ?? true,
+            )}</div>
+            <span style="${HELP}">
+              Match each diarized speaker's voiceprint against the names you've assigned before and suggest who they are when you open a recording. Naming a speaker enrolls their voice into a cross-recording library. Local diarization only. On by default.
+            </span>
+          </div>
+
           <details class="settings-advanced">
             <summary>
               <svg class="settings-advanced-chev" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
@@ -146,6 +157,12 @@ export class SectionDiarization {
               <div><input type="number" id="diar-merge-gap" min="0" max="5" step="0.05" style="width:110px;"
                 value="${this.config.diarization?.merge_gap_secs ?? 0.25}" /></div>
               <span style="${HELP}">Adjacent turns from the same speaker closer than this are merged into one. Lower = more, shorter turns. Default 0.25.</span>
+            </div>
+            <div class="settings-field">
+              <label>Recognition threshold</label>
+              <div><input type="number" id="diar-voiceprint-threshold" min="0" max="1" step="0.05" style="width:110px;"
+                value="${this.config.diarization?.voiceprint_match_threshold ?? 0.5}" /></div>
+              <span style="${HELP}">How similar a voice must be (0–1 cosine) to be suggested as a known speaker. Higher = stricter: fewer false matches, more misses. Default 0.5 — tune to your own recordings.</span>
             </div>
             <div class="settings-field">
               <label>Speaker keep threshold</label>
@@ -198,6 +215,7 @@ export class SectionDiarization {
       });
     };
     bindNum("diar-merge-gap", "merge_gap_secs", 0, 5, 0.25);
+    bindNum("diar-voiceprint-threshold", "voiceprint_match_threshold", 0, 1, 0.5);
     bindNum("diar-epsilon", "reconstruct_method_epsilon", 0, 1, 0.1);
     // The keep-threshold is a text input (so a tiny value shows as a plain
     // decimal, not "1e-7"); parse with parseFloat, clamp to [0,1], write a

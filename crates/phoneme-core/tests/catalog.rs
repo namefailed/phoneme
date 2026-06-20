@@ -1055,3 +1055,233 @@ async fn semantic_search_thresholds_dim_checks_and_dedupes_meetings() {
         "results must be sorted descending"
     );
 }
+
+#[tokio::test]
+async fn saved_searches_upsert_list_and_delete() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // Empty to start.
+    assert!(catalog.list_saved_searches().await.unwrap().is_empty());
+
+    // Insert two; both come back.
+    catalog
+        .upsert_saved_search("ss_a", "Meetings", r#"{"kind":"meeting"}"#)
+        .await
+        .unwrap();
+    catalog
+        .upsert_saved_search("ss_b", "Failed", r#"{"status":"failed"}"#)
+        .await
+        .unwrap();
+    let list = catalog.list_saved_searches().await.unwrap();
+    assert_eq!(list.len(), 2);
+
+    // Upsert by the same id updates in place (no duplicate row).
+    catalog
+        .upsert_saved_search("ss_a", "Meetings (renamed)", r#"{"kind":"meeting","sort_desc":false}"#)
+        .await
+        .unwrap();
+    let list = catalog.list_saved_searches().await.unwrap();
+    assert_eq!(list.len(), 2, "upsert by id must not create a duplicate");
+    let a = list.iter().find(|s| s.id == "ss_a").expect("ss_a present");
+    assert_eq!(a.name, "Meetings (renamed)");
+    assert_eq!(a.filter_json, r#"{"kind":"meeting","sort_desc":false}"#);
+
+    // Delete one; the other remains, and a second delete of the same id is a no-op.
+    assert!(catalog.delete_saved_search("ss_a").await.unwrap());
+    assert!(!catalog.delete_saved_search("ss_a").await.unwrap());
+    let list = catalog.list_saved_searches().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, "ss_b");
+}
+
+#[tokio::test]
+async fn voiceprints_enroll_recognize_merge_and_forget() {
+    let (_dir, catalog) = fresh_catalog().await;
+    // Voiceprints have an ON DELETE CASCADE FK to recordings, so each capture's
+    // recording must exist (it always does in production — captured at transcribe).
+    let r1 = RecordingId::new();
+    let r2 = RecordingId::new();
+    let r3 = RecordingId::new();
+    for r in [&r1, &r2, &r3] {
+        catalog.insert(&sample_recording((*r).clone())).await.unwrap();
+    }
+
+    // Empty library + an un-enrolled capture recognizes nothing.
+    assert!(catalog.list_named_voices().await.unwrap().is_empty());
+    catalog
+        .save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0, 0.0])
+        .await
+        .unwrap();
+    assert!(catalog
+        .recognize_voice(&[1.0, 0.0, 0.0], 0.8)
+        .await
+        .unwrap()
+        .is_none());
+
+    // Enrolling that capture under a name makes a future close centroid match it.
+    let id = catalog
+        .enroll_speaker(r1.as_str(), 1, "Alice")
+        .await
+        .unwrap()
+        .expect("enrolled");
+    let (voice, score) = catalog
+        .recognize_voice(&[0.98, 0.02, 0.0], 0.8)
+        .await
+        .unwrap()
+        .expect("recognized");
+    assert_eq!(voice.name, "Alice");
+    assert_eq!(voice.id, id);
+    assert!(score > 0.9);
+    // An orthogonal voice is not Alice.
+    assert!(catalog
+        .recognize_voice(&[0.0, 0.0, 1.0], 0.8)
+        .await
+        .unwrap()
+        .is_none());
+
+    // A second sample for Alice (different recording) updates the running mean
+    // and sample count; naming by the same name reuses the entry.
+    catalog
+        .save_speaker_voiceprint(r2.as_str(), 1, &[0.0, 1.0, 0.0])
+        .await
+        .unwrap();
+    let id2 = catalog
+        .enroll_speaker(r2.as_str(), 1, "alice") // case-insensitive → same voice
+        .await
+        .unwrap()
+        .expect("enrolled");
+    assert_eq!(id2, id);
+    let voices = catalog.list_named_voices().await.unwrap();
+    assert_eq!(voices.len(), 1);
+    assert_eq!(voices[0].samples, 2);
+
+    // A separate voice, then merge it into Alice: captures re-point, entry drops.
+    catalog
+        .save_speaker_voiceprint(r3.as_str(), 1, &[0.0, 0.0, 1.0])
+        .await
+        .unwrap();
+    let other = catalog
+        .enroll_speaker(r3.as_str(), 1, "Bob")
+        .await
+        .unwrap()
+        .expect("enrolled");
+    assert_eq!(catalog.list_named_voices().await.unwrap().len(), 2);
+    assert!(catalog.merge_named_voices(&other, &id).await.unwrap());
+    let voices = catalog.list_named_voices().await.unwrap();
+    assert_eq!(voices.len(), 1);
+    assert_eq!(voices[0].samples, 3);
+
+    // Forgetting Alice empties the library but keeps the raw captures.
+    assert!(catalog.forget_named_voice(&id).await.unwrap());
+    assert!(catalog.list_named_voices().await.unwrap().is_empty());
+    assert!(catalog
+        .recognize_voice(&[0.98, 0.02, 0.0], 0.8)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(catalog
+        .speaker_voiceprint(r1.as_str(), 1)
+        .await
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
+async fn recognize_speakers_for_skips_named_and_dismissed() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let r1 = RecordingId::new();
+    let r2 = RecordingId::new();
+    // Both must exist: set_speaker_name + the voiceprint cascade FK to recordings.
+    catalog.insert(&sample_recording(r1.clone())).await.unwrap();
+    catalog.insert(&sample_recording(r2.clone())).await.unwrap();
+
+    // Enroll Alice from one recording.
+    catalog
+        .save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0, 0.0])
+        .await
+        .unwrap();
+    catalog.enroll_speaker(r1.as_str(), 1, "Alice").await.unwrap();
+
+    // A new recording: speaker 1 sounds like Alice, speaker 2 is someone else.
+    catalog
+        .save_speaker_voiceprint(r2.as_str(), 1, &[0.97, 0.03, 0.0])
+        .await
+        .unwrap();
+    catalog
+        .save_speaker_voiceprint(r2.as_str(), 2, &[0.0, 0.0, 1.0])
+        .await
+        .unwrap();
+    let sugg = catalog.recognize_speakers_for(r2.as_str(), 0.5).await.unwrap();
+    assert_eq!(sugg.len(), 1, "only speaker 1 matches Alice");
+    assert_eq!(sugg[0].speaker_label, 1);
+    assert_eq!(sugg[0].name, "Alice");
+    assert!(sugg[0].score > 0.9);
+
+    // Naming speaker 1 stops suggesting over it.
+    catalog.set_speaker_name(&r2, 1, "Alice").await.unwrap();
+    assert!(catalog
+        .recognize_speakers_for(r2.as_str(), 0.5)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // A third speaker also matching Alice IS suggested — until dismissed.
+    catalog
+        .save_speaker_voiceprint(r2.as_str(), 3, &[0.96, 0.04, 0.0])
+        .await
+        .unwrap();
+    let sugg = catalog.recognize_speakers_for(r2.as_str(), 0.5).await.unwrap();
+    assert_eq!(sugg.len(), 1);
+    assert_eq!(sugg[0].speaker_label, 3);
+    catalog.dismiss_speaker_suggestion(r2.as_str(), 3).await.unwrap();
+    assert!(catalog
+        .recognize_speakers_for(r2.as_str(), 0.5)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn deleting_a_recording_cascades_voiceprints_and_recomputes_named_voices() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let r1 = RecordingId::new();
+    let r2 = RecordingId::new();
+    catalog.insert(&sample_recording(r1.clone())).await.unwrap();
+    catalog.insert(&sample_recording(r2.clone())).await.unwrap();
+
+    // "Alice" enrolled from two recordings → 2 samples.
+    catalog.save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0]).await.unwrap();
+    catalog.save_speaker_voiceprint(r2.as_str(), 1, &[0.0, 1.0]).await.unwrap();
+    catalog.enroll_speaker(r1.as_str(), 1, "Alice").await.unwrap();
+    catalog.enroll_speaker(r2.as_str(), 1, "Alice").await.unwrap();
+    catalog.dismiss_speaker_suggestion(r1.as_str(), 2).await.unwrap();
+    assert_eq!(catalog.list_named_voices().await.unwrap()[0].samples, 2);
+
+    // Delete r1 → its voiceprint + dismissal cascade away; Alice recomputed to 1.
+    catalog.delete(&r1).await.unwrap();
+    assert!(
+        catalog.speaker_voiceprint(r1.as_str(), 1).await.unwrap().is_none(),
+        "the deleted recording's voiceprint must cascade away"
+    );
+    let voices = catalog.list_named_voices().await.unwrap();
+    assert_eq!(voices.len(), 1);
+    assert_eq!(voices[0].samples, 1, "Alice recomputed after losing r1's sample");
+}
+
+#[tokio::test]
+async fn renaming_a_speaker_recomputes_the_previously_linked_voice() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let r = RecordingId::new();
+    catalog.insert(&sample_recording(r.clone())).await.unwrap();
+    catalog.save_speaker_voiceprint(r.as_str(), 1, &[1.0, 0.0]).await.unwrap();
+
+    // Enroll as Alice, then re-name (the corrected-a-wrong-suggestion case) to Bob.
+    catalog.enroll_speaker(r.as_str(), 1, "Alice").await.unwrap();
+    catalog.enroll_speaker(r.as_str(), 1, "Bob").await.unwrap();
+
+    let voices = catalog.list_named_voices().await.unwrap();
+    let alice = voices.iter().find(|v| v.name == "Alice").expect("Alice present");
+    let bob = voices.iter().find(|v| v.name == "Bob").expect("Bob present");
+    assert_eq!(alice.samples, 0, "Alice recomputed to 0 after the sample moved to Bob");
+    assert_eq!(bob.samples, 1);
+}

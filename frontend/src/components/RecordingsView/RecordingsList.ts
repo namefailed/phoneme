@@ -15,7 +15,7 @@ import {
   highlightMatch,
 } from "../../utils/format";
 import { groupRecordings } from "./grouping";
-import { getContrastColor } from "./TagChips";
+import { getContrastColor, safeTagColor } from "./TagChips";
 import "../shared/styles.css";
 import "./styles.css";
 
@@ -1023,7 +1023,7 @@ export class RecordingsListElement extends LitElement {
       title: html`<span class="rec-title-col" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; ${r.title ? "color: var(--fg-default);" : "color: var(--fg-faded);"}" title=${r.title || "Untitled"}>${r.title || "—"}</span>`,
       tags: html`<span class="rec-tags">${
         (r.tags ?? []).length
-          ? r.tags!.map((t: any) => html`<span class="rec-tag-chip" style=${t.color ? `background:${t.color}; color:${getContrastColor(t.color)};` : ""}>${t.name}</span>`)
+          ? r.tags!.map((t: any) => html`<span class="rec-tag-chip" style=${t.color ? `background:${safeTagColor(t.color)}; color:${getContrastColor(t.color)};` : ""}>${t.name}</span>`)
           : nothing
       }</span>`,
       model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.model || ""}</span>`,

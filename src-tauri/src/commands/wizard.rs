@@ -54,15 +54,6 @@ pub async fn wizard_test_whisper(
     Ok(crate::wizard::test_whisper_endpoint(&target).await)
 }
 
-#[tauri::command]
-pub async fn wizard_test_hook(
-    bridge: Br<'_>,
-    custom_command: Option<String>,
-) -> Result<TestConnectResult, CommandError> {
-    let b = bridge.get_or_connect().await;
-    Ok(crate::wizard::test_hook(b.as_ref(), custom_command).await)
-}
-
 #[derive(serde::Serialize, Clone)]
 struct DownloadProgress {
     downloaded: u64,

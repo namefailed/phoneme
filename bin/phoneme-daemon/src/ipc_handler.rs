@@ -273,6 +273,28 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(rows) => serialize_response(rows),
             Err(e) => err_response(&e),
         },
+        Request::ListSavedSearches => match state.catalog.list_saved_searches().await {
+            Ok(rows) => serialize_response(rows),
+            Err(e) => err_response(&e),
+        },
+        Request::UpsertSavedSearch {
+            id,
+            name,
+            filter_json,
+        } => match state
+            .catalog
+            .upsert_saved_search(&id, &name, &filter_json)
+            .await
+        {
+            Ok(()) => Response::Ok(serde_json::json!({})),
+            Err(e) => err_response(&e),
+        },
+        Request::DeleteSavedSearch { id } => {
+            match state.catalog.delete_saved_search(&id).await {
+                Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
+                Err(e) => err_response(&e),
+            }
+        }
         Request::ListMeeting { meeting_id } => {
             match state.catalog.list_by_meeting(&meeting_id).await {
                 Ok(rows) => serialize_response(rows),
@@ -757,12 +779,80 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 .await
             {
                 Ok(()) => {
+                    // Implicit enrollment (#9): naming a speaker folds its
+                    // captured voiceprint into the cross-recording library;
+                    // clearing the name un-enrolls it. Best-effort and a no-op
+                    // when no voiceprint was captured (cloud-diarized recordings)
+                    // — recognition is a convenience, never a reason to fail the
+                    // rename.
+                    let enrolled = if name.trim().is_empty() {
+                        state
+                            .catalog
+                            .unenroll_speaker(id.as_str(), speaker_label)
+                            .await
+                            .map(|_| ())
+                    } else {
+                        state
+                            .catalog
+                            .enroll_speaker(id.as_str(), speaker_label, &name)
+                            .await
+                            .map(|_| ())
+                    };
+                    if let Err(e) = enrolled {
+                        tracing::warn!(id = %id.as_str(), label = speaker_label, "voiceprint enroll failed: {e}");
+                    }
                     state.events.emit(DaemonEvent::SpeakerNameUpdated { id });
                     ok_null()
                 }
                 Err(e) => err_response(&e),
             }
         }
+        Request::RecognizeSpeakers { id } => {
+            let cfg = state.config.load();
+            if cfg.diarization.recognize_speakers {
+                let threshold = cfg.diarization.voiceprint_match_threshold as f32;
+                match state
+                    .catalog
+                    .recognize_speakers_for(id.as_str(), threshold)
+                    .await
+                {
+                    Ok(suggestions) => serialize_response(suggestions),
+                    Err(e) => err_response(&e),
+                }
+            } else {
+                serialize_response(Vec::<phoneme_core::types::SpeakerSuggestion>::new())
+            }
+        }
+        Request::DismissSpeakerSuggestion { id, speaker_label } => {
+            match state
+                .catalog
+                .dismiss_speaker_suggestion(id.as_str(), speaker_label)
+                .await
+            {
+                Ok(()) => ok_null(),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::ListNamedVoices => match state.catalog.list_named_voices().await {
+            Ok(voices) => serialize_response(voices),
+            Err(e) => err_response(&e),
+        },
+        Request::RenameNamedVoice { id, name } => {
+            match state.catalog.rename_named_voice(&id, &name).await {
+                Ok(()) => ok_null(),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::MergeNamedVoices { from_id, into_id } => {
+            match state.catalog.merge_named_voices(&from_id, &into_id).await {
+                Ok(merged) => Response::Ok(serde_json::json!({ "merged": merged })),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::ForgetNamedVoice { id } => match state.catalog.forget_named_voice(&id).await {
+            Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
+            Err(e) => err_response(&e),
+        },
         Request::ImportRecording { path } => import_recording(state, path).await,
         Request::ReimportFromDisk { dry_run } => reimport_from_disk(state, dry_run).await,
         Request::RebuildCatalog => {
@@ -1220,6 +1310,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(removed) => {
                 // Refresh the depth so the panel's failed badge clears at once.
                 crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::json!({ "removed": removed }))
+            }
+            Err(e) => err_response(&e),
+        },
+        Request::DismissFailed { id } => match state.inbox.dismiss_failed(&id).await {
+            Ok(removed) => {
+                // Refresh the depth so the failed badge reflects the new count.
+                if removed {
+                    crate::queue_worker::emit_queue_depth(state).await;
+                }
                 Response::Ok(serde_json::json!({ "removed": removed }))
             }
             Err(e) => err_response(&e),

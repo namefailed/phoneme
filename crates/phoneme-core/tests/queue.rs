@@ -188,6 +188,35 @@ async fn clear_failed_empties_the_failed_folder() {
 }
 
 #[tokio::test]
+async fn dismiss_failed_removes_one_and_leaves_the_rest() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    // Two quarantined items.
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let id = RecordingId::new();
+        q.enqueue(&make_payload(id)).await.unwrap();
+        let claimed = q.claim_next().await.unwrap().unwrap();
+        q.finish_failed(&claimed.id, "whisper_error", "boom")
+            .await
+            .unwrap();
+        ids.push(claimed.id);
+    }
+    assert_eq!(q.counts().await.unwrap().failed, 2);
+
+    // Dismiss exactly one; the other stays.
+    assert!(q.dismiss_failed(&ids[0]).await.unwrap(), "the file existed");
+    assert_eq!(q.counts().await.unwrap().failed, 1, "only the one removed");
+
+    // Dismissing an already-removed or never-seen id is a no-op `false`.
+    assert!(!q.dismiss_failed(&ids[0]).await.unwrap(), "already gone");
+    assert!(
+        !q.dismiss_failed(&RecordingId::new()).await.unwrap(),
+        "never existed"
+    );
+}
+
+#[tokio::test]
 async fn states_counts_reflect_inbox() {
     let dir = TempDir::new().unwrap();
     let q = InboxQueue::new(dir.path()).await.unwrap();

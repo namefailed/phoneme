@@ -209,22 +209,29 @@ fn strip_annotations(text: &str) -> String {
     out
 }
 
-/// Drop standalone filler words (case-insensitive). A comma immediately after
-/// the filler is eaten with it, so "so, um, anyway" → "so, anyway" rather
-/// than "so, , anyway".
+/// Drop standalone filler words (case-insensitive). Punctuation the filler
+/// carried is eaten with it but transferred to the previous word, so
+/// "so, um, anyway" → "so, anyway" (not "so, , anyway") and "that's all um.
+/// moving on" → "that's all. moving on" (not a run-on "that's all moving on").
 fn strip_fillers(text: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     for word in text.split_whitespace() {
         let bare = word.trim_matches(|c: char| !c.is_alphanumeric());
         let is_filler = !bare.is_empty() && FILLERS.iter().any(|f| bare.eq_ignore_ascii_case(f));
         if is_filler {
-            // Keep punctuation the filler carried: "um," contributes its comma
-            // to the previous word once ("well um, yes" → "well, yes"), but
-            // never doubles one up.
-            if word.ends_with(',') {
+            // Keep the punctuation the filler carried: a trailing comma OR a
+            // terminal `.`/`!`/`?` ("um," or "um.") moves to the previous word
+            // once, so dropping the filler never merges two sentences into a
+            // run-on. Never doubles a mark up when the previous word already
+            // ends in sentence punctuation.
+            let carried = word
+                .chars()
+                .last()
+                .filter(|c| matches!(c, ',' | '.' | '!' | '?'));
+            if let Some(mark) = carried {
                 if let Some(prev) = out.last_mut() {
                     if !prev.ends_with([',', '.', '!', '?', ';', ':']) {
-                        prev.push(',');
+                        prev.push(mark);
                     }
                 }
             }
@@ -299,9 +306,73 @@ fn finish_sentence(text: &str) -> String {
     out
 }
 
+/// The minimal end-edit to turn already-typed `streamed` text into `final_text`:
+/// `(backspaces, insert)` — delete that many trailing characters, then type
+/// `insert`. Shares the longest common prefix, so only the divergent tail is
+/// rewritten.
+///
+/// This is streaming-type's stop reconciliation: words were typed live from the
+/// rolling preview, and the final batch transcript is more accurate, so this
+/// patches the typed text to the final one with the fewest visible keystrokes.
+///
+/// The returned `backspaces` is the number of UTF-16 code UNITS in the deleted
+/// tail, not the number of Rust `char`s (audit M4). A Windows Backspace deletes
+/// one UTF-16 code unit, so a deleted astral character (emoji, some CJK/IME
+/// output) is two backspaces, not one — counting `char`s would under-delete and
+/// leave a stray surrogate-pair half behind. The common-prefix split stays on
+/// `char` boundaries (never mid-code-point); only the COUNT is in UTF-16 units.
+pub fn reconcile_edit(streamed: &str, final_text: &str) -> (usize, String) {
+    let s: Vec<char> = streamed.chars().collect();
+    let f: Vec<char> = final_text.chars().collect();
+    let common = s.iter().zip(f.iter()).take_while(|(a, b)| a == b).count();
+    // Count the deleted tail in UTF-16 code units to match how a Windows
+    // Backspace deletes (one code unit per press), so astral text round-trips.
+    let backspaces: usize = s[common..].iter().map(|c| c.len_utf16()).sum();
+    let insert: String = f[common..].iter().collect();
+    (backspaces, insert)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconcile_noop_when_identical() {
+        assert_eq!(reconcile_edit("hello world", "hello world"), (0, String::new()));
+    }
+
+    #[test]
+    fn reconcile_patches_only_the_divergent_tail() {
+        // "wrld" → "world": common prefix "hello w", delete "rld" (3), type "orld".
+        assert_eq!(reconcile_edit("hello wrld", "hello world"), (3, "orld".into()));
+    }
+
+    #[test]
+    fn reconcile_handles_empty_sides() {
+        assert_eq!(reconcile_edit("", "typed in"), (0, "typed in".into()));
+        assert_eq!(reconcile_edit("backspace all", ""), (13, String::new()));
+    }
+
+    #[test]
+    fn reconcile_backspaces_count_utf16_units_for_astral_text() {
+        // A Windows Backspace deletes one UTF-16 code unit, so an astral emoji
+        // (two code units) in the deleted tail is TWO backspaces, not one — a
+        // char count would under-delete and strand a surrogate half (audit M4).
+        // "hi 😀" → "hi" : the trailing " 😀" is space(1) + emoji(2) = 3 units.
+        assert_eq!(reconcile_edit("hi 😀", "hi"), (3, String::new()));
+        // Replacing the emoji keeps the "hi " prefix and deletes only the emoji
+        // (2 units), then types the replacement.
+        assert_eq!(reconcile_edit("hi 😀", "hi !"), (2, "!".into()));
+    }
+
+    #[test]
+    fn reconcile_appends_when_final_extends_streamed() {
+        // The common case: the final transcript just has more/finished words.
+        assert_eq!(
+            reconcile_edit("the meeting went", "the meeting went well."),
+            (0, " well.".into())
+        );
+    }
 
     #[test]
     fn polishes_a_typical_dictation() {
@@ -327,6 +398,22 @@ mod tests {
     fn eats_filler_commas_without_doubling() {
         assert_eq!(fast_polish("well um, yes"), "Well, yes.");
         assert_eq!(fast_polish("so, um, anyway"), "So, anyway.");
+    }
+
+    #[test]
+    fn filler_transfers_its_terminal_punctuation_not_just_a_comma() {
+        // A filler carrying a sentence-ender keeps the boundary: dropping "um."
+        // must not merge two sentences into a run-on (audit LOW). fast_polish
+        // only capitalizes the first letter, so the second sentence stays as
+        // dictated — the point of this fix is the preserved `. ` boundary.
+        assert_eq!(
+            fast_polish("that's all um. moving on"),
+            "That's all. moving on."
+        );
+        assert_eq!(fast_polish("done uh! next"), "Done! next.");
+        assert_eq!(fast_polish("really uh? maybe"), "Really? maybe.");
+        // Still doesn't double a mark the previous word already carries.
+        assert_eq!(fast_polish("stop. um. go"), "Stop. go.");
     }
 
     #[test]

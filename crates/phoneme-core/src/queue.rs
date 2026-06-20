@@ -11,8 +11,9 @@
 //! `done/`/`failed/`. That gives crash recovery for free ([`recover_orphans`]
 //! re-queues anything stuck in `processing/`, and is idempotent across the
 //! finish-then-crash window). Two dot-files control ordering and pausing without
-//! showing up as payloads: `.queue-order` (the user's custom claim order) and
-//! `.queue-paused` (a sentinel the worker checks before each claim). The badge
+//! showing up as payloads: `pending/.queue-order` (the user's custom claim order)
+//! and `.queue-paused` in the inbox root (a sentinel the worker checks before each
+//! claim). The badge
 //! counts in the GUI come from [`InboxQueue::counts`].
 //!
 //! [`recover_orphans`]: InboxQueue::recover_orphans
@@ -489,6 +490,20 @@ impl InboxQueue {
             }
         }
         Ok(removed)
+    }
+
+    /// Remove ONE quarantined payload from `failed/` by id — the per-item
+    /// counterpart to [`clear_failed`](Self::clear_failed), so a user can dismiss
+    /// a single acknowledged failure without wiping the whole quarantine. The
+    /// catalog row (with its failed status) is untouched; only the inbox file is
+    /// removed. Returns whether a file was actually removed.
+    pub async fn dismiss_failed(&self, id: &RecordingId) -> Result<bool> {
+        let path = self.root.join("failed").join(format!("{id}.json"));
+        if fs::try_exists(&path).await.unwrap_or(false) {
+            fs::remove_file(&path).await?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Count files in each inbox subdirectory.

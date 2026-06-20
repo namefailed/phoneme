@@ -81,6 +81,7 @@
 pub mod catalog;
 pub mod chunk;
 pub mod config;
+pub mod der;
 pub mod diarization;
 pub mod dictation;
 pub mod doctor;
@@ -108,6 +109,7 @@ pub mod tags;
 pub mod title;
 pub mod transcription;
 pub mod types;
+pub mod voiceprint;
 pub mod webhook;
 
 pub use catalog::Catalog;

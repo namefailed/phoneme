@@ -40,8 +40,10 @@ pub fn read_config() -> Result<Value, CommandError> {
 /// keyboard toggles, and re-positioning the card programmatically. The window is
 /// created lazily if the setting is on but it hasn't been built yet.
 ///
-/// `action` is one of `"show"`, `"hide"`, or `"move"`. For `"move"`, pass
-/// logical `x`/`y` (top-left corner); they are ignored for show/hide.
+/// `action` is one of `"show"`, `"hide"`, `"preview"`, or `"move"`. `"preview"`
+/// shows the card pinned open with placeholder text (no auto-hide) so the user
+/// can position/resize it without recording. For `"move"`, pass logical `x`/`y`
+/// (top-left corner); they are ignored for the other actions.
 #[tauri::command]
 pub fn set_overlay(
     app: tauri::AppHandle,

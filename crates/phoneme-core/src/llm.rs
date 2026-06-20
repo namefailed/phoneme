@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 use async_trait::async_trait;
 use secrecy::ExposeSecret;
 use serde::Deserialize;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 /// A sink for streamed response tokens, passed to
@@ -127,10 +128,14 @@ fn combine(prompt: &str, text: &str) -> String {
 /// Normalize LLM response by collapsing multiple consecutive newlines into single newlines
 /// and removing single newlines that break sentences (unless followed by sentence-ending punctuation).
 fn normalize_response(text: &str) -> String {
+    // Compiled once: matching every response is hot, and `Regex::new` is costly.
+    static EXCESS_NEWLINES: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"\n{3,}").unwrap());
+    static WRAPPED_SENTENCE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"([^\n.!?])\n([a-z])").unwrap());
+
     // First, collapse 3+ consecutive newlines into 2 newlines (preserve paragraph breaks)
-    let collapsed = regex::Regex::new(r"\n{3,}")
-        .unwrap()
-        .replace_all(text, "\n\n");
+    let collapsed = EXCESS_NEWLINES.replace_all(text, "\n\n");
 
     // Then, collapse a *single* newline that merely wraps a sentence. The
     // newline must be preceded by a non-newline, non-sentence-ending character
@@ -139,9 +144,7 @@ fn normalize_response(text: &str) -> String {
     // `\n([a-z])` ate the second newline of a pair); excluding `.?!` preserves a
     // newline that follows sentence-ending punctuation; the lowercase look-ahead
     // preserves a newline before a capitalized word.
-    let sentence_normalized = regex::Regex::new(r"([^\n.!?])\n([a-z])")
-        .unwrap()
-        .replace_all(&collapsed, "${1} ${2}");
+    let sentence_normalized = WRAPPED_SENTENCE.replace_all(&collapsed, "${1} ${2}");
 
     // Trim leading/trailing whitespace
     sentence_normalized.trim().to_string()

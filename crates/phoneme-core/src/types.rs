@@ -184,6 +184,51 @@ pub struct AiActivityEntry {
     pub created_at: String,
 }
 
+/// One persisted saved search — a user-named snapshot of the full library
+/// filter, moved out of the webview's `localStorage` into the catalog so it
+/// survives a reinstall and can ride catalog sync later. `filter_json` is opaque
+/// JSON the frontend serializes (a `UiFilter`); the daemon only stores and
+/// returns it, never interpreting the filter shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedSearch {
+    /// Stable id (frontend-generated); the upsert key.
+    pub id: String,
+    /// User-chosen name. Uniqueness (case-insensitive) is enforced by the
+    /// frontend's upsert-by-name, not a DB constraint.
+    pub name: String,
+    /// The library filter snapshot as opaque JSON (a serialized `UiFilter`).
+    pub filter_json: String,
+}
+
+/// A named voice in the cross-recording voiceprint library (#9): the identity a
+/// recognized speaker is matched against. The centroid embedding stays internal
+/// to the catalog; this DTO carries only what the Speaker Library UI shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NamedVoice {
+    /// Stable id — the enrollment / merge target.
+    pub id: String,
+    /// Display name (the person).
+    pub name: String,
+    /// How many captured per-recording voiceprints are enrolled under this voice.
+    pub samples: u32,
+}
+
+/// A recognized-speaker suggestion (#9): a still-unnamed diarized speaker in a
+/// recording whose voiceprint matched a known voice closely enough to suggest.
+/// The UI offers it as a confirmable ✓/✗ chip; ✓ names the speaker (which also
+/// reinforces the voiceprint), ✗ dismisses it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeakerSuggestion {
+    /// The 1-based speaker label this suggestion is for.
+    pub speaker_label: i64,
+    /// The suggested name (the matched known voice).
+    pub name: String,
+    /// The matched named-voice id.
+    pub named_voice_id: String,
+    /// Cosine similarity of the match, in [0, 1] — higher is more confident.
+    pub score: f32,
+}
+
 /// The canonical Recording row as exposed by `Catalog`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recording {

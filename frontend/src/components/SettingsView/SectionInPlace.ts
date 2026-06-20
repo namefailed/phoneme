@@ -238,6 +238,7 @@ export class SectionInPlace {
         type_first: false,
         save_to_library: true,
         type_mode: "type",
+        stream_type: false,
       };
     }
     const ip = this.config.in_place;
@@ -312,6 +313,22 @@ export class SectionInPlace {
             <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               Typing works everywhere but takes a moment for long text. Pasting is near-instant —
               your previous clipboard is put back afterwards — but a few apps block paste.
+            </span>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label>Stream as you speak <span style="font-size:0.7143rem; font-weight:600; color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius:6px; padding:0 5px; vertical-align:middle;">experimental</span></label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "in_place.stream_type", label: "", kind: "checkbox" },
+              ip.stream_type ?? false,
+            )}</div>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Off by default. With delivery set to <b>Typing</b>, dictated words appear live at your
+              cursor as you speak, then a quiet patch corrects them to the accurate final transcript
+              when you stop. It types the live preview's words, so it reads best with a fast preview
+              model; ignored when delivery is <b>Pasting</b>.
             </span>
           </div>
         </div>

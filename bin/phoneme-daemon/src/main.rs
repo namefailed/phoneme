@@ -78,8 +78,19 @@ async fn main() -> Result<()> {
     // failure is non-fatal — the in-memory migration still applies and the next
     // load retries.
     let cfg = load_config()?;
+
+    // Install logging BEFORE building AppState so early warnings aren't dropped:
+    // job-object creation, the embedder load, and the first config-apply all
+    // happen inside `AppState::new` and used to log into the void because the
+    // subscriber wasn't up yet. The log dir + level come straight from the
+    // freshly-loaded config (the same resolution AppState uses), so we don't
+    // need a built state to configure the appender. The only thing still ahead
+    // of the subscriber is `load_config()`'s own one-time migration warning,
+    // which is inherently pre-logging (we need a config to configure logging).
+    let log_dir = app_state::ResolvedPaths::from_config_in(&cfg, None)?.log_dir;
+    let _guard = logging::init(&cfg, &log_dir, args.foreground)?;
+
     let state = AppState::new(cfg).await?;
-    let _guard = logging::init(&state.config.load(), &state.paths.log_dir, args.foreground)?;
 
     std::panic::set_hook(Box::new(|info| {
         let payload = info.payload();

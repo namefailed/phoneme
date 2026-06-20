@@ -2049,6 +2049,9 @@ pub async fn run(
         // speaker-name write below so a cloud STT backend (which ignores the
         // hint) or a silent/segment-less mic track never gets an orphan row.
         fixed_speaker_applied,
+        // Per-speaker centroid voiceprints (local diarization only; empty for
+        // cloud/plain paths), persisted below for cross-recording recognition (#9).
+        speaker_voiceprints,
     } = transcription;
 
     // Finish the Transcribing activity entry with timing + size for the popout.
@@ -2178,6 +2181,21 @@ pub async fn run(
         tracing::warn!(id = %id.as_str(), "failed to persist transcript words: {e}");
     }
 
+    // Persist each speaker's centroid voiceprint (local diarization only; empty
+    // on cloud/plain paths) keyed by the same label as the transcript, so naming
+    // a speaker can enroll it into the cross-recording library and later
+    // recordings can be matched against it (#9). A re-transcribe refreshes the
+    // sample without un-enrolling. Best-effort: a failure costs only recognition.
+    for vp in &speaker_voiceprints {
+        if let Err(e) = state
+            .catalog
+            .save_speaker_voiceprint(id.as_str(), vp.label as i64, &vp.centroid)
+            .await
+        {
+            tracing::warn!(id = %id.as_str(), label = vp.label, "failed to persist voiceprint: {e}");
+        }
+    }
+
     // Track-aware Meeting Mode: seed label 1 → "You" only when the mic track
     // was ACTUALLY labelled `[Speaker 1]` in place of a diarizer pass
     // (`fixed_speaker_applied` — the local OpenAI-compatible path with real
@@ -2260,7 +2278,63 @@ pub async fn run(
             // `focused_app` is the side-channel value claimed early above; `None`
             // (no stash, or a daemon-restart drop) degrades to the global mode.
             let type_mode = cfg.in_place.resolve_type_mode(focused_app.as_deref());
-            if type_mode == "off" {
+            // Did streaming-type type live this dictation? Reset at every record
+            // start, so non-empty = THIS recording streamed — independent of the
+            // current config (audit M3). Taken (cleared) here regardless.
+            let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
+            if !streamed.is_empty() {
+                // This recording streamed text live, so there is ALREADY
+                // live-typed text at the cursor — branch on that FIRST, before
+                // the resolved `type_mode` (audit LOW / mode-flip). If a
+                // mid-recording config change flipped the app to paste/off, the
+                // old code fell through and typed the transcript ON TOP of the
+                // orphaned live text. Instead always reconcile the streamed text:
+                // type-mode patches it to the pipeline result, paste/off first
+                // backspaces it away (then paste re-delivers via the clipboard).
+                tracing::info!(id = %id.as_str(), "in-place dictation: reconciling streamed text to pipeline result");
+                let target = if type_mode == "type" {
+                    transcript.as_str()
+                } else {
+                    ""
+                };
+                let (backspaces, insert) =
+                    phoneme_core::dictation::reconcile_edit(&streamed, target);
+                // SAFETY GUARD (audit H1/M14): only backspace while the SAME
+                // window the text streamed into still owns the caret. If focus
+                // moved between live streaming and this end-of-run reconcile,
+                // those backspaces would chew through unrelated content in the
+                // wrong window. On a mismatch skip the destructive part; for
+                // "type" still append the divergent insert at the current caret.
+                let focus_lost = backspaces > 0
+                    && !crate::in_place::foreground_still_matches(focused_app.as_deref());
+                if focus_lost {
+                    tracing::warn!(
+                        id = %id.as_str(),
+                        "in-place dictation: foreground changed since streaming; skipping {backspaces} backspaces to avoid destroying other content"
+                    );
+                    if type_mode == "type" && !insert.is_empty() {
+                        if let Err(e) = crate::in_place::type_at_cursor(&insert, "type").await {
+                            tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to type appended insert after focus change");
+                        }
+                    }
+                    state.events.emit(DaemonEvent::TranscriptionFailed {
+                        id: id.clone(),
+                        error: "dictation finished, but focus moved away from where you were typing — the live text wasn't corrected to the final transcript (left as-is to avoid deleting other content). The full transcript is in the library.".to_string(),
+                    });
+                } else if let Err(e) =
+                    crate::in_place::reconcile_at_cursor(backspaces, &insert).await
+                {
+                    tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to reconcile streamed text");
+                }
+                // A paste-mode flip still owes the user the final text via the
+                // clipboard once the orphaned live text is cleared. Skip on focus
+                // loss (orphan not cleared) or an empty transcript.
+                if type_mode == "paste" && !focus_lost && !transcript.trim().is_empty() {
+                    if let Err(e) = crate::in_place::type_at_cursor(&transcript, "paste").await {
+                        tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to paste after streamed reconcile");
+                    }
+                }
+            } else if type_mode == "off" {
                 // The user asked dictation NOT to auto-deliver for this app — the
                 // transcript still rides the pipeline into the library, it just
                 // doesn't land at the cursor. Same skip the fast lane does.

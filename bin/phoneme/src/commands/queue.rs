@@ -171,6 +171,29 @@ pub async fn run(args: QueueArgs, cfg: &Config, json: bool) -> ExitCode {
             }
             Err(code) => code,
         },
+        QueueAction::DismissFailed { id } => {
+            let rid = match parse_id(&id) {
+                Ok(r) => r,
+                Err(code) => return code,
+            };
+            match client.send(Request::DismissFailed { id: rid }).await {
+                Ok(value) => {
+                    if json {
+                        output::print_json(&value);
+                    } else if value
+                        .get("removed")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        println!("dismissed failed item {id}");
+                    } else {
+                        println!("no failed item with id {id}");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(code) => code,
+            }
+        }
     }
 }
 

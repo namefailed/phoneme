@@ -138,16 +138,61 @@ entirely for **single** (non-meeting) recordings: a solo note reads as plain pro
 and is never split into `[Speaker N]` turns. Meetings (separate mic/system tracks)
 and genuinely multi-speaker files are unaffected.
 
+### 🎯 Recognize named speakers across recordings
+
+Diarization tells you *that* there are two speakers; recognition tells you *who*
+they are. Once you've put a name to a voice, Phoneme remembers it and suggests it
+the next time that voice turns up — so you're not re-labelling the same teammates
+meeting after meeting. It's **on by default** and runs entirely on your machine
+(local diarization only — cloud providers don't expose the voiceprints it needs).
+
+**How it works, end to end:**
+
+1. **Name a speaker once.** Open a recording, click **Rename speakers**, and type a
+   name for `Speaker 2` (say, *Alex*). That's it — naming a speaker quietly
+   **enrolls** their voiceprint into a cross-recording library.
+2. **It gets suggested next time.** Open a later recording where Alex spoke and the
+   Rename-speakers panel shows *"Sounds like **Alex** · 82% match"* next to the
+   unnamed speaker. Click **Use name** to apply it (which also strengthens the
+   stored voiceprint), or **Not them** to dismiss it. In the **merged meeting
+   view**, the same suggestions appear as a *"🔎 Recognized voices"* banner at the
+   top.
+3. **Recognition keeps up with you.** Suggestions are computed *when you open a
+   recording*, against the current library — so a voice you name *today* is
+   suggested on meetings you recorded *last week*, too.
+
+Nothing is ever applied automatically: a suggestion is always a one-click
+**✓ / ✗**, so a wrong guess can't silently mislabel a speaker.
+
+**The Speaker Library.** **Settings → Diarization → Speaker Library** lists every
+voice you've named, with how many recordings each is built from. There you can
+**rename** a voice, **merge** two that turn out to be the same person (their
+voiceprints combine), or **forget** one. Forgetting only stops recognition — your
+recordings and any names you've already applied are untouched, and you can
+re-enroll just by naming the speaker again.
+
+**Tuning.** **Recognition threshold** (Settings → Diarization → Advanced) is how
+similar a voice must be to be suggested — higher is stricter (fewer wrong guesses,
+more misses), lower is looser. The `82%` in a suggestion is that similarity, so
+you can see where to set the bar. To turn the whole feature off, clear
+**Recognize known speakers**.
+
+> [!NOTE]
+> Voiceprints are captured **when a recording is transcribed**, so recordings made
+> before recognition existed have none — **Re-transcribe** them (or record fresh
+> ones) to start matching. A meeting's **mic track** is always labelled **You** and
+> isn't matched; recognition is for the other voices on the call.
+
 ### The local diarization models
 
 Local diarization uses the **speakrs** ONNX models (around 500 MB total). You
 don't have to download or point at them yourself: by default they live in your
 **Hugging Face cache** (`%USERPROFILE%\.cache\huggingface\hub`) and are fetched
 automatically the first time diarization runs, or when you install them from the
-First Run Wizard. The **Model Path** field in
-**Settings → Transcription → Speaker Diarization** (`diarization.local_model_path`)
-is **optional** — leave it blank to use the auto-managed cache; only fill it in
-if you keep the model somewhere specific.
+First Run Wizard. The **Models folder** field in **Settings → Diarization**
+(`diarization.models_dir`) is **optional** — leave it blank to use the auto-managed
+cache; only point it at a folder if you keep a custom speakrs bundle (segmentation
++ embedding ONNX) somewhere specific.
 
 > [!NOTE]
 > Local diarization runs entirely on your machine and needs noticeably more RAM,

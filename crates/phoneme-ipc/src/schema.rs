@@ -199,6 +199,27 @@ pub enum Request {
         /// Max rows to return (clamped server-side to a bounded window).
         limit: u32,
     },
+    /// All saved searches (user-named library-filter snapshots), most-recently-
+    /// updated first. Ok = JSON array of `SavedSearch`. GUI saved-searches menu,
+    /// migrated from webview `localStorage` into the catalog.
+    ListSavedSearches,
+    /// Insert or update a saved search by id. The frontend owns the by-name
+    /// upsert and rename-conflict rules and picks the id to write, so this is a
+    /// plain by-id upsert. Ok = `{}`. GUI save / rename / update-filter.
+    UpsertSavedSearch {
+        /// Stable id; the upsert key.
+        id: String,
+        /// User-chosen name.
+        name: String,
+        /// The library filter snapshot as opaque JSON (a serialized `UiFilter`).
+        filter_json: String,
+    },
+    /// Delete a saved search by id (unknown ids are a no-op). Ok =
+    /// `{"removed":bool}`. GUI saved-searches delete.
+    DeleteSavedSearch {
+        /// The saved-search id to remove.
+        id: String,
+    },
     /// Fetch all recordings belonging to a single meeting session (the two
     /// tracks linked by a shared `meeting_id`), ordered by track then time.
     /// Additive to `ListRecordings` — grouping is a presentation concern, so
@@ -571,6 +592,50 @@ pub enum Request {
         name: String,
     },
 
+    // ── Named-speaker recognition (#9) ───────────────────────────────────
+    /// On-demand named-speaker recognition for a recording: the still-unnamed
+    /// diarized speakers whose voiceprints match a known voice. Ok = JSON array
+    /// of `SpeakerSuggestion` (empty when recognition is off or nothing
+    /// matches). GUI detail pane.
+    RecognizeSpeakers {
+        /// The recording to recognize speakers in.
+        id: RecordingId,
+    },
+    /// Dismiss a recognized-speaker suggestion so it isn't offered again for that
+    /// recording + speaker. Ok = `{}`. GUI detail-pane ✗ on a suggestion chip.
+    DismissSpeakerSuggestion {
+        /// The recording.
+        id: RecordingId,
+        /// The 1-based speaker label whose suggestion to dismiss.
+        speaker_label: i64,
+    },
+    /// The named-voice library — id, name, and sample count per enrolled voice.
+    /// Ok = JSON array of `NamedVoice`. GUI Speaker Library manager.
+    ListNamedVoices,
+    /// Rename a named voice. Ok = `{}`. GUI Speaker Library manager.
+    RenameNamedVoice {
+        /// The named-voice id.
+        id: String,
+        /// The new display name.
+        name: String,
+    },
+    /// Merge one named voice into another — re-points the source's samples onto
+    /// the target and deletes the source. Ok = `{"merged":bool}`. GUI Speaker
+    /// Library manager.
+    MergeNamedVoices {
+        /// The voice to merge FROM (removed on success).
+        from_id: String,
+        /// The voice to merge INTO (kept).
+        into_id: String,
+    },
+    /// Forget a named voice — unlink its captures (the raw voiceprints stay) and
+    /// delete the library entry. Ok = `{"removed":bool}`. GUI Speaker Library
+    /// manager.
+    ForgetNamedVoice {
+        /// The named-voice id to forget.
+        id: String,
+    },
+
     // ── Queue (inbox) operations ─────────────────────────────────────────
     // Inspect and manage the durable inbox the queue worker drains. GUI
     // queue panel, `phoneme queue …`.
@@ -623,6 +688,15 @@ pub enum Request {
     /// so the failed badge clears. GUI failure panel, `phoneme queue
     /// clear-failed`.
     ClearFailed,
+    /// Remove ONE quarantined payload from the inbox `failed/` folder by id — the
+    /// per-item counterpart to [`ClearFailed`], so a single acknowledged failure
+    /// can be dismissed without wiping the whole quarantine. The catalog row is
+    /// untouched. Ok `{"removed":bool}`; emits `QueueDepthChanged` when something
+    /// was removed. GUI per-item dismiss, `phoneme queue dismiss-failed <id>`.
+    DismissFailed {
+        /// The recording id whose `failed/<id>.json` quarantine file to remove.
+        id: RecordingId,
+    },
     /// Remove ALL still-pending items from the queue at once ("clear queue").
     /// The currently-processing item is left untouched. Each removed
     /// recording is marked `cancelled`. Ok `{"removed":n}`; emits
@@ -654,12 +728,19 @@ pub enum Request {
     /// Liveness + identity probe. Ok `{"running":true,"pid":n,"version":"…",
     /// "whisper_preferred_port":n,"whisper_effective_port":n|null,
     /// "preview_whisper_preferred_port":n|null,
-    /// "preview_whisper_effective_port":n|null}`. The `preferred` ports are
-    /// the configured values; the `effective` ports are what the supervisors
-    /// actually bound (they fall back to a free port when a foreign app holds
-    /// the preferred one) and are `null` while that server isn't running —
-    /// clients probing the local server must dial the effective port when
-    /// present. `version` drives the tray/CLI stale-daemon handshake.
+    /// "preview_whisper_effective_port":n|null,
+    /// "dictation_whisper_preferred_port":n|null,
+    /// "dictation_whisper_effective_port":n|null}`. There are three port pairs:
+    /// the main whisper-server, the optional `[preview_whisper]` server, and the
+    /// optional dedicated `[in_place.stt]` dictation server. The `preferred`
+    /// ports are the configured values (`null` when that server isn't
+    /// configured); the `effective` ports are what the supervisors actually
+    /// bound (they fall back to a free port when a foreign app holds the
+    /// preferred one) and are `null` while that server isn't running — clients
+    /// probing the local server must dial the effective port when present (the
+    /// tray Doctor and the CLI `phoneme doctor` both read
+    /// `dictation_whisper_effective_port`). `version` drives the tray/CLI
+    /// stale-daemon handshake.
     /// `phoneme daemon status`, the GUI daemon panel.
     DaemonStatus,
     /// Ask the daemon to exit. Replies Ok `null` FIRST — the actual trigger

@@ -99,6 +99,7 @@ pub fn record_start() -> Request {
         in_place: false,
         recipe_id: None,
         whisper_model: None,
+        source: None,
     }
 }
 

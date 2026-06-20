@@ -101,6 +101,12 @@ meeting conversation — so one rename relabels them all.
 > and the label reverts to `Speaker N` — and you can re-rename a speaker as often
 > as you like.
 
+**Remembered across recordings.** With local diarization, naming a speaker also
+**enrolls their voice**, so the next recording that voice appears in suggests the
+name — *"Sounds like **Alex** · 82% match"* — for you to accept with one click. See
+[Recognize named speakers](diarization_and_whisper.md) for the full flow and the
+Speaker Library.
+
 ## 📜 Transcript views in the detail pane
 
 Open a recording and the right pane shows the editable transcript by default.

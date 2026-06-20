@@ -21,7 +21,7 @@ daemon-is-down state is itself the answer for them, so they print
 
 | Behavior | Commands |
 |----------|----------|
-| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `notes`, `edit`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed`, `tag add/update/delete/attach/detach/clear-suggestions/merge`, `profile use`, `hook test`, `export` (zip and `--captions`), `config reload`, `daemon start` |
+| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `notes`, `edit`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed/dismiss-failed`, `tag add/update/delete/attach/detach/clear-suggestions/merge`, `profile use`, `hook test`, `export` (zip and `--captions`), `config reload`, `daemon start` |
 | **Observe-only** (fail fast with exit 3 when no daemon) | `list`, `show`, `search`, `watch`, `doctor`, `daemon status`, `queue list/counts/status`, `queue skip`*, `tag list/for/usage`, `meeting tracks`, `profile list` |
 | **Purely local** (no daemon involved at all) | `config` (print), `config path`, `config set`, `profile save`, `version` |
 
@@ -446,6 +446,9 @@ phoneme queue cancel-all
 
 # Empty the inbox failed/ quarantine ("dismiss failed")
 phoneme queue clear-failed
+
+# Dismiss ONE quarantined item by id (the per-item counterpart to clear-failed)
+phoneme queue dismiss-failed 20260519T143500823
 ```
 
 ### 🗑️ `phoneme delete <ID>`

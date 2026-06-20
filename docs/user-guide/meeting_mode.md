@@ -99,6 +99,13 @@ Your final transcript will look like this:
 - **[Speaker 1]**: "I love it, but we need to tweak the colors."
 - **[Speaker 2]**: "Agreed, let's make it more vibrant."
 
+> [!TIP]
+> **Name a speaker once and Phoneme remembers them.** Renaming `Speaker 1` to a
+> teammate's name enrolls their voice, so your next meeting's merged view suggests
+> *"🔎 Recognized voices: Speaker N sounds like &lt;name&gt;"* — label the regulars
+> with one click. See [Recognize named speakers](diarization_and_whisper.md) for the
+> full flow and the Speaker Library.
+
 ## 🏆 Best Practices for Meeting Mode
 
 > [!TIP]

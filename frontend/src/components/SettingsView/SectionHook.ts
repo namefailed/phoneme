@@ -22,6 +22,7 @@ export class SectionHook {
     if (typeof w.allow_private_network !== "boolean") w.allow_private_network = false;
     if (typeof w.allow_http !== "boolean") w.allow_http = false;
     if (typeof w.hmac_secret !== "string") w.hmac_secret = "";
+    if (typeof w.max_retries !== "number") w.max_retries = 2;
     if (typeof w.custom_headers !== "object" || w.custom_headers === null || Array.isArray(w.custom_headers)) {
       w.custom_headers = {};
     }
@@ -96,6 +97,16 @@ export class SectionHook {
           )}</div>
           <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             When set, every webhook POST carries an <code>X-Phoneme-Signature: sha256=&lt;hex&gt;</code> header — HMAC-SHA256 of the exact body — so your receiver can verify the request really came from this Phoneme install and wasn't tampered with. Leave blank to disable signing. Stored encrypted (DPAPI); it never leaves your machine in plaintext.
+          </span>
+        </div>
+        <div class="settings-field">
+          <label>Retries</label>
+          <div>${renderField(
+            { key: "webhook.max_retries", label: "", kind: "number" },
+            this.config.webhook.max_retries ?? 2,
+          )}</div>
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
+            How many times to retry a failed webhook POST after the first attempt, with exponential backoff (~250ms&nbsp;→&nbsp;2s). Only <b>transient</b> failures retry — a timeout, connection error, HTTP 429, or 5xx; a 4xx (your receiver refusing it) and a blocked target fail immediately. Default <b>2</b>; set <b>0</b> to disable.
           </span>
         </div>
         <div class="settings-field stacked">

@@ -355,7 +355,7 @@ pub fn assign_words<'a>(
     frame_step: f64,
     frame_duration: f64,
     min_turn: f64,
-) -> (Vec<(&'a WordSpan, usize)>, usize) {
+) -> (Vec<(&'a WordSpan, usize)>, usize, Vec<usize>) {
     use std::collections::HashMap;
 
     // Non-empty words only, mirroring `label_segments` skipping empty segments.
@@ -402,7 +402,55 @@ pub fn assign_words<'a>(
         out.push((*word, idx));
     }
 
-    (out, next_idx - 1)
+    // Invert label_to_idx into idx → column, so callers can fetch each speaker's
+    // centroid voiceprint (see `speaker_voiceprints`). 1-based labels are dense,
+    // so `speaker_columns[idx - 1]` holds the discrete-diarization column for
+    // speaker label `idx`.
+    let num = next_idx - 1;
+    let mut speaker_columns = vec![0usize; num];
+    for (label, &idx) in &label_to_idx {
+        if (1..=num).contains(&idx) {
+            if let Some(col) = parse_speaker_column(label) {
+                speaker_columns[idx - 1] = col;
+            }
+        }
+    }
+
+    (out, num, speaker_columns)
+}
+
+/// One speaker's voiceprint from a completed local diarization: the integer
+/// `label` (matching the transcript's `[Speaker N]` and the `speaker_names`
+/// table) paired with its L2-normalized centroid embedding.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpeakerVoiceprint {
+    /// The 1-based speaker label, as assigned by [`assign_words`].
+    pub label: usize,
+    /// The L2-normalized centroid embedding for this speaker.
+    pub centroid: Vec<f32>,
+}
+
+/// Per-speaker centroid voiceprints for a completed diarization, keyed by the
+/// same labels [`assign_words`] assigns (and the transcript + `speaker_names`
+/// use). `speaker_columns` is the `assign_words` third return value (label → the
+/// discrete-diarization column). Speakers whose column has no finite centroid are
+/// skipped. Used to capture voiceprints for cross-recording recognition (#9).
+pub fn speaker_voiceprints(
+    diar: &LocalDiarization,
+    speaker_columns: &[usize],
+) -> Vec<SpeakerVoiceprint> {
+    let num_cols = diar.discrete_diarization.ncols();
+    let centroids = cluster_centroids(&diar.embeddings, &diar.hard_clusters, num_cols);
+    let mut out = Vec::new();
+    for (i, &col) in speaker_columns.iter().enumerate() {
+        if let Some(Some(centroid)) = centroids.get(col) {
+            out.push(SpeakerVoiceprint {
+                label: i + 1,
+                centroid: centroid.clone(),
+            });
+        }
+    }
+    out
 }
 
 /// A per-word speaker turn shorter than this (seconds) is treated as a diarizer
@@ -436,6 +484,9 @@ pub(crate) const WORD_MIN_TURN_SECS: f64 = 0.6;
 /// (~10 tokens ≈ ~5 spoken words). It only ever applies to runs bracketed by the
 /// SAME speaker (one voice either side), where even a longish island is almost
 /// always that voice continuing, not a real interjection.
+// TODO(audit): smooth on spoken-word UNITS rather than this subword-token count
+// (coalesce tokens into whole words first, then size islands in words), so the
+// bound stops being a fuzzy "~2x" estimate. Deferred — out of this lane.
 const MAX_ISLAND_WORDS: usize = 10;
 
 /// The larger ceiling for a same-speaker-bracketed island that is also strictly
@@ -945,7 +996,16 @@ impl QueuedDiarizer {
 
         tracing::info!("loading local diarization pipeline (segmentation + embedding models)");
         let started = std::time::Instant::now();
-        let pipeline = OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)?;
+        // A custom `[diarization].models_dir` loads a user-supplied bundle
+        // (segmentation + embedding ONNX); empty (the default) downloads/uses the
+        // pretrained models. The diarizer cache is keyed on the whole config, so
+        // changing the dir reloads the pipeline.
+        let dir = cfg.models_dir.trim();
+        let pipeline = if dir.is_empty() {
+            OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)?
+        } else {
+            OwnedDiarizationPipeline::from_dir(dir, ExecutionMode::Cpu)?
+        };
 
         // Map the user-facing knobs onto speakrs' PipelineConfig. The diarizer
         // cache is keyed on the whole DiarizationConfig, so changing any of these
@@ -1122,11 +1182,21 @@ fn cluster_centroids(
         .collect()
 }
 
-/// Map each speaker column to its canonical (merged) column via single-linkage
+/// Map each speaker column to its canonical (merged) column via complete-linkage
 /// agglomerative merging on centroid cosine ≥ `threshold` (see
 /// [`SPEAKER_MERGE_COSINE`]). The smallest column index in a merged group is the
 /// canonical one (so first-appearance numbering stays sensible). Columns with no
 /// centroid never merge. A no-op (identity map) when nothing is similar enough.
+///
+/// Complete-linkage (not single-linkage) is the point: two groups merge only when
+/// EVERY cross-pair of their members clears `threshold`. Single-linkage would
+/// chain A~B~C into one speaker off two borderline pairs even when A~C are clearly
+/// distinct voices — under-clustering, the worst diarization failure for a user.
+/// Requiring all cross-pairs to clear keeps that transitive collapse from
+/// happening: a borderline-similar pair only merges its own two fragments.
+// TODO(audit): an expected-speakers prior (clamp/seed the merged count toward a
+// caller-supplied target speaker count) would go here, gating or guiding which
+// groups merge. Deferred — out of this lane.
 fn merge_similar_clusters(
     embeddings: &Array3<f32>,
     hard_clusters: &Array2<i32>,
@@ -1134,36 +1204,54 @@ fn merge_similar_clusters(
     threshold: f32,
 ) -> Vec<usize> {
     let centroids = cluster_centroids(embeddings, hard_clusters, num_cols);
-    let mut parent: Vec<usize> = (0..num_cols).collect();
-    fn find(parent: &mut [usize], x: usize) -> usize {
-        let mut root = x;
-        while parent[root] != root {
-            root = parent[root];
+
+    // Precompute pairwise cosines once; `None` for any pair where either column
+    // lacks a centroid (those never merge).
+    let cos = |i: usize, j: usize| -> Option<f32> {
+        match (&centroids[i], &centroids[j]) {
+            (Some(ci), Some(cj)) => Some(ci.iter().zip(cj).map(|(a, b)| a * b).sum()),
+            _ => None,
         }
-        let mut cur = x;
-        while parent[cur] != root {
-            let next = parent[cur];
-            parent[cur] = root;
-            cur = next;
-        }
-        root
-    }
-    for i in 0..num_cols {
-        for j in (i + 1)..num_cols {
-            if let (Some(ci), Some(cj)) = (&centroids[i], &centroids[j]) {
-                let cos: f32 = ci.iter().zip(cj).map(|(a, b)| a * b).sum();
-                if cos >= threshold {
-                    let ri = find(&mut parent, i);
-                    let rj = find(&mut parent, j);
-                    if ri != rj {
-                        let (keep, drop) = if ri < rj { (ri, rj) } else { (rj, ri) };
-                        parent[drop] = keep;
-                    }
+    };
+
+    // Groups of column indices, each kept sorted; the group's canonical column is
+    // its smallest index. Start fully split, then greedily merge.
+    let mut groups: Vec<Vec<usize>> = (0..num_cols).map(|c| vec![c]).collect();
+
+    // Complete-linkage: a group pair is mergeable only when every cross-pair of
+    // members clears `threshold`. Repeat until a full pass merges nothing — one
+    // merge can unblock or block later ones, so we don't stop after a single pass.
+    loop {
+        let mut merged_any = false;
+        'outer: for a in 0..groups.len() {
+            for b in (a + 1)..groups.len() {
+                let all_clear = groups[a]
+                    .iter()
+                    .all(|&i| groups[b].iter().all(|&j| cos(i, j).is_some_and(|v| v >= threshold)));
+                if all_clear {
+                    let moved = std::mem::take(&mut groups[b]);
+                    groups[a].extend(moved);
+                    groups[a].sort_unstable();
+                    groups.remove(b);
+                    merged_any = true;
+                    // Indices shifted by the `remove`; restart the scan.
+                    break 'outer;
                 }
             }
         }
+        if !merged_any {
+            break;
+        }
     }
-    (0..num_cols).map(|c| find(&mut parent, c)).collect()
+
+    let mut canon: Vec<usize> = (0..num_cols).collect();
+    for group in &groups {
+        let root = *group.iter().min().expect("group is never empty");
+        for &c in group {
+            canon[c] = root;
+        }
+    }
+    canon
 }
 
 /// Parse a `SPEAKER_{k:02}` label back to its column index `k`.
@@ -1271,6 +1359,20 @@ pub fn run_local_diarization(
             if let Some(k) = parse_speaker_column(&seg.speaker) {
                 if k < num_cols && canon[k] != k {
                     seg.speaker = column_label(canon[k]);
+                }
+            }
+        }
+        // Remap hard_clusters through canon too. `speaker_voiceprints` computes a
+        // persisted voiceprint via `cluster_centroids`, which buckets embeddings by
+        // hard_clusters id — without this remap a merged speaker's centroid would
+        // aggregate only its canonical column's ORIGINAL fragment, dropping the
+        // merged-in clusters' embeddings and weakening cross-recording matching
+        // (audit M1). `-1` (unassigned) cells are left as-is.
+        for v in result.hard_clusters.0.iter_mut() {
+            if *v >= 0 {
+                let c = *v as usize;
+                if c < num_cols {
+                    *v = canon[c] as i32;
                 }
             }
         }
@@ -1677,7 +1779,7 @@ mod tests {
             word(frame_mid(3), frame_mid(4), "gamma"), // frames 3..=4 → speaker 1
             word(frame_mid(5), frame_mid(5), "delta"), // frame 5      → speaker 1
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 2, "two distinct speakers used");
         let idxs: Vec<usize> = labeled.iter().map(|(_, i)| *i).collect();
         // First-appearance order: speaker 0 → index 1, speaker 1 → index 2.
@@ -1700,7 +1802,7 @@ mod tests {
             [0.0, 1.0], // 5
         ];
         let words = vec![word(frame_mid(1), frame_mid(5), "straddle")]; // frames 1..=5
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 1);
         // Only one word, so it's the first-appearing speaker → index 1, but it is
         // speaker column 1 (the dominant one), not column 0 where it started.
@@ -1721,7 +1823,7 @@ mod tests {
             word(frame_mid(1), frame_mid(1), "voiced"), // frame 1 → speaker 0
             word(frame_mid(2), frame_mid(2), "silent"), // frame 2 → all-zero → unattributed
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 1, "only the voiced word counts toward speaker count");
         assert_eq!(labeled[0].1, 1);
         assert_eq!(labeled[1].1, 0, "silent word is unattributed");
@@ -1735,7 +1837,7 @@ mod tests {
             word(frame_mid(0), frame_mid(0), "a"),  // frame 0 → speaker 0
             word(frame_mid(1), frame_mid(1), "b"),  // frame 1 → speaker 1
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(labeled.len(), 2, "the whitespace word is dropped");
         assert_eq!(n, 2);
         assert_eq!(labeled[0].0.text, "a");
@@ -1763,7 +1865,7 @@ mod tests {
     fn empty_matrix_attributes_nothing() {
         let m: Array2<f32> = Array2::zeros((0, 0));
         let words = vec![word(frame_mid(0), frame_mid(1), "x")];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 0);
         assert_eq!(labeled[0].1, 0, "no columns → unattributed");
     }
@@ -2149,6 +2251,51 @@ mod tests {
         let hard = ndarray::Array2::from_shape_vec((2, 1), vec![0, 1]).unwrap();
         let canon = merge_similar_clusters(&embeddings, &hard, 2, 0.5);
         assert_eq!(canon, vec![0, 1], "two distinct voices stay separate");
+    }
+
+    /// Complete-linkage guard: a borderline chain A~B~C must NOT collapse all
+    /// three into one speaker. cos(A,B)=cos(B,C)≈0.55 (over threshold) but
+    /// cos(A,C)≈0.30 (well under) — A and C are clearly two voices, so the only
+    /// merge complete-linkage allows is the closest pair. Single-linkage would
+    /// wrongly chain them via B (under-clustering); this asserts it doesn't.
+    #[test]
+    fn voiceprint_merge_does_not_chain_distinct_voices() {
+        // Pick unit centroids on the circle so the pairwise cosines are exactly
+        // the angle cosines: A at 0 rad, B at θ, C at 2θ with cos θ = 0.55. Then
+        // cos(A,B)=cos(B,C)=0.55 and cos(A,C)=cos(2θ)=2*0.55^2-1=-0.395 (< 0.5).
+        let t = 0.55_f32.acos();
+        let centroid = |ang: f32| -> Vec<f32> { vec![ang.cos(), ang.sin()] };
+        let a = centroid(0.0);
+        let b = centroid(t);
+        let c = centroid(2.0 * t);
+        let flat: Vec<f32> = [a, b, c].concat();
+        let embeddings = ndarray::Array3::from_shape_vec((3, 1, 2), flat).unwrap();
+        let hard = ndarray::Array2::from_shape_vec((3, 1), vec![0, 1, 2]).unwrap();
+        let canon = merge_similar_clusters(&embeddings, &hard, 3, 0.5);
+        // No chain-collapse: A,B,C are not all one column. C in particular stays
+        // its own canonical column — it is a genuinely distinct voice from A.
+        assert_eq!(canon[2], 2, "C (cos≈0.30 vs A) keeps its own column, no chaining");
+        assert!(
+            canon[0] != canon[2],
+            "A and C never share a speaker via the B bridge: {canon:?}"
+        );
+    }
+
+    /// A genuine same-voice over-split pair (A~B well over threshold, no third
+    /// voice in the way) still merges under complete-linkage — the conservative
+    /// linkage doesn't break the legitimate merge case.
+    #[test]
+    fn voiceprint_merge_still_merges_a_true_over_split_pair() {
+        // A=[1,0], B=[0.9,~0.436] → cos(A,B)=0.9 ≥ 0.5.
+        let b1 = 0.9_f32;
+        let embeddings = ndarray::Array3::from_shape_vec(
+            (2, 1, 2),
+            vec![1.0, 0.0, b1, (1.0 - b1 * b1).sqrt()],
+        )
+        .unwrap();
+        let hard = ndarray::Array2::from_shape_vec((2, 1), vec![0, 1]).unwrap();
+        let canon = merge_similar_clusters(&embeddings, &hard, 2, 0.5);
+        assert_eq!(canon, vec![0, 0], "a true over-split pair still folds into one");
     }
 
     /// Diagnostic (ignored): for each WAV in CAL_WAV1/CAL_WAV2, print speakrs'

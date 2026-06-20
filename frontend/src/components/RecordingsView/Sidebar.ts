@@ -219,7 +219,7 @@ export class SidebarElement extends LitElement {
                   : ""}
               </div>
               ${this.tags.length === 0 ? html`
-                <div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No tags yet. Add tags from a note's detail view.</div>
+                <div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No tags yet. Add tags from a recording's detail view.</div>
               ` : this.tags.map(t => html`
                 <div class="sidebar-item ${f.tag_id === t.id ? 'active' : ''}" @click=${() => this.setTagFilter(t.id)}>
                   <span class="sidebar-icon" style="color: var(--accent);">#</span>

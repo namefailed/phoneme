@@ -58,6 +58,11 @@ pub struct Transcription {
     /// cloud STT backend (which ignores the hint) or a silent mic track never
     /// gets an orphaned/mislabelled `speaker_names` row.
     pub fixed_speaker_applied: bool,
+    /// Per-speaker centroid voiceprints, keyed by the same integer labels as the
+    /// transcript and `speaker_names`. Populated ONLY on the local-diarization
+    /// paths (cloud providers and plain text leave it empty); the pipeline
+    /// persists them for cross-recording named-speaker recognition (#9).
+    pub speaker_voiceprints: Vec<crate::diarization::SpeakerVoiceprint>,
 }
 
 impl Transcription {
@@ -623,6 +628,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
                     segments,
                     words,
                     fixed_speaker_applied: true,
+                    speaker_voiceprints: Vec::new(),
                 });
             }
         }
@@ -661,6 +667,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             segments,
             words,
             fixed_speaker_applied: false,
+            speaker_voiceprints: Vec::new(),
         })
     }
 }
@@ -756,6 +763,7 @@ pub(crate) async fn diarize_transcript(
                     .map(|w| TranscriptWord { speaker: None, ..w })
                     .collect(),
                 fixed_speaker_applied: false,
+                speaker_voiceprints: Vec::new(),
             }
         };
 
@@ -838,6 +846,7 @@ fn diarize_per_segment(
             segments: segs,
             words: strip_word_speakers(words),
             fixed_speaker_applied: false,
+            speaker_voiceprints: Vec::new(),
         };
     }
 
@@ -874,6 +883,7 @@ fn diarize_per_segment(
         segments: out_segments,
         words: strip_word_speakers(words),
         fixed_speaker_applied: false,
+        speaker_voiceprints: Vec::new(),
     }
 }
 
@@ -901,7 +911,7 @@ fn diarize_per_word(
         })
         .collect();
 
-    let (labeled, num_speakers) = assign_words(
+    let (labeled, num_speakers, speaker_columns) = assign_words(
         &spans,
         &diar.discrete_diarization,
         speakrs::pipeline::FRAME_STEP_SECONDS,
@@ -991,6 +1001,9 @@ fn diarize_per_word(
         segments: out_segments,
         words: out_words,
         fixed_speaker_applied: false,
+        // Capture each speaker's centroid voiceprint for cross-recording
+        // recognition (#9); keyed by the same labels emitted above.
+        speaker_voiceprints: crate::diarization::speaker_voiceprints(diar, &speaker_columns),
     })
 }
 
@@ -1177,6 +1190,7 @@ impl TranscriptionProvider for DeepgramProvider {
             segments: Vec::new(),
             words: plain_words.clone(),
             fixed_speaker_applied: false,
+            speaker_voiceprints: Vec::new(),
         };
 
         if !self.diarize || dg_words.is_empty() {
@@ -1253,6 +1267,7 @@ impl TranscriptionProvider for DeepgramProvider {
             segments,
             words,
             fixed_speaker_applied: false,
+            speaker_voiceprints: Vec::new(),
         })
     }
 }
@@ -1493,6 +1508,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                             segments: Vec::new(),
                             words: words.clone(),
                             fixed_speaker_applied: false,
+                            speaker_voiceprints: Vec::new(),
                         };
 
                         if !self.diarize || t.utterances.is_none() {
@@ -1537,6 +1553,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                             segments,
                             words,
                             fixed_speaker_applied: false,
+                            speaker_voiceprints: Vec::new(),
                         });
                     }
                     "error" => {

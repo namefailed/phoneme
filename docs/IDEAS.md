@@ -33,12 +33,17 @@ Auto-split a 90-minute meeting on long silences into navigable chapters.
 
 ### Live meeting subtitles overlay
 Floating captions during Meeting Mode without alt-tabbing.
-- **Status: partially shipped.** A system-wide, always-on-top, frameless live-preview
-  overlay now floats the caption over any app (opt-in via `interface.preview_overlay`;
-  `src-tauri/src/overlay.rs`, `frontend/overlay.*`). It shows the **live preview**
-  stream (a rolling re-transcription), not yet true word-by-word real-time captions.
-- **Remaining:** lower-latency real-time captioning and the multi-monitor / click-through
-  UX decisions.
+- **Status: largely shipped.** A system-wide, always-on-top, frameless live-preview
+  overlay floats the caption over any app (opt-in via `interface.preview_overlay`;
+  `src-tauri/src/overlay.rs`, `frontend/overlay.*`), **and** a second independent
+  always-on-top recording-indicator overlay (dot + waveform + timer;
+  `src-tauri/src/indicator.rs`) works even with captions off. Both are
+  **multi-monitor-aware** (per-label window-state geometry). The caption shows the
+  **live preview** stream (a rolling re-transcription), not yet true word-by-word
+  real-time captions.
+- **Remaining:** only lower-latency, true word-by-word real-time captioning (this is
+  the same thing as the "Word-by-word streaming transcription" item in ROADMAP →
+  *Not convinced yet*). Multi-monitor and the indicator overlay are done.
 
 ### Team glossary sync
 Shared names/terms (custom vocabulary) across machines/teammates.
@@ -46,6 +51,32 @@ Shared names/terms (custom vocabulary) across machines/teammates.
   opt-in S3 cloud-sync planned for v2.0. Single-machine custom vocabulary (v1.10)
   has to exist and prove useful first.
 - **Promote when:** custom vocabulary ships and teams ask to share it.
+- **Cheap prerequisite (not parked):** a plain **export/import file** for a glossary
+  or a Playbook recipe sidesteps the sync question entirely — promote that first if
+  anyone asks to share config.
+
+### Smaller quality-of-life ideas
+A grab-bag of low-cost ideas that don't yet clear the bar on their own:
+- **WER / accuracy benchmark harness** — a dev-only "transcribe a reference clip →
+  score against ground-truth" twin of the DER harness, so a model/provider swap can't
+  silently degrade *what-was-said* accuracy. Promote if accuracy regressions actually bite.
+- **Per-recording confidence badge** — roll the per-word probabilities (already used
+  by the squiggle) into one "92% confident" chip + a jump to low-confidence spans.
+- **Trim / crop dead air; Opus/MP3 re-export** — niche audio editing on top of the
+  existing silence detector + decode pipeline; promote when someone reuses the audio
+  outside transcription.
+- **Disk-space pre-flight on record-start; background re-embed progress in the UI** —
+  small ops guardrails (Doctor only warns after the fact today).
+- **Push-to-talk max-duration safety cap** — a per-Hold limit separate from the 3 h
+  absolute cap; one config knob, mitigates the dropped-key-up stuck-recording footgun.
+
+### MCP / REST surface breadth
+The CLI has near-total IPC parity, but **MCP exposes ~16 of 135 requests and REST ~9** —
+no meeting/queue/tag/edit/re-run ops, and `REST record/start` is hold-mode-only.
+- **Why parked here, not roadmapped:** the in-app **Phoneme Agent** (ROADMAP H2) and
+  the **browser extension** (H2, rides REST) both *depend* on broader coverage, so the
+  breadth work is best scoped *with* them rather than as a standalone item.
+- **Promote when:** either of those is picked up, or an automation user hits the wall.
 
 ---
 

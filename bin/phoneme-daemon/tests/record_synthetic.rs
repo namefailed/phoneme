@@ -58,6 +58,7 @@ async fn record_start_stop_creates_row_and_transcribes() {
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut done = false;
     let mut got_transcript = false;
+    let mut track = None;
     while Instant::now() < deadline {
         let r = h
             .client
@@ -69,6 +70,7 @@ async fn record_start_stop_creates_row_and_transcribes() {
             if status == "done" {
                 done = true;
                 got_transcript = value["transcript"].is_string();
+                track = value["track"].as_str().map(|s| s.to_string());
                 break;
             }
         }
@@ -79,6 +81,14 @@ async fn record_start_stop_creates_row_and_transcribes() {
     assert!(
         got_transcript,
         "pipeline should write a transcript for the completed recording"
+    );
+    // A single recording records its real capture source on `track` (the list's
+    // Source column reads this); the global default is the microphone, so it must
+    // be "mic" — not None, not "system".
+    assert_eq!(
+        track.as_deref(),
+        Some("mic"),
+        "a default-source recording must label its track 'mic'"
     );
 
     // Exactly one row in the catalog.
@@ -104,6 +114,60 @@ async fn record_start_stop_creates_row_and_transcribes() {
     assert!(
         has_wav,
         "a WAV file should have been written to the audio dir"
+    );
+}
+
+/// A recording started with an explicit `source = system_audio` (as a custom
+/// hotkey can request) records THAT source on its `track`, so the list's Source
+/// column reflects the real capture source rather than assuming "single == mic".
+/// The synthetic backend yields the same silence regardless of source, so this
+/// exercises the track-labelling path end-to-end without real loopback hardware.
+#[tokio::test]
+async fn record_with_system_audio_source_labels_track() {
+    std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+    let mut h = DaemonHarness::start().await;
+
+    let resp = h
+        .client
+        .request(Request::RecordStart {
+            mode: phoneme_core::RecordMode::Hold,
+            in_place: false,
+            recipe_id: None,
+            whisper_model: None,
+            source: Some(phoneme_core::config::CaptureSource::SystemAudio),
+        })
+        .await
+        .unwrap();
+    let id = match resp {
+        Response::Ok(v) => v["id"].as_str().expect("RecordStart id").to_string(),
+        Response::Err(e) => panic!("RecordStart failed: {e:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    h.client.request(Request::RecordStop).await.unwrap();
+
+    let rid = phoneme_core::RecordingId::parse(id).expect("id should be canonical");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut track = None;
+    while Instant::now() < deadline {
+        if let Response::Ok(value) = h
+            .client
+            .request(Request::GetRecording { id: rid.clone() })
+            .await
+            .unwrap()
+        {
+            if value["status"].as_str() == Some("done") {
+                track = value["track"].as_str().map(|s| s.to_string());
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    assert_eq!(
+        track.as_deref(),
+        Some("system"),
+        "a source=system_audio recording must label its track 'system'"
     );
 }
 

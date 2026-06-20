@@ -144,8 +144,6 @@ The magic of the LLM is in the prompt. You can select one of our default presets
 > **The Meeting Summarizer (Requires Meeting Mode)**
 > This is a multi-speaker transcript. Provide a concise summary of the decisions made, and list the action items assigned to each speaker. Output ONLY the summary and action items.
 
-Enjoy perfectly polished transcripts!
-
 ## 🧾 Auto AI Summary
 
 Separately from cleanup, Phoneme can produce a short **AI summary** of each recording.

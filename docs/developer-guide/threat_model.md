@@ -71,7 +71,8 @@ update this file in the same PR.
 | WebView | API keys are **masked** before `read_config` crosses to the renderer and restored from disk on `write_config`, so secrets never reach the WebView | `phoneme-tray::commands` (`mask_config_secrets`/`unmask_config_secrets`) | S-H2 (in part) |
 | Logging | `Debug` for config redacts API keys | `phoneme-core::config` | — |
 | Files on disk | API keys are encrypted at rest with Windows DPAPI (`CryptProtectData`, per-user, `dpapi:v1:` prefix); decrypted only in-process on config load, and legacy plaintext migrates on the next save | `phoneme-core::secret_crypto` + `config.rs` | S-H2 |
-| Outbound network | Webhook SSRF guard: loopback targets always allowed (local-first); non-loopback private ranges (RFC1918, link-local, IPv6 ULA) blocked unless `[webhook] allow_private_network = true`; public targets must be HTTPS unless `[webhook] allow_http = true`. Hostnames are resolved and every address classified (most restrictive wins), and the webhook client never follows redirects, so an allowed endpoint can't bounce the POST somewhere blocked | `phoneme-core::webhook` | S-H1 |
+| Outbound network | Webhook SSRF guard: loopback targets always allowed (local-first); non-loopback private ranges (RFC1918, v4 link-local `169.254/16`, CGNAT `100.64/10`, IPv6 ULA, IPv6 link-local) blocked unless `[webhook] allow_private_network = true`; public targets must be HTTPS unless `[webhook] allow_http = true`. Hostnames are resolved and every address classified (most restrictive wins), and the webhook client never follows redirects, so an allowed endpoint can't bounce the POST somewhere blocked | `phoneme-core::webhook` | S-H1 |
+| Outbound network | Optional HMAC-SHA256 webhook signing: a non-empty `[webhook] hmac_secret` adds an `X-Phoneme-Signature: sha256=<hex>` header (HMAC over the exact body bytes) so the receiver can verify authenticity; the secret is DPAPI-encrypted at rest and masked in the UI | `phoneme-core::webhook` | S-H1 |
 | IPC pipe | `HookTest` output is redacted before it crosses the pipe: credential-shaped tokens (`sk-`/`ghp_`/`AKIA`-style prefixes, `Bearer` values, `key=`-style assignments) are masked and the text is length-capped — on the failure path too, since `HookFailed` embeds the command's stderr in its message | `phoneme-core::hook::redact_secrets` + `phoneme-daemon::ipc_handler` | — |
 | Tampered downloads | Every artifact the first-run wizard loads or extracts is pinned to an exact SHA-256: the whisper GGML models, the semantic-search ONNX model + tokenizer, and `whisper-bin-x64.zip` (verified **before** it's unzipped). A download whose bytes don't match its pin — or that has no pin — is deleted and the wizard surfaces an error rather than loading it. A unit test fails if a wizard URL has no pin. (The Ollama installer is intentionally unpinned — a third-party auto-updating installer the user launches themselves.) | `phoneme-tray::checksums` (`expected_sha256` / `file_sha256`) | S-H7 |
 
@@ -127,8 +128,10 @@ documented data location both work as-is.
   before POSTing: loopback always allowed (local automation is the point),
   non-loopback private ranges blocked unless `[webhook] allow_private_network =
   true`, public targets HTTPS-only unless `[webhook] allow_http = true`;
-  hostnames resolve-and-classify, redirects are never followed. Optional HMAC
-  signing remains open. (S-H1 — see the mitigations table above.)*
+  hostnames resolve-and-classify, redirects are never followed. Optional
+  HMAC-SHA256 body signing is implemented and tested (a non-empty
+  `[webhook] hmac_secret` adds the `X-Phoneme-Signature` header). (S-H1 — see the
+  mitigations table above.)*
 - ~~**Baseline CSP + narrowed Tauri asset scope**~~ *Done — `tauri.conf.json`
   ships a real production `csp` (plus a `devCsp` for the Vite dev server), and the
   asset-protocol scope is narrowed from `$HOME/**` to the Phoneme audio subtree.

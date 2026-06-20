@@ -37,6 +37,22 @@ fn cue_text(seg: &TranscriptSegment) -> String {
     }
 }
 
+/// Escape a WebVTT cue payload. WebVTT cue text is parsed as HTML by the
+/// `<track>` element, so `&`, `<`, `>` must become entity references or a label
+/// like `R&D` mis-parses and a stray `<` opens a phantom tag. Escaping `>` also
+/// neutralizes a literal `-->` inside the text (it becomes `--&gt;`), which a
+/// parser could otherwise mistake for a cue-timing line. The ampersand is
+/// replaced first so the entities it introduces aren't double-escaped.
+///
+/// SRT is deliberately NOT escaped: it is a plain-text format whose players
+/// render `&`, `<`, `>` literally, so entity-encoding there would corrupt the
+/// output rather than protect it.
+fn escape_vtt(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 
 /// Render segments as an SRT subtitle file (UTF-8, LF line endings).
@@ -93,7 +109,7 @@ pub fn segments_to_vtt(segments: &[TranscriptSegment]) -> String {
         out.push_str(" --> ");
         out.push_str(&end);
         out.push('\n');
-        out.push_str(&cue_text(seg));
+        out.push_str(&escape_vtt(&cue_text(seg)));
         out.push('\n');
         out.push('\n');
     }
@@ -227,6 +243,27 @@ mod tests {
         let segs = [seg_speaker(0, 1000, "Hi.", "Bob")];
         let out = segments_to_vtt(&segs);
         assert!(out.contains("Bob: Hi."), "expected 'Bob: Hi.' in:\n{out}");
+    }
+
+    #[test]
+    fn vtt_escapes_html_metacharacters_in_cue_text() {
+        // `&`, `<`, `>` must be entity-encoded so the `<track>` HTML parser
+        // doesn't mangle "R&D" or open a phantom tag on a stray `<`; escaping
+        // `>` also defuses a literal `-->` in the text into `--&gt;`.
+        let segs = [seg_speaker(0, 1000, "shipped <b>R&D</b> --> done", "R&D")];
+        let out = segments_to_vtt(&segs);
+        assert!(out.contains("R&amp;D: shipped &lt;b&gt;R&amp;D&lt;/b&gt; --&gt; done"));
+        assert!(!out.contains("<b>"), "raw tag leaked into the cue:\n{out}");
+    }
+
+    #[test]
+    fn srt_leaves_metacharacters_literal() {
+        // SRT is plain text — players render `&`/`<`/`>` verbatim, so entity
+        // encoding would corrupt it. The cue text must stay byte-for-byte.
+        let segs = [seg(0, 1000, "R&D <tag>")];
+        let out = segments_to_srt(&segs);
+        assert!(out.contains("R&D <tag>"), "SRT should stay literal:\n{out}");
+        assert!(!out.contains("&amp;"));
     }
 
     #[test]

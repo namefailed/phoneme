@@ -41,6 +41,24 @@ hotkey, the recording takes a **dedicated fast lane**:
    closed, the text is still in Phoneme. Turn "Keep dictations in the library"
    off for fully ephemeral dictation.
 
+## ⌨️ Stream as you speak (experimental)
+
+By default the text lands all at once when you release the key. Turn on
+**Settings → Dictation → "Stream as you speak"** (with delivery set to **Typing**)
+and the words instead appear **live at your cursor as you speak** — like the
+dictation tools built into some operating systems.
+
+It works by typing the live preview's words as they settle, then, the moment you
+stop, **quietly patching them up to the accurate final transcript** — usually just
+finishing the last few words and the closing punctuation. It only ever *adds* text
+while you're speaking (never reaching back to retype), so the cursor doesn't jump
+around mid-sentence.
+
+Two things to know: it surfaces the **live preview's** rough first-pass words
+(corrected at the end), so it reads best with a **fast preview model**
+(Settings → Live Preview); and it's **Typing-only** — it's ignored when delivery
+is set to Pasting. It's off by default and clearly marked experimental.
+
 ## 🗣️ Voice commands
 
 While dictating, a few spoken commands are turned into formatting instead of

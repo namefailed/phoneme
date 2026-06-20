@@ -110,7 +110,7 @@ The audio-source override is ignored for **Meeting** hotkeys — a meeting alway
 
 ## 👥 Diarization
 
-Speaker diarization backend: `none`, local ONNX, Deepgram, or AssemblyAI, plus the local model path. A live warning flags a mismatch (cloud diarization picked but a different provider transcribes). Once a recording is diarized you can rename each `Speaker N` to a real name (persisted per recording, applied across every view). See [Whisper & Diarization](diarization_and_whisper.md) and [Named speakers](search_and_organization.md#-named-speakers).
+Speaker diarization backend: `none`, local ONNX, Deepgram, or AssemblyAI, plus an optional **Models folder** for a custom local bundle. A live warning flags a mismatch (cloud diarization picked but a different provider transcribes). Once a recording is diarized you can rename each `Speaker N` to a real name (persisted per recording, applied across every view). With **Recognize known speakers** on, naming a speaker enrolls their voice so later recordings suggest who they are; the **Speaker Library** here lists, renames, merges, and forgets those voices, and a **Recognition threshold** (Advanced) tunes how strict the match is. See [Whisper & Diarization](diarization_and_whisper.md) and [Named speakers](search_and_organization.md#-named-speakers).
 
 ## 🎨 Appearance
 

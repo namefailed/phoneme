@@ -13,7 +13,10 @@
 //!   item and retry with exponential backoff (30 s → 5 min), emitting
 //!   `WhisperStatusChanged { reachable: false }`; after
 //!   `MAX_TRANSIENT_ATTEMPTS` consecutive misses the item is declared failed
-//!   so a permanently dead server can't loop one recording forever.
+//!   so a permanently dead server can't loop one recording forever. The
+//!   matching `{ reachable: true }` is emitted ONCE on the recovery edge (the
+//!   first run that completes after a down signal), so the UI's error icon
+//!   clears even when recovery happens to land on a run with no transcript.
 //! - **Permanent** pipeline errors are already quarantined by the pipeline;
 //!   the worker just logs and moves on.
 //! - An inbox **claim error** (antivirus lock, NTFS hiccup) retries with the
@@ -35,7 +38,30 @@ use tokio::sync::watch;
 /// failures (unreachable / timeout). High on purpose: with max backoff this is
 /// ~25 minutes of a dead server before an item is declared failed — Doctor's
 /// restart usually heals it long before. Permanent errors never retry.
-const MAX_TRANSIENT_ATTEMPTS: u32 = 5;
+pub(crate) const MAX_TRANSIENT_ATTEMPTS: u32 = 5;
+
+/// What to do with a recording after a transient transcribe failure, decided
+/// purely from the attempt bookkeeping. Pulled out of [`run`]'s match arm so the
+/// give-up threshold is unit-testable without spawning a pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransientOutcome {
+    /// Put the item back in pending and retry after the backoff.
+    Requeue,
+    /// Enough consecutive misses — declare the item failed so a permanently
+    /// dead server can't loop one recording forever.
+    GiveUp,
+}
+
+/// Classify a transient failure from the running attempt count. `attempts` is
+/// the count INCLUDING the failure just observed (i.e. post-increment); once it
+/// reaches `max` the item is given up, otherwise it is requeued for another try.
+pub(crate) fn classify_transient_outcome(attempts: u32, max: u32) -> TransientOutcome {
+    if attempts >= max {
+        TransientOutcome::GiveUp
+    } else {
+        TransientOutcome::Requeue
+    }
+}
 
 pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow::Result<()> {
     let mut backoff = Duration::from_secs(30);
@@ -44,6 +70,15 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
     // failing item eventually lands in failed/ instead of looping forever.
     let mut attempts: std::collections::HashMap<phoneme_core::RecordingId, u32> =
         std::collections::HashMap::new();
+    // Latches when we emit `WhisperStatusChanged { reachable: false }` so we can
+    // emit the matching `{ reachable: true }` exactly once on the recovery edge.
+    // Without this, a transient failure (down → error icon) that then clears via
+    // an idle period — rather than a completed transcription — never sends the
+    // recovery event, so the UI's error icon stays latched. `TranscriptionDone`
+    // happens to clear it on the success-with-output path, but a down server that
+    // simply starts answering health checks again, or a queue that drains to
+    // empty after the server heals, would otherwise leave it stuck.
+    let mut whisper_unreachable = false;
     // Last-seen mtime of the config file. Config is only re-parsed from disk
     // when this changes — a stat() is orders of magnitude cheaper than a full
     // TOML parse + validation on every pipeline run (the common hot path).
@@ -101,9 +136,22 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                     Ok(()) => {
                         backoff = Duration::from_secs(30); // reset on success
                         attempts.remove(&rec_id);
+                        // Recovery edge: a run completed, so whisper is reachable
+                        // again. Emit the matching `reachable: true` ONCE if we
+                        // had previously signalled it down — otherwise the error
+                        // icon stays latched on the down→idle-without-transcription
+                        // path (recovery was only ever incidental via
+                        // `TranscriptionDone`).
+                        if whisper_unreachable {
+                            whisper_unreachable = false;
+                            state
+                                .events
+                                .emit(DaemonEvent::WhisperStatusChanged { reachable: true });
+                        }
                     }
                     Err(e @ Error::WhisperUnreachable { .. })
                     | Err(e @ Error::WhisperTimeout { .. }) => {
+                        whisper_unreachable = true;
                         state
                             .events
                             .emit(DaemonEvent::WhisperStatusChanged { reachable: false });
@@ -113,7 +161,9 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                         // being silently lost while the worker moves on.
                         let tries = attempts.entry(rec_id.clone()).or_insert(0);
                         *tries += 1;
-                        if *tries >= MAX_TRANSIENT_ATTEMPTS {
+                        if classify_transient_outcome(*tries, MAX_TRANSIENT_ATTEMPTS)
+                            == TransientOutcome::GiveUp
+                        {
                             tracing::error!(
                                 id = %rec_id.as_str(),
                                 tries = *tries,

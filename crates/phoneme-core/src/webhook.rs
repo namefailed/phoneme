@@ -268,6 +268,12 @@ impl WebhookClient {
     /// [`Error::HookTimeout`] on a slow response, and [`Error::HookFailed`]
     /// (carrying the status and body) on a non-2xx answer — a 3xx included,
     /// since redirects are deliberately not followed.
+    ///
+    /// **Delivery is at-least-once.** A transient retry (timeout / connection /
+    /// 429 / 5xx) re-sends the identical body, so a receiver that committed the
+    /// request but whose response was lost (or that 5xx'd after committing) can
+    /// see the same event twice — a non-idempotent receiver (e.g. an "append to
+    /// note" webhook) should dedupe on the payload's recording id.
     pub async fn post(
         &self,
         url: &str,
@@ -301,52 +307,91 @@ impl WebhookClient {
             None => self.http.clone(),
         };
 
-        let mut request = http
-            .post(url)
-            .timeout(timeout)
-            .header("content-type", "application/json")
-            .body(body.clone());
-
-        // Custom headers first, so a reserved-header collision logged below is
-        // about the user's config — and so Phoneme's own headers set afterwards
-        // always win even if the skip guard ever missed one.
-        for (name, value) in &policy.custom_headers {
-            if RESERVED_HEADERS
-                .iter()
-                .any(|r| r.eq_ignore_ascii_case(name))
-            {
-                tracing::warn!(
-                    header = %name,
-                    "ignoring webhook custom_headers entry: it collides with a header Phoneme controls"
-                );
-                continue;
-            }
-            request = request.header(name, value);
-        }
-
-        // Sign last so the signature header can never be shadowed by a custom one.
-        let secret = policy.hmac_secret.expose_secret();
-        if !secret.is_empty() {
-            request = request.header(SIGNATURE_HEADER, sign_body(secret.as_bytes(), &body));
-        }
-
-        let response = request.send().await.map_err(|e| {
-            if e.is_timeout() {
-                Error::HookTimeout {
-                    secs: timeout.as_secs(),
+        // Pre-validate the custom headers once (so a reserved-header collision is
+        // logged once, not per retry — the warning is about the user's config) and
+        // precompute the signature header. Phoneme's own headers are set after
+        // these on each attempt, so they always win.
+        let valid_headers: Vec<(&String, &String)> = policy
+            .custom_headers
+            .iter()
+            .filter(|(name, _)| {
+                let collides = RESERVED_HEADERS
+                    .iter()
+                    .any(|r| r.eq_ignore_ascii_case(name));
+                if collides {
+                    tracing::warn!(
+                        header = %name,
+                        "ignoring webhook custom_headers entry: it collides with a header Phoneme controls"
+                    );
                 }
-            } else {
-                Error::Internal(format!("webhook send failed: {e}"))
+                !collides
+            })
+            .collect();
+        let secret = policy.hmac_secret.expose_secret();
+        let signature = (!secret.is_empty()).then(|| sign_body(secret.as_bytes(), &body));
+
+        // Deliver with bounded exponential backoff. The SSRF guard, body, and pin
+        // are settled above; each attempt only rebuilds the request (reqwest's
+        // builder is consumed by `send`). Only a TRANSIENT failure retries — a
+        // timeout, a connection error, an HTTP 429, or a 5xx — up to
+        // `policy.max_retries` extra tries; a 4xx (the receiver refusing us) and
+        // an SSRF block fail immediately.
+        let mut attempt = 0u32;
+        loop {
+            let mut request = http
+                .post(url)
+                .timeout(timeout)
+                .header("content-type", "application/json")
+                .body(body.clone());
+            for (name, value) in &valid_headers {
+                request = request.header(*name, *value);
             }
-        })?;
-        if !response.status().is_success() {
-            return Err(Error::HookFailed {
-                code: response.status().as_u16() as i32,
-                stderr_tail: response.text().await.unwrap_or_default(),
-            });
+            // Sign last so the signature header can never be shadowed by a custom one.
+            if let Some(sig) = &signature {
+                request = request.header(SIGNATURE_HEADER, sig);
+            }
+
+            match request.send().await {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        return Ok(());
+                    }
+                    let retryable = status.as_u16() == 429 || status.is_server_error();
+                    if retryable && attempt < policy.max_retries {
+                        attempt += 1;
+                        tokio::time::sleep(webhook_backoff(attempt)).await;
+                        continue;
+                    }
+                    return Err(Error::HookFailed {
+                        code: status.as_u16() as i32,
+                        stderr_tail: response.text().await.unwrap_or_default(),
+                    });
+                }
+                Err(e) => {
+                    if attempt < policy.max_retries {
+                        attempt += 1;
+                        tokio::time::sleep(webhook_backoff(attempt)).await;
+                        continue;
+                    }
+                    return Err(if e.is_timeout() {
+                        Error::HookTimeout {
+                            secs: timeout.as_secs(),
+                        }
+                    } else {
+                        Error::Internal(format!("webhook send failed: {e}"))
+                    });
+                }
+            }
         }
-        Ok(())
     }
+}
+
+/// Exponential backoff before webhook retry attempt `n` (1-based): 250 ms,
+/// 500 ms, 1 s, then capped at 2 s.
+fn webhook_backoff(attempt: u32) -> Duration {
+    let shift = attempt.saturating_sub(1).min(3);
+    Duration::from_millis((250u64 << shift).min(2000))
 }
 
 #[cfg(test)]
@@ -368,6 +413,15 @@ mod tests {
             duration_ms: 1234,
             model: "test-model".into(),
             metadata: HookMetadata::current(),
+        }
+    }
+
+    /// A policy with retries OFF, for tests asserting single-attempt behaviour
+    /// (failure mapping, the SSRF guard) without backoff delays.
+    fn no_retry() -> WebhookConfig {
+        WebhookConfig {
+            max_retries: 0,
+            ..Default::default()
         }
     }
 
@@ -412,7 +466,7 @@ mod tests {
                 &server.uri(),
                 Duration::from_secs(5),
                 &sample_payload(),
-                &WebhookConfig::default(),
+                &no_retry(),
             )
             .await
             .expect_err("500 must be an error");
@@ -444,7 +498,7 @@ mod tests {
                 &server.uri(),
                 Duration::from_millis(200),
                 &sample_payload(),
-                &WebhookConfig::default(),
+                &no_retry(),
             )
             .await
             .expect_err("a response slower than the timeout must error");
@@ -462,6 +516,7 @@ mod tests {
         let client = WebhookClient::new().unwrap();
         let policy = WebhookConfig {
             allow_http: true,
+            max_retries: 0,
             ..Default::default()
         };
         // Reserved TEST-NET-1 address that should not accept connections.
@@ -480,6 +535,62 @@ mod tests {
             err,
             Error::Internal(_) | Error::HookTimeout { .. }
         ));
+    }
+
+    // ── Retry / backoff ────────────────────────────────────────────────────
+
+    /// A 4xx is the receiver refusing the request — it is NOT retried even with
+    /// retries enabled. `.expect(1)` proves exactly one POST was sent.
+    #[tokio::test]
+    async fn post_does_not_retry_4xx() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = WebhookClient::new().unwrap();
+        let err = client
+            .post(
+                &server.uri(),
+                Duration::from_secs(5),
+                &sample_payload(),
+                &WebhookConfig::default(), // retries enabled — but a 4xx mustn't retry
+            )
+            .await
+            .expect_err("400 must fail");
+        assert!(
+            matches!(err, Error::HookFailed { code: 400, .. }),
+            "expected HookFailed 400, got {err:?}"
+        );
+    }
+
+    /// A persistent 5xx is retried up to `max_retries` extra times, then fails.
+    /// With `max_retries = 2` that's exactly 3 POSTs (verified by `.expect(3)`),
+    /// proving transient server faults are retried and the cap is honoured.
+    #[tokio::test]
+    async fn post_retries_5xx_up_to_max() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(3)
+            .mount(&server)
+            .await;
+
+        let client = WebhookClient::new().unwrap();
+        let policy = WebhookConfig {
+            max_retries: 2,
+            ..Default::default()
+        };
+        let err = client
+            .post(&server.uri(), Duration::from_secs(5), &sample_payload(), &policy)
+            .await
+            .expect_err("a persistent 503 must fail after exhausting retries");
+        assert!(
+            matches!(err, Error::HookFailed { code: 503, .. }),
+            "expected HookFailed 503, got {err:?}"
+        );
     }
 
     // ── SSRF guard: classification ─────────────────────────────────────────

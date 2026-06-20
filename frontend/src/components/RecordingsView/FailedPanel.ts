@@ -5,6 +5,7 @@ import {
   listRecordings,
   retranscribeRecording,
   clearFailed,
+  dismissFailed,
   getQueueCounts,
   type Recording,
 } from "../../services/ipc";
@@ -128,6 +129,9 @@ export class FailedPanelElement extends LitElement {
   @state() private error: string | null = null;
   /** Ids with a single Retry in flight (row button shows "Retrying…"). */
   @state() private retrying = new Set<string>();
+  /** Ids dismissed this session — hidden from the panel after their quarantine
+   *  file is cleared (the catalog row keeps its failed status). */
+  @state() private dismissed = new Set<string>();
   /** Retry-all progress, or null when idle. Disables all actions while set. */
   @state() private retryAll: { done: number; total: number } | null = null;
   /** True while the clear-failed request runs. */
@@ -213,7 +217,7 @@ export class FailedPanelElement extends LitElement {
       // Don't resurrect a row whose retry is mid-flight (the daemon flips the
       // status to transcribing before the IPC returns, but an event-driven
       // refresh can race the click).
-      this.rows = merged.filter((r) => !this.retrying.has(r.id));
+      this.rows = merged.filter((r) => !this.retrying.has(r.id) && !this.dismissed.has(r.id));
     } catch (e) {
       this.error = errText(e);
       this.rows = [];
@@ -305,6 +309,22 @@ export class FailedPanelElement extends LitElement {
     this.close();
   }
 
+  /** Dismiss one failed item: clear its inbox `failed/` quarantine file and hide
+   *  the row for this session. The catalog row keeps its failed status (you can
+   *  still open and delete it from the library) — this just acknowledges the one
+   *  failure without wiping the whole quarantine. */
+  private async dismiss(id: string) {
+    if (this.retryAll !== null) return;
+    try {
+      await dismissFailed(id);
+      this.dismissed = new Set(this.dismissed).add(id);
+      this.rows = this.rows.filter((r) => r.id !== id);
+      if (this.inboxFailed > 0) this.inboxFailed -= 1;
+    } catch (e) {
+      showToast(`Couldn't dismiss: ${errText(e)}`, "error");
+    }
+  }
+
   private renderRow(r: Recording) {
     const msg = failureMessage(r);
     const busy = this.retrying.has(r.id) || this.retryAll !== null;
@@ -333,6 +353,14 @@ export class FailedPanelElement extends LitElement {
             @click=${() => this.open(r.id)}
           >
             Open
+          </button>
+          <button
+            class="modal-btn failed-dismiss"
+            ?disabled=${busy}
+            title="Dismiss this failure — clears its queue marker and hides it here (the recording stays in your library)"
+            @click=${() => void this.dismiss(r.id)}
+          >
+            Dismiss
           </button>
         </div>
       </div>

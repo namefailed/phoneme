@@ -7,7 +7,7 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 ## 🚧 v1.8.x — Recall, Meetings & Hardening (in development)
 
 *Workspace version `1.8.1`. Closing promise-vs-reality gaps and hardening the
-trust boundary. Verified against current code.*
+trust boundary.*
 
 ### Recall
 
@@ -38,14 +38,34 @@ trust boundary. Verified against current code.*
 - [x] **Merged meeting view** — selecting a meeting's group header opens a single,
   read-only reading of every track, labelled 🎤 Microphone / 🔊 System audio with the
   diarizer's `[Speaker N]` turns surfaced, plus Copy / Export
-  (`MergedConversationDetail.ts`, `mergeMeeting.ts`). Coarse/source-sectioned — not
-  yet chronologically interleaved.
+  (`MergedConversationDetail.ts`, `mergeMeeting.ts`). Now a **chronologically
+  interleaved** chat timeline (`mergeChronological()`, ordered by per-track segment
+  offsets), falling back to the coarse source-sectioned merge only when segment
+  timings are absent.
 - [x] **Speaker-diarization provider picker** — Settings → Transcription now exposes a
   Speaker Diarization section to choose who-spoke-when: off, **Local** (speakrs ONNX),
   **Deepgram**, or **AssemblyAI** (`SectionDiarization.ts`). Cloud diarization rides the
   same provider's transcription API, so the section shows a live warning when the chosen
   diarization provider can't run with the configured transcription backend (e.g. Deepgram
   diarization picked while Local transcribes) instead of silently doing nothing.
+- [x] **Named-speaker recognition** — the local diarizer now captures a voiceprint
+  (centroid embedding) per speaker; naming a speaker enrolls that voice into a
+  cross-recording library, and opening a later recording suggests known voices for
+  still-unnamed speakers ("Sounds like Alex? ✓ / ✗") in the Rename-speakers modal.
+  On-demand, so a voice named *after* a recording was transcribed is still suggested
+  on it. `[diarization].recognize_speakers` toggles it; `voiceprint_match_threshold`
+  tunes the cosine bar. Local diarization only.
+- [x] **DER eval harness (dev)** — a pure, unit-tested collar-0 Diarization Error
+  Rate metric (`phoneme_core::der`: `parse_rttm`, `compute_der`, missed /
+  false-alarm / confusion with overlap-based speaker mapping), plus an `#[ignore]`d
+  harness that runs the local diarizer on an audio fixture and scores it against a
+  reference RTTM — for measuring diarizer quality / catching regressions (an
+  optional nightly check, never a PR gate).
+- [x] **Custom local diarization models** — `[diarization].models_dir` points the local
+  diarizer at a folder holding your own speakrs bundle (segmentation + embedding ONNX),
+  loaded via `OwnedDiarizationPipeline::from_dir` instead of the pretrained download;
+  empty keeps the defaults. Settings field under Diarization; the cache reloads on
+  change. (The dead `local_model_path` key it replaces was never wired in.)
 - [x] **Track-aware Meeting Mode** — a meeting's **mic track** is now labelled as one
   speaker, **You**, without running the diarizer at all; only the system/loopback track
   is diarized. The mic track is a single voice (yours), so diarizing it only burned time
@@ -83,6 +103,21 @@ trust boundary. Verified against current code.*
   so the list's **Source** column and its hover icon are accurate instead of always
   showing Microphone for single recordings. Pairs with the per-keybind source
   override under Custom Hotkeys.
+- [x] **Streaming-type dictation (experimental)** — `[in_place].stream_type`, off
+  by default: with Typing delivery, dictated words appear live at your cursor as you
+  speak (the streaming preview's committed words, typed only on clean forward
+  extensions so the cursor never churns), then a minimal backspace + retype patches
+  them up to the accurate final transcript when you stop. The live-preview + final
+  batch transcription pipeline is unchanged — this only changes when/how the typed
+  fast lane delivers. Settings → Dictation toggle.
+- [x] **Steadier live preview** — the live caption no longer reshuffles words you
+  already saw. It used to re-transcribe the whole take and replace the caption
+  wholesale for the first 15s (i.e. most dictations), so earlier words visibly
+  changed as you kept talking. Now it **always stitches** each tick onto the text
+  already shown — words once committed are frozen, only the genuinely-new tail is
+  appended — with a phase-aware fallback that never blindly re-appends a
+  re-transcribed tail (the old duplicated-runs bug). It also advances ~2× more
+  smoothly (0.5s min-new gate); weak machines still self-throttle.
 - [x] **Live preview now works during in-place dictation** — dictation previously
   showed no overlay caption at all (the streaming-preview loop was hard-skipped for
   dictation to protect paste latency). It now drives the overlay like any recording,
@@ -354,14 +389,12 @@ trust boundary. Verified against current code.*
   cleanup provider (prefer a local LLM) and is never logged or stored. An
   `in_place.app_context_denylist` excludes named apps (e.g. a password manager)
   even while it's on.
-- [x] **Streaming-type spike — assessed, not shipped.** Typing words as they're
-  recognized was evaluated against the dictation fast lane, which transcribes the
-  whole clip after stop and types once — there is no committed-word stream to
-  drive safe incremental typing without risking text corruption when Whisper
-  revises earlier words, focus changes mid-type, or the user types too. An
-  off-by-default `in_place.stream_type` flag is reserved as a no-op stub; the
-  hazards and a recommended design are written up in
-  `archive_internal/plans/dictation-streaming-type-spike.md`.
+- [x] **Streaming-type dictation** — type words as they finalize instead of all at
+  once on stop. Only clean forward extensions of the streaming preview's committed
+  words are typed mid-stream (never a mid-stream backspace, so the cursor doesn't
+  churn); on stop a minimal backspace+retype reconciles to the accurate final
+  transcript (`dictation::reconcile_edit`). Off by default under
+  `[in_place].stream_type`; honored with `type_mode = "type"`.
 
 ### Playbook & Custom Hotkeys
 
@@ -716,6 +749,10 @@ trust boundary. Verified against current code.*
   instead of leaving it stuck in `processing/` until the next daemon restart.
   The hot-path `pending_overrides` mutex also recovers from poisoning instead of
   panicking the daemon.
+- [x] **Dismiss one failed item** — the failed-recordings panel now has a per-item
+  **Dismiss** (clears that recording's `failed/` quarantine marker and hides the
+  row; the recording stays in the library), the counterpart to **Clear failed**.
+  New `DismissFailed` IPC + `phoneme queue dismiss-failed <id>`.
 - [x] **Audit hardening (verified findings)** — a whole-app audit pass; the
   confirmed-real items fixed: a Deepgram speaker turn now advances its segment end
   time even when a word lacks an `end` timestamp (falls back to the word's start,
@@ -1208,6 +1245,12 @@ trust boundary. Verified against current code.*
   suggested tags across the library (`ClearAllTagSuggestions`).
 - [x] **FLAC import** — wav / mp3 / m4a / flac, end to end (decoder feature,
   CLI + GUI filters, docs).
+- [x] **Saved searches persist in the catalog** — saved searches moved out of
+  the webview's `localStorage` into the catalog's `saved_searches` table, so they
+  survive a reinstall and can ride catalog sync later (`ListSavedSearches` /
+  `UpsertSavedSearch` / `DeleteSavedSearch` IPC). The frontend keeps its sync API
+  via an in-memory cache that lazy-loads from the daemon and writes through;
+  existing `localStorage` saves migrate over once, then the old key is cleared.
 - [x] **Saved-search rename collision guard** — renaming a saved search to a
   name another one already uses is refused with a clear toast (the rename editor
   stays open) instead of silently leaving two same-named searches where the next

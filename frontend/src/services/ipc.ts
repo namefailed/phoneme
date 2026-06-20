@@ -587,6 +587,38 @@ export async function clearFailed(): Promise<number> {
   return r.removed;
 }
 
+/** Dismiss ONE item from the inbox `failed/` quarantine by id (the per-item
+ *  counterpart to {@link clearFailed}). Returns whether a file was removed.
+ *  The catalog row keeps its failed status — only the inbox file is removed. */
+export async function dismissFailed(id: string): Promise<boolean> {
+  const r = await tauriInvoke<{ removed: boolean }>("dismiss_failed", { id });
+  return r.removed;
+}
+
+/** Wire shape of a saved search as the catalog stores it — `filter_json` is the
+ *  opaque serialized `UiFilter` (the state module parses/serializes it). */
+export type SavedSearchRow = { id: string; name: string; filter_json: string };
+
+/** All saved searches (catalog-backed), most-recently-updated first. */
+export async function listSavedSearches(): Promise<SavedSearchRow[]> {
+  return await tauriInvoke<SavedSearchRow[]>("list_saved_searches");
+}
+
+/** Insert or update a saved search by id; `filterJson` is a serialized `UiFilter`. */
+export async function upsertSavedSearch(
+  id: string,
+  name: string,
+  filterJson: string,
+): Promise<void> {
+  await tauriInvoke("upsert_saved_search", { id, name, filterJson });
+}
+
+/** Delete a saved search by id; resolves to whether a row was removed. */
+export async function deleteSavedSearch(id: string): Promise<boolean> {
+  const r = await tauriInvoke<{ removed: boolean }>("delete_saved_search", { id });
+  return r.removed;
+}
+
 /** Tail the last `maxLines` of a daemon log (`hook.log` / `daemon.log` /
  *  `ollama.log`) for the in-app log viewer. Returns "" when the log doesn't
  *  exist yet. The basename is allowlisted on the backend. */
@@ -757,6 +789,56 @@ export async function setSpeakerName(
   name: string,
 ): Promise<void> {
   await tauriInvoke("set_speaker_name", { id, speakerLabel, name });
+}
+
+// ── Named-speaker recognition (#9) ─────────────────────────────────────────────
+
+/** A recognized-speaker suggestion: an unnamed diarized speaker whose voiceprint
+ *  matched a known voice. */
+export type SpeakerSuggestion = {
+  speaker_label: number;
+  name: string;
+  named_voice_id: string;
+  score: number;
+};
+
+/** A named voice in the cross-recording library. */
+export type NamedVoice = { id: string; name: string; samples: number };
+
+/** On-demand recognition for a recording: unnamed speakers matching a known
+ *  voice. Empty when recognition is off or nothing matches. */
+export async function recognizeSpeakers(id: string): Promise<SpeakerSuggestion[]> {
+  return await tauriInvoke<SpeakerSuggestion[]>("recognize_speakers", { id });
+}
+
+/** Dismiss a recognized-speaker suggestion so it isn't offered again. */
+export async function dismissSpeakerSuggestion(
+  id: string,
+  speakerLabel: number,
+): Promise<void> {
+  await tauriInvoke("dismiss_speaker_suggestion", { id, speakerLabel });
+}
+
+/** The named-voice library (Speaker Library manager). */
+export async function listNamedVoices(): Promise<NamedVoice[]> {
+  return await tauriInvoke<NamedVoice[]>("list_named_voices");
+}
+
+/** Rename a named voice. */
+export async function renameNamedVoice(id: string, name: string): Promise<void> {
+  await tauriInvoke("rename_named_voice", { id, name });
+}
+
+/** Merge one named voice into another; resolves to whether a merge happened. */
+export async function mergeNamedVoices(fromId: string, intoId: string): Promise<boolean> {
+  const r = await tauriInvoke<{ merged: boolean }>("merge_named_voices", { fromId, intoId });
+  return r.merged;
+}
+
+/** Forget a named voice; resolves to whether an entry was removed. */
+export async function forgetNamedVoice(id: string): Promise<boolean> {
+  const r = await tauriInvoke<{ removed: boolean }>("forget_named_voice", { id });
+  return r.removed;
 }
 
 /** Whether the daemon process is running, and its pid. Answered by the TRAY
