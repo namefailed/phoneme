@@ -965,6 +965,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Err(e) => err_response(&e),
         },
         Request::ImportRecording { path } => import_recording(state, path).await,
+        Request::ExportClip {
+            id,
+            start_ms,
+            end_ms,
+            out_path,
+        } => export_clip(state, id, start_ms, end_ms, out_path).await,
         Request::ReimportFromDisk { dry_run } => reimport_from_disk(state, dry_run).await,
         Request::RebuildCatalog => {
             // Refuse while capture is live — clearing the table would orphan a
@@ -2389,6 +2395,64 @@ async fn import_recording(state: &AppState, path: String) -> Response {
     });
     tracing::info!(id = %id, source = %path, ms = duration_ms, "imported recording");
     Response::Ok(serde_json::json!({ "id": id.to_string() }))
+}
+
+/// Export a `[start_ms, end_ms)` slice of a recording's audio to a new WAV (S7).
+/// Looks up the recording's audio path in the catalog, picks the output path
+/// (the caller's `out_path`, or a `_clip_<start>-<end>` sibling of the source),
+/// then runs the pure `phoneme_audio::wav::clip_wav` helper on a blocking thread
+/// (read + slice + write is CPU/IO-bound). Ok `{"path":"<written>"}`.
+async fn export_clip(
+    state: &AppState,
+    id: phoneme_core::RecordingId,
+    start_ms: i64,
+    end_ms: i64,
+    out_path: Option<String>,
+) -> Response {
+    let rec = match state.catalog.get(&id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return not_found(format!("recording {id} not found")),
+        Err(e) => return err_response(&e),
+    };
+
+    let src = std::path::PathBuf::from(&rec.audio_path);
+    // Default output: next to the source WAV with a `_clip_<start>-<end>` suffix
+    // (milliseconds), so repeated clips of the same recording don't collide.
+    let dest = match out_path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            let stem = src
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| id.to_string());
+            let name = format!("{stem}_clip_{start_ms}-{end_ms}.wav");
+            match src.parent() {
+                Some(dir) => dir.join(name),
+                None => std::path::PathBuf::from(name),
+            }
+        }
+    };
+
+    // Read + slice + write is blocking — keep it off the async runtime so the
+    // IPC connection (and the single-connection tray bridge) stays responsive.
+    let dest_for_task = dest.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        phoneme_audio::wav::clip_wav(&src, &dest_for_task, start_ms, end_ms)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(frames)) => {
+            let path = dest.to_string_lossy().into_owned();
+            tracing::info!(id = %id, %path, start_ms, end_ms, frames, "exported audio clip");
+            Response::Ok(serde_json::json!({ "path": path }))
+        }
+        Ok(Err(e)) => err_response(&e),
+        Err(e) => Response::Err(IpcError {
+            kind: IpcErrorKind::Internal,
+            message: format!("clip task panicked: {e}"),
+        }),
+    }
 }
 
 /// A `.wav` on disk whose RecordingId has no catalog row — a candidate to
