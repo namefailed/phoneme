@@ -1678,6 +1678,43 @@ async fn run_transform_steps(
 /// `run` (the cancel has already been finalized via `finalize_canceled`).
 struct Canceled;
 
+/// Re-derive the **cleaned** timing variant (TL-CONSISTENCY): take the recording's
+/// raw machine words, realign them to `cleaned_text`, and store the result in the
+/// `*_clean` tables so the Timeline/Synced views can match the cleaned panel text.
+/// The raw machine-truth timeline is never touched. Best-effort + gated by
+/// `editor.resync_views_on_edit` (the same switch manual-edit re-flow uses); a
+/// realign that can't map the text simply leaves the cleaned variant absent, and
+/// the views fall back to raw. Shared by the pipeline and `rerun_cleanup`.
+pub(crate) async fn reflow_cleaned_timing(state: &AppState, id: &RecordingId, cleaned_text: &str) {
+    if !state.config.load().editor.resync_views_on_edit {
+        return;
+    }
+    let raw_words = match state.catalog.words_for(id).await {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::warn!(id = %id.as_str(), error = %e, "cleaned re-flow: could not load raw words");
+            return;
+        }
+    };
+    let Some(r) = phoneme_core::realign::realign_transcript(cleaned_text, &raw_words) else {
+        return;
+    };
+    if let Err(e) = state
+        .catalog
+        .replace_words_variant(id, "cleaned", &r.words)
+        .await
+    {
+        tracing::warn!(id = %id.as_str(), error = %e, "cleaned re-flow: failed to store words");
+    }
+    if let Err(e) = state
+        .catalog
+        .replace_segments_variant(id, "cleaned", &r.segments)
+        .await
+    {
+        tracing::warn!(id = %id.as_str(), error = %e, "cleaned re-flow: failed to store segments");
+    }
+}
+
 /// Run the recipe's title enrichment (the only enrichment that lands BEFORE the
 /// transcript-commit's downstream events — same position as the legacy title
 /// call). Membership is the gate (a `title` step present == the old
@@ -2284,6 +2321,14 @@ pub async fn run(
     // views (word seek, confidence highlighting), not the recording.
     if let Err(e) = state.catalog.replace_words(&id, &words).await {
         tracing::warn!(id = %id.as_str(), "failed to persist transcript words: {e}");
+    }
+
+    // TL-CONSISTENCY: when a Transform changed the transcript, re-derive a
+    // "cleaned" timing variant (the raw words realigned to the cleaned text) so
+    // Timeline/Synced can match the panel instead of showing the raw ASR. The raw
+    // timing just stored above is untouched; this writes only the *_clean tables.
+    if transcript != raw_transcript {
+        reflow_cleaned_timing(state, &id, &transcript).await;
     }
 
     // Persist each speaker's centroid voiceprint (local diarization only; empty

@@ -2024,6 +2024,11 @@ async fn rerun_cleanup(
                     }
                 }
 
+                // TL-CONSISTENCY: re-derive the cleaned timing variant from the raw
+                // words realigned to the re-cleaned text, so Timeline/Synced match
+                // the panel. Raw timing is untouched. Best-effort + gated inside.
+                crate::pipeline::reflow_cleaned_timing(&task_state, &id, &cleaned).await;
+
                 // Re-embed the new text so semantic search stays consistent,
                 // mirroring the pipeline and UpdateTranscript paths.
                 let embedder = task_state.embedder.read().await.as_ref().cloned();
