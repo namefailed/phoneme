@@ -81,6 +81,8 @@ pub enum Command {
     Profile(ProfileArgs),
     /// Export all recordings and metadata to a zip file.
     Export(ExportArgs),
+    /// Restore recordings + audio from a backup zip (the inverse of `export`).
+    ImportBackup(ImportBackupArgs),
     /// Print a shell-completion script for the given shell to stdout.
     Completions(CompletionsArgs),
     /// Print version + commit info.
@@ -701,4 +703,10 @@ pub struct ExportArgs {
     /// `<recording-id>.srt` / `<recording-id>.vtt` in the current directory.
     #[arg(short, long, value_name = "FILE", requires = "captions")]
     pub out: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ImportBackupArgs {
+    /// Path to a backup zip produced by `phoneme export <FILE>`.
+    pub file: String,
 }

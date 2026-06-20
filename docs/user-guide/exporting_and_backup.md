@@ -41,6 +41,29 @@ The export archive is completely portable and contains:
    Each recording row includes the current transcript and the preserved original (raw) transcript, timestamps and durations, and meeting IDs for Meeting Mode sessions.
 2. **`audio/`**: your `.wav` files, organised into per-day subfolders (`audio/<YYYY-MM-DD>/<recording>.wav`) that match each recording's date prefix in `catalog.json`. (Backups made by older versions stored every file flat in `audio/`; both layouts restore correctly.)
 
+## ♻️ Restoring a backup archive
+
+To bring a backup back into a library — on a new machine, or to recover after a
+mishap — use:
+
+```bash
+phoneme import-backup backup.zip
+```
+
+Each recording in the archive is re-inserted into the catalog and its audio
+copied into your configured audio directory. The daemon holds the catalog open
+while running, so `import-backup` shuts a running daemon down first and waits for
+it to let go before touching the database; start it again afterwards with
+`phoneme daemon start`.
+
+Restoring is **idempotent**. A recording whose id already exists is skipped —
+never overwritten — so re-running on the same backup never duplicates anything,
+and an edit you've made since the backup survives. The command reports how many
+recordings it imported and how many it skipped. The recording metadata,
+transcripts, tags and audio round-trip; derived data such as transcript
+segments, search embeddings and speaker voiceprints isn't stored in the backup
+and is regenerated when you re-transcribe.
+
 ## 🎬 Exporting Captions (SRT / WebVTT)
 
 Any transcribed recording can be exported as a subtitle file — handy for

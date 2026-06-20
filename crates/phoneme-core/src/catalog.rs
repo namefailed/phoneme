@@ -522,6 +522,70 @@ impl Catalog {
         Ok(())
     }
 
+    /// Insert a recording with EVERY persisted DTO column at once — the faithful
+    /// inverse of the library backup export ([`crate::backup`]).
+    ///
+    /// The pipeline's [`Catalog::insert`] writes only the columns a fresh
+    /// recording starts with and fills the rest (title, summary, favorite, the
+    /// per-step model names, …) later via dedicated setters as it advances. A
+    /// backup restore has all of those values up front and must land them in one
+    /// row, so this writes the full column set. Fields the DTO does NOT carry —
+    /// `original_transcript` / `clean_transcript`, segments, words, embeddings,
+    /// voiceprints — are bounded by what the export captured and are simply not
+    /// restored. `INSERT` (not upsert): the restore caller skips ids that already
+    /// exist, so a re-import never overwrites a row (idempotent), and a genuine
+    /// id clash surfaces as an error rather than silently clobbering.
+    pub async fn insert_restored(&self, r: &Recording) -> Result<()> {
+        let tag_suggestions = if r.tag_suggestions.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&r.tag_suggestions)?)
+        };
+        sqlx::query(
+            "INSERT INTO recordings (
+                 id, started_at, duration_ms, audio_path, transcript, model, status,
+                 error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
+                 transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
+                 cleanup_model, diarized, user_edited, favorite, tag_suggestions, summary,
+                 summary_model, title, title_is_auto, title_model, tag_model, diarization_model
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(r.id.as_str())
+        .bind(r.started_at.to_rfc3339())
+        .bind(r.duration_ms)
+        .bind(&r.audio_path)
+        .bind(r.transcript.as_deref())
+        .bind(r.model.as_deref())
+        .bind(r.status.as_str())
+        .bind(r.error_kind.as_deref())
+        .bind(r.error_message.as_deref())
+        .bind(r.hook_command.as_deref())
+        .bind(r.hook_exit_code)
+        .bind(r.hook_duration_ms)
+        .bind(r.transcribed_at.map(|d| d.to_rfc3339()))
+        .bind(r.hook_ran_at.map(|d| d.to_rfc3339()))
+        .bind(r.notes.as_deref())
+        .bind(r.meeting_id.as_deref())
+        .bind(r.meeting_name.as_deref())
+        .bind(r.track.as_deref())
+        .bind(r.in_place)
+        .bind(r.cleanup_model.as_deref())
+        .bind(r.diarized)
+        .bind(r.user_edited)
+        .bind(r.favorite)
+        .bind(tag_suggestions)
+        .bind(r.summary.as_deref())
+        .bind(r.summary_model.as_deref())
+        .bind(r.title.as_deref())
+        .bind(r.title_is_auto)
+        .bind(r.title_model.as_deref())
+        .bind(r.tag_model.as_deref())
+        .bind(r.diarization_model.as_deref())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Set (or clear) the display name for every track sharing `meeting_id`.
     pub async fn update_meeting_name(&self, meeting_id: &str, name: Option<&str>) -> Result<()> {
         sqlx::query("UPDATE recordings SET meeting_name = ?, updated_at = datetime('now') WHERE meeting_id = ?")

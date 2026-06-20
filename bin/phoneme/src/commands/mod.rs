@@ -14,6 +14,7 @@ pub mod edit;
 pub mod export;
 pub mod hook_cmd;
 pub mod import;
+pub mod import_backup;
 pub mod list;
 pub mod meeting;
 pub mod notes;

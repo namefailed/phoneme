@@ -63,7 +63,14 @@ fn list_command_recognized() {
 /// daemon. Each top-level command is exercised here.
 #[test]
 fn new_subcommands_are_recognized() {
-    for cmd in ["queue", "reembed", "refire-hook", "suggest-tags", "speaker"] {
+    for cmd in [
+        "queue",
+        "reembed",
+        "refire-hook",
+        "suggest-tags",
+        "speaker",
+        "import-backup",
+    ] {
         Command::cargo_bin("phoneme")
             .unwrap()
             .args([cmd, "--help"])

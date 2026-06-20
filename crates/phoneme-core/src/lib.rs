@@ -86,6 +86,7 @@
 
 #![warn(missing_docs)]
 
+pub mod backup;
 pub mod catalog;
 pub mod chunk;
 pub mod config;
