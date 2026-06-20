@@ -86,11 +86,25 @@ phoneme record --oneshot
 
 # Record exactly 10 seconds (blocking).
 phoneme record --duration 10
+
+# Run a specific Playbook recipe (by id or name) instead of the default
+# pipeline. Works on the blocking default, `record start`, and `record toggle`.
+phoneme record --recipe meeting_notes
+phoneme record start --recipe "Meeting notes"
+phoneme record toggle --recipe prompt_capture
 ```
 
 Each non-blocking subcommand sends a single request (`RecordStart`,
 `RecordStop`, `RecordToggle`, `RecordCancel`, `RecordPause`, `RecordResume`) and
 exits 0. `--oneshot` / `--duration` modify the blocking default.
+
+> **`--recipe <ID|NAME>`:** pick a Playbook recipe like the GUI's recipe
+> picker. The value is matched against your configured recipes — by id first,
+> then case-insensitively by name — and the resolved id is sent to the daemon.
+> Omit it for the default pipeline. A value that matches no recipe is an error
+> (it lists the available recipes); it never silently falls back to default.
+> Available on bare `phoneme record` (blocking / `--oneshot` / `--duration`),
+> `record start`, and `record toggle`.
 
 > **Breaking change:** the pre-1.8 flag spellings (`record --start`, `--stop`,
 > `--toggle`, `--cancel`, `--pause`, `--resume`) were **removed** — use the
@@ -237,13 +251,21 @@ phoneme retranscribe 20260519T143500823 --no-run-hooks
 
 # Skip the LLM cleanup step for this run only (produces the raw transcript)
 phoneme retranscribe 20260519T143500823 --no-post-process
+
+# Re-run through a specific Playbook recipe (by id or name) instead of the
+# default pipeline — the CLI face of the GUI ↻ Re-run "Recipe to run" picker.
+phoneme retranscribe 20260519T143500823 --recipe meeting_notes
+phoneme retranscribe 20260519T143500823 --recipe "Meeting notes"
 ```
 
-> **Note:** `retranscribe` always runs the recording through the **`default`
-> recipe** — there is **no `--recipe` flag**. To re-run a recording through a
-> *different* Playbook recipe, use the GUI's **↻ Re-run** modal ("Recipe to run"
-> picker); see [Plugins and Hooks](plugins_and_hooks.md). The `--model` override
-> here still applies as a one-time transcription-model override.
+> **`--recipe <ID|NAME>`:** re-run the recording through a chosen Playbook
+> recipe, matching the GUI's **↻ Re-run** "Recipe to run" picker. The value is
+> resolved against your configured recipes — by id first, then
+> case-insensitively by name — and the resolved id is sent to the daemon. Omit
+> it for the **`default`** pipeline. A value matching no recipe is an error that
+> lists the available recipes (no silent fallback to default). The `--model`
+> override still applies independently as a one-time transcription-model
+> override.
 
 ### ✨ `phoneme cleanup <ID>`
 

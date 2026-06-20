@@ -140,6 +140,16 @@ trust boundary.*
   The in-app detail-pane merge/split editor is a planned follow-up; the wire contract above is
   what it will call.
 
+### CLI
+
+- [x] **`--recipe <ID|NAME>` on `record` + `retranscribe`** — pick a Playbook recipe
+  from the CLI the way the GUI does. Available on `phoneme record` (blocking /
+  `--oneshot` / `--duration`), `phoneme record start`, `phoneme record toggle`, and
+  `phoneme retranscribe`. The value resolves locally against `[[recipes]]` — by id
+  first, then case-insensitively by name — and the resolved id rides the existing
+  `recipe_id` IPC field; absent = the default pipeline. A value matching no recipe is
+  an error that lists the available recipes (no silent fallback to default).
+
 ### Transcription
 
 - [x] **Custom vocabulary / glossary** — a new **Settings → Transcription → Custom

@@ -19,6 +19,7 @@ pub mod meeting;
 pub mod notes;
 pub mod profile_cmd;
 pub mod queue;
+pub mod recipe;
 pub mod record;
 pub mod reembed;
 pub mod refire_hook;

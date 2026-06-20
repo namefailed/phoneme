@@ -33,29 +33,50 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
     // Preferred form: the non-blocking control subcommand
     // (`record start|stop|toggle|cancel|pause|resume`), consistent with
     // `meeting`, `daemon`, and the rest of the CLI. `start`/`toggle` carry their
-    // own `--in-place` so a binding can start dictation.
+    // own `--in-place` and `--recipe` so a binding can start dictation through a
+    // chosen Playbook recipe.
     if let Some(action) = &args.action {
         let req = match action {
-            RecordAction::Start { in_place } => Request::RecordStart {
-                mode: RecordMode::Hold,
-                in_place: *in_place,
-                recipe_id: None,
-                whisper_model: None,
-                source: None,
-            },
+            RecordAction::Start { in_place, recipe } => {
+                let recipe_id = match resolve_recipe(cfg, recipe.as_deref()) {
+                    Ok(id) => id,
+                    Err(code) => return code,
+                };
+                Request::RecordStart {
+                    mode: RecordMode::Hold,
+                    in_place: *in_place,
+                    recipe_id,
+                    whisper_model: None,
+                    source: None,
+                }
+            }
             RecordAction::Stop => Request::RecordStop,
-            RecordAction::Toggle { in_place } => Request::RecordToggle {
-                in_place: *in_place,
-                recipe_id: None,
-                whisper_model: None,
-                source: None,
-            },
+            RecordAction::Toggle { in_place, recipe } => {
+                let recipe_id = match resolve_recipe(cfg, recipe.as_deref()) {
+                    Ok(id) => id,
+                    Err(code) => return code,
+                };
+                Request::RecordToggle {
+                    in_place: *in_place,
+                    recipe_id,
+                    whisper_model: None,
+                    source: None,
+                }
+            }
             RecordAction::Cancel => Request::RecordCancel,
             RecordAction::Pause => Request::RecordPause,
             RecordAction::Resume => Request::RecordResume,
         };
         return single_request(&mut client, req, json).await;
     }
+
+    // Blocking modes (oneshot / duration / hold-via-stdin) honor the top-level
+    // `--recipe`. Resolve it to an id before opening the event subscription so a
+    // bad value errors out without leaving a dangling connection.
+    let blocking_recipe_id = match resolve_recipe(cfg, args.recipe.as_deref()) {
+        Ok(id) => id,
+        Err(code) => return code,
+    };
 
     // Oneshot / Duration / Hold-via-stdin all block on the event stream.
     let mode = if args.oneshot {
@@ -87,7 +108,7 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         .send(Request::RecordStart {
             mode,
             in_place: args.in_place,
-            recipe_id: None,
+            recipe_id: blocking_recipe_id,
             whisper_model: None,
             source: None,
         })
@@ -169,6 +190,24 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
 
     eprintln!("timed out waiting for transcription");
     ExitCode::from(exit::GENERIC_FAIL)
+}
+
+/// Map an optional `--recipe ID|NAME` value to the IPC `recipe_id` field:
+/// `None` (absent flag) stays `None` (the daemon's default pipeline); a present
+/// value is resolved against `config.recipes` (id then name) to its stable id.
+/// An unmatched value prints the available recipes and yields an error exit so
+/// a typo never silently runs the default pipeline.
+fn resolve_recipe(cfg: &Config, value: Option<&str>) -> Result<Option<String>, ExitCode> {
+    match value {
+        None => Ok(None),
+        Some(v) => match crate::commands::recipe::resolve(cfg, v) {
+            Ok(id) => Ok(Some(id)),
+            Err(msg) => {
+                eprintln!("error: {msg}");
+                Err(ExitCode::from(exit::GENERIC_FAIL))
+            }
+        },
+    }
 }
 
 async fn single_request(client: &mut Client, req: Request, json: bool) -> ExitCode {
@@ -297,6 +336,7 @@ mod tests {
             oneshot: true,
             duration: None,
             in_place: false,
+            recipe: None,
         };
 
         // Outer guard so a regression (event lost → CLI waits for its full
@@ -327,6 +367,7 @@ mod tests {
             oneshot: false,
             duration: None,
             in_place: false,
+            recipe: None,
         }
     }
 
@@ -353,7 +394,10 @@ mod tests {
     async fn record_start_subcommand_sends_record_start() {
         assert_action_sends(
             "start",
-            RecordAction::Start { in_place: false },
+            RecordAction::Start {
+                in_place: false,
+                recipe: None,
+            },
             Request::RecordStart {
                 mode: RecordMode::Hold,
                 in_place: false,
@@ -369,7 +413,10 @@ mod tests {
     async fn record_start_subcommand_carries_in_place() {
         assert_action_sends(
             "start-ip",
-            RecordAction::Start { in_place: true },
+            RecordAction::Start {
+                in_place: true,
+                recipe: None,
+            },
             Request::RecordStart {
                 mode: RecordMode::Hold,
                 in_place: true,
@@ -382,6 +429,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn record_start_subcommand_resolves_recipe_by_name() {
+        // "Meeting notes" is the display name of the seeded `meeting_notes`
+        // recipe; the subcommand must send the resolved id, not the typed name.
+        assert_action_sends(
+            "start-recipe",
+            RecordAction::Start {
+                in_place: false,
+                recipe: Some("Meeting notes".into()),
+            },
+            Request::RecordStart {
+                mode: RecordMode::Hold,
+                in_place: false,
+                recipe_id: Some("meeting_notes".into()),
+                whisper_model: None,
+                source: None,
+            },
+        )
+        .await;
+    }
+
+    /// A bad `--recipe` on a non-blocking subcommand errors before connecting,
+    /// so the daemon never sees a request.
+    #[tokio::test]
+    async fn record_start_subcommand_rejects_unknown_recipe() {
+        let mock = MockDaemon::spawn("start-bad-recipe", |_req| {
+            Response::Ok(serde_json::json!({ "id": RecordingId::new().to_string() }))
+        });
+        let mut cfg = phoneme_core::Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+
+        let action = RecordAction::Start {
+            in_place: false,
+            recipe: Some("no-such-recipe".into()),
+        };
+        let code = tokio::time::timeout(Duration::from_secs(5), run(args_action(action), &cfg, false))
+            .await
+            .expect("must return promptly");
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+        assert!(
+            mock.received().is_empty(),
+            "a bad --recipe must not reach the daemon"
+        );
+    }
+
+    #[tokio::test]
     async fn record_stop_subcommand_sends_record_stop() {
         assert_action_sends("stop", RecordAction::Stop, Request::RecordStop).await;
     }
@@ -390,7 +482,10 @@ mod tests {
     async fn record_toggle_subcommand_sends_record_toggle() {
         assert_action_sends(
             "toggle",
-            RecordAction::Toggle { in_place: false },
+            RecordAction::Toggle {
+                in_place: false,
+                recipe: None,
+            },
             Request::RecordToggle {
                 in_place: false,
                 recipe_id: None,

@@ -112,6 +112,12 @@ pub struct RecordArgs {
     /// simulated keystrokes (the blocking default, or `record start -i`).
     #[arg(long, short = 'i')]
     pub in_place: bool,
+    /// Playbook recipe to run for this recording, by id or name (as in the GUI
+    /// recipe picker). Omit for the default pipeline. Applies to the blocking
+    /// default mode (`record` / `--oneshot` / `--duration`); `record start` /
+    /// `record toggle` carry their own `--recipe`.
+    #[arg(long, value_name = "ID|NAME")]
+    pub recipe: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -121,6 +127,10 @@ pub enum RecordAction {
         /// In-place dictation: type the transcript into the focused window.
         #[arg(long, short = 'i')]
         in_place: bool,
+        /// Playbook recipe to run, by id or name (as in the GUI recipe picker).
+        /// Omit for the default pipeline.
+        #[arg(long, value_name = "ID|NAME")]
+        recipe: Option<String>,
     },
     /// Non-blocking: stop the active recording, exit 0.
     Stop,
@@ -130,6 +140,10 @@ pub enum RecordAction {
         /// In-place dictation when this toggle starts a recording.
         #[arg(long, short = 'i')]
         in_place: bool,
+        /// Playbook recipe to run when this toggle starts a recording, by id or
+        /// name. Omit for the default pipeline.
+        #[arg(long, value_name = "ID|NAME")]
+        recipe: Option<String>,
     },
     /// Discard the active recording without saving.
     Cancel,
@@ -249,6 +263,10 @@ pub struct RetranscribeArgs {
     /// Skip the LLM cleanup / post-processing step for this run only.
     #[arg(long)]
     pub no_post_process: bool,
+    /// Playbook recipe to run for this re-transcription, by id or name (as in
+    /// the GUI ↻ Re-run picker). Omit to use the default pipeline.
+    #[arg(long, value_name = "ID|NAME")]
+    pub recipe: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]

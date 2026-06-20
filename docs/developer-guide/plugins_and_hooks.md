@@ -158,8 +158,9 @@ surfaces failures but keeps the recording usable).
 > recipe — hooks included — without re-recording. Pick **"Default pipeline"** for
 > the normal chain. The choice is a **one-time** override for that run (it rides
 > the same `pending_recipe` ledger a custom hotkey uses and is never saved to
-> config). The CLI's `phoneme retranscribe` always runs the `default` recipe —
-> there's no `--recipe` flag yet.
+> config). The CLI mirrors this with `phoneme retranscribe <ID> --recipe <ID|NAME>`
+> (and `phoneme record [start|toggle] --recipe <ID|NAME>` for live captures);
+> omit the flag for the `default` pipeline.
 
 > **Migrating from `[hook]`?** Older configs used a top-level `[hook]` section
 > (`commands` / `keyword_rules` / `webhook_url`). On first launch Phoneme
