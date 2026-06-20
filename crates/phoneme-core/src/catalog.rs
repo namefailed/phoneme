@@ -2950,6 +2950,12 @@ impl Catalog {
             .bind(from_id)
             .execute(&self.pool)
             .await?;
+        // Drop any undo-log rows keyed by the absorbed voice — the hard delete below
+        // has no FK cascade, so these would otherwise orphan.
+        sqlx::query("DELETE FROM forgotten_voiceprint_links WHERE named_voice_id = ?")
+            .bind(from_id)
+            .execute(&self.pool)
+            .await?;
         sqlx::query("DELETE FROM named_voiceprints WHERE id = ?")
             .bind(from_id)
             .execute(&self.pool)
@@ -3190,16 +3196,27 @@ impl Catalog {
             // capture. enroll_speaker is a no-op when no voiceprint was captured.
             self.set_speaker_name(recording_id, *speaker_label, &name)
                 .await?;
-            let enrolled = self
+            // Don't `?` the enroll: a failure AFTER the name was written would leave a
+            // display name with no enrollment. Match so we can roll the name back.
+            match self
                 .enroll_speaker(recording_id.as_str(), *speaker_label, &name)
-                .await?;
-            if enrolled.is_some() {
-                applied += 1;
-            } else {
-                // No voiceprint to enroll — undo the name we just wrote so a target
-                // with no capture isn't half-applied (display-named but unenrolled).
-                self.set_speaker_name(recording_id, *speaker_label, "")
-                    .await?;
+                .await
+            {
+                Ok(Some(_)) => applied += 1,
+                Ok(None) => {
+                    // No voiceprint to enroll — undo the name we just wrote so a target
+                    // with no capture isn't half-applied (display-named but unenrolled).
+                    self.set_speaker_name(recording_id, *speaker_label, "")
+                        .await?;
+                }
+                Err(e) => {
+                    // Enrollment failed — roll back the name we just wrote, then
+                    // propagate the error (best-effort undo; the enroll error wins).
+                    let _ = self
+                        .set_speaker_name(recording_id, *speaker_label, "")
+                        .await;
+                    return Err(e);
+                }
             }
         }
         Ok(applied)

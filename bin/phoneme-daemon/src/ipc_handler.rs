@@ -2643,7 +2643,15 @@ async fn speaker_name_propagation(
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(voice = %named_voice_id, "propagation candidate scan failed: {e}");
-            return serde_json::json!({ "policy": "ask", "applied": 0, "candidates": [] });
+            // Report the policy that was actually configured (not a hardcoded
+            // tag) and flag the failure so callers can tell an empty result
+            // apart from a clean "no candidates" one.
+            return serde_json::json!({
+                "policy": format!("{:?}", diar.name_propagation).to_lowercase(),
+                "applied": 0,
+                "candidates": [],
+                "error": true,
+            });
         }
     };
     match diar.name_propagation {
@@ -2653,15 +2661,15 @@ async fn speaker_name_propagation(
                 .iter()
                 .map(|c| (c.recording_id.clone(), c.speaker_label))
                 .collect();
-            let applied = match state
+            let (applied, apply_err) = match state
                 .catalog
                 .apply_propagation(named_voice_id, &targets)
                 .await
             {
-                Ok(n) => n,
+                Ok(n) => (n, false),
                 Err(e) => {
                     tracing::warn!(voice = %named_voice_id, "propagation apply failed: {e}");
-                    0
+                    (0, true)
                 }
             };
             if applied > 0 {
@@ -2673,7 +2681,14 @@ async fn speaker_name_propagation(
                     });
                 }
             }
-            serde_json::json!({ "policy": "auto", "applied": applied, "candidates": [] })
+            // Flag the failure so an aborted back-fill isn't read as a clean
+            // "applied 0" — the policy tag itself stays the real one.
+            serde_json::json!({
+                "policy": format!("{:?}", diar.name_propagation).to_lowercase(),
+                "applied": applied,
+                "candidates": [],
+                "error": apply_err,
+            })
         }
         NamePropagation::Ask => {
             // Surface the candidates for the UI to confirm; change nothing now.

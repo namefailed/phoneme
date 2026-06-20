@@ -1083,8 +1083,12 @@ export class RecordingDetail {
         showToast(`Couldn't rename speaker: ${errText(e)}`, "error");
       }
     };
-    this.speakerCommitChain = this.speakerCommitChain.then(run, run);
-    return this.speakerCommitChain;
+    // Capture THIS commit's slot on the chain so the returned promise resolves
+    // when this commit lands — not when whatever later commit happens to be the
+    // chain tail at await-time does. A blur's `await` must track its own write.
+    const slot = this.speakerCommitChain.then(run, run);
+    this.speakerCommitChain = slot;
+    return slot;
   }
 
   /** Render the stored summary into the peek box and wire its Regenerate button. */

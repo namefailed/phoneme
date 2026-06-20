@@ -167,6 +167,13 @@ pub fn compute_eer(genuine: &[f32], impostor: &[f32]) -> EerReport {
     // Sentinel strictly below the lowest score so its FAR is 1.0 and FRR 0.0.
     let lowest = thresholds[0];
     thresholds.insert(0, lowest - 1.0);
+    // Sentinel strictly above the highest score so its FAR is 0.0 and FRR 1.0.
+    // Without it, when every genuine and impostor score is identical the curve
+    // never reaches the all-reject end, `diff = far - frr` never changes sign, and
+    // `find_eer` returns `None` instead of the ~0.5 chance EER. The extra point
+    // gives the sign change the interpolation needs.
+    let highest = *thresholds.last().unwrap();
+    thresholds.push(highest + 1.0);
 
     let g = genuine.len() as f32;
     let im = impostor.len() as f32;
@@ -396,6 +403,23 @@ mod tests {
         let r = compute_eer(&genuine, &impostor);
         assert_eq!(r.eer, Some(0.5), "{r:?}");
         assert_eq!(r.eer_threshold, Some(0.6), "{r:?}");
+    }
+
+    #[test]
+    fn fully_overlapping_scores_give_eer_one_half() {
+        // Genuine and impostor distributions are byte-for-byte identical, so the
+        // verifier can't separate them at all — EER must be ~0.5 (chance), not
+        // `None`. The right-side sentinel above the max threshold is what gives the
+        // FAR/FRR curve its all-reject end so the crossing interpolates here.
+        let genuine = vec![0.3, 0.5, 0.7];
+        let impostor = vec![0.3, 0.5, 0.7];
+        let r = compute_eer(&genuine, &impostor);
+        let eer = r.eer.expect("defined: the curve must reach a crossing");
+        assert!(
+            (eer - 0.5).abs() < 1e-6,
+            "fully-overlapping scores should be exactly chance, got {eer} ({r:?})"
+        );
+        assert!(r.eer_threshold.is_some(), "{r:?}");
     }
 
     #[test]

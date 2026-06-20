@@ -118,11 +118,9 @@ pub fn tokenize_chars(text: &str) -> Vec<char> {
 /// Compute the Levenshtein edit distance between `ref_seq` and `hyp_seq` and
 /// return the `(substitutions, insertions, deletions)` breakdown.
 ///
-/// Uses the standard DP table with a single-row rolling optimization so memory
-/// is `O(|ref|)` rather than `O(|ref| × |hyp|)`. The backtrace is implicit:
-/// once we have the minimum-edit solution we recover the breakdown by walking
-/// the full DP table, which adds a second `O(|ref| × |hyp|)` pass only when
-/// the breakdown is needed (it always is here, since the struct exposes it).
+/// Uses the full `O(|ref| × |hyp|)` DP table so the backtrace can count
+/// substitutions, insertions, and deletions separately; a rolling single-row
+/// variant would give only the total distance.
 ///
 /// For the tiny sequences in a normal ASR evaluation (a few hundred words at
 /// most) this is always fast; the O(n²) concern only matters for book-length

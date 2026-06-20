@@ -44,6 +44,13 @@ const CATALOG_ENTRY: &str = "catalog.json";
 /// The prefix under which audio files live inside the zip.
 const AUDIO_PREFIX: &str = "audio/";
 
+/// Hard cap on the decompressed size of a single audio entry we'll read on
+/// restore. The entry's self-reported `size()` is attacker-controllable, so we
+/// reject anything claiming more than this rather than honor a header that asks
+/// for a multi-GB allocation (a DoS guard, not a real-recording limit — 2 GiB is
+/// far past any plausible WAV).
+const MAX_RESTORE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 /// The deserialized `catalog.json` envelope.
 ///
 /// `recordings`/`tags` are the same DTOs the IPC layer emits, so the envelope
@@ -147,17 +154,20 @@ pub fn write_to_zip(
                     continue;
                 }
                 let entry_name = audio_entry_name(audio_dir, &path);
-                let mut buf = Vec::new();
-                match std::fs::File::open(&path).and_then(|mut f| f.read_to_end(&mut buf)) {
-                    Ok(_) => {}
+                // Open first so an unreadable file warns and skips before we've
+                // started its zip entry.
+                let mut file = match std::fs::File::open(&path) {
+                    Ok(f) => f,
                     Err(e) => {
                         tracing::warn!("backup: skipping unreadable {}: {e}", path.display());
                         continue;
                     }
-                }
+                };
                 zip.start_file(&entry_name, options)
                     .map_err(|e| Error::Internal(format!("backup: writing {entry_name}: {e}")))?;
-                zip.write_all(&buf)?;
+                // Stream the WAV straight into the archive rather than buffering the
+                // whole file in memory.
+                std::io::copy(&mut file, &mut zip)?;
             }
         }
     }
@@ -257,7 +267,17 @@ fn restore_audio_for(
     // filesystem so the borrow ends cleanly.
     let bytes = match archive.by_name(&entry_name) {
         Ok(mut entry) => {
-            let mut buf = Vec::with_capacity(entry.size() as usize);
+            // The entry's self-reported size is untrusted (a hand-crafted ZIP can
+            // claim a huge one). Cap it before reading rather than pre-allocating a
+            // buffer to that size, so a malicious header can't trigger a giant
+            // allocation; then read what's actually there with a growing buffer.
+            if entry.size() > MAX_RESTORE_BYTES {
+                return Err(Error::Internal(format!(
+                    "backup: entry {entry_name} too large ({} bytes > {MAX_RESTORE_BYTES} cap)",
+                    entry.size()
+                )));
+            }
+            let mut buf = Vec::new();
             entry.read_to_end(&mut buf)?;
             buf
         }

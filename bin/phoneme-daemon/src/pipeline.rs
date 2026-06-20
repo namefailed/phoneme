@@ -2533,6 +2533,14 @@ pub async fn run(
                     .inbox
                     .finish_failed(&id, "hook_failed", &e.to_string())
                     .await?;
+                // The transcript is complete and persisted; the provenance-deferral
+                // rationale (waiting for update_hook_result) doesn't apply on the
+                // failure path — that write is never reached — so signal the
+                // transcript to the UI before failing the recording.
+                state.events.emit(DaemonEvent::TranscriptionDone {
+                    id: id.clone(),
+                    transcript: transcript.clone(),
+                });
                 state.events.emit(DaemonEvent::HookFailed {
                     id,
                     error: e.to_string(),
@@ -2594,6 +2602,14 @@ pub async fn run(
                 .inbox
                 .finish_failed(&id, "hook_failed", &e.to_string())
                 .await?;
+            // The transcript is complete and persisted; the provenance-deferral
+            // rationale (waiting for update_hook_result) doesn't apply on the
+            // failure path — that write is never reached — so signal the
+            // transcript to the UI before failing the recording.
+            state.events.emit(DaemonEvent::TranscriptionDone {
+                id: id.clone(),
+                transcript: transcript.clone(),
+            });
             state.events.emit(DaemonEvent::HookFailed {
                 id: id.clone(),
                 error: e.to_string(),

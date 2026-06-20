@@ -1516,6 +1516,28 @@ pub fn run_local_diarization(
                     "expected-speakers prior merged clusters down to the target count"
                 );
             }
+            // The merge only collapses clusters that HAVE a centroid; a
+            // centroid-less active cluster stays its own speaker. Recompute the
+            // live active count after applying the mapping and warn if it still
+            // exceeds the target, so a prior that couldn't be honored isn't silent.
+            let still_active = (0..num_cols)
+                .filter(|&c| exp_canon[c] == c)
+                .filter(|&c| {
+                    result
+                        .discrete_diarization
+                        .0
+                        .column(c)
+                        .iter()
+                        .any(|&v| v != 0.0)
+                })
+                .count();
+            if still_active > target {
+                tracing::warn!(
+                    detected = still_active,
+                    expected = target,
+                    "expected-speakers prior could not reach the target: some clusters have no voiceprint centroid and cannot be merged"
+                );
+            }
         }
     }
 

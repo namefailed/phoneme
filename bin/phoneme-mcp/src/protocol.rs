@@ -129,9 +129,10 @@ async fn read_capped_line<R: AsyncBufRead + Unpin>(
         // boundary, then surface the problem as a parse error rather than an
         // io::Error (which would kill the session).
         drain_to_newline(inner).await?;
-        // Return a sentinel: 1 byte so callers know "not EOF", but `line` will
-        // be missing its newline — the caller's parse step will reject the
-        // truncated content as invalid JSON, producing a JSON-RPC parse error.
+        // Signal the oversize-line case as an InvalidData error; `next_message`
+        // surfaces it as a JSON-RPC parse error (`Ok(Some(Err(..)))`) without
+        // tearing down the session. The stream is already drained past the bad
+        // line, so the next read starts on a clean boundary.
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("MCP line exceeds {MAX_FRAME_BYTES} bytes; line drained for realignment"),

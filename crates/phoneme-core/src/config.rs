@@ -281,6 +281,11 @@ pub struct DiarizationConfig {
     /// threshold only), so this is enforced as a post-clustering merge on the
     /// local path; cloud providers ignore it. Useful when you know the headcount
     /// (a 1:1 call, a known panel) and the model over-splits.
+    ///
+    /// Limitation: only clusters that produced a voiceprint centroid can be
+    /// merged, so if some detected speakers have no centroid the merge may not be
+    /// able to reach the target — the diarizer logs a warning and leaves the
+    /// remaining clusters split.
     #[serde(default)]
     pub expected_speakers: Option<usize>,
     /// Gap (seconds) below which adjacent same-speaker turns are merged into one.
@@ -347,9 +352,11 @@ pub struct DiarizationConfig {
     /// other recordings. `ask` (default) gathers the matching unnamed speakers and
     /// returns them so the UI can confirm before changing anything — nothing past
     /// is touched automatically. `auto` back-fills every match immediately. `off`
-    /// never back-fills. Only matches at or above
-    /// [`voiceprint_match_threshold`](Self::voiceprint_match_threshold) (the same
-    /// bar recognition uses) are candidates, and an already-named speaker is never
+    /// never back-fills. Only candidates at or above the effective recognition
+    /// threshold ([`voiceprint_match_threshold`](Self::voiceprint_match_threshold)
+    /// when [`voiceprint_score_norm`](Self::voiceprint_score_norm) is off, otherwise
+    /// [`voiceprint_score_norm_threshold`](Self::voiceprint_score_norm_threshold)) —
+    /// the same bar recognition uses — and an already-named speaker is never
     /// overwritten.
     #[serde(default)]
     pub name_propagation: NamePropagation,

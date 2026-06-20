@@ -246,7 +246,8 @@ fn merge_preview_tick(committed: &str, window: &str, window_slid: bool) -> Strin
 }
 
 /// The committed (stable) prefix length to attach to a `TranscriptionPartial`:
-/// the char length of the caption shown BEFORE this tick's append, clamped to the
+/// the UTF-16 code-unit length, matching the JS overlay which indexes by code unit,
+/// of the caption shown BEFORE this tick's append, clamped to the
 /// merged caption's length. Everything in `merged` past this offset is this tick's
 /// freshly-appended, least-settled tail — the part the overlay dims as tentative.
 ///
@@ -261,7 +262,13 @@ fn merge_preview_tick(committed: &str, window: &str, window_slid: bool) -> Strin
 /// overlay dims nothing. Pulled out (not inlined) so the boundary rule is unit-
 /// testable without driving an audio/whisper round trip.
 fn preview_committed_len(prev_committed: &str, merged: &str) -> usize {
-    prev_committed.len().min(merged.len())
+    // Count UTF-16 code units, not bytes: the JS overlay consumer
+    // (frontend/src/overlayTail.ts) indexes the caption by code unit
+    // (text.length / text[i]), so a byte count would over-dim non-ASCII captions.
+    prev_committed
+        .encode_utf16()
+        .count()
+        .min(merged.encode_utf16().count())
 }
 
 impl DaemonRecorder {
@@ -944,5 +951,31 @@ mod tests {
         // if a (hypothetical) merge shortened the caption.
         let len = preview_committed_len("a long prior caption", "short");
         assert_eq!(len, "short".len());
+    }
+
+    #[test]
+    fn committed_len_counts_utf16_code_units_not_bytes_or_chars() {
+        // The JS overlay indexes the caption by UTF-16 code unit, so the boundary
+        // must be the prev caption's encode_utf16().count() — NOT its byte length
+        // (which inflates for non-ASCII) and NOT its char/codepoint count (which
+        // under-counts astral chars: an emoji is 1 char but 2 UTF-16 units).
+        //
+        // "café" — 'é' is 2 bytes / 1 char / 1 UTF-16 unit → 4 bytes, 4 chars, 4 units.
+        let prev = "café";
+        let merged = "café latte";
+        let len = preview_committed_len(prev, merged);
+        assert_eq!(len, prev.encode_utf16().count());
+        assert_eq!(len, 4);
+        assert_ne!(len, prev.len()); // byte len is 5 ('é' is 2 bytes)
+
+        // An emoji is a single char but two UTF-16 code units (a surrogate pair),
+        // so the char count would under-count here.
+        let prev = "hi 👋";
+        let merged = "hi 👋 there";
+        let len = preview_committed_len(prev, merged);
+        assert_eq!(len, prev.encode_utf16().count());
+        assert_eq!(len, 5); // 'h','i',' ' = 3 units + emoji surrogate pair = 2 units
+        assert_ne!(len, prev.chars().count()); // char count is 4
+        assert_ne!(len, prev.len()); // byte len is 7 (emoji is 4 bytes)
     }
 }
