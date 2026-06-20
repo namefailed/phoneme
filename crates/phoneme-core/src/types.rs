@@ -84,6 +84,30 @@ impl RecordingStatus {
         }
     }
 
+    /// Parse a status from its stable wire/catalog string ([`Self::as_str`]),
+    /// returning `None` for an unrecognized value. The inverse of [`Self::as_str`].
+    pub fn from_str_opt(s: &str) -> Option<Self> {
+        Some(match s {
+            "recording" => Self::Recording,
+            "paused" => Self::Paused,
+            "queued" => Self::Queued,
+            "transcribing" => Self::Transcribing,
+            "cleaning_up" => Self::CleaningUp,
+            "summarizing" => Self::Summarizing,
+            "tagging" => Self::Tagging,
+            "hook_running" => Self::HookRunning,
+            "done" => Self::Done,
+            "transcribe_failed" => Self::TranscribeFailed,
+            "hook_failed" => Self::HookFailed,
+            "cleanup_failed" => Self::CleanupFailed,
+            "summarize_failed" => Self::SummarizeFailed,
+            "title_failed" => Self::TitleFailed,
+            "tag_failed" => Self::TagFailed,
+            "cancelled" => Self::Cancelled,
+            _ => return None,
+        })
+    }
+
     /// Every terminal status — `Done`, the failures, and `Cancelled` — in a
     /// fixed order. The single source of truth that [`Self::is_terminal`] and
     /// [`Self::terminal_sql_list`] both derive from, so a new terminal variant
@@ -198,6 +222,136 @@ pub struct SavedSearch {
     pub name: String,
     /// The library filter snapshot as opaque JSON (a serialized `UiFilter`).
     pub filter_json: String,
+}
+
+/// The server-side reading of a saved search's `filter_json` — the frontend's
+/// `UiFilter` shape (see `frontend/src/state/filter.ts`). The daemon stores
+/// `filter_json` opaquely (the frontend serializes a `UiFilter`); this type is
+/// the deserialize target when a saved search is *executed* server-side
+/// (`Request::RunSavedSearch`), so the daemon doesn't depend on the frontend to
+/// translate the filter.
+///
+/// It is a superset of [`ListFilter`]: it carries the same wire fields plus the
+/// UI-only re-modelling the frontend uses — the four-way `kind`
+/// (`all`/`single`/`meeting`/`in_place`/`favorite`) that maps onto the daemon's
+/// `kind`/`favorite`/`in_place`, and `tag_state` (`tagged`/`untagged`) that maps
+/// onto `tagged`. UI-only display state (`semantic`, `like_id`, `like_label`) is
+/// accepted-and-ignored: executing a saved search runs the normal *list* query,
+/// not a similarity/semantic search (those are separate IPCs). Every field is
+/// optional / serde-defaulted so a snapshot written by any frontend version (or
+/// hand-edited) still deserializes.
+///
+/// [`Self::into_list_filter`] is the Rust mirror of the frontend's
+/// `toWireFilter`; the two MUST stay in step.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedSearchFilter {
+    /// Maximum rows to return; `None` for no cap.
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// Rows to skip before returning results (pagination).
+    #[serde(default)]
+    pub offset: Option<u32>,
+    /// Keep only recordings started at or after this time.
+    #[serde(default)]
+    pub since: Option<DateTime<Local>>,
+    /// Keep only recordings started at or before this time.
+    #[serde(default)]
+    pub until: Option<DateTime<Local>>,
+    /// Keep only recordings in this status.
+    #[serde(default)]
+    pub status: Option<RecordingStatus>,
+    /// Full-text query over transcripts (and a `LIKE` over tag names).
+    #[serde(default)]
+    pub search: Option<String>,
+    /// Keep only recordings carrying this tag.
+    #[serde(default)]
+    pub tag_id: Option<i64>,
+    /// `true` (default) = newest first; `false` = oldest first.
+    #[serde(default)]
+    pub sort_desc: Option<bool>,
+    /// The frontend's four-way Library type-filter, as a string:
+    /// `all`/`single`/`meeting`/`in_place`/`favorite`. Mapped onto the daemon's
+    /// `kind`/`favorite`/`in_place` by [`Self::into_list_filter`].
+    #[serde(default)]
+    pub kind: Option<SavedSearchKind>,
+    /// The frontend's tag-presence filter: `tagged` / `untagged`. Mapped onto the
+    /// daemon's `tagged` flag.
+    #[serde(default)]
+    pub tag_state: Option<SavedSearchTagState>,
+}
+
+/// The frontend's four-way Library `kind` choice (a superset of [`ListKind`]:
+/// adds `all`, `in_place`, and `favorite`, which the daemon models on separate
+/// `ListFilter` fields). Unknown strings deserialize as an error, which the
+/// run path reports as a clear "malformed saved search".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SavedSearchKind {
+    /// No type filter.
+    All,
+    /// Single-track voice notes only.
+    Single,
+    /// Meeting tracks only.
+    Meeting,
+    /// In-place dictations only.
+    InPlace,
+    /// Starred (favorite) recordings only.
+    Favorite,
+}
+
+/// The frontend's tag-presence choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SavedSearchTagState {
+    /// Only recordings carrying at least one tag.
+    Tagged,
+    /// Only recordings with no tags.
+    Untagged,
+}
+
+impl SavedSearchFilter {
+    /// Translate the saved (UI) filter into the daemon's wire [`ListFilter`],
+    /// the Rust mirror of the frontend's `toWireFilter`: drop UI-only display
+    /// state (semantic / like-mode) and map the four-way `kind` and `tag_state`
+    /// onto the daemon's `kind` / `favorite` / `in_place` / `tagged` fields, so
+    /// the same query runs in SQL *before* pagination.
+    pub fn into_list_filter(self) -> ListFilter {
+        let mut wire = ListFilter {
+            limit: self.limit,
+            offset: self.offset,
+            since: self.since,
+            until: self.until,
+            status: self.status,
+            search: self.search,
+            tag_id: self.tag_id,
+            sort_desc: self.sort_desc,
+            ..ListFilter::default()
+        };
+        match self.kind {
+            Some(SavedSearchKind::Single) => wire.kind = Some(ListKind::Single),
+            Some(SavedSearchKind::Meeting) => wire.kind = Some(ListKind::Meeting),
+            Some(SavedSearchKind::InPlace) => wire.in_place = Some(true),
+            Some(SavedSearchKind::Favorite) => wire.favorite = Some(true),
+            Some(SavedSearchKind::All) | None => {}
+        }
+        match self.tag_state {
+            Some(SavedSearchTagState::Tagged) => wire.tagged = Some(true),
+            Some(SavedSearchTagState::Untagged) => wire.tagged = Some(false),
+            None => {}
+        }
+        wire
+    }
+
+    /// Parse a saved search's opaque `filter_json` into a [`ListFilter`].
+    /// Malformed JSON (a bad shape, an unknown `kind`/`status`, a hand-edit)
+    /// surfaces as [`crate::Error::InvalidConfig`] so the daemon can return a
+    /// clear error rather than silently running an empty/whole-library query.
+    pub fn parse_to_list_filter(filter_json: &str) -> crate::Result<ListFilter> {
+        let parsed: SavedSearchFilter = serde_json::from_str(filter_json).map_err(|e| {
+            crate::Error::InvalidConfig(format!("malformed saved search filter: {e}"))
+        })?;
+        Ok(parsed.into_list_filter())
+    }
 }
 
 /// A named voice in the cross-recording voiceprint library (#9): the identity a
@@ -600,6 +754,64 @@ mod tests {
     fn recording_status_serializes_snake_case() {
         let s = serde_json::to_string(&RecordingStatus::HookRunning).unwrap();
         assert_eq!(s, "\"hook_running\"");
+    }
+
+    #[test]
+    fn recording_status_from_str_opt_is_inverse_of_as_str() {
+        for v in RecordingStatus::TERMINAL.iter().copied().chain([
+            RecordingStatus::Recording,
+            RecordingStatus::Paused,
+            RecordingStatus::Queued,
+            RecordingStatus::Transcribing,
+            RecordingStatus::CleaningUp,
+            RecordingStatus::Summarizing,
+            RecordingStatus::Tagging,
+            RecordingStatus::HookRunning,
+        ]) {
+            assert_eq!(RecordingStatus::from_str_opt(v.as_str()), Some(v));
+        }
+        assert_eq!(RecordingStatus::from_str_opt("bogus"), None);
+    }
+
+    #[test]
+    fn saved_search_filter_mirrors_to_wire_filter() {
+        // `kind:"meeting"` → daemon `kind`.
+        let f: SavedSearchFilter = serde_json::from_str(r#"{"kind":"meeting"}"#).unwrap();
+        let wire = f.into_list_filter();
+        assert_eq!(wire.kind, Some(ListKind::Meeting));
+        assert_eq!(wire.favorite, None);
+        assert_eq!(wire.in_place, None);
+
+        // `kind:"favorite"` → `favorite:true`; `kind:"in_place"` → `in_place:true`.
+        let fav: SavedSearchFilter = serde_json::from_str(r#"{"kind":"favorite"}"#).unwrap();
+        assert_eq!(fav.into_list_filter().favorite, Some(true));
+        let ip: SavedSearchFilter = serde_json::from_str(r#"{"kind":"in_place"}"#).unwrap();
+        assert_eq!(ip.into_list_filter().in_place, Some(true));
+
+        // `tag_state` maps onto `tagged`.
+        let tagged: SavedSearchFilter = serde_json::from_str(r#"{"tag_state":"tagged"}"#).unwrap();
+        assert_eq!(tagged.into_list_filter().tagged, Some(true));
+        let untagged: SavedSearchFilter =
+            serde_json::from_str(r#"{"tag_state":"untagged"}"#).unwrap();
+        assert_eq!(untagged.into_list_filter().tagged, Some(false));
+
+        // UI-only fields (semantic / like_id / like_label) are accepted-and-ignored.
+        let ui: SavedSearchFilter = serde_json::from_str(
+            r#"{"search":"hi","semantic":true,"like_id":"x","like_label":"y","kind":"all"}"#,
+        )
+        .unwrap();
+        let wire = ui.into_list_filter();
+        assert_eq!(wire.search.as_deref(), Some("hi"));
+        assert_eq!(wire.kind, None, "kind:all is no filter");
+    }
+
+    #[test]
+    fn saved_search_filter_rejects_malformed() {
+        assert!(SavedSearchFilter::parse_to_list_filter(r#"{"kind":"bogus"}"#).is_err());
+        assert!(SavedSearchFilter::parse_to_list_filter("not json").is_err());
+        // An empty object parses to an all-recordings filter.
+        let f = SavedSearchFilter::parse_to_list_filter("{}").unwrap();
+        assert_eq!(f, ListFilter::default());
     }
 
     #[test]

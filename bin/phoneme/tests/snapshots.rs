@@ -70,6 +70,7 @@ fn new_subcommands_are_recognized() {
         "suggest-tags",
         "speaker",
         "import-backup",
+        "find-replace",
     ] {
         Command::cargo_bin("phoneme")
             .unwrap()

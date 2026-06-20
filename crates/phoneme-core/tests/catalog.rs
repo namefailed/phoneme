@@ -1056,6 +1056,88 @@ async fn semantic_search_thresholds_dim_checks_and_dedupes_meetings() {
     );
 }
 
+// ── S3: meaning-search scoped by a list filter ────────────────────────────────
+
+#[tokio::test]
+async fn hybrid_search_filter_restricts_to_matching_recordings() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // Two recordings, both strong matches for the query vector. One is tagged;
+    // we'll scope the search to that tag and expect only it back.
+    let tag = catalog.add_tag("work", None).await.unwrap();
+    let tagged = sample_recording(RecordingId::new());
+    let untagged = sample_recording(RecordingId::new());
+    catalog.insert(&tagged).await.unwrap();
+    catalog.insert(&untagged).await.unwrap();
+    catalog
+        .upsert_embedding(&tagged.id, &[1.0, 0.0, 0.0])
+        .await
+        .unwrap();
+    catalog
+        .upsert_embedding(&untagged.id, &[0.99, 0.1, 0.0])
+        .await
+        .unwrap();
+    catalog.attach_tag(&tagged.id, tag.id).await.unwrap();
+
+    let q = [1.0f32, 0.0, 0.0];
+
+    // Unscoped: both surface (today's behavior, unchanged).
+    let unscoped = catalog.hybrid_search("", &q, 10, -1.0, None).await.unwrap();
+    assert_eq!(
+        unscoped.len(),
+        2,
+        "unscoped search returns both: {unscoped:?}"
+    );
+
+    // Scoped to the tag: only the tagged recording survives.
+    let filter = ListFilter {
+        tag_id: Some(tag.id),
+        ..Default::default()
+    };
+    let scoped = catalog
+        .hybrid_search("", &q, 10, -1.0, Some(&filter))
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped.len(),
+        1,
+        "scoped search restricts to the tag: {scoped:?}"
+    );
+    assert_eq!(scoped[0].0, tagged.id);
+}
+
+#[tokio::test]
+async fn hybrid_search_filter_ignores_query_pagination_fields() {
+    // The filter's `search`/`limit`/`offset`/`sort_desc` must NOT scope the
+    // candidate set — only its predicate fields do. A filter carrying a bogus
+    // `search` and a tiny `limit` must still return the in-scope recording.
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .upsert_embedding(&rec.id, &[1.0, 0.0, 0.0])
+        .await
+        .unwrap();
+
+    let filter = ListFilter {
+        search: Some("a-query-that-matches-no-transcript".into()),
+        limit: Some(0),
+        offset: Some(5),
+        sort_desc: Some(false),
+        ..Default::default()
+    };
+    let scoped = catalog
+        .hybrid_search("", &[1.0, 0.0, 0.0], 10, -1.0, Some(&filter))
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped.len(),
+        1,
+        "query/pagination fields must not scope the candidate set: {scoped:?}"
+    );
+    assert_eq!(scoped[0].0, rec.id);
+}
+
 #[tokio::test]
 async fn saved_searches_upsert_list_and_delete() {
     let (_dir, catalog) = fresh_catalog().await;
@@ -1096,6 +1178,213 @@ async fn saved_searches_upsert_list_and_delete() {
     let list = catalog.list_saved_searches().await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, "ss_b");
+}
+
+// ── S2: run a saved search server-side ────────────────────────────────────────
+
+#[tokio::test]
+async fn run_saved_search_executes_the_stored_filter() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // A meeting track and a single voice note.
+    let single = sample_recording(RecordingId::new());
+    let mut meeting = sample_recording(RecordingId::new());
+    meeting.meeting_id = Some("m1".into());
+    catalog.insert(&single).await.unwrap();
+    catalog.insert(&meeting).await.unwrap();
+
+    // Save a "meetings only" search (the frontend's UiFilter shape: `kind` is
+    // the four-way string, not the daemon's ListKind).
+    catalog
+        .upsert_saved_search("ss_meet", "Meetings", r#"{"kind":"meeting"}"#)
+        .await
+        .unwrap();
+
+    let rows = catalog.run_saved_search("ss_meet").await.unwrap();
+    assert_eq!(rows.len(), 1, "only the meeting track should match");
+    assert_eq!(rows[0].id, meeting.id);
+}
+
+#[tokio::test]
+async fn run_saved_search_maps_favorite_and_tag_state() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // One starred, one plain.
+    let starred = sample_recording(RecordingId::new());
+    let plain = sample_recording(RecordingId::new());
+    catalog.insert(&starred).await.unwrap();
+    catalog.insert(&plain).await.unwrap();
+    catalog.set_favorite(&starred.id, true).await.unwrap();
+
+    // `kind:"favorite"` in the UiFilter maps onto the daemon's `favorite` flag.
+    catalog
+        .upsert_saved_search("ss_fav", "Starred", r#"{"kind":"favorite"}"#)
+        .await
+        .unwrap();
+    let rows = catalog.run_saved_search("ss_fav").await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, starred.id);
+
+    // `tag_state:"untagged"` maps onto `tagged:false` — both are untagged here.
+    catalog
+        .upsert_saved_search("ss_untagged", "Untagged", r#"{"tag_state":"untagged"}"#)
+        .await
+        .unwrap();
+    let rows = catalog.run_saved_search("ss_untagged").await.unwrap();
+    assert_eq!(rows.len(), 2, "both recordings are untagged");
+}
+
+#[tokio::test]
+async fn run_saved_search_unknown_id_is_not_found() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let err = catalog.run_saved_search("nope").await.unwrap_err();
+    assert!(
+        matches!(err, phoneme_core::Error::NotFound { .. }),
+        "unknown saved-search id must be NotFound, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn run_saved_search_malformed_filter_is_invalid_config() {
+    let (_dir, catalog) = fresh_catalog().await;
+    // Store a hand-broken filter (an unknown `kind` value).
+    catalog
+        .upsert_saved_search("ss_bad", "Bad", r#"{"kind":"bogus"}"#)
+        .await
+        .unwrap();
+    let err = catalog.run_saved_search("ss_bad").await.unwrap_err();
+    assert!(
+        matches!(err, phoneme_core::Error::InvalidConfig(_)),
+        "malformed filter_json must be InvalidConfig, got {err:?}"
+    );
+    // And non-JSON garbage too.
+    catalog
+        .upsert_saved_search("ss_garbage", "Garbage", "not json at all")
+        .await
+        .unwrap();
+    let err = catalog.run_saved_search("ss_garbage").await.unwrap_err();
+    assert!(matches!(err, phoneme_core::Error::InvalidConfig(_)));
+}
+
+// ── S6: find & replace across a transcript ────────────────────────────────────
+
+#[tokio::test]
+async fn find_replace_replaces_and_counts_case_insensitive_by_default() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .update_transcript(
+            &rec.id,
+            "The cat sat. THE end.",
+            "The cat sat. THE end.",
+            "m",
+        )
+        .await
+        .unwrap();
+
+    // Case-insensitive: both "The" and "THE" match.
+    let out = catalog
+        .find_replace_transcript(&rec.id, "the", "a", false)
+        .await
+        .unwrap();
+    assert_eq!(out.replaced, 2);
+    assert_eq!(out.transcript, "a cat sat. a end.");
+
+    // Persisted to the live transcript, original preserved.
+    let got = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(got.transcript.as_deref(), Some("a cat sat. a end."));
+    assert!(
+        got.user_edited,
+        "find-replace marks the recording user-edited"
+    );
+    let original = catalog.get_original_transcript(&rec.id).await.unwrap();
+    assert_eq!(
+        original.as_deref(),
+        Some("The cat sat. THE end."),
+        "original transcript must be preserved (revertible)"
+    );
+}
+
+#[tokio::test]
+async fn find_replace_case_sensitive_only_matches_exact() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .update_transcript(&rec.id, "API and api", "API and api", "m")
+        .await
+        .unwrap();
+
+    let out = catalog
+        .find_replace_transcript(&rec.id, "API", "X", true)
+        .await
+        .unwrap();
+    assert_eq!(out.replaced, 1, "only the exact-case run matches");
+    assert_eq!(out.transcript, "X and api");
+}
+
+#[tokio::test]
+async fn find_replace_no_match_is_a_noop() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .update_transcript(&rec.id, "untouched text", "untouched text", "m")
+        .await
+        .unwrap();
+
+    let out = catalog
+        .find_replace_transcript(&rec.id, "zzz", "qqq", false)
+        .await
+        .unwrap();
+    assert_eq!(out.replaced, 0);
+    assert_eq!(out.transcript, "untouched text");
+    // No write: still NOT user-edited (the no-op never rewrote the row).
+    let got = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(got.transcript.as_deref(), Some("untouched text"));
+    assert!(!got.user_edited, "a no-match must not flip user_edited");
+}
+
+#[tokio::test]
+async fn find_replace_empty_find_is_a_noop() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .update_transcript(&rec.id, "abc", "abc", "m")
+        .await
+        .unwrap();
+
+    let out = catalog
+        .find_replace_transcript(&rec.id, "", "X", false)
+        .await
+        .unwrap();
+    assert_eq!(out.replaced, 0, "empty find must not splice between chars");
+    assert_eq!(out.transcript, "abc");
+}
+
+#[tokio::test]
+async fn find_replace_errors_when_no_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap(); // inserted with transcript = None
+
+    let err = catalog
+        .find_replace_transcript(&rec.id, "a", "b", false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, phoneme_core::Error::NotFound { .. }),
+        "no transcript to edit must be NotFound, got {err:?}"
+    );
+
+    // Unknown id likewise.
+    let err = catalog
+        .find_replace_transcript(&RecordingId::new(), "a", "b", false)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, phoneme_core::Error::NotFound { .. }));
 }
 
 #[tokio::test]

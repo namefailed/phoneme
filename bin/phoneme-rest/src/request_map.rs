@@ -91,6 +91,9 @@ pub fn search(q: &SearchQuery) -> Request {
     Request::SemanticSearch {
         query: q.q.clone(),
         limit: q.limit.unwrap_or(DEFAULT_SEARCH_LIMIT),
+        // The REST search endpoint stays unscoped for now; the S3 filter is a
+        // pipe-level addition the daemon honors when present.
+        filter: None,
     }
 }
 
@@ -314,7 +317,7 @@ mod tests {
             limit: None,
         };
         match search(&q) {
-            Request::SemanticSearch { query, limit } => {
+            Request::SemanticSearch { query, limit, .. } => {
                 assert_eq!(query, "hello");
                 assert_eq!(limit, DEFAULT_SEARCH_LIMIT);
             }

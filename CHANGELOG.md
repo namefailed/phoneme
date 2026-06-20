@@ -23,6 +23,19 @@ trust boundary.*
   settings section exposes them, plus a **Re-embed all recordings** action
   (`ReembedAll` IPC) that re-indexes the library after a model change.
 - [x] **Semantic relevance chip** in the recordings list during a semantic query.
+- [x] **Filtered meaning-search** — a semantic search can be scoped by the same
+  Library filters as the list (tag, status, date, kind, favorite, in-place,
+  tag-presence): `catalog::hybrid_search` takes an optional `ListFilter` that
+  restricts the candidate set after ranking, before the limit, so the top
+  in-scope results come back. `SemanticSearch` IPC gained an optional `filter`
+  (additive; unscoped by default); CLI parity via `phoneme search --tag/--status/
+  --kind` (and through `phoneme list --semantic`).
+- [x] **Run saved searches server-side** — a saved search can now be executed by
+  id: `run_saved_search` (`RunSavedSearch` IPC, `catalog::run_saved_search`)
+  parses the stored `filter_json` into a `ListFilter` and runs the list query in
+  the daemon, returning the same recordings shape as `list_recordings`.
+  Malformed filter JSON reports a clear error instead of silently running the
+  whole library. `phoneme list --saved [id]` runs (or lists) them.
 - [x] **"More like this"** — open a recording → find semantically similar ones,
   for free: the recording's already-stored chunk vectors are averaged into the
   query (no fresh embedding; `catalog::more_like_this`, `MoreLikeThis` IPC) and
@@ -175,6 +188,13 @@ trust boundary.*
   first, then case-insensitively by name — and the resolved id rides the existing
   `recipe_id` IPC field; absent = the default pipeline. A value matching no recipe is
   an error that lists the available recipes (no silent fallback to default).
+- [x] **`phoneme find-replace <ID> <FIND> <REPLACE>`** — literal (not regex)
+  find-and-replace across a recording's transcript, case-insensitive by default
+  (`--case-sensitive` for exact case). Only the live transcript is rewritten — the
+  preserved original/clean copies stay, so it's revertible — and the timing layers
+  re-flow + the text re-embeds like a hand edit (`FindReplace` IPC,
+  `catalog::find_replace_transcript`). A no-match is a no-op; prints/returns the
+  replacement count.
 
 ### Transcription
 

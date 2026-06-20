@@ -350,7 +350,11 @@ impl Tool for SearchRecordings {
     fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
         let query = require_str(args, "query", "search_recordings")?;
         let limit = opt_limit(args, "search_recordings")? as usize;
-        Ok(Request::SemanticSearch { query, limit })
+        Ok(Request::SemanticSearch {
+            query,
+            limit,
+            filter: None,
+        })
     }
 }
 
@@ -1324,7 +1328,8 @@ mod tests {
                 .unwrap(),
             Request::SemanticSearch {
                 query: "api redesign".to_string(),
-                limit: 10
+                limit: 10,
+                filter: None,
             }
         );
     }

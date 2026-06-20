@@ -12,6 +12,7 @@ pub mod delete;
 pub mod doctor;
 pub mod edit;
 pub mod export;
+pub mod find_replace;
 pub mod hook_cmd;
 pub mod import;
 pub mod import_backup;

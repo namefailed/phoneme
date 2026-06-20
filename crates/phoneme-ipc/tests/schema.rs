@@ -85,6 +85,79 @@ fn list_filter_without_kind_or_favorite_still_deserializes() {
 }
 
 #[test]
+fn run_saved_search_request_roundtrips() {
+    // S2: execute a saved search by id, server-side.
+    roundtrip(&Request::RunSavedSearch {
+        id: "ss_abc123".into(),
+    });
+}
+
+#[test]
+fn semantic_search_request_roundtrips_with_and_without_filter() {
+    // S3: unscoped (the prior shape) and scoped variants both roundtrip.
+    roundtrip(&Request::SemanticSearch {
+        query: "quarterly plan".into(),
+        limit: 20,
+        filter: None,
+    });
+    roundtrip(&Request::SemanticSearch {
+        query: "quarterly plan".into(),
+        limit: 5,
+        filter: Some(ListFilter {
+            status: Some(RecordingStatus::Done),
+            kind: Some(ListKind::Meeting),
+            tag_id: Some(7),
+            ..ListFilter::default()
+        }),
+    });
+}
+
+#[test]
+fn semantic_search_without_filter_field_still_deserializes() {
+    // An older client omits `filter` entirely — serde default must absorb it,
+    // so the field is purely additive.
+    let legacy = r#"{"type":"semantic_search","query":"x","limit":10}"#;
+    let parsed: Request = serde_json::from_str(legacy).unwrap();
+    let Request::SemanticSearch { filter, limit, .. } = parsed else {
+        panic!("expected semantic_search");
+    };
+    assert_eq!(filter, None);
+    assert_eq!(limit, 10);
+}
+
+#[test]
+fn find_replace_request_roundtrips() {
+    // S6: literal find-replace, both case modes.
+    roundtrip(&Request::FindReplace {
+        id: RecordingId::new(),
+        find: "teh".into(),
+        replace: "the".into(),
+        case_sensitive: false,
+    });
+    roundtrip(&Request::FindReplace {
+        id: RecordingId::new(),
+        find: "API".into(),
+        replace: "api".into(),
+        case_sensitive: true,
+    });
+}
+
+#[test]
+fn find_replace_defaults_case_sensitive_to_false() {
+    // Omitting `case_sensitive` decodes to the forgiving default (insensitive).
+    let id = RecordingId::new();
+    let json = format!(
+        r#"{{"type":"find_replace","id":"{}","find":"a","replace":"b"}}"#,
+        id.as_str()
+    );
+    let parsed: Request = serde_json::from_str(&json).unwrap();
+    let Request::FindReplace { case_sensitive, .. } = parsed else {
+        panic!("expected find_replace");
+    };
+    assert!(!case_sensitive);
+}
+
+#[test]
 fn get_segments_request_roundtrips() {
     roundtrip(&Request::GetSegments {
         id: RecordingId::new(),

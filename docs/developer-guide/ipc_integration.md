@@ -78,10 +78,12 @@ active recording has nothing new to attach them to):
 - `list_recordings` (with a `filter`), `kind_counts` (per-Library-kind totals for the sidebar badges), `get_recording`, `list_meeting`, `get_segments` (machine transcript segments with ms timing + speaker labels; empty list when none are stored)
 - `get_words` (machine transcript **words** — the finer per-word layer beneath `get_segments`; ordered JSON array of `{ idx, start_ms, end_ms, text, speaker, confidence }`, where `confidence` is a 0..1 per-word score or `null` when the provider gives none — whisper-family endpoints emit only segment-level logprobs, so only Deepgram/AssemblyAI populate it. `speaker` is the `[Speaker N]` label (or `null` when undiarized): Deepgram/AssemblyAI tag words from their own speaker labels, and local diarization now tags each word too — it assigns speakers per word off the diarizer's per-frame activation matrix rather than per whole segment. Empty list when none are stored. Fetched lazily by the word-level features — word↔waveform seek and confidence highlighting)
 - `delete_recording` (`keep_audio` bool), `import_recording` (`.wav`/`.mp3`/`.m4a`/`.flac`)
+- `list_saved_searches`, `upsert_saved_search`, `delete_saved_search`, and `run_saved_search` (`{ "id" }`) — execute a stored saved search server-side: the daemon parses the saved `filter_json` into a `ListFilter` and runs the same query as `list_recordings`, returning the same recordings array. `not_found` for an unknown id, `invalid_config` when the stored filter won't parse.
 - `list_ai_activity` (`recording_id` optional, `limit`) — the persisted AI-activity log: completed streaming LLM sessions (cleanup/summary and their re-runs) with the exact prompt + response, newest first. Powers the 🧠 popout's history so it survives app restarts. `recording_id` filters to one recording; omit it for the whole library's recent activity. The daemon prunes the table to a bounded recent window.
 
 **Transcript & metadata edits:**
 - `update_transcript`, `update_notes`, `update_meeting_name`
+- `find_replace` (`{ "id", "find", "replace", "case_sensitive"? }`) — **literal** (not regex) find-and-replace across the live transcript, case-insensitive by default. Only the live `transcript` is rewritten (the preserved original/clean copies stay, so the edit is revertible); the word/segment timing layers are re-flowed and the text re-embedded exactly like `update_transcript`. A zero-match (or empty `find`) is a no-op. Ok = `{ "replaced": N }`; emits `transcript_updated` only when `N > 0`.
 - `get_original_transcript` (raw machine transcript), `get_clean_transcript` (cleaned, pre-edit)
 - `set_favorite` (star/unstar), `set_speaker_name` (rename a diarized `[Speaker N]` label; never rewrites the stored transcript)
 - **In-recording speaker correction** (fix the diarizer's per-segment assignments — `transcript_segments` stays authoritative, and each op rebuilds the prose transcript's `[Speaker N]:` markers in the same transaction so every view agrees; all three are mutating, not retry-safe, and emit `speaker_name_updated`):
@@ -141,7 +143,10 @@ as a failure.
 **Tags:** `list_tags`, `list_all_tags`, `add_tag`, `update_tag`, `delete_tag`,
 `attach_tag`, `detach_tag`, `tags_for`, `tag_usage_counts`, `merge_tags`.
 
-**Search / recall:** `semantic_search` (`query`, `limit`); `more_like_this` (`id`,
+**Search / recall:** `semantic_search` (`query`, `limit`, optional `filter`) — a
+`filter` (the same `ListFilter` shape as `list_recordings`) scopes the meaning-
+search to matching recordings (tag/status/date/kind/…), applied after ranking and
+before the limit; omit it for an unscoped search; `more_like_this` (`id`,
 `limit`) — "more like this": ranks the library by similarity to a stored
 recording using its already-stored vectors (no fresh embedding), excluding the
 source itself and the other track of its own meeting. Both respond with the

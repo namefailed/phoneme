@@ -13,14 +13,25 @@ pub async fn list_recordings(
     forward(&bridge, Request::ListRecordings { filter }).await
 }
 
-/// Perform a semantic search across transcripts.
+/// Perform a semantic search across transcripts, optionally scoped (S3) by the
+/// same Library filter as `list_recordings` (tag/status/date/kind/…). `filter`
+/// omitted = unscoped (the prior behavior).
 #[tauri::command]
 pub async fn semantic_search(
     bridge: Br<'_>,
     query: String,
     limit: usize,
+    filter: Option<ListFilter>,
 ) -> Result<Value, CommandError> {
-    forward(&bridge, Request::SemanticSearch { query, limit }).await
+    forward(
+        &bridge,
+        Request::SemanticSearch {
+            query,
+            limit,
+            filter,
+        },
+    )
+    .await
 }
 
 /// Clear all embeddings and re-embed the whole library with the current model
