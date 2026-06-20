@@ -125,6 +125,20 @@ trust boundary.*
   reuses the canonical `[Speaker N]` machinery (a `speaker_names` row names label 1 → You),
   so it stays user-renamable and the merged-meeting view is unchanged. Normal single
   recordings and the system track are completely unaffected.
+- [x] **In-recording speaker correction** — fix the diarizer's per-segment assignments
+  after the fact: **reassign** one segment to another speaker, **merge** two speakers
+  into one, or **split** some segments off onto a fresh speaker (`catalog::reassign_segment`
+  / `merge_speakers` / `split_speaker`). `transcript_segments` stays authoritative (the
+  timeline / Synced views re-derive from it) and each op rebuilds the prose transcript's
+  `[Speaker N]:` markers — and the per-word layer — in one transaction, so the change shows
+  everywhere at once. On a **merge** the surviving speaker keeps its name (adopts the other's
+  only when unnamed) and the merged-away speaker's voiceprint is dropped (the centroid is
+  per-label; a re-transcribe re-captures the merged label) with any affected named voice
+  recomputed; a split-off speaker has no name/voiceprint until enrolled. New
+  `ReassignSegmentSpeaker` / `MergeSpeakers` / `SplitSpeaker` IPC (mutating, not retry-safe,
+  emit `speaker_name_updated`) + Tauri commands, and CLI `phoneme speaker reassign|merge|split`.
+  The in-app detail-pane merge/split editor is a planned follow-up; the wire contract above is
+  what it will call.
 
 ### Transcription
 

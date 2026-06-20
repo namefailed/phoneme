@@ -128,6 +128,32 @@ any of this; it just happens on the local word-level path.
 > They re-run whenever you **Re-transcribe** a recording, so an older recording
 > made before an update gets the improvements the next time you re-transcribe it.
 
+### ✏️ Fix the speaker assignments by hand
+
+The cleanup passes get most of it right, but the diarizer still occasionally
+mis-assigns a stretch — two people collapsed into one speaker, or one person
+split across two. You can correct the assignments after the fact without
+re-transcribing. Today this lives on the CLI (`phoneme speaker`); the in-app
+detail-pane editor is a planned follow-up.
+
+- **Reassign** one segment to a different speaker (a brand-new label is fine — it
+  just starts existing):
+  `phoneme speaker reassign <ID> <SEGMENT_IDX> <LABEL>`
+- **Merge** two speakers that are really the same person — every `from` segment
+  becomes `into`, and `from` disappears:
+  `phoneme speaker merge <ID> <FROM> <INTO>`
+- **Split** one speaker into two — move some segments onto a fresh label:
+  `phoneme speaker split <ID> <LABEL> <NEW_LABEL> <SEGMENT_IDX>…`
+
+Segment indices come from `phoneme show --segments`. The correction is applied
+everywhere at once: the timeline / Synced views, the prose transcript's
+`[Speaker N]:` markers, and the per-word layer all update together. **Names**
+follow the obvious rule on a merge — the surviving speaker keeps its name (and
+adopts the other's only if it had none). The merged-away speaker's cross-recording
+**voiceprint** is dropped rather than blended (the voice fingerprint is captured
+per label, so a re-transcribe re-captures a clean one for the merged speaker); a
+freshly split-off speaker has no name or voiceprint until you name it.
+
 ### 🙋 Treat a solo recording as one speaker
 
 A solo voice note is sometimes heard as two people — a big tonal shift when you

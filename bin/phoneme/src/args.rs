@@ -319,6 +319,44 @@ pub enum SpeakerAction {
         /// The 1-based `[Speaker N]` index to clear.
         label: i64,
     },
+    /// Reassign one transcript segment to a different speaker label (U1). The
+    /// `IDX` is the 0-based segment index from `phoneme show --segments`; a
+    /// brand-new `LABEL` simply starts existing. Segments stay authoritative
+    /// and the prose `[Speaker N]` markers are rebuilt to match.
+    Reassign {
+        /// The recording whose segment to reassign.
+        id: String,
+        /// The 0-based segment index (from `phoneme show --segments`).
+        idx: i64,
+        /// The 1-based `[Speaker N]` label to assign it to.
+        label: i64,
+    },
+    /// Merge two speakers in a recording (U1): every FROM segment becomes INTO,
+    /// then FROM ceases to exist. INTO keeps its name (adopts FROM's only when
+    /// unnamed); FROM's voiceprint is dropped and any affected named voice
+    /// recomputed.
+    Merge {
+        /// The recording whose speakers to merge.
+        id: String,
+        /// The 1-based label that ceases to exist.
+        from: i64,
+        /// The 1-based label that absorbs FROM's segments.
+        into: i64,
+    },
+    /// Split some of a speaker's segments off onto a fresh label (U1). The
+    /// listed segment indices move from LABEL to NEW-LABEL (which starts with no
+    /// name/voiceprint); every other segment of LABEL stays.
+    Split {
+        /// The recording whose speaker to split.
+        id: String,
+        /// The 1-based source label to split segments off of.
+        label: i64,
+        /// The fresh 1-based label to assign the listed segments.
+        new_label: i64,
+        /// The 0-based segment indices to move (from `phoneme show --segments`).
+        #[arg(required = true, num_args = 1.., value_name = "IDX")]
+        segments: Vec<i64>,
+    },
 }
 
 #[derive(Debug, clap::Args)]
