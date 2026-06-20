@@ -229,6 +229,22 @@ pub struct SpeakerSuggestion {
     pub score: f32,
 }
 
+/// A back-fill candidate (V5): an *unnamed* speaker in some OTHER recording whose
+/// voiceprint matches a named voice closely enough to be the same person. Naming a
+/// speaker can propagate that name onto these — automatically under the `auto`
+/// policy, or after the UI confirms under `ask`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PropagationCandidate {
+    /// The other recording the matching speaker is in.
+    pub recording_id: RecordingId,
+    /// The 1-based speaker label in that recording.
+    pub speaker_label: i64,
+    /// Match score against the named voice's centroid — cosine in [0, 1] under the
+    /// raw scorer, or the z-score under a normalization mode (same scale as the
+    /// recognizer's threshold).
+    pub score: f32,
+}
+
 /// The canonical Recording row as exposed by `Catalog`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recording {

@@ -519,6 +519,7 @@ pub fn run() {
             commands::rename_named_voice,
             commands::merge_named_voices,
             commands::forget_named_voice,
+            commands::undo_forget_named_voice,
             commands::cancel_all_queued,
             commands::cancel_processing,
             commands::run_doctor,

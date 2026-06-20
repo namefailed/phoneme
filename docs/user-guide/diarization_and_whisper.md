@@ -168,8 +168,25 @@ Nothing is ever applied automatically: a suggestion is always a one-click
 voice you've named, with how many recordings each is built from. There you can
 **rename** a voice, **merge** two that turn out to be the same person (their
 voiceprints combine), or **forget** one. Forgetting only stops recognition — your
-recordings and any names you've already applied are untouched, and you can
-re-enroll just by naming the speaker again.
+recordings and any names you've already applied are untouched. **Forgetting is
+reversible:** a forgotten voice is hidden, not erased, so an accidental forget can
+be **undone** (it reappears in the library with its samples re-linked); you can
+also re-enroll from scratch just by naming the speaker again.
+
+**Back-filling past recordings.** When you name a speaker, that same voice may sit
+**unnamed** in recordings you made earlier. The **`name_propagation`** policy
+(config) decides what happens to them:
+
+- **`ask`** (default) — Phoneme finds the matching unnamed speakers and offers them
+  for you to confirm; **nothing in a past recording is changed until you say so.**
+- **`auto`** — the name is applied to every matching unnamed speaker right away.
+- **`off`** — naming only affects the recording you named in; past recordings are
+  left alone.
+
+Only unnamed speakers that clear the recognition threshold are candidates, and a
+speaker you've **already named is never overwritten**. The confirm prompt itself
+(and a "don't ask again" toggle that flips the policy to `auto`) is a UI follow-up;
+for now the policy is set in config.
 
 **Tuning.** **Recognition threshold** (Settings → Diarization → Advanced) is how
 similar a voice must be to be suggested — higher is stricter (fewer wrong guesses,

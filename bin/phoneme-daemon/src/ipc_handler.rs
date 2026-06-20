@@ -819,24 +819,39 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     // when no voiceprint was captured (cloud-diarized recordings)
                     // — recognition is a convenience, never a reason to fail the
                     // rename.
-                    let enrolled = if name.trim().is_empty() {
-                        state
-                            .catalog
-                            .unenroll_speaker(id.as_str(), speaker_label)
-                            .await
-                            .map(|_| ())
+                    let enrolled_id = if name.trim().is_empty() {
+                        if let Err(e) =
+                            state.catalog.unenroll_speaker(id.as_str(), speaker_label).await
+                        {
+                            tracing::warn!(id = %id.as_str(), label = speaker_label, "voiceprint unenroll failed: {e}");
+                        }
+                        None
                     } else {
-                        state
-                            .catalog
-                            .enroll_speaker(id.as_str(), speaker_label, &name)
-                            .await
-                            .map(|_| ())
+                        match state.catalog.enroll_speaker(id.as_str(), speaker_label, &name).await {
+                            Ok(nid) => nid,
+                            Err(e) => {
+                                tracing::warn!(id = %id.as_str(), label = speaker_label, "voiceprint enroll failed: {e}");
+                                None
+                            }
+                        }
                     };
-                    if let Err(e) = enrolled {
-                        tracing::warn!(id = %id.as_str(), label = speaker_label, "voiceprint enroll failed: {e}");
-                    }
-                    state.events.emit(DaemonEvent::SpeakerNameUpdated { id });
-                    ok_null()
+                    state.events.emit(DaemonEvent::SpeakerNameUpdated { id: id.clone() });
+
+                    // Name propagation (V5): when the speaker actually enrolled
+                    // into the library, optionally back-fill that name onto the
+                    // SAME unnamed voice in other recordings, per policy. Naming
+                    // never fails over propagation — it's a convenience layered on
+                    // top, so any error here is logged and swallowed.
+                    let cfg = state.config.load();
+                    let propagation = match enrolled_id {
+                        Some(nid) if cfg.diarization.recognize_speakers => {
+                            speaker_name_propagation(state, &nid, &cfg.diarization).await
+                        }
+                        // No enrollment (cleared name / cloud-diarized / recognition
+                        // off) → nothing to propagate.
+                        _ => serde_json::json!({ "policy": "off", "applied": 0, "candidates": [] }),
+                    };
+                    Response::Ok(serde_json::json!({ "propagation": propagation }))
                 }
                 Err(e) => err_response(&e),
             }
@@ -846,14 +861,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             if cfg.diarization.recognize_speakers {
                 // V2 score normalization: when off (default), use the raw cosine
                 // bar exactly as before; when on, switch to the z-score bar.
-                let mode = phoneme_core::voiceprint::ScoreNorm::from(
-                    cfg.diarization.voiceprint_score_norm,
-                );
-                let threshold = if mode == phoneme_core::voiceprint::ScoreNorm::Off {
-                    cfg.diarization.voiceprint_match_threshold as f32
-                } else {
-                    cfg.diarization.voiceprint_score_norm_threshold as f32
-                };
+                let (mode, threshold) = voiceprint_scorer(&cfg.diarization);
                 match state
                     .catalog
                     .recognize_speakers_for(id.as_str(), threshold, mode)
@@ -894,6 +902,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::ForgetNamedVoice { id } => match state.catalog.forget_named_voice(&id).await {
             Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
+            Err(e) => err_response(&e),
+        },
+        Request::UndoForgetNamedVoice { id } => match state.catalog.undo_forget(&id).await {
+            Ok(restored) => Response::Ok(serde_json::json!({ "restored": restored })),
             Err(e) => err_response(&e),
         },
         Request::ImportRecording { path } => import_recording(state, path).await,
@@ -2535,6 +2547,85 @@ fn error_to_kind(e: &phoneme_core::Error) -> IpcErrorKind {
 /// The error arm shared by nearly every handler: a core error answered as
 /// `Response::Err` with the standard kind mapping and the error's own text.
 /// Wire-identical to spelling the `IpcError` out at the call site.
+/// The (mode, threshold) pair the voiceprint scorer should use for a diarization
+/// config — V2 score-norm aware. With norm `off` (default) it's the raw cosine
+/// bar; with `s_norm`/`as_norm` it's the z-score bar. Shared by recognition and
+/// V5 propagation so both judge "is this the same voice" the same way.
+fn voiceprint_scorer(
+    diar: &phoneme_core::config::DiarizationConfig,
+) -> (phoneme_core::voiceprint::ScoreNorm, f32) {
+    let mode = phoneme_core::voiceprint::ScoreNorm::from(diar.voiceprint_score_norm);
+    let threshold = if mode == phoneme_core::voiceprint::ScoreNorm::Off {
+        diar.voiceprint_match_threshold as f32
+    } else {
+        diar.voiceprint_score_norm_threshold as f32
+    };
+    (mode, threshold)
+}
+
+/// Run V5 name propagation for a just-enrolled named voice, returning the JSON the
+/// `SetSpeakerName` response carries. Routes on `diar.name_propagation`:
+/// `off` → no-op; `auto` → back-fill every candidate and report the count; `ask`
+/// → return the candidate list for the UI to confirm (apply nothing). Best-effort
+/// — any catalog error is logged and reported as an empty result, never failing
+/// the rename.
+async fn speaker_name_propagation(
+    state: &AppState,
+    named_voice_id: &str,
+    diar: &phoneme_core::config::DiarizationConfig,
+) -> serde_json::Value {
+    use phoneme_core::config::NamePropagation;
+    if diar.name_propagation == NamePropagation::Off {
+        return serde_json::json!({ "policy": "off", "applied": 0, "candidates": [] });
+    }
+    let (mode, threshold) = voiceprint_scorer(diar);
+    let candidates = match state
+        .catalog
+        .propagation_candidates(named_voice_id, threshold, mode)
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(voice = %named_voice_id, "propagation candidate scan failed: {e}");
+            return serde_json::json!({ "policy": "ask", "applied": 0, "candidates": [] });
+        }
+    };
+    match diar.name_propagation {
+        NamePropagation::Off => unreachable!("handled above"),
+        NamePropagation::Auto => {
+            let targets: Vec<(phoneme_core::id::RecordingId, i64)> = candidates
+                .iter()
+                .map(|c| (c.recording_id.clone(), c.speaker_label))
+                .collect();
+            let applied = match state.catalog.apply_propagation(named_voice_id, &targets).await {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::warn!(voice = %named_voice_id, "propagation apply failed: {e}");
+                    0
+                }
+            };
+            if applied > 0 {
+                // The back-filled recordings now show the new name — nudge clients
+                // to refresh those rows.
+                for c in &candidates {
+                    state.events.emit(DaemonEvent::SpeakerNameUpdated {
+                        id: c.recording_id.clone(),
+                    });
+                }
+            }
+            serde_json::json!({ "policy": "auto", "applied": applied, "candidates": [] })
+        }
+        NamePropagation::Ask => {
+            // Surface the candidates for the UI to confirm; change nothing now.
+            serde_json::json!({
+                "policy": "ask",
+                "applied": 0,
+                "candidates": serde_json::to_value(&candidates).unwrap_or(serde_json::Value::Array(vec![])),
+            })
+        }
+    }
+}
+
 fn err_response(e: &phoneme_core::Error) -> Response {
     Response::Err(IpcError {
         kind: error_to_kind(e),
