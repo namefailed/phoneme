@@ -188,8 +188,16 @@ impl NamedPipeListener {
         // or connect otherwise fails, the `?` below must not leave `self.current`
         // as None — that would make every later accept() fail with "listener
         // empty", locking out all IPC until the daemon restarts.
-        let next = create_secured_server(&ServerOptions::new(), &pipe_path(&self.name))
-            .map_err(IpcTransportError::Connect)?;
+        let next = match create_secured_server(&ServerOptions::new(), &pipe_path(&self.name)) {
+            Ok(s) => s,
+            Err(e) => {
+                // Restore the in-hand (still unconnected) instance so the next
+                // accept() can retry with it rather than finding None and returning
+                // "listener empty" forever.
+                self.current = Some(server);
+                return Err(IpcTransportError::Connect(e));
+            }
+        };
         self.current = Some(next);
 
         server.connect().await?;

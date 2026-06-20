@@ -267,7 +267,12 @@ pub struct CleanupArgs {
     #[arg(long)]
     pub api_url: Option<String>,
     /// Override the cleanup API key for this run only.
-    #[arg(long)]
+    ///
+    /// WARNING: passing a key via this flag exposes it to every local process
+    /// that can read the process table (e.g. `ps`, Task Manager, shell history).
+    /// Prefer the `PHONEME_CLEANUP_API_KEY` environment variable — it is not
+    /// visible in the process table and is not recorded in shell history.
+    #[arg(long, env = "PHONEME_CLEANUP_API_KEY")]
     pub api_key: Option<String>,
 }
 

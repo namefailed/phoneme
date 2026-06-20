@@ -2597,3 +2597,56 @@ async fn run_hook_steps_honors_trigger_and_required() {
     let res = run_hook_steps(&state, &cfg, &[hook_step("", true)], &payload, &mut sf).await;
     assert!(res.is_err(), "a required webhook failure fails the recording");
 }
+
+/// `skip_active_queue_item` must only honor the global skip broadcast for the
+/// recording that is the queue's CURRENTLY-PROCESSING item — so one ⏭ aborts
+/// just that stage, not every concurrent LLM stage (e.g. an on-demand re-run
+/// streaming at the same time). Locks R4.
+#[tokio::test]
+async fn skip_only_fires_for_the_active_processing_item() {
+    use crate::pipeline::skip_active_queue_item;
+    use std::time::Duration;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state(tmp.path(), Config::default()).await;
+
+    let active = RecordingId::new();
+    let other = RecordingId::new();
+
+    // Mark `active` as the processing item (what the queue worker does).
+    {
+        let mut slot = state.processing.lock().unwrap();
+        *slot = Some((active.clone(), CancellationToken::new()));
+    }
+
+    // A background pulser keeps broadcasting the skip — like a user clicking ⏭ —
+    // so the test never depends on a single notify landing in the exact poll
+    // window (notify_waiters only wakes already-registered waiters).
+    let pulse = {
+        let state = state.clone();
+        tokio::spawn(async move {
+            loop {
+                state.skip_stage.notify_waiters();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+    };
+
+    // A skip aimed at a NON-active recording must NOT resolve: the helper wakes
+    // on each broadcast, sees it isn't the active item, and re-arms. The timeout
+    // is the assertion that it stays parked despite the steady pulses.
+    let parked =
+        tokio::time::timeout(Duration::from_millis(150), skip_active_queue_item(&state, &other))
+            .await;
+    assert!(
+        parked.is_err(),
+        "a skip for a non-active recording must not resolve skip_active_queue_item"
+    );
+
+    // A skip aimed at the ACTIVE recording resolves on the next broadcast.
+    tokio::time::timeout(Duration::from_millis(500), skip_active_queue_item(&state, &active))
+        .await
+        .expect("skip for the active item must resolve before the timeout");
+
+    pulse.abort();
+}

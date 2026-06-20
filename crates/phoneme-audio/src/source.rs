@@ -105,7 +105,9 @@ where
                 .unwrap_or_else(|_| Vec::with_capacity(data.len()));
             buf.clear();
             buf.extend(data.iter().map(|&s| sample_to_f32(s)));
-            let _ = raw_tx.try_send(buf);
+            if raw_tx.try_send(buf).is_err() {
+                    tracing::warn!("audio callback: channel full, dropping block");
+                }
         },
         move |err| {
             tracing::warn!("cpal stream error: {err}");

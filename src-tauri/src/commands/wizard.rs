@@ -476,12 +476,31 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Com
             if file.is_file() {
                 if let Some(file_name) = outpath.file_name().and_then(|n| n.to_str()) {
                     if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
+                        // Extract to a sibling temp path first, then rename into
+                        // place atomically — a crash or write error mid-copy
+                        // leaves only the .tmp, so the final target is never a
+                        // trusted-but-truncated binary on the next launch.
                         let extract_to = bin_path.join(file_name);
-                        let mut outfile = std::fs::File::create(&extract_to).map_err(|e| {
-                            format!("failed to create output file {}: {}", file_name, e)
+                        let tmp_path = bin_path.join(format!("{}.tmp", file_name));
+                        // Remove any stale .tmp from a prior interrupted run.
+                        let _ = std::fs::remove_file(&tmp_path);
+                        let mut outfile = std::fs::File::create(&tmp_path).map_err(|e| {
+                            format!("failed to create temp file for {}: {}", file_name, e)
                         })?;
-                        std::io::copy(&mut file, &mut outfile)
-                            .map_err(|e| format!("failed to extract {}: {}", file_name, e))?;
+                        if let Err(e) = std::io::copy(&mut file, &mut outfile) {
+                            let _ = std::fs::remove_file(&tmp_path);
+                            return Err(format!("failed to extract {}: {}", file_name, e).into());
+                        }
+                        // Flush before rename so all bytes are on disk.
+                        if let Err(e) = outfile.sync_all() {
+                            let _ = std::fs::remove_file(&tmp_path);
+                            return Err(format!("failed to flush {}: {}", file_name, e).into());
+                        }
+                        drop(outfile);
+                        std::fs::rename(&tmp_path, &extract_to).map_err(|e| {
+                            let _ = std::fs::remove_file(&tmp_path);
+                            format!("failed to place {}: {}", file_name, e)
+                        })?;
                     }
                 }
             }

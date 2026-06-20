@@ -88,11 +88,27 @@ export class RecordingDetail {
   private renderedAudioPath: string | null = null;
   /** Whether the summary "peek" is currently hijacking the transcript box. */
   private summaryPeeking = false;
-  /** Guards against overlapping summary-generation polls. */
-  private summaryPolling = false;
+  /** Generation token for the summary-generation poll loop. Each requestSummary
+   *  call bumps it and captures the new value; a running tick bails the moment
+   *  its generation is stale, so a regenerate-while-polling retires the old poll
+   *  and starts a fresh one (instead of the old early-return dropping it). */
+  private summaryPollGen = 0;
   /** The 24-hour-time setting, for the header date (K). Loaded from config and
    *  kept current via the config:saved event. */
   private use24h = false;
+  /** Serializes speaker-rename commits. Each commit reads `this.recording.
+   *  transcript`, rewrites it, and writes it back across two awaits; tabbing
+   *  through the speakers modal can fire several blur commits at once, so without
+   *  this chain two concurrent renames would each rewrite from a pre-other-write
+   *  transcript and the later writer would clobber the earlier one's change (DB
+   *  + memory). Chaining makes each commit read-then-write atomically. */
+  private speakerCommitChain: Promise<void> = Promise.resolve();
+  /** Close fn of the currently-open modal (Compare / Speakers), if any. These
+   *  modals append to document.body and add a document-level keydown listener,
+   *  so navigating to another recording (renderRecording/clear) must close the
+   *  open one — otherwise it stays visible over the new recording AND keeps
+   *  intercepting Escape. Set when a modal opens, cleared by its own close(). */
+  private activeModalClose: (() => void) | null = null;
 
   constructor(container: HTMLElement, onRefresh: () => void) {
     this.container = container;
@@ -183,6 +199,7 @@ export class RecordingDetail {
   }
 
   clear() {
+    this.activeModalClose?.(); // close any body-level modal before tearing down
     this.recording = null;
     this.renderedId = null;
     this.renderedAudioPath = null;
@@ -240,6 +257,10 @@ export class RecordingDetail {
 
   private renderRecording() {
     if (!this.recording) return;
+    // A body-level modal (Compare / Speakers) opened for the PREVIOUS recording
+    // outlives this.container, so close it before mounting the new one —
+    // otherwise it floats over the fresh recording and keeps eating Escape.
+    this.activeModalClose?.();
     // The previous render's timeline (if any) lives in DOM this rewrite is
     // about to replace — drop its window listeners. `pendingTimeline` is left
     // alone: it may have been set for THIS render.
@@ -837,12 +858,16 @@ export class RecordingDetail {
     document.body.appendChild(overlay);
     const close = () => {
       document.removeEventListener("keydown", onKey);
+      if (this.activeModalClose === close) this.activeModalClose = null;
       closeModalOverlay(overlay, () => overlay.remove());
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
     document.addEventListener("keydown", onKey);
+    // Let navigation away from this recording tear the modal down (it lives on
+    // document.body, not in this.container).
+    this.activeModalClose = close;
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) close();
     });
@@ -930,12 +955,16 @@ export class RecordingDetail {
 
     const close = () => {
       document.removeEventListener("keydown", onKey);
+      if (this.activeModalClose === close) this.activeModalClose = null;
       closeModalOverlay(overlay, () => overlay.remove());
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
     document.addEventListener("keydown", onKey);
+    // Let navigation away from this recording tear the modal down (it lives on
+    // document.body, not in this.container).
+    this.activeModalClose = close;
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) close();
     });
@@ -1013,41 +1042,49 @@ export class RecordingDetail {
    *  transcript so the name actually replaces `[Speaker N]` in the text (it
    *  sticks — not just a display overlay). An empty value clears the saved name
    *  but can't un-bake text that was already replaced. */
-  private async commitSpeakerName(
+  private commitSpeakerName(
     id: string,
     label: number,
     value: string,
     previous: string,
-  ) {
-    if (value.trim() === previous.trim()) return; // nothing changed
-    try {
-      // The speaker's CURRENT display name (before this rename) — needed to find
-      // an already-baked label in the text on the 2nd/3rd rename.
-      const oldName = speakerDisplayName(this.recording?.speaker_names, label);
-      await setSpeakerName(id, label, value.trim());
-      if (this.recording?.id === id) {
-        const names = (this.recording.speaker_names ?? []).filter(
-          (s) => s.speaker_label !== label,
-        );
-        if (value.trim()) names.push({ speaker_label: label, name: value.trim() });
-        this.recording.speaker_names = names;
-        // Bake the name into the transcript text so it sticks AND stays
-        // renamable: replace the [Speaker N] marker OR a previously-baked name.
-        // Skip meeting tracks — the merged view splits turns on the markers, so
-        // baking would break it (it shows names from the map there instead).
-        if (this.recording.transcript && !this.recording.meeting_id) {
-          const rewritten = renameSpeakerInTranscript(this.recording.transcript, label, oldName, value);
-          if (rewritten !== this.recording.transcript) {
-            await updateTranscript(id, rewritten);
-            this.recording.transcript = rewritten;
+  ): Promise<void> {
+    if (value.trim() === previous.trim()) return Promise.resolve(); // nothing changed
+    // Run on the serialization chain so concurrent blur commits (tabbing through
+    // the modal) can't each rewrite the transcript from a pre-other-write copy
+    // and clobber one another — each commit reads-then-writes after the previous
+    // one has fully landed. A failed commit doesn't break the chain for the next.
+    const run = async () => {
+      try {
+        // The speaker's CURRENT display name (before this rename) — needed to find
+        // an already-baked label in the text on the 2nd/3rd rename.
+        const oldName = speakerDisplayName(this.recording?.speaker_names, label);
+        await setSpeakerName(id, label, value.trim());
+        if (this.recording?.id === id) {
+          const names = (this.recording.speaker_names ?? []).filter(
+            (s) => s.speaker_label !== label,
+          );
+          if (value.trim()) names.push({ speaker_label: label, name: value.trim() });
+          this.recording.speaker_names = names;
+          // Bake the name into the transcript text so it sticks AND stays
+          // renamable: replace the [Speaker N] marker OR a previously-baked name.
+          // Skip meeting tracks — the merged view splits turns on the markers, so
+          // baking would break it (it shows names from the map there instead).
+          if (this.recording.transcript && !this.recording.meeting_id) {
+            const rewritten = renameSpeakerInTranscript(this.recording.transcript, label, oldName, value);
+            if (rewritten !== this.recording.transcript) {
+              await updateTranscript(id, rewritten);
+              this.recording.transcript = rewritten;
+            }
           }
         }
+        showToast(value.trim() ? "Speaker renamed" : "Speaker name cleared", "success");
+        this.onRefresh();
+      } catch (e) {
+        showToast(`Couldn't rename speaker: ${errText(e)}`, "error");
       }
-      showToast(value.trim() ? "Speaker renamed" : "Speaker name cleared", "success");
-      this.onRefresh();
-    } catch (e) {
-      showToast(`Couldn't rename speaker: ${errText(e)}`, "error");
-    }
+    };
+    this.speakerCommitChain = this.speakerCommitChain.then(run, run);
+    return this.speakerCommitChain;
   }
 
   /** Render the stored summary into the peek box and wire its Regenerate button. */
@@ -1073,6 +1110,10 @@ export class RecordingDetail {
    *  (RerunSummary spawns a task and emits SummaryUpdated), so polling keeps the
    *  flow self-contained without depending on event re-renders. */
   async requestSummary(id: string, model: string | null = null, prompt: string | null = null) {
+    // Re-baseline against the CURRENT summary on every call: a regenerate must
+    // wait for a summary that differs from what's shown now, not from the value
+    // captured before some earlier job (which a still-running poll could satisfy
+    // with the first job's result and stop early).
     const prev = this.recording?.summary ?? null;
     try {
       await rerunSummary(id, model, prompt);
@@ -1084,29 +1125,25 @@ export class RecordingDetail {
       }
       return;
     }
-    if (this.summaryPolling) return;
-    this.summaryPolling = true;
+    // Bump the generation so any poll started by an earlier call retires itself
+    // on its next tick, and this call owns the fresh loop (handles a regenerate
+    // fired while a previous poll is still in flight).
+    const gen = ++this.summaryPollGen;
     const deadline = Date.now() + 90_000;
     const tick = async () => {
-      if (Date.now() > deadline) {
-        this.summaryPolling = false;
-        return;
-      }
+      // A newer requestSummary superseded us, or the deadline passed.
+      if (gen !== this.summaryPollGen || Date.now() > deadline) return;
       let rec: Recording;
       try {
         rec = await getRecording(id);
       } catch {
-        window.setTimeout(() => void tick(), 1500);
+        if (gen === this.summaryPollGen) window.setTimeout(() => void tick(), 1500);
         return;
       }
-      // Bail if the user navigated to a different recording while polling.
-      if (this.recording?.id !== id) {
-        this.summaryPolling = false;
-        return;
-      }
+      // Bail if the user navigated away or a newer poll took over while we waited.
+      if (gen !== this.summaryPollGen || this.recording?.id !== id) return;
       if (rec.summary && rec.summary.trim() && rec.summary !== prev) {
         this.recording = rec;
-        this.summaryPolling = false;
         const peekEl = this.container.querySelector<HTMLElement>("#summary-peek");
         if (peekEl && peekEl.style.display !== "none") {
           this.fillSummaryPeek(peekEl, rec);

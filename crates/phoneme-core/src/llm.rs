@@ -182,11 +182,6 @@ struct OllamaProvider {
     timeout: Duration,
 }
 
-#[derive(Debug, Deserialize)]
-struct OllamaResponse {
-    response: String,
-}
-
 /// One NDJSON object from a streaming `/api/generate` response. `response` is a
 /// token/chunk; `done` marks the final object.
 #[derive(Debug, Deserialize)]
@@ -200,21 +195,14 @@ struct OllamaStreamChunk {
 #[async_trait]
 impl LlmProvider for OllamaProvider {
     async fn process(&self, prompt: &str, text: &str) -> Result<String> {
-        let body = serde_json::json!({
-            "model": self.model,
-            "prompt": combine(prompt, text),
-            "stream": false,
-        });
-        // Floor the deadline well above the 30 s default: a cold local model on a
-        // CPU box needs time to load before it emits the (whole, non-streamed)
-        // response, and 30 s reliably aborts that on a slow machine.
-        let deadline = self.timeout.max(Duration::from_secs(120));
-        let parsed: OllamaResponse = send_json(
-            self.http.post(&self.url).timeout(deadline).json(&body),
-            "Ollama",
-        )
-        .await?;
-        Ok(normalize_response(&parsed.response))
+        // Drive the streaming path with a no-op sink rather than a `stream:false`
+        // request. `RequestBuilder::timeout` is a TOTAL cap on the whole response
+        // body, so a `stream:false` call buffers the entire generation server-side
+        // before the first byte and a cold model on a slow box blows the cap mid-
+        // generation, surfacing a misleading timeout. The streaming path instead
+        // bounds only the *idle* gap between chunks (see `process_streaming`), so a
+        // healthy long generation never trips it. We discard the per-token deltas.
+        self.process_streaming(prompt, text, &mut |_| {}).await
     }
 
     /// Stream tokens from Ollama's NDJSON response, forwarding each chunk to

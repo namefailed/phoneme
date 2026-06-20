@@ -281,6 +281,35 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                 emit_queue_depth(&state).await;
             }
             None => {
+                // When the queue is empty and the whisper-unreachable latch is
+                // set, the recovery edge (a completed pipeline run) can never
+                // fire — so the UI's error icon stays stuck even after the
+                // server comes back. Probe the health endpoint here instead,
+                // matching the expected UX: the error clears because the server
+                // recovered, not because a recording happened to succeed.
+                if whisper_unreachable {
+                    let base_url = {
+                        let cfg = state.config.load();
+                        state
+                            .whisper_ports
+                            .apply(&cfg, &cfg.whisper)
+                            .server_base_url()
+                    };
+                    let health = format!("{}/health", base_url.trim_end_matches('/'));
+                    if let Ok(client) = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(2))
+                        .build()
+                    {
+                        if let Ok(resp) = client.get(&health).send().await {
+                            if resp.status().is_success() {
+                                whisper_unreachable = false;
+                                state.events.emit(DaemonEvent::WhisperStatusChanged {
+                                    reachable: true,
+                                });
+                            }
+                        }
+                    }
+                }
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_millis(500)) => {}
                     _ = shutdown.changed() => return Ok(()),

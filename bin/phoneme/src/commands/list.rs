@@ -5,7 +5,9 @@
 //! Builds a `ListFilter` from the flags (`--limit/--offset` pagination,
 //! `--since/--until` dates, `--status`, `--search` FTS5, `--kind`
 //! single/meeting) and sends `ListRecordings`; `--tag` accepts an id or a
-//! name and is resolved against `ListTags`/`ListAllTags` first. The `kind`
+//! name and is resolved against `ListAllTags` first (uses all tags, including
+//! orphaned ones, so `--tag <name>` on a tag with zero recordings returns the
+//! correct empty list rather than "not found"). The `kind`
 //! filter is applied in SQL by the daemon — before LIMIT/OFFSET — so pages
 //! stay full. `--semantic <QUERY>` short-circuits the whole flow into
 //! `commands::search` (a `SemanticSearch` request) reusing `--limit`.
@@ -77,7 +79,7 @@ async fn resolve_tag(client: &mut Client, tag: Option<&str>) -> Result<Option<i6
     if let Ok(id) = tag.parse::<i64>() {
         return Ok(Some(id));
     }
-    let value = client.send(Request::ListTags).await?;
+    let value = client.send(Request::ListAllTags).await?;
     let tags: Vec<phoneme_core::tags::Tag> = serde_json::from_value(value).map_err(|e| {
         eprintln!("error: parsing tags list: {e}");
         ExitCode::from(exit::GENERIC_FAIL)

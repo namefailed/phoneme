@@ -76,6 +76,9 @@ export type DaemonEvent =
   | { event: "transcript_updated"; id: string }
   | { event: "summary_updated"; id: string }
   | { event: "summary_failed"; id: string; error: string }
+  | { event: "cleanup_failed"; id: string; error: string }
+  | { event: "title_failed"; id: string; error: string }
+  | { event: "tag_failed"; id: string; error: string }
   | { event: "notes_updated"; id: string }
   | { event: "speaker_name_updated"; id: string }
   | { event: "tag_created"; id: number }

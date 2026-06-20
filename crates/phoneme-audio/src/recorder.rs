@@ -314,6 +314,10 @@ impl Recorder {
                         samples.extend_from_slice(&b);
                     }
                 }
+                // Cap at max_samples: a large OS buffer or long tail_grace period
+                // can push the drain past the configured maximum. Consistent with
+                // how the mid-loop max-duration path truncates (lines above).
+                samples.truncate(max_samples);
             }
 
             let duration_ms =

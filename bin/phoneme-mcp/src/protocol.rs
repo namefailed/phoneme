@@ -112,22 +112,51 @@ const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 /// guarding against a peer that streams headers without a blank terminator.
 const MAX_HEADER_LINES: usize = 64;
 
-/// Read one line into `line`, erroring out if it grows past [`MAX_FRAME_BYTES`]
-/// without a terminating newline — so a peer that streams an unbounded line
-/// can't grow memory without limit. Returns the byte count read (`0` = clean
-/// EOF), matching [`AsyncBufReadExt::read_line`].
+/// Read one line into `line`. If the line grows past [`MAX_FRAME_BYTES`]
+/// without a terminating newline the reader drains until `\n` (or EOF) to
+/// restore alignment, then returns a parse-level `Err` so the *session*
+/// survives and the caller can answer with a JSON-RPC parse error rather than
+/// tearing the loop down. Returns the byte count read (`0` = clean EOF),
+/// matching [`AsyncBufReadExt::read_line`].
 async fn read_capped_line<R: AsyncBufRead + Unpin>(
     inner: &mut R,
     line: &mut String,
 ) -> std::io::Result<usize> {
     let n = inner.take(MAX_FRAME_BYTES as u64).read_line(line).await?;
     if n == MAX_FRAME_BYTES && !line.ends_with('\n') {
+        // The cap was hit before a newline arrived. Drain the remainder of this
+        // oversized line so the next read_line starts on a clean message
+        // boundary, then surface the problem as a parse error rather than an
+        // io::Error (which would kill the session).
+        drain_to_newline(inner).await?;
+        // Return a sentinel: 1 byte so callers know "not EOF", but `line` will
+        // be missing its newline — the caller's parse step will reject the
+        // truncated content as invalid JSON, producing a JSON-RPC parse error.
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("MCP line exceeds {MAX_FRAME_BYTES} bytes without a newline"),
+            format!("MCP line exceeds {MAX_FRAME_BYTES} bytes; line drained for realignment"),
         ));
     }
     Ok(n)
+}
+
+/// Discard bytes from `inner` until a `\n` or EOF — used after hitting the
+/// per-line cap to realign the stream to the next message boundary.
+async fn drain_to_newline<R: AsyncBufRead + Unpin>(inner: &mut R) -> std::io::Result<()> {
+    loop {
+        let buf = inner.fill_buf().await?;
+        if buf.is_empty() {
+            return Ok(()); // EOF
+        }
+        if let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            // Consume up to and including the newline.
+            let consume = pos + 1;
+            inner.consume(consume);
+            return Ok(());
+        }
+        let len = buf.len();
+        inner.consume(len);
+    }
 }
 
 /// Reads JSON-RPC messages off an async buffered stream, accepting either
@@ -152,7 +181,16 @@ impl<R: AsyncBufRead + Unpin> FramedReader<R> {
         // content line is a Content-Length header or a bare JSON line.
         loop {
             let mut line = String::new();
-            let n = read_capped_line(&mut self.inner, &mut line).await?;
+            let n = match read_capped_line(&mut self.inner, &mut line).await {
+                Ok(n) => n,
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                    // Oversize line: the stream has been drained to the next
+                    // newline boundary; surface this as a parse error so the
+                    // loop keeps serving rather than killing the session.
+                    return Ok(Some(Err(e.to_string())));
+                }
+                Err(e) => return Err(e),
+            };
             if n == 0 {
                 return Ok(None); // EOF
             }
@@ -166,13 +204,20 @@ impl<R: AsyncBufRead + Unpin> FramedReader<R> {
                 // blank line, then read exactly `len` bytes of JSON body.
                 self.consume_headers().await?;
                 // Cap the body to the IPC frame limit: an oversize Content-Length
-                // must not trigger an unbounded eager allocation that aborts or
-                // OOM-kills the bridge. Surface it as a parse error so the loop
-                // keeps serving rather than allocating `len` bytes.
+                // must not trigger an unbounded eager allocation. Unlike the
+                // newline-framed oversize case (where we can drain to the next
+                // `\n`), a Content-Length body could be arbitrarily large and
+                // draining it is unbounded — so we close the stream here. This
+                // is a hard protocol violation from the client; the session is
+                // not recoverable.
                 if len > MAX_FRAME_BYTES {
-                    return Ok(Some(Err(format!(
-                        "Content-Length {len} exceeds maximum {MAX_FRAME_BYTES} bytes"
-                    ))));
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Content-Length {len} exceeds maximum {MAX_FRAME_BYTES} bytes; \
+                             stream closed to avoid unbounded drain"
+                        ),
+                    ));
                 }
                 let mut buf = vec![0u8; len];
                 self.inner.read_exact(&mut buf).await?;
@@ -298,16 +343,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oversize_content_length_surfaces_as_error_not_allocation() {
+    async fn oversize_content_length_closes_stream_not_allocation() {
         // A wildly oversize Content-Length must NOT trigger a multi-terabyte
-        // eager allocation — it surfaces as a parse Err and the reader survives.
+        // eager allocation. Because draining the body is unbounded, the stream
+        // is closed (Err returned) rather than attempting to drain and continue.
         let framed = "Content-Length: 4000000000000\r\n\r\n";
         let mut reader = FramedReader::new(BufReader::new(Cursor::new(framed.as_bytes().to_vec())));
-        let msg = reader.next_message().await.unwrap().unwrap();
+        let result = reader.next_message().await;
         assert!(
-            msg.is_err(),
-            "oversize Content-Length must surface as Err, not allocate"
+            result.is_err(),
+            "oversize Content-Length must close the stream (Err), not allocate"
         );
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn oversize_line_surfaces_as_parse_error_and_session_continues() {
+        // An oversize newline-framed line must NOT kill the session. The reader
+        // drains to the newline boundary and returns Ok(Some(Err)) so the loop
+        // can send a JSON-RPC parse error and keep serving.
+        //
+        // Build: MAX_FRAME_BYTES of 'x', NO newline (triggers the cap),
+        // then a valid second message on its own line.
+        let mut input: Vec<u8> = vec![b'x'; MAX_FRAME_BYTES];
+        // Add a newline to terminate the oversize "line".
+        input.push(b'\n');
+        // Append a valid second JSON message.
+        let second = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}\n";
+        input.extend_from_slice(second.as_bytes());
+
+        let mut reader = FramedReader::new(BufReader::new(Cursor::new(input)));
+        // First read: the oversize line — should surface as Ok(Some(Err)).
+        let first = reader.next_message().await.unwrap();
+        assert!(
+            first.unwrap().is_err(),
+            "oversize line must surface as a parse Err, not kill the session"
+        );
+        // Second read: the valid message that follows — must still be readable.
+        let second = reader.next_message().await.unwrap().unwrap().unwrap();
+        assert_eq!(second["method"], "ping");
     }
 
     #[tokio::test]

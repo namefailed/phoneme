@@ -756,6 +756,7 @@ fn audio_zip_entry_name(audio_dir: &std::path::Path, path: &std::path::Path) -> 
 #[tauri::command]
 pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, CommandError> {
     reject_executable_dest(&dest)?;
+    reject_sensitive_dir_dest(&dest)?;
     let recordings = forward(
         &bridge,
         Request::ListRecordings {
