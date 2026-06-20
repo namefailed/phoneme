@@ -75,6 +75,11 @@ export class SyncedTranscript {
   private words: TranscriptWord[] = [];
   private activeIdx = -1;
   private disposed = false;
+  /** Timing source: "raw" machine truth, or "cleaned" (re-aligned to the
+   *  post-cleanup transcript). Toggle appears only when a cleaned set exists. */
+  private variant: "raw" | "cleaned" = "raw";
+  private hasCleaned = false;
+  private probedCleaned = false;
 
   constructor(
     container: HTMLElement,
@@ -95,7 +100,14 @@ export class SyncedTranscript {
 
   private async load() {
     try {
-      this.words = await getWords(this.recordingId);
+      this.words = await getWords(this.recordingId, this.variant);
+      if (!this.probedCleaned) {
+        this.probedCleaned = true;
+        this.hasCleaned =
+          this.variant === "cleaned"
+            ? this.words.length > 0
+            : (await getWords(this.recordingId, "cleaned")).length > 0;
+      }
     } catch (e) {
       if (!this.disposed) {
         this.container.innerHTML = `<div class="st-empty">Couldn't load the transcript: ${escapeHtml(errText(e))}</div>`;
@@ -152,7 +164,24 @@ export class SyncedTranscript {
           </p>`;
       })
       .join("");
-    this.container.innerHTML = `<div class="st-flow">${paras}</div>`;
+    // Raw ⇄ Cleaned timing toggle (TL-CONSISTENCY) — only when a cleaned word
+    // timeline exists. Reuses the timeline toggle's styling.
+    const toggle = this.hasCleaned
+      ? `<div class="tl-variant" role="group" aria-label="Transcript timing source">
+           <button type="button" class="tl-variant-btn${this.variant === "raw" ? " on" : ""}" data-variant="raw" title="Original transcription timing (machine truth)">Raw</button>
+           <button type="button" class="tl-variant-btn${this.variant === "cleaned" ? " on" : ""}" data-variant="cleaned" title="Aligned to the cleaned-up transcript">Cleaned</button>
+         </div>`
+      : "";
+    this.container.innerHTML = `${toggle}<div class="st-flow">${paras}</div>`;
+
+    this.container.querySelector(".tl-variant")?.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>(".tl-variant-btn");
+      const v = btn?.dataset.variant;
+      if ((v === "raw" || v === "cleaned") && v !== this.variant) {
+        this.variant = v;
+        void this.load();
+      }
+    });
 
     const flow = this.container.querySelector<HTMLElement>(".st-flow");
     flow?.addEventListener("click", (e) => {
