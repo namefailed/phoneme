@@ -180,6 +180,25 @@ pub struct FindReplaceOutcome {
     pub transcript: String,
 }
 
+/// One step's transcript output in a compounding recipe (PB-COMPOUND). `idx` is
+/// the step order — `0` is the raw ASR, later rows are each Transform step's
+/// output, and the last is the transcript that landed. Powers the Compare-versions
+/// chain + revert. Stored via [`Catalog::replace_transcript_versions`] (wholesale
+/// per (re)transcription, like segments) and read back in `idx` order.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TranscriptVersion {
+    /// Step order; `0` = raw ASR, then one per Transform step.
+    pub idx: i64,
+    /// Recipe step id that produced it (e.g. `"cleanup"`); `None` for the raw row.
+    pub step_id: Option<String>,
+    /// Human label for the Compare-versions list (e.g. `"Cleanup (llama3.2)"`).
+    pub label: Option<String>,
+    /// Model that produced this version, if any.
+    pub model: Option<String>,
+    /// The transcript text at this step.
+    pub text: String,
+}
+
 /// Case-insensitive literal find-replace over `haystack`: every run that equals
 /// `needle` ignoring ASCII/Unicode case is replaced with `replacement` verbatim.
 /// Returns `(count, new_string)`. Matching is by lowercased comparison; the
@@ -3519,6 +3538,96 @@ impl Catalog {
                 })
             })
             .collect()
+    }
+
+    // ── Compounding transcript versions (PB-COMPOUND) ───────────────────────
+    //
+    // A compounding recipe chains Transform steps (each rewrites the running
+    // transcript); these methods record every step's output so the chain is
+    // inspectable + revertible. Replaced wholesale per (re)transcription, like
+    // segments. The executor + the Compare-versions IPC/UI wire onto these.
+
+    /// Replace all transcript versions for a recording (wholesale, single tx).
+    /// Pass them in `idx` order (`0` = raw ASR). An empty slice clears them.
+    pub async fn replace_transcript_versions(
+        &self,
+        recording_id: &RecordingId,
+        versions: &[TranscriptVersion],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM transcript_versions WHERE recording_id = ?")
+            .bind(recording_id.as_str())
+            .execute(&mut *tx)
+            .await?;
+        for v in versions {
+            sqlx::query(
+                "INSERT INTO transcript_versions \
+                 (recording_id, idx, step_id, label, model, text) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(recording_id.as_str())
+            .bind(v.idx)
+            .bind(&v.step_id)
+            .bind(&v.label)
+            .bind(&v.model)
+            .bind(&v.text)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// A recording's transcript versions in step order. Empty for recordings that
+    /// predate compounding — callers treat "no versions" as a normal state.
+    pub async fn transcript_versions_for(
+        &self,
+        recording_id: &RecordingId,
+    ) -> Result<Vec<TranscriptVersion>> {
+        let rows = sqlx::query(
+            "SELECT idx, step_id, label, model, text FROM transcript_versions \
+             WHERE recording_id = ? ORDER BY idx",
+        )
+        .bind(recording_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(TranscriptVersion {
+                    idx: r.try_get("idx")?,
+                    step_id: r.try_get("step_id")?,
+                    label: r.try_get("label")?,
+                    model: r.try_get("model")?,
+                    text: r.try_get("text")?,
+                })
+            })
+            .collect()
+    }
+
+    /// One transcript version by step `idx`, if present.
+    pub async fn transcript_version(
+        &self,
+        recording_id: &RecordingId,
+        idx: i64,
+    ) -> Result<Option<TranscriptVersion>> {
+        let row = sqlx::query(
+            "SELECT idx, step_id, label, model, text FROM transcript_versions \
+             WHERE recording_id = ? AND idx = ?",
+        )
+        .bind(recording_id.as_str())
+        .bind(idx)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|r| {
+            Ok(TranscriptVersion {
+                idx: r.try_get("idx")?,
+                step_id: r.try_get("step_id")?,
+                label: r.try_get("label")?,
+                model: r.try_get("model")?,
+                text: r.try_get("text")?,
+            })
+        })
+        .transpose()
     }
 
     // ── In-recording speaker correction (U1) ───────────────────────────────

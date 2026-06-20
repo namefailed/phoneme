@@ -67,6 +67,78 @@ async fn insert_then_get_returns_same_recording() {
 }
 
 #[tokio::test]
+async fn transcript_versions_round_trip_and_replace() {
+    use phoneme_core::catalog::TranscriptVersion;
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+
+    // No versions until written; "none" is a normal state, not an error.
+    assert!(catalog
+        .transcript_versions_for(&rec.id)
+        .await
+        .unwrap()
+        .is_empty());
+
+    let versions = vec![
+        TranscriptVersion {
+            idx: 0,
+            step_id: None,
+            label: Some("Original (raw)".into()),
+            model: None,
+            text: "um hello world".into(),
+        },
+        TranscriptVersion {
+            idx: 1,
+            step_id: Some("cleanup".into()),
+            label: Some("Cleanup".into()),
+            model: Some("llama3.2".into()),
+            text: "Hello world.".into(),
+        },
+    ];
+    catalog
+        .replace_transcript_versions(&rec.id, &versions)
+        .await
+        .unwrap();
+
+    // Round-trips in idx order, all fields preserved.
+    let got = catalog.transcript_versions_for(&rec.id).await.unwrap();
+    assert_eq!(got, versions);
+
+    // get-one by idx; unknown idx is None.
+    let one = catalog
+        .transcript_version(&rec.id, 1)
+        .await
+        .unwrap()
+        .expect("idx 1 present");
+    assert_eq!(one.text, "Hello world.");
+    assert_eq!(one.step_id.as_deref(), Some("cleanup"));
+    assert!(catalog
+        .transcript_version(&rec.id, 9)
+        .await
+        .unwrap()
+        .is_none());
+
+    // Replace is wholesale (the prior idx 1 is gone).
+    catalog
+        .replace_transcript_versions(
+            &rec.id,
+            &[TranscriptVersion {
+                idx: 0,
+                step_id: None,
+                label: None,
+                model: None,
+                text: "redo".into(),
+            }],
+        )
+        .await
+        .unwrap();
+    let got2 = catalog.transcript_versions_for(&rec.id).await.unwrap();
+    assert_eq!(got2.len(), 1);
+    assert_eq!(got2[0].text, "redo");
+}
+
+#[tokio::test]
 async fn get_missing_returns_none() {
     let (_dir, catalog) = fresh_catalog().await;
     let id = RecordingId::new();
