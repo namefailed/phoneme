@@ -271,6 +271,18 @@ pub struct DiarizationConfig {
     /// (Honored on the local diarization path.)
     #[serde(default)]
     pub solo_one_speaker: bool,
+    /// Expected speaker count, as a prior on the diarizer's auto-detected count.
+    /// `None` (default, and any `0`) = today's behavior: trust whatever speakrs
+    /// clusters. `Some(n)` = if the local pipeline detects MORE than `n`
+    /// speakers, greedily merge the closest speaker clusters (by centroid cosine)
+    /// until exactly `n` remain. It never *splits* — detecting `<= n` speakers is
+    /// left untouched, since the prior is "no more than this many voices", not "at
+    /// least". speakrs has no native target-count knob (it clusters by similarity
+    /// threshold only), so this is enforced as a post-clustering merge on the
+    /// local path; cloud providers ignore it. Useful when you know the headcount
+    /// (a 1:1 call, a known panel) and the model over-splits.
+    #[serde(default)]
+    pub expected_speakers: Option<usize>,
     /// Gap (seconds) below which adjacent same-speaker turns are merged into one.
     /// Lower = more, shorter turns; higher = fewer, longer turns. Default 0.25.
     #[serde(default = "default_merge_gap_secs")]
@@ -420,6 +432,7 @@ impl Default for DiarizationConfig {
             local_model_path: String::new(),
             models_dir: String::new(),
             solo_one_speaker: false,
+            expected_speakers: None,
             merge_gap_secs: default_merge_gap_secs(),
             speaker_keep_threshold: default_speaker_keep_threshold(),
             reconstruct_method: default_reconstruct_method(),
