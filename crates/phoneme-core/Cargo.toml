@@ -25,6 +25,10 @@ ndarray = "0.17.2"
 secrecy.workspace = true
 speakrs = "0.4.2"
 hound.workspace = true
+# Library backup archive — read for `import-backup`, written by the shared
+# writer the round-trip test exercises. Same version + feature set the CLI
+# already pins, so this adds no new resolution in Cargo.lock.
+zip = { workspace = true }
 whisper-rs = { version = "0.11", optional = true }
 regex.workspace = true
 which = "6"

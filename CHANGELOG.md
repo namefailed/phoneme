@@ -152,6 +152,14 @@ trust boundary.*
 
 ### CLI
 
+- [x] **`phoneme import-backup <ZIP>`** — restore a library backup, the inverse of
+  `phoneme export <FILE>`. Re-inserts every recording from the archive's `catalog.json`
+  into the catalog and copies its audio into the audio dir. Idempotent: an id already
+  present is skipped (counted, never overwritten), so a re-import never duplicates a row
+  or reverts a later hand edit. Shuts a running daemon down first to release `catalog.db`
+  (like `doctor --rebuild-catalog`) and reports imported/skipped counts. Core restore +
+  the shared backup-zip writer now live in `phoneme-core::backup` (round-trip tested);
+  the CLI `export` and `import-backup` are thin wrappers over them.
 - [x] **`--recipe <ID|NAME>` on `record` + `retranscribe`** — pick a Playbook recipe
   from the CLI the way the GUI does. Available on `phoneme record` (blocking /
   `--oneshot` / `--duration`), `phoneme record start`, `phoneme record toggle`, and

@@ -345,8 +345,9 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
 /// Resolve the local app-data root (where catalog.db lives) the same way the
 /// daemon and the shared doctor checks do: the `PHONEME_DATA_LOCAL` override
 /// wins, otherwise the platform default. Keeps `--rebuild-catalog` pointed at
-/// the volume the daemon actually writes to.
-fn resolve_data_local_dir() -> Option<std::path::PathBuf> {
+/// the volume the daemon actually writes to. Shared with `import-backup`, which
+/// must open the same catalog.db the daemon owns.
+pub(crate) fn resolve_data_local_dir() -> Option<std::path::PathBuf> {
     if let Ok(p) = std::env::var("PHONEME_DATA_LOCAL") {
         if !p.is_empty() {
             return Some(std::path::PathBuf::from(p));
