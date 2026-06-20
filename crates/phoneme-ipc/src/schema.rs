@@ -1170,6 +1170,22 @@ pub enum DaemonEvent {
         #[serde(default)]
         meeting_id: Option<String>,
     },
+    /// The input device failed mid-recording (e.g. the microphone was
+    /// unplugged or its driver dropped) and capture ended early. The audio
+    /// captured before the drop WAS saved and is finalizing/transcribing
+    /// exactly like a normal recording — this event only surfaces WHY capture
+    /// stopped, so the UI can warn the user instead of failing silently (A1).
+    /// Emitted in addition to the recording's normal `RecordingStopped`. The GUI
+    /// raises a warning toast linking to the saved partial via `id`. Never
+    /// emitted for a normal user stop, an auto-stop, or a clean end-of-stream.
+    DeviceLost {
+        /// The recording whose capture ended on the device failure — the saved
+        /// partial take the user can still open.
+        id: RecordingId,
+        /// Length in milliseconds of the audio captured before the drop and
+        /// saved (so the toast can confirm what was kept).
+        captured_ms: i64,
+    },
     /// Capture of the active recording/meeting was paused (`RecordPause`).
     RecordingPaused {
         /// The paused recording's id.

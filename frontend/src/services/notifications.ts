@@ -13,7 +13,8 @@
  * per-recording map remembers the previous stage to word that correctly.
  */
 import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "./events";
-import { showToast } from "../utils/toast";
+import { showToast, type ToastType } from "../utils/toast";
+import { formatDuration } from "../utils/format";
 import { getRecording } from "./ipc";
 
 let stepsEnabled = true;
@@ -86,6 +87,15 @@ function onEvent(event: DaemonEvent) {
       showToast(msg, "info", 2500);
       return;
     }
+    case "device_lost": {
+      // The mic dropped mid-recording. Always surface it (regardless of the
+      // step-notification gate) — the user needs to know capture ended early —
+      // but as a WARNING, not an error: the audio captured before the drop WAS
+      // saved and is transcribing like a normal take. See `deviceLostToast`.
+      const { message, severity } = deviceLostToast(Number(e.captured_ms ?? 0));
+      showToast(message, severity);
+      return;
+    }
     case "transcription_failed":
       // Always — regardless of the step-notification setting. The daemon's
       // `internal error:` wrapper is stripped so the toast shows the real reason.
@@ -144,6 +154,24 @@ function stepFailedToast(label: string, error: string, stepsEnabled: boolean): v
   }
   const reason = stripInternalPrefix(error);
   showToast(`${label} failed: ${reason || "check the AI provider in Settings"}`, "error");
+}
+
+/**
+ * The toast for a `device_lost` event (A1). The mic dropped mid-recording, but
+ * the audio captured before the drop was saved — so this is a WARNING, not an
+ * error. When the daemon reports a non-trivial captured length, the toast
+ * confirms how much was kept; a near-zero capture (the device died right at the
+ * start) just states the disconnect. Pure so the wording/severity is unit-
+ * testable without the DOM.
+ */
+export function deviceLostToast(capturedMs: number): { message: string; severity: ToastType } {
+  const base = "Microphone disconnected";
+  // Below ~0.5 s there's effectively nothing to advertise as "saved".
+  const message =
+    capturedMs >= 500
+      ? `${base} — saved the ${formatDuration(capturedMs)} captured so far.`
+      : `${base} — recording stopped.`;
+  return { message, severity: "warning" };
 }
 
 /** Subscribe to daemon events for the app's lifetime. Call once at startup. */

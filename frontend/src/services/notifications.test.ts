@@ -37,6 +37,7 @@ import {
   initStepNotifications,
   setStepNotifications,
   stripInternalPrefix,
+  deviceLostToast,
 } from "./notifications";
 
 const toast = showToast as unknown as Mock;
@@ -175,6 +176,32 @@ describe("errors always surface, regardless of the step setting", () => {
     toast.mockClear();
     emit({ event: "hook_failed", id: "r1", error: "internal error: command not found" });
     expect(toast).toHaveBeenCalledWith("Hook failed: command not found", "error");
+  });
+});
+
+describe("device loss surfaces a warning, never an error (A1)", () => {
+  it("device_lost toasts a warning even with steps OFF", () => {
+    setStepNotifications(false);
+    emit({ event: "device_lost", id: "r1", captured_ms: 4200 });
+    expect(toast).toHaveBeenCalledTimes(1);
+    const [message, severity] = toast.mock.calls[0];
+    expect(severity).toBe("warning");
+    expect(message).toMatch(/microphone disconnected/i);
+    // Confirms the captured audio was kept.
+    expect(message).toMatch(/saved/i);
+  });
+
+  it("a near-zero capture just states the disconnect, no 'saved' claim", () => {
+    const { message, severity } = deviceLostToast(120);
+    expect(severity).toBe("warning");
+    expect(message).toMatch(/microphone disconnected/i);
+    expect(message).not.toMatch(/saved/i);
+  });
+
+  it("a real capture advertises the saved length", () => {
+    const { message } = deviceLostToast(4200);
+    expect(message).toContain("4.2s");
+    expect(message).toMatch(/saved/i);
   });
 });
 

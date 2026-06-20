@@ -1265,18 +1265,26 @@ impl DaemonRecorder {
         let level_snapshot = recorder.snapshot_handle();
         *self.handle.lock().await = Some(recorder);
 
-        // If it's a self-terminating mode, spawn a task to auto-stop when the recorder task finishes natively.
-        if !matches!(mode, RecordMode::Hold) {
-            let daemon_recorder = self.clone();
-            let state_clone = state.clone();
-            tokio::spawn(async move {
-                if rx.await.is_ok() {
-                    if let Err(e) = daemon_recorder.stop(&state_clone).await {
-                        tracing::warn!("auto-stop failed: {e}");
-                    }
+        // Spawn a task to auto-finalize when the recorder task ends on its OWN —
+        // a self-terminating mode hitting its stop condition (Oneshot silence /
+        // Duration elapsed), OR, for any mode incl. Hold, the capture device
+        // failing mid-recording (A1: the mic was unplugged). `on_done` fires
+        // whenever the loop ends, so this single task covers both: it calls
+        // `stop`, which finalizes the partial take and (when the source flagged
+        // a device loss) emits `DeviceLost`. A normal user `RecordStop`/cancel
+        // consumes the recorder first, so this task then finds the slot empty
+        // and `stop` returns `NotRecording` — a benign "already stopped", not a
+        // failure, so it's swallowed rather than logged.
+        let daemon_recorder = self.clone();
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            if rx.await.is_ok() {
+                match daemon_recorder.stop(&state_clone).await {
+                    Ok(_) | Err(Error::NotRecording) => {}
+                    Err(e) => tracing::warn!("auto-stop failed: {e}"),
                 }
-            });
-        }
+            }
+        });
 
         // Spawn the live streaming-preview loop. No-op unless
         // `recording.streaming_preview` is enabled (default: off). Runs for
@@ -1484,6 +1492,18 @@ impl DaemonRecorder {
             audio_path: active.audio_path.to_string_lossy().into_owned(),
             meeting_id: None,
         });
+        // A1: capture ended because the input device failed mid-recording (the
+        // mic was unplugged). The partial take above was saved + enqueued
+        // exactly as normal; this extra event only lets the UI tell the user WHY
+        // it stopped, linking to the saved partial via `id`. Emitted only on a
+        // genuine device loss — a normal stop / auto-stop leaves it false.
+        if result.device_lost {
+            tracing::warn!(id = %active.id, ms = result.duration_ms, "recording ended: capture device lost (saved the partial)");
+            state.events.emit(DaemonEvent::DeviceLost {
+                id: active.id.clone(),
+                captured_ms: result.duration_ms,
+            });
+        }
         tracing::info!(id = %active.id, ms = result.duration_ms, "recording stopped");
 
         // Resume idle pre-capture (`ensure_preroll` re-acquires the active
