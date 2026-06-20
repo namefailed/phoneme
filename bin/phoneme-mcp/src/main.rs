@@ -176,7 +176,12 @@ mod tests {
 
         let list: Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(list["id"], 2);
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 16);
+        // Derive the count from the shared registry — the single source of truth
+        // for the tool catalog — so this stays correct as tools are added.
+        let expected = phoneme_agent_core::ToolRegistry::with_phoneme_tools()
+            .specs()
+            .len();
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), expected);
     }
 
     /// A malformed JSON line is answered with a parse error and the loop keeps

@@ -4,9 +4,10 @@
 bridge that exposes Phoneme to MCP-capable AI clients (Claude Desktop, the
 Claude CLI, and any other MCP host). It lets an assistant **record, search and
 read your library, and act on recordings** — set titles, star favorites,
-suggest & list tags, summarize, re-run cleanup, re-transcribe, find similar
-recordings, and pull word-level timings — through the same daemon the GUI and
-`phoneme` CLI talk to.
+suggest / approve / dismiss tags, summarize, re-run cleanup, re-transcribe, find
+similar recordings, pull word-level timings and segments, run meetings, and
+correct / name / recognize speakers (including the named-voice library) —
+through the same daemon the GUI and `phoneme` CLI talk to.
 
 It is deliberately a *translator*, not a brain: MCP is JSON-RPC 2.0 over stdio,
 and each tool call maps to exactly one `phoneme-ipc` `Request` over the existing
@@ -64,6 +65,41 @@ Any other method returns a JSON-RPC `-32601` (method not found).
 | `retranscribe` | `id` (required), `model?` | `RetranscribeRecording` | Confirmation — **heavy**: re-runs the whole pipeline |
 | `more_like_this` | `id` (required), `limit?` (default 10) | `MoreLikeThis` | Ranked similar recordings: id, title, score, snippet |
 | `get_words` | `id` (required) | `GetWords` | A count of word-level timings (start/end offsets, e.g. for caption/SRT export) |
+| `get_segments` | `id` (required) | `GetSegments` | A count of transcript segments (start/end offsets, text, speaker label per segment) |
+| `approve_tag_suggestion` | `id`, `name` (both required) | `ApproveTagSuggestion` | Confirmation — creates the tag if needed, attaches it, drops the suggestion |
+| `dismiss_tag_suggestion` | `id`, `name` (both required) | `DismissTagSuggestion` | Confirmation — drops the suggestion without attaching |
+
+**Meetings** (two-track capture on a shared timeline):
+
+| Tool | Arguments | Maps to | Returns |
+|------|-----------|---------|---------|
+| `start_meeting` | _(none)_ | `StartMeeting` | The new meeting id |
+| `stop_meeting` | _(none)_ | `StopMeeting` | The stopped meeting id |
+| `list_meeting` | `meeting_id` (required) | `ListMeeting` | The meeting's track rows (id, status, title, snippet) |
+
+**Speakers** (diarization correction + named-speaker recognition):
+
+| Tool | Arguments | Maps to | Returns |
+|------|-----------|---------|---------|
+| `set_speaker_name` | `id`, `speaker_label` (≥1), `name` (all required; blank `name` clears) | `SetSpeakerName` | Confirmation — names apply at display/export time, so it's reversible |
+| `reassign_speaker_segment` | `id`, `idx` (≥0), `new_label` (≥1) | `ReassignSegmentSpeaker` | Confirmation — moves one `get_segments` segment to another speaker |
+| `merge_speakers` | `id`, `from_label` (≥1), `into_label` (≥1) | `MergeSpeakers` | Confirmation — `from` is absorbed into `into` |
+| `split_speaker` | `id`, `label` (≥1), `segment_idxs` (non-empty array of ≥0), `new_label` (≥1) | `SplitSpeaker` | Confirmation — moves the listed segments onto a fresh label |
+| `recognize_speakers` | `id` (required) | `RecognizeSpeakers` | Named-speaker matches (Speaker N → name), or a "no matches" note |
+
+**Named-voice library** (the enrolled voices recognition matches against):
+
+| Tool | Arguments | Maps to | Returns |
+|------|-----------|---------|---------|
+| `list_named_voices` | _(none)_ | `ListNamedVoices` | A bulleted list of voices with sample counts |
+| `rename_named_voice` | `id`, `name` (both required) | `RenameNamedVoice` | Confirmation |
+| `merge_named_voices` | `from_id`, `into_id` (both required) | `MergeNamedVoices` | Confirmation — `from`'s samples move onto `into`, then `from` is removed |
+| `forget_named_voice` | `id` (required) | `ForgetNamedVoice` | Confirmation — **reversible** in-app (raw voiceprints stay); confirm with the user first |
+
+**Destructive prune** (irreversible — confirm with the user before calling):
+
+| Tool | Arguments | Maps to | Returns |
+|------|-----------|---------|---------|
 | `delete_recording` | `id` (required), `keep_audio?` (default `false`) | `DeleteRecording` | Confirmation — **irreversible**; deletes the audio too unless `keep_audio` |
 | `delete_tag` | `id` (required, integer) | `DeleteTag` | Confirmation — **irreversible**; detaches the tag from every recording |
 
@@ -193,10 +229,15 @@ Phoneme toolset in the same order** `phoneme-mcp` exposes it: the read-only core
 (`start_recording`, `stop_recording`, `get_transcript`, `search_recordings`,
 `list_recent`), the "act on it" tools (`set_title`, `set_favorite`,
 `suggest_tags`, `list_tags`, `summarize`, `rerun_cleanup`, `retranscribe`,
-`more_like_this`, `get_words`), and the destructive prune tools
-(`delete_recording`, `delete_tag`). Because `phoneme-mcp` builds its surface by
-iterating this registry, the two can't drift — and a `phoneme-mcp` test asserts
-its exposed names equal the registry's, byte-for-byte.
+`more_like_this`, `get_words`, `get_segments`, `approve_tag_suggestion`,
+`dismiss_tag_suggestion`), the meeting tools (`start_meeting`, `stop_meeting`,
+`list_meeting`), the speaker tools (`set_speaker_name`,
+`reassign_speaker_segment`, `merge_speakers`, `split_speaker`,
+`recognize_speakers`), the named-voice library (`list_named_voices`,
+`rename_named_voice`, `merge_named_voices`, `forget_named_voice`), and the
+destructive prune tools (`delete_recording`, `delete_tag`). Because `phoneme-mcp`
+builds its surface by iterating this registry, the two can't drift — and a
+`phoneme-mcp` test asserts its exposed names equal the registry's, byte-for-byte.
 
 ```rust
 use phoneme_agent_core::ToolRegistry;

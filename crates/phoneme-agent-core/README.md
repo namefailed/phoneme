@@ -27,12 +27,22 @@ registry, opposite direction": external agents reach the same capabilities via
 `phoneme-mcp`, both off the one catalog, so the two surfaces can't drift.
 
 It registers the canonical Phoneme toolset (in `phoneme-mcp`'s `tools/list`
-order): the read-only core (`start_recording`, `stop_recording`,
-`get_transcript`, `search_recordings`, `list_recent`), the "act on it" tools
-(`set_title`, `set_favorite`, `suggest_tags`, `list_tags`, `summarize`,
-`rerun_cleanup`, `retranscribe`, `more_like_this`, `get_words`), and the
-destructive prune tools (`delete_recording`, `delete_tag`). See
-`docs/design/phoneme-agent-harness.md`.
+order):
+
+- **Read-only core** — `start_recording`, `stop_recording`, `get_transcript`,
+  `search_recordings`, `list_recent`.
+- **Act on it** — `set_title`, `set_favorite`, `suggest_tags`, `list_tags`,
+  `summarize`, `rerun_cleanup`, `retranscribe`, `more_like_this`, `get_words`,
+  `get_segments`, `approve_tag_suggestion`, `dismiss_tag_suggestion`.
+- **Meetings** — `start_meeting`, `stop_meeting`, `list_meeting`.
+- **Speakers** — `set_speaker_name`, `reassign_speaker_segment`,
+  `merge_speakers`, `split_speaker`, `recognize_speakers`.
+- **Named-voice library** — `list_named_voices`, `rename_named_voice`,
+  `merge_named_voices`, `forget_named_voice`.
+- **Destructive prune** (last, confirm first) — `delete_recording`,
+  `delete_tag`.
+
+See `docs/design/phoneme-agent-harness.md`.
 
 **Status:** the tool registry + the Phoneme tools + tests, consumed by
 `phoneme-mcp`. The in-app agent loop and the Lit chat panel build on top of this.

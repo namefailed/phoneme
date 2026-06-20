@@ -671,6 +671,18 @@ trust boundary.*
   single source of truth for names, schemas, and the arg→`Request` mapping, and a
   test asserts `phoneme-mcp`'s exposed names equal the registry's so the two can
   never drift again.
+- [x] **MCP tool breadth — meetings + speakers** — the shared `phoneme-agent-core`
+  registry (and so the `phoneme-mcp` surface) grew from sixteen to **thirty-one**
+  tools, all mapping to existing IPC requests. New: `get_segments` and
+  `approve_tag_suggestion` / `dismiss_tag_suggestion`; meetings (`start_meeting`,
+  `stop_meeting`, `list_meeting`); speaker correction + recognition
+  (`set_speaker_name`, `reassign_speaker_segment`, `merge_speakers`,
+  `split_speaker`, `recognize_speakers`); and the named-voice library
+  (`list_named_voices`, `rename_named_voice`, `merge_named_voices`,
+  `forget_named_voice`). Each is a pure args → `Request` mapping with bounds-checked
+  speaker labels / segment indices, and the drift-guard test (MCP tools == registry)
+  derives its counts from the registry so it can't desync. See
+  [MCP Server](docs/developer-guide/mcp_server.md).
 
 - [x] **`recorder.rs` split into a directory module** — the 3.3k-line daemon
   recorder is now `recorder/{mod,preview,meeting}.rs`: `preview.rs` owns the live
