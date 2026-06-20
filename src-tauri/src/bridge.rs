@@ -198,6 +198,9 @@ fn is_retry_safe(req: &Request) -> bool {
         // recording. Never blind-retry.
         | RebuildCatalog
         | ImportRecording { .. }
+        // Writes a new WAV to disk; a blind re-send after a lost reply would
+        // re-cut and overwrite the clip, so single-attempt only.
+        | ExportClip { .. }
         // Re-import inserts catalog rows + enqueues; a blind re-send could
         // double-enqueue freshly-relinked files, so single-attempt only.
         | ReimportFromDisk { .. }
@@ -464,6 +467,13 @@ mod tests {
         assert!(!is_retry_safe(&Request::DeleteRecording {
             id: phoneme_core::RecordingId::new(),
             keep_audio: false,
+        }));
+        // ExportClip writes a WAV — a blind re-send would re-cut it.
+        assert!(!is_retry_safe(&Request::ExportClip {
+            id: phoneme_core::RecordingId::new(),
+            start_ms: 0,
+            end_ms: 1_000,
+            out_path: None,
         }));
     }
 }

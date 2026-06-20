@@ -312,6 +312,31 @@ pub enum Request {
         path: String,
     },
 
+    /// Export a `[start_ms, end_ms)` slice of a recording's audio to a new WAV
+    /// (S7). The daemon looks up the recording's audio path in the catalog and
+    /// calls the pure `phoneme_audio::wav::clip_wav` helper: the range is cut on
+    /// sample-frame boundaries (channel-aware) and written with the source's
+    /// format. `end_ms` is clamped to the recording's duration; `start_ms` must
+    /// be before `end_ms`, non-negative, and inside the recording (an empty
+    /// resulting range errors). When `out_path` is omitted the clip is written
+    /// next to the source WAV with a `_clip_<start>-<end>` suffix (milliseconds).
+    /// Ok `{"path":"<written file>"}`; `not_found` for an unknown recording,
+    /// `invalid_config` for a bad range, `io` for a read/write failure. `phoneme
+    /// clip`.
+    ExportClip {
+        /// The recording whose audio to slice.
+        id: RecordingId,
+        /// Start of the range, in milliseconds from the recording's start.
+        start_ms: i64,
+        /// End of the range, in milliseconds (clamped to the recording's
+        /// duration; exclusive).
+        end_ms: i64,
+        /// Absolute output path for the new WAV. `None` (or empty) = next to the
+        /// source with a `_clip_<start>-<end>` suffix.
+        #[serde(default)]
+        out_path: Option<String>,
+    },
+
     /// Scan the audio directory for `.wav` files whose RecordingId has no
     /// catalog row and re-link each: insert a `queued` row pointing at the
     /// EXISTING file and enqueue it for the normal pipeline — recovering

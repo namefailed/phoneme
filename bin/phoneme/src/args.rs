@@ -55,6 +55,8 @@ pub enum Command {
     Edit(EditArgs),
     /// Find-and-replace literal text across a recording's transcript.
     FindReplace(FindReplaceArgs),
+    /// Export a time range of a recording's audio to a new WAV.
+    Clip(ClipArgs),
     /// Rename or clear a recording's diarized speaker labels.
     Speaker(SpeakerArgs),
     /// Semantic (embedding) search over transcripts.
@@ -430,6 +432,19 @@ pub struct FindReplaceArgs {
     /// Match case exactly (default is case-insensitive).
     #[arg(long)]
     pub case_sensitive: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ClipArgs {
+    /// The recording whose audio to slice.
+    pub id: String,
+    /// Start of the range, in seconds (e.g. `12.5`).
+    pub start: f64,
+    /// End of the range, in seconds (clamped to the recording's duration).
+    pub end: f64,
+    /// Output WAV path. Defaults to a `_clip_<start>-<end>` sibling of the
+    /// source recording's audio file.
+    pub out: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]
