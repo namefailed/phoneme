@@ -548,16 +548,13 @@ impl DaemonRecorder {
             // `RecorderConfig::mode` is `phoneme_core::RecordMode` (re-exported
             // by phoneme-audio as `RecordingMode`), so no conversion is needed.
             mode,
-            // The auto-stop budget is measured against the recorder's TOTAL sample
-            // count, which `start_with_prepend` has already seeded with the
-            // pre-rolled `prepend` audio (up to `pre_roll_ms`). So when pre-roll is
-            // on, a `max_duration_secs` of N yields N seconds of audio INCLUDING the
-            // prepended lead-in — i.e. slightly fewer than N seconds of freshly
-            // captured speech. This is the intended trade: pre-roll exists to keep
-            // the very start of the utterance, and counting it keeps the finalized
-            // WAV's length matching the configured cap exactly. Separating the
-            // fresh-capture length would mean threading a new field through the
-            // phoneme-audio `Recorder`, which is out of scope here.
+            // The auto-stop budget measures FRESHLY captured audio only: the
+            // recorder excludes the prepended pre-roll from both the
+            // `Duration { secs }` auto-stop and this `max_duration_ms` ceiling
+            // (audit A3). So a `max_duration_secs` of N yields N seconds of live
+            // capture with the pre-roll lead-in added on top — the requested length
+            // is never shortened by pre-roll, and the cap bounds the same amount of
+            // speech whether or not pre-roll is enabled.
             max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
             silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
             silence_window_ms: state.config.load().recording.silence_window_ms,

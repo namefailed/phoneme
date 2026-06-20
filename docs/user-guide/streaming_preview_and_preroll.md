@@ -36,6 +36,7 @@ Or **Settings → Capture → Pre-roll**.
 - Pre-roll applies to **microphone** capture only, not system loopback.
 - Idle buffer is **never written to disk** unless you start a recording.
 - Slightly higher idle CPU — the mic stream stays open.
+- Pre-roll sits **on top of** the requested length. A fixed-duration take of N seconds still captures a full N seconds of fresh audio, with the pre-roll lead-in added before it; pre-roll never shortens the requested duration. The same goes for `max_duration_secs` — the cap bounds the live capture, not the pre-roll.
 
 ## Streaming transcription preview
 
