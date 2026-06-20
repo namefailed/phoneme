@@ -1109,7 +1109,7 @@ async fn voiceprints_enroll_recognize_merge_and_forget() {
     // Empty library + an un-enrolled capture recognizes nothing.
     assert!(catalog.list_named_voices().await.unwrap().is_empty());
     catalog
-        .save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0, 0.0])
+        .save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0, 0.0], 0)
         .await
         .unwrap();
     assert!(catalog
@@ -1142,7 +1142,7 @@ async fn voiceprints_enroll_recognize_merge_and_forget() {
     // A second sample for Alice (different recording) updates the running mean
     // and sample count; naming by the same name reuses the entry.
     catalog
-        .save_speaker_voiceprint(r2.as_str(), 1, &[0.0, 1.0, 0.0])
+        .save_speaker_voiceprint(r2.as_str(), 1, &[0.0, 1.0, 0.0], 0)
         .await
         .unwrap();
     let id2 = catalog
@@ -1157,7 +1157,7 @@ async fn voiceprints_enroll_recognize_merge_and_forget() {
 
     // A separate voice, then merge it into Alice: captures re-point, entry drops.
     catalog
-        .save_speaker_voiceprint(r3.as_str(), 1, &[0.0, 0.0, 1.0])
+        .save_speaker_voiceprint(r3.as_str(), 1, &[0.0, 0.0, 1.0], 0)
         .await
         .unwrap();
     let other = catalog
@@ -1197,18 +1197,18 @@ async fn recognize_speakers_for_skips_named_and_dismissed() {
 
     // Enroll Alice from one recording.
     catalog
-        .save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0, 0.0])
+        .save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0, 0.0], 0)
         .await
         .unwrap();
     catalog.enroll_speaker(r1.as_str(), 1, "Alice").await.unwrap();
 
     // A new recording: speaker 1 sounds like Alice, speaker 2 is someone else.
     catalog
-        .save_speaker_voiceprint(r2.as_str(), 1, &[0.97, 0.03, 0.0])
+        .save_speaker_voiceprint(r2.as_str(), 1, &[0.97, 0.03, 0.0], 0)
         .await
         .unwrap();
     catalog
-        .save_speaker_voiceprint(r2.as_str(), 2, &[0.0, 0.0, 1.0])
+        .save_speaker_voiceprint(r2.as_str(), 2, &[0.0, 0.0, 1.0], 0)
         .await
         .unwrap();
     let sugg = catalog
@@ -1230,7 +1230,7 @@ async fn recognize_speakers_for_skips_named_and_dismissed() {
 
     // A third speaker also matching Alice IS suggested — until dismissed.
     catalog
-        .save_speaker_voiceprint(r2.as_str(), 3, &[0.96, 0.04, 0.0])
+        .save_speaker_voiceprint(r2.as_str(), 3, &[0.96, 0.04, 0.0], 0)
         .await
         .unwrap();
     let sugg = catalog
@@ -1256,8 +1256,8 @@ async fn deleting_a_recording_cascades_voiceprints_and_recomputes_named_voices()
     catalog.insert(&sample_recording(r2.clone())).await.unwrap();
 
     // "Alice" enrolled from two recordings → 2 samples.
-    catalog.save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0]).await.unwrap();
-    catalog.save_speaker_voiceprint(r2.as_str(), 1, &[0.0, 1.0]).await.unwrap();
+    catalog.save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0], 0).await.unwrap();
+    catalog.save_speaker_voiceprint(r2.as_str(), 1, &[0.0, 1.0], 0).await.unwrap();
     catalog.enroll_speaker(r1.as_str(), 1, "Alice").await.unwrap();
     catalog.enroll_speaker(r2.as_str(), 1, "Alice").await.unwrap();
     catalog.dismiss_speaker_suggestion(r1.as_str(), 2).await.unwrap();
@@ -1279,7 +1279,7 @@ async fn renaming_a_speaker_recomputes_the_previously_linked_voice() {
     let (_dir, catalog) = fresh_catalog().await;
     let r = RecordingId::new();
     catalog.insert(&sample_recording(r.clone())).await.unwrap();
-    catalog.save_speaker_voiceprint(r.as_str(), 1, &[1.0, 0.0]).await.unwrap();
+    catalog.save_speaker_voiceprint(r.as_str(), 1, &[1.0, 0.0], 0).await.unwrap();
 
     // Enroll as Alice, then re-name (the corrected-a-wrong-suggestion case) to Bob.
     catalog.enroll_speaker(r.as_str(), 1, "Alice").await.unwrap();

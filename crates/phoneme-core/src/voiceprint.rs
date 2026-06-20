@@ -81,6 +81,59 @@ pub fn mean_centroid(centroids: &[Vec<f32>]) -> Option<Vec<f32>> {
     Some(mean)
 }
 
+/// Duration-weighted component-wise mean of several centroids, L2-normalized
+/// (roadmap V4).
+///
+/// Each sample is `(centroid, weight)`; a longer speech sample carries a heavier
+/// weight, so a clean multi-minute capture outvotes a one-word blip instead of
+/// counting the same. Weights are the speaker's total speaking duration (any
+/// positive unit — ms in practice); only ratios matter, never the absolute
+/// scale.
+///
+/// Fallback rule (this is the backward-compatibility contract): a sample whose
+/// weight is non-positive or non-finite is treated as weight `1` — so legacy
+/// captures stored before durations existed (`duration_ms = 0`) count equally.
+/// When *every* weight is non-positive (or the total collapses to zero), this is
+/// exactly equal weighting, i.e. byte-for-byte [`mean_centroid`] of the same
+/// vectors. With all-equal positive weights it also equals [`mean_centroid`].
+///
+/// Returns `None` under the same conditions as [`mean_centroid`]: empty input or
+/// a dimension mismatch (vectors from different embedding models must not be
+/// averaged). Non-finite components are skipped per cell so one bad sample can't
+/// poison the mean.
+pub fn weighted_mean_centroid(samples: &[(Vec<f32>, f64)]) -> Option<Vec<f32>> {
+    let dim = samples.first()?.0.len();
+    if dim == 0 || samples.iter().any(|(c, _)| c.len() != dim) {
+        return None;
+    }
+    // Normalize each weight to a usable positive number: a non-positive or
+    // non-finite weight falls back to 1.0 (equal weighting), which makes legacy
+    // duration_ms=0 rows behave exactly like the unweighted mean.
+    let norm_weight = |w: f64| if w.is_finite() && w > 0.0 { w } else { 1.0 };
+
+    // Weighted per-component sum in f64 (cast to f32 at the end), matching
+    // `mean_centroid` / `diarization::cluster_centroids` for path consistency.
+    let mut sum = vec![0.0f64; dim];
+    let mut weight = vec![0.0f64; dim];
+    for (c, w) in samples {
+        let w = norm_weight(*w);
+        for (i, &x) in c.iter().enumerate() {
+            if x.is_finite() {
+                sum[i] += (x as f64) * w;
+                weight[i] += w;
+            }
+        }
+    }
+    let mut mean = vec![0.0f32; dim];
+    for ((m, &s), &wsum) in mean.iter_mut().zip(sum.iter()).zip(weight.iter()) {
+        if wsum > 0.0 {
+            *m = (s / wsum) as f32;
+        }
+    }
+    l2_normalize(&mut mean);
+    Some(mean)
+}
+
 /// The best candidate for `probe` at or above `threshold`, as `(index, score)`.
 ///
 /// `candidates[i]` is compared by cosine similarity; the highest scorer that
@@ -275,6 +328,84 @@ mod tests {
     fn mean_centroid_rejects_empty_or_mismatched() {
         assert!(mean_centroid(&[]).is_none());
         assert!(mean_centroid(&[vec![1.0, 0.0], vec![1.0]]).is_none());
+    }
+
+    // --- Duration-weighted mean (V4) -----------------------------------------
+
+    /// Component-wise approximate equality of two centroids, for the weighting
+    /// tests below.
+    fn approx(a: &[f32], b: &[f32]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
+    }
+
+    #[test]
+    fn weighted_mean_empty_is_none_and_mismatch_is_none() {
+        assert!(weighted_mean_centroid(&[]).is_none());
+        assert!(weighted_mean_centroid(&[(vec![1.0, 0.0], 1.0), (vec![1.0], 2.0)]).is_none());
+    }
+
+    #[test]
+    fn weighted_mean_equal_weights_matches_plain_mean() {
+        let vecs = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![1.0, 1.0]];
+        let plain = mean_centroid(&vecs).unwrap();
+        // All-equal positive weights == plain mean.
+        let w_equal: Vec<_> = vecs.iter().map(|v| (v.clone(), 3.0)).collect();
+        assert!(
+            approx(&weighted_mean_centroid(&w_equal).unwrap(), &plain),
+            "equal positive weights must equal the unweighted mean"
+        );
+    }
+
+    #[test]
+    fn weighted_mean_zero_weights_fall_back_to_equal() {
+        // The legacy contract: duration_ms=0 everywhere → equal weighting → the
+        // SAME centroid as mean_centroid of those vectors.
+        let vecs = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![0.7, 0.7]];
+        let plain = mean_centroid(&vecs).unwrap();
+        let w_zero: Vec<_> = vecs.iter().map(|v| (v.clone(), 0.0)).collect();
+        assert!(
+            approx(&weighted_mean_centroid(&w_zero).unwrap(), &plain),
+            "all-zero weights must reproduce the unweighted mean (legacy rows)"
+        );
+        // A negative / non-finite weight is also treated as the equal-weight
+        // fallback, never poisoning the mean.
+        let w_bad: Vec<_> = vecs
+            .iter()
+            .map(|v| (v.clone(), -5.0))
+            .chain(std::iter::once((vecs[0].clone(), f64::NAN)))
+            .collect();
+        let bad = weighted_mean_centroid(&w_bad).unwrap();
+        // Equivalent to equal-weighting the same four vectors.
+        let equal4 = mean_centroid(&[
+            vecs[0].clone(),
+            vecs[1].clone(),
+            vecs[2].clone(),
+            vecs[0].clone(),
+        ])
+        .unwrap();
+        assert!(approx(&bad, &equal4), "bad weights → equal weighting");
+    }
+
+    #[test]
+    fn weighted_mean_pulls_toward_the_heavier_sample() {
+        // Two orthogonal unit samples. Equal weighting lands the mean at 45°
+        // (cos to each = √½ ≈ 0.707). Weighting the first sample 9:1 must pull
+        // the mean markedly toward it — closer to [1,0] than to [0,1].
+        let a = vec![1.0, 0.0];
+        let b = vec![0.0, 1.0];
+        let weighted = weighted_mean_centroid(&[(a.clone(), 9.0), (b.clone(), 1.0)]).unwrap();
+        let to_a = cosine_similarity(&weighted, &a);
+        let to_b = cosine_similarity(&weighted, &b);
+        assert!(
+            to_a > to_b,
+            "heavier sample must dominate: cos→A {to_a} vs cos→B {to_b}"
+        );
+        // And strictly more than the equal-weight 0.707 it would otherwise have.
+        let equal = weighted_mean_centroid(&[(a.clone(), 1.0), (b.clone(), 1.0)]).unwrap();
+        assert!(
+            cosine_similarity(&weighted, &a) > cosine_similarity(&equal, &a),
+            "weighting must move the mean past the equal-weight midpoint"
+        );
     }
 
     #[test]

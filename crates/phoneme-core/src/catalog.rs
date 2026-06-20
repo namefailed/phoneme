@@ -2289,21 +2289,29 @@ impl Catalog {
     /// An existing `named_voice_id` link is preserved (a re-transcribe refreshes
     /// the sample without un-enrolling), and the linked named voice is recomputed
     /// so its cached centroid tracks the new sample.
+    ///
+    /// `duration_ms` is the speaker's total speaking time in this recording — the
+    /// duration-weight (roadmap V4) so a long, clean capture outvotes a brief one
+    /// when the named voice is recomputed. Pass `0` when it isn't known; the
+    /// weighted mean treats `0` as the equal-weight fallback (legacy behavior).
     pub async fn save_speaker_voiceprint(
         &self,
         recording_id: &str,
         speaker_label: i64,
         centroid: &[f32],
+        duration_ms: i64,
     ) -> Result<()> {
         let json = serde_json::to_string(centroid)?;
         sqlx::query(
-            "INSERT INTO speaker_voiceprints (recording_id, speaker_label, centroid) \
-             VALUES (?, ?, ?) \
-             ON CONFLICT(recording_id, speaker_label) DO UPDATE SET centroid = excluded.centroid",
+            "INSERT INTO speaker_voiceprints (recording_id, speaker_label, centroid, duration_ms) \
+             VALUES (?, ?, ?, ?) \
+             ON CONFLICT(recording_id, speaker_label) DO UPDATE SET \
+                 centroid = excluded.centroid, duration_ms = excluded.duration_ms",
         )
         .bind(recording_id)
         .bind(speaker_label)
         .bind(&json)
+        .bind(duration_ms)
         .execute(&self.pool)
         .await?;
         if let Some(nid) = self.named_voice_for(recording_id, speaker_label).await? {
@@ -2457,39 +2465,48 @@ impl Catalog {
 
     /// Drop clear outliers from a named voice's linked captures before averaging.
     ///
+    /// Each sample is `(centroid, duration_weight)`; outliers are judged purely on
+    /// centroid *geometry* (a long sample of the wrong speaker is still the wrong
+    /// speaker), and each survivor keeps its weight so the caller can take a
+    /// duration-weighted mean over what's left (roadmap V4).
+    ///
     /// With `< 4` samples there's too little signal to judge, so the input is
-    /// returned unchanged (the unweighted mean of everything). At `>= 4`, a
-    /// provisional mean is taken, then any capture whose cosine to that mean is
-    /// below either a hard floor (`0.2` — almost certainly a different speaker)
-    /// or `mean - 2*stddev` (a statistical outlier) is removed. If pruning would
-    /// drop *everything* (a degenerate cutoff, or a provisional mean that can't
-    /// be computed — e.g. mixed dimensions), the originals are kept so the voice
-    /// never silently empties.
-    fn drop_centroid_outliers(samples: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
+    /// returned unchanged. At `>= 4`, a provisional (unweighted) mean is taken,
+    /// then any capture whose cosine to that mean is below either a hard floor
+    /// (`0.2` — almost certainly a different speaker) or `mean - 2*stddev` (a
+    /// statistical outlier) is removed. If pruning would drop *everything* (a
+    /// degenerate cutoff, or a provisional mean that can't be computed — e.g.
+    /// mixed dimensions), the originals are kept so the voice never silently
+    /// empties.
+    fn drop_centroid_outliers(samples: Vec<(Vec<f32>, f64)>) -> Vec<(Vec<f32>, f64)> {
         const MIN_SAMPLES_TO_PRUNE: usize = 4;
         const HARD_FLOOR: f32 = 0.2;
 
         if samples.len() < MIN_SAMPLES_TO_PRUNE {
             return samples;
         }
-        let provisional = match crate::voiceprint::mean_centroid(&samples) {
+        // The provisional mean used for outlier detection is UNWEIGHTED — duration
+        // must not decide who counts as an outlier, only how much a survivor
+        // contributes to the final template.
+        let centroids: Vec<Vec<f32>> = samples.iter().map(|(c, _)| c.clone()).collect();
+        let provisional = match crate::voiceprint::mean_centroid(&centroids) {
             Some(m) => m,
             None => return samples, // mixed dims etc. — can't judge, keep all
         };
         let sims: Vec<f32> = samples
             .iter()
-            .map(|s| crate::voiceprint::cosine_similarity(s, &provisional))
+            .map(|(c, _)| crate::voiceprint::cosine_similarity(c, &provisional))
             .collect();
         let n = sims.len() as f32;
         let mean: f32 = sims.iter().sum::<f32>() / n;
         let var: f32 = sims.iter().map(|s| (s - mean) * (s - mean)).sum::<f32>() / n;
         let cutoff = (mean - 2.0 * var.sqrt()).max(HARD_FLOOR);
 
-        let kept: Vec<Vec<f32>> = samples
+        let kept: Vec<(Vec<f32>, f64)> = samples
             .iter()
             .zip(sims.iter())
             .filter(|(_, &sim)| sim >= cutoff)
-            .map(|(s, _)| s.clone())
+            .map(|((c, w), _)| (c.clone(), *w))
             .collect();
         // A degenerate cutoff (every sample identical → var 0, and float jitter
         // drops the whole set) must not empty the voice — fall back to the full
@@ -2501,27 +2518,36 @@ impl Catalog {
     }
 
     /// Recompute a named voice's cached centroid + sample count from its linked
-    /// captures (the L2-normalized mean, after [`Self::drop_centroid_outliers`]
-    /// prunes clear outliers). A voice with no remaining captures gets an empty
+    /// captures: the **duration-weighted** L2-normalized mean (roadmap V4), taken
+    /// over the survivors of [`Self::drop_centroid_outliers`]. Weighting is
+    /// applied *after* outlier rejection, so a long sample only counts more once
+    /// it's already been judged a genuine member of the cluster — it can't drag in
+    /// a wrong-speaker capture just by being lengthy. Legacy captures with
+    /// `duration_ms = 0` fall back to equal weighting, so a library built before
+    /// this feature recomputes to the identical centroid until new, duration-
+    /// bearing captures arrive. A voice with no remaining captures gets an empty
     /// centroid and zero samples (it never matches, but the entry stays until
     /// explicitly forgotten).
     async fn recompute_named_centroid(&self, named_voice_id: &str) -> Result<()> {
-        let rows = sqlx::query("SELECT centroid FROM speaker_voiceprints WHERE named_voice_id = ?")
-            .bind(named_voice_id)
-            .fetch_all(&self.pool)
-            .await?;
-        let mut samples: Vec<Vec<f32>> = Vec::with_capacity(rows.len());
+        let rows = sqlx::query(
+            "SELECT centroid, duration_ms FROM speaker_voiceprints WHERE named_voice_id = ?",
+        )
+        .bind(named_voice_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut samples: Vec<(Vec<f32>, f64)> = Vec::with_capacity(rows.len());
         for r in rows {
-            samples.push(serde_json::from_str::<Vec<f32>>(
-                &r.try_get::<String, _>("centroid")?,
-            )?);
+            let centroid =
+                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            let duration_ms: i64 = r.try_get("duration_ms")?;
+            samples.push((centroid, duration_ms as f64));
         }
         // With enough captures, prune clear outliers before the final mean so one
         // mis-assigned sample (a wrong-speaker capture named into this voice)
         // can't drag the template off the real speaker (audit M7). Below the
         // threshold every sample counts — too few to tell signal from noise.
         let kept = Self::drop_centroid_outliers(samples);
-        let mean = crate::voiceprint::mean_centroid(&kept).unwrap_or_default();
+        let mean = crate::voiceprint::weighted_mean_centroid(&kept).unwrap_or_default();
         let json = serde_json::to_string(&mean)?;
         sqlx::query(
             "UPDATE named_voiceprints SET centroid = ?, samples = ?, updated_at = datetime('now') \
@@ -5002,7 +5028,7 @@ mod tests {
         // Enroll one library voice "Ada" from a source recording.
         let src = embedded_recording(None);
         db.insert(&src).await.unwrap();
-        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
         let ada = db
@@ -5015,10 +5041,10 @@ mod tests {
         // (one a near-perfect match, the other a clear runner-up).
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.95, 0.31, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.95, 0.31, 0.0], 0)
             .await
             .unwrap();
 
@@ -5049,10 +5075,10 @@ mod tests {
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let src = embedded_recording(None);
         db.insert(&src).await.unwrap();
-        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0, 0.0])
+        db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0, 0.0], 0)
             .await
             .unwrap();
         let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
@@ -5060,10 +5086,10 @@ mod tests {
 
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.0, 1.0, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.0, 1.0, 0.0], 0)
             .await
             .unwrap();
 
@@ -5084,10 +5110,10 @@ mod tests {
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let src = embedded_recording(None);
         db.insert(&src).await.unwrap();
-        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0])
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0])
+        db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0], 0)
             .await
             .unwrap();
         db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap();
@@ -5096,7 +5122,7 @@ mod tests {
         // Probe at 45°: cosine ~0.707 to both voices — tie inside MARGIN.
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 1.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 1.0], 0)
             .await
             .unwrap();
         let sugg = db
@@ -5114,10 +5140,10 @@ mod tests {
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let src = embedded_recording(None);
         db.insert(&src).await.unwrap();
-        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0, 0.0])
+        db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0, 0.0], 0)
             .await
             .unwrap();
         let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
@@ -5125,10 +5151,10 @@ mod tests {
 
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[0.98, 0.02, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[0.98, 0.02, 0.0], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.02, 0.98, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.02, 0.98, 0.0], 0)
             .await
             .unwrap();
 
@@ -5158,7 +5184,7 @@ mod tests {
             (2, [0.0, 1.0, 0.0]),
             (3, [0.0, 0.0, 1.0]),
         ] {
-            db.save_speaker_voiceprint(src.id.as_str(), label, &v)
+            db.save_speaker_voiceprint(src.id.as_str(), label, &v, 0)
                 .await
                 .unwrap();
         }
@@ -5168,10 +5194,10 @@ mod tests {
 
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[0.99, 0.01, 0.0]) // ~Ada
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[0.99, 0.01, 0.0], 0) // ~Ada
             .await
             .unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.01, 0.99, 0.0]) // ~Bob
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.01, 0.99, 0.0], 0) // ~Bob
             .await
             .unwrap();
 
@@ -5193,7 +5219,7 @@ mod tests {
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
         db.dismiss_speaker_suggestion(rec.id.as_str(), 1)
@@ -5224,16 +5250,16 @@ mod tests {
         db.insert(&rec).await.unwrap();
         // Three tightly-clustered captures plus one clear (opposite-direction)
         // outlier — a wrong-speaker capture mistakenly named into this voice.
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.99, 0.10, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.99, 0.10, 0.0], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 3, &[0.98, 0.0, 0.10])
+        db.save_speaker_voiceprint(rec.id.as_str(), 3, &[0.98, 0.0, 0.10], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 4, &[-1.0, 0.0, 0.0]) // outlier
+        db.save_speaker_voiceprint(rec.id.as_str(), 4, &[-1.0, 0.0, 0.0], 0) // outlier
             .await
             .unwrap();
         let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
@@ -5260,10 +5286,10 @@ mod tests {
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0], 0)
             .await
             .unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.0, 1.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.0, 1.0], 0)
             .await
             .unwrap();
         let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
@@ -5275,6 +5301,79 @@ mod tests {
         );
     }
 
+    /// The named voice's cached centroid, read straight from the library row.
+    async fn named_voice_centroid(db: &Catalog, id: &str) -> Vec<f32> {
+        let json: String = sqlx::query_scalar("SELECT centroid FROM named_voiceprints WHERE id = ?")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        serde_json::from_str(&json).unwrap()
+    }
+
+    #[tokio::test]
+    async fn recompute_named_centroid_legacy_zero_durations_match_plain_mean() {
+        // Backward-compat contract: a library whose captures all have
+        // duration_ms=0 (built before V4) must recompute to the SAME centroid the
+        // old unweighted mean produced — i.e. mean_centroid of those vectors.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        let vecs = [vec![1.0f32, 0.0, 0.0], vec![0.0, 1.0, 0.0], vec![0.7, 0.7, 0.0]];
+        for (i, v) in vecs.iter().enumerate() {
+            db.save_speaker_voiceprint(rec.id.as_str(), (i + 1) as i64, v, 0)
+                .await
+                .unwrap();
+        }
+        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        db.enroll_speaker(rec.id.as_str(), 2, "Ada").await.unwrap();
+        db.enroll_speaker(rec.id.as_str(), 3, "Ada").await.unwrap();
+
+        // Below the 4-sample pruning threshold, so all three survive → the cached
+        // centroid is exactly the unweighted mean of the three vectors.
+        let expected = crate::voiceprint::mean_centroid(&vecs).unwrap();
+        let got = named_voice_centroid(&db, &ada).await;
+        assert_eq!(got.len(), expected.len());
+        for (g, e) in got.iter().zip(expected.iter()) {
+            assert!((g - e).abs() < 1e-6, "legacy recompute drifted: {got:?} vs {expected:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn recompute_named_centroid_weights_toward_the_longer_capture() {
+        // Two orthogonal captures of very different speaking duration. The plain
+        // (unweighted) mean would sit at 45° — equidistant. Duration-weighting
+        // must pull the cached centroid toward the much longer capture, so it
+        // scores clearly higher to the long sample's direction than the short.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        let long_dir = [1.0f32, 0.0]; // spoke for minutes
+        let short_dir = [0.0f32, 1.0]; // spoke for a moment
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &long_dir, 600_000)
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &short_dir, 2_000)
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        db.enroll_speaker(rec.id.as_str(), 2, "Ada").await.unwrap();
+
+        let centroid = named_voice_centroid(&db, &ada).await;
+        let to_long = crate::voiceprint::cosine_similarity(&centroid, &long_dir);
+        let to_short = crate::voiceprint::cosine_similarity(&centroid, &short_dir);
+        assert!(
+            to_long > to_short,
+            "centroid must lean toward the longer capture: long {to_long} vs short {to_short}"
+        );
+        // And strictly past the unweighted-mean midpoint (cos 0.707 to each).
+        let midpoint = std::f32::consts::FRAC_1_SQRT_2;
+        assert!(
+            to_long > midpoint + 1e-3,
+            "weighting must move the centroid past the equal-weight midpoint: {to_long}"
+        );
+    }
+
     #[tokio::test]
     async fn recognize_voice_skips_dimension_mismatched_library() {
         // Audit L: a library centroid of a different dimension than the probe is
@@ -5283,7 +5382,7 @@ mod tests {
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
         // Library voice has a 3-dim centroid.
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
         db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap();
@@ -5300,7 +5399,7 @@ mod tests {
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
         let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
@@ -5326,7 +5425,7 @@ mod tests {
             r
         };
         db.insert(&old).await.unwrap();
-        db.save_speaker_voiceprint(old.id.as_str(), 1, &[1.0, 0.0, 0.0])
+        db.save_speaker_voiceprint(old.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
         let ada = db.enroll_speaker(old.id.as_str(), 1, "Ada").await.unwrap().unwrap();

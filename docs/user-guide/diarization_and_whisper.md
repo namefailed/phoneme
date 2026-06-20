@@ -181,7 +181,10 @@ you can see where to set the bar. To turn the whole feature off, clear
 > Voiceprints are captured **when a recording is transcribed**, so recordings made
 > before recognition existed have none — **Re-transcribe** them (or record fresh
 > ones) to start matching. A meeting's **mic track** is always labelled **You** and
-> isn't matched; recognition is for the other voices on the call.
+> isn't matched; recognition is for the other voices on the call. A voice's stored
+> print leans on the recordings where that person spoke the **most** — a long, clean
+> sample counts for more than a brief one-word blip, so recognition gets steadier the
+> more real speech it has to learn from.
 
 ### The local diarization models
 

@@ -315,6 +315,38 @@ are relabelled accordingly.
 
 `diarization.rs:1068-1167` — `SPEAKER_MERGE_COSINE`, `cluster_centroids`, `merge_similar_clusters`
 
+### A named voice's cached centroid: robust *and* duration-weighted
+
+**Problem.** A named voice in the Speaker Library is one cached centroid recomputed
+from every capture enrolled under it. Two things spoil a naive mean of those
+captures: a single mis-named wrong-speaker capture drags the template off the real
+voice, and a one-word capture (a quick "yeah") gets the same vote as a clean
+five-minute one — so the template drifts toward whoever happened to be captured
+often, not whoever was actually heard most.
+
+**Solution (two layers, in order).** `recompute_named_centroid` pulls every linked
+capture with its `duration_ms`, then:
+
+1. **Outlier rejection (geometry only).** With ≥ 4 captures, `drop_centroid_outliers`
+   takes a provisional *unweighted* mean and drops any capture below a hard cosine
+   floor (`0.2`) or `mean − 2·stddev`. Duration is deliberately *not* used here —
+   a long sample of the wrong speaker is still the wrong speaker, so length must
+   never buy an outlier its way in.
+2. **Duration-weighted mean (survivors only).** `voiceprint::weighted_mean_centroid`
+   then averages the *surviving* captures weighted by their speaking duration, so a
+   long clean sample outvotes a brief one. Weights are ratios only (ms in practice).
+
+**Backward compatibility.** A capture's `duration_ms` defaults to `0` (migration
+`20260620000000`), and the weighted mean treats a non-positive/non-finite weight as
+weight 1 — i.e. equal weighting. So a library built before this feature (all zeros)
+recomputes to the *exact* old unweighted centroid until new, duration-bearing
+captures arrive. The capture-time duration is the sum of that speaker's segment
+spans, summed in the pipeline from the persisted segment timeline.
+
+`catalog.rs` — `save_speaker_voiceprint` (stores `duration_ms`), `drop_centroid_outliers`,
+`recompute_named_centroid`; `voiceprint.rs` — `weighted_mean_centroid`;
+`pipeline.rs` — per-speaker duration sum at capture.
+
 ### Keeping written words atomic across a hand-off, and subword spacing
 
 **Problem.** Per-word argmax places boundaries on a ~17 ms grid, so a token at a
