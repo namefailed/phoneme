@@ -65,9 +65,11 @@ Sources: [opencode](https://github.com/sst/opencode) · [Inside OpenCode](https:
 - **Now (prototype):** scaffold `crates/phoneme-agent-core` (the typed tool
   registry seam) **and** the standalone `phoneme-agent` repo wired to opencode +
   `phoneme-mcp`, with one capability working end-to-end.
-- The two share the *conceptual* tool list but not code: external agents come in
-  via MCP; the in-app agent goes out via the in-tree seam — "same registry,
-  opposite direction" as the roadmap puts it.
+- The two share the tool list *as code*: `phoneme-mcp` depends on
+  `phoneme-agent-core` and builds its `tools/list` + `tools/call` dispatch from
+  that registry, so external agents (in via MCP) and the in-app agent (out via the
+  in-tree seam) work off one catalog — "same registry, opposite direction" as the
+  roadmap puts it, now with no second hand-maintained list to drift.
 - A future in-app chat panel (Lit) builds on `phoneme-agent-core`; if it ever
   wants a TS-side loop instead, the Vercel AI SDK is the fallback — but the tool
   contract stays the Rust seam.

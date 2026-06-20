@@ -1,47 +1,32 @@
-//! The MCP tools and their thin map onto `phoneme-ipc` requests.
+//! A thin MCP adapter over the `phoneme-agent-core` tool registry.
 //!
 //! Per the roadmap this layer is a *translator*, not a brain: each tool's
-//! `tools/call` arguments are validated into exactly one [`Request`], the
-//! daemon does the work, and the [`phoneme_ipc::Response`] value is rendered back as MCP
-//! text content. The request-building is factored into the pure
-//! [`build_request`] function so it can be unit-tested without a live daemon
-//! (mirroring how `bin/phoneme`'s command tests assert the exact `Request` a
-//! subcommand sends).
+//! `tools/call` arguments are validated into exactly one [`Request`], the daemon
+//! does the work, and the [`phoneme_ipc::Response`] value is rendered back as MCP
+//! text content.
 //!
-//! The surface stays in lockstep with the in-tree `phoneme-agent-core` registry
-//! (same names, same `Request`s, opposite direction). Beyond the original
-//! read-only five it now exposes "act on it" tools (set title/favorite, suggest
-//! & list tags, summarize, re-run cleanup, retranscribe, more-like-this, words)
-//! and the destructive prune tools (delete a recording / delete a tag).
+//! There is **no second tool catalog here.** `phoneme-agent-core` is the single
+//! source of truth for the tool names, schemas, and the arg→`Request` mapping;
+//! this module only adapts that registry to the MCP wire shapes:
 //!
-//! Tools:
+//! - [`tools_list`] turns the registry's [`ToolSpec`]s into the JSON-RPC
+//!   `tools/list` payload (`name` / `description` / `inputSchema`);
+//! - [`build_request`] delegates a `tools/call` name+arguments to the registry's
+//!   pure [`ToolRegistry::to_request`], translating its error into the MCP
+//!   [`ToolError`];
+//! - [`render_result`] is the MCP-presentation half (registry-free): it shapes a
+//!   successful [`phoneme_ipc::Response`] value into the text an MCP client shows.
 //!
-//! | tool                | request                          |
-//! |---------------------|----------------------------------|
-//! | `start_recording`   | [`Request::RecordStart`]         |
-//! | `stop_recording`    | [`Request::RecordStop`]          |
-//! | `get_transcript`    | [`Request::GetRecording`]        |
-//! | `search_recordings` | [`Request::SemanticSearch`]      |
-//! | `list_recent`       | [`Request::ListRecordings`]      |
-//! | `set_title`         | [`Request::SetRecordingTitle`]   |
-//! | `set_favorite`      | [`Request::SetFavorite`]         |
-//! | `suggest_tags`      | [`Request::SuggestTags`]         |
-//! | `list_tags`         | [`Request::ListAllTags`]         |
-//! | `summarize`         | [`Request::RerunSummary`]        |
-//! | `rerun_cleanup`     | [`Request::RerunCleanup`]        |
-//! | `retranscribe`      | [`Request::RetranscribeRecording`]|
-//! | `more_like_this`    | [`Request::MoreLikeThis`]        |
-//! | `get_words`         | [`Request::GetWords`]            |
-//! | `delete_recording`  | [`Request::DeleteRecording`]     |
-//! | `delete_tag`        | [`Request::DeleteTag`]           |
+//! `build_request` stays pure and daemon-free, so request-building round-trips in
+//! unit tests without a live daemon (mirroring how `bin/phoneme`'s command tests
+//! assert the exact `Request` a subcommand sends).
 
-use phoneme_core::{ListFilter, RecordMode, RecordingId};
-use phoneme_ipc::Request;
+use phoneme_agent_core::{ToolRegistry, ToolSpec};
 use serde_json::{json, Value};
 
-/// Default number of results for `search_recordings` / `list_recent` when the
-/// caller omits `limit`.
-const DEFAULT_LIMIT: u64 = 10;
+// Re-export so call sites keep their `Request` reference; the request-building
+// lives in the registry now.
+use phoneme_ipc::Request;
 
 /// A tool invocation that failed *before* (or instead of) reaching the daemon —
 /// bad arguments, an unknown tool name. Surfaced to the MCP client as a tool
@@ -62,471 +47,46 @@ impl std::fmt::Display for ToolError {
     }
 }
 
+/// The shared registry — the single source of truth for the tool catalog and the
+/// arg→`Request` mapping. Cheap to build; rebuilt per call so the surface stays
+/// stateless.
+fn registry() -> ToolRegistry {
+    ToolRegistry::with_phoneme_tools()
+}
+
 /// The JSON-RPC `tools/list` payload: every tool with its input schema.
 ///
-/// Schemas are plain JSON-Schema objects (draft the MCP spec expects); kept in
-/// code so they can't drift from [`build_request`].
+/// Built by iterating the registry's [`ToolSpec`]s so the advertised surface can
+/// never drift from [`build_request`] — both read the same catalog.
 pub fn tools_list() -> Value {
-    json!({
-        "tools": [
-            {
-                "name": "start_recording",
-                "description": "Start a new audio recording on the Phoneme daemon. \
-                    Returns the new recording id. Fails if a recording or meeting \
-                    is already active.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "mode": {
-                            "type": "string",
-                            "enum": ["oneshot", "hold"],
-                            "description": "Stop condition. 'oneshot' (default) \
-                                auto-stops on silence; 'hold' records until \
-                                stop_recording is called."
-                        }
-                    },
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "stop_recording",
-                "description": "Stop and finalize the active recording. The audio is \
-                    saved and queued for transcription. Fails if nothing is recording.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "get_transcript",
-                "description": "Fetch the transcript text for a recording by id. \
-                    Returns the transcript, or a note that it is not ready yet.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording id (e.g. from list_recent \
-                                or search_recordings)."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "search_recordings",
-                "description": "Semantic + lexical search over the recording library. \
-                    Returns matching recordings with id, title, relevance score, and \
-                    a transcript snippet.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Natural-language search query."
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Max results to return (default 10)."
-                        }
-                    },
-                    "required": ["query"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "list_recent",
-                "description": "List the most recent recordings (newest first) with \
-                    id, title, status, and a transcript snippet.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Max recordings to return (default 10)."
-                        }
-                    },
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "set_title",
-                "description": "Set or clear a recording's display title. Provide \
-                    'title' to set it; omit or leave it blank to revert to the \
-                    auto-generated title.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording id (e.g. from list_recent \
-                                or search_recordings)."
-                        },
-                        "title": {
-                            "type": "string",
-                            "description": "The new title. Omit or leave blank to \
-                                return to auto-generation."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "set_favorite",
-                "description": "Star or un-star a recording (the Favorites view).",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording id."
-                        },
-                        "favorite": {
-                            "type": "boolean",
-                            "description": "true = starred, false = un-starred."
-                        }
-                    },
-                    "required": ["id", "favorite"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "suggest_tags",
-                "description": "Run the LLM tag-suggestion step for a recording on \
-                    demand (awaits the model). Suggestions land on the recording \
-                    for the user to approve.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording id."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "list_tags",
-                "description": "List every tag in the library (including tags not \
-                    attached to any recording).",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "summarize",
-                "description": "Generate (or regenerate) and store an LLM summary of \
-                    a recording's current transcript.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording id."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "rerun_cleanup",
-                "description": "Re-run the LLM cleanup step on a recording's \
-                    preserved original transcript. Does not re-transcribe the \
-                    audio.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording id."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "retranscribe",
-                "description": "Re-transcribe a saved recording through the full \
-                    pipeline. Heavy: this re-runs transcription and post-processing. \
-                    Optionally override the transcription 'model' for this run only.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording id."
-                        },
-                        "model": {
-                            "type": "string",
-                            "description": "One-time transcription model override (a \
-                                model file path for the local backend, a model id \
-                                for cloud backends). Omit to use the configured model."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "more_like_this",
-                "description": "Find recordings semantically similar to a stored one, \
-                    using its existing vectors (no fresh query embedding). Returns \
-                    ranked hits with id, title, score, and a snippet.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording whose stored vectors are \
-                                the query."
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Max results to return (default 10)."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "get_words",
-                "description": "Fetch a recording's word-level timings (start/end \
-                    offsets per word) — e.g. for caption/SRT export.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording id."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "delete_recording",
-                "description": "Permanently delete a recording (and, by default, its \
-                    audio file). Irreversible — confirm with the user before calling.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "The recording id."
-                        },
-                        "keep_audio": {
-                            "type": "boolean",
-                            "description": "true = remove only the catalog row and \
-                                leave the WAV on disk (default false)."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            },
-            {
-                "name": "delete_tag",
-                "description": "Delete a tag everywhere, detaching it from every \
-                    recording. Irreversible — confirm with the user before calling.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "integer",
-                            "description": "The tag's id (from list_tags)."
-                        }
-                    },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }
-            }
-        ]
-    })
+    let tools: Vec<Value> = registry()
+        .specs()
+        .iter()
+        .map(|ToolSpec {
+                 name,
+                 description,
+                 input_schema,
+             }| {
+            json!({
+                "name": name,
+                "description": description,
+                "inputSchema": input_schema,
+            })
+        })
+        .collect();
+    json!({ "tools": tools })
 }
 
 /// Translate a `tools/call` (name + arguments object) into the single
-/// [`Request`] it maps to.
+/// [`Request`] it maps to, by delegating to the shared registry.
 ///
-/// Pure and daemon-free: argument validation lives here so tests can assert the
-/// exact request without standing up a daemon. `arguments` is the raw MCP
-/// `arguments` object (may be `null`/absent → treated as empty).
+/// Pure and daemon-free: argument validation lives in `phoneme-agent-core` so
+/// tests can assert the exact request without standing up a daemon. `arguments`
+/// is the raw MCP `arguments` object (may be `null`/absent → treated as empty).
 pub fn build_request(name: &str, arguments: &Value) -> Result<Request, ToolError> {
-    let args = arguments;
-    match name {
-        "start_recording" => {
-            let mode = match args.get("mode").and_then(Value::as_str) {
-                None | Some("oneshot") => RecordMode::Oneshot,
-                Some("hold") => RecordMode::Hold,
-                Some(other) => {
-                    return Err(ToolError::new(format!(
-                        "invalid mode '{other}': expected 'oneshot' or 'hold'"
-                    )))
-                }
-            };
-            Ok(Request::RecordStart {
-                mode,
-                in_place: false,
-                recipe_id: None,
-                whisper_model: None,
-
-                source: None,
-            })
-        }
-        "stop_recording" => Ok(Request::RecordStop),
-        "get_transcript" => {
-            let id = require_recording_id(args)?;
-            Ok(Request::GetRecording { id })
-        }
-        "search_recordings" => {
-            let query = args
-                .get("query")
-                .and_then(Value::as_str)
-                .filter(|q| !q.trim().is_empty())
-                .ok_or_else(|| ToolError::new("missing required argument 'query'"))?
-                .to_string();
-            let limit = optional_limit(args)? as usize;
-            Ok(Request::SemanticSearch { query, limit })
-        }
-        "list_recent" => {
-            let limit = optional_limit(args)?;
-            Ok(Request::ListRecordings {
-                filter: ListFilter {
-                    limit: Some(limit as u32),
-                    sort_desc: Some(true),
-                    ..Default::default()
-                },
-            })
-        }
-        "set_title" => {
-            let id = require_recording_id(args)?;
-            // Some(non-empty) sets a user title; None (omitted or blank) reverts
-            // to auto-generation.
-            let title = optional_string(args, "title");
-            Ok(Request::SetRecordingTitle { id, title })
-        }
-        "set_favorite" => {
-            let id = require_recording_id(args)?;
-            let favorite = args
-                .get("favorite")
-                .and_then(Value::as_bool)
-                .ok_or_else(|| ToolError::new("missing required boolean 'favorite'"))?;
-            Ok(Request::SetFavorite { id, favorite })
-        }
-        "suggest_tags" => {
-            let id = require_recording_id(args)?;
-            Ok(Request::SuggestTags { id })
-        }
-        "list_tags" => Ok(Request::ListAllTags),
-        "summarize" => {
-            let id = require_recording_id(args)?;
-            Ok(Request::RerunSummary {
-                id,
-                model: None,
-                prompt: None,
-            })
-        }
-        "rerun_cleanup" => {
-            let id = require_recording_id(args)?;
-            Ok(Request::RerunCleanup {
-                id,
-                model: None,
-                provider: None,
-                prompt: None,
-                api_url: None,
-                api_key: None,
-            })
-        }
-        "retranscribe" => {
-            let id = require_recording_id(args)?;
-            let model = optional_string(args, "model");
-            Ok(Request::RetranscribeRecording {
-                id,
-                model,
-                run_hooks: None,
-                post_process: None,
-                all_overrides: None,
-
-                recipe_id: None,
-            })
-        }
-        "more_like_this" => {
-            let id = require_recording_id(args)?;
-            let limit = optional_limit(args)? as usize;
-            Ok(Request::MoreLikeThis { id, limit })
-        }
-        "get_words" => {
-            let id = require_recording_id(args)?;
-            Ok(Request::GetWords { id })
-        }
-        "delete_recording" => {
-            let id = require_recording_id(args)?;
-            let keep_audio = args
-                .get("keep_audio")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            Ok(Request::DeleteRecording { id, keep_audio })
-        }
-        "delete_tag" => {
-            let id = args
-                .get("id")
-                .and_then(Value::as_i64)
-                .ok_or_else(|| ToolError::new("missing required integer 'id'"))?;
-            Ok(Request::DeleteTag { id })
-        }
-        other => Err(ToolError::new(format!("unknown tool '{other}'"))),
-    }
-}
-
-/// Pull the required `id` argument and parse it into a [`RecordingId`].
-fn require_recording_id(args: &Value) -> Result<RecordingId, ToolError> {
-    let raw = args
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| ToolError::new("missing required argument 'id'"))?;
-    RecordingId::parse(raw).ok_or_else(|| ToolError::new(format!("invalid recording id '{raw}'")))
-}
-
-/// Read an optional string argument, normalized to `Some(non-empty)` or `None`
-/// (a missing key or a blank/whitespace-only value both map to `None`). Used by
-/// the tools where omitting a field is meaningful — `set_title` (None reverts to
-/// auto) and `retranscribe` (None keeps the configured model).
-fn optional_string(args: &Value, key: &str) -> Option<String> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
-
-/// Read an optional `limit` argument (positive integer), defaulting to
-/// [`DEFAULT_LIMIT`]. Rejects zero/negative values with a clear message.
-fn optional_limit(args: &Value) -> Result<u64, ToolError> {
-    match args.get("limit") {
-        None | Some(Value::Null) => Ok(DEFAULT_LIMIT),
-        Some(v) => {
-            let n = v
-                .as_u64()
-                .ok_or_else(|| ToolError::new("'limit' must be a positive integer"))?;
-            if n == 0 {
-                return Err(ToolError::new("'limit' must be at least 1"));
-            }
-            Ok(n)
-        }
-    }
+    registry()
+        .to_request(name, arguments)
+        .map_err(|e| ToolError::new(e.to_string()))
 }
 
 /// Render the daemon's successful [`phoneme_ipc::Response`] value for a tool into the
@@ -697,35 +257,26 @@ fn pretty(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phoneme_core::{RecordMode, RecordingId};
 
-    /// Every tool name this bridge exposes, in `tools/list` order.
-    const EXPECTED_TOOLS: [&str; 16] = [
-        "start_recording",
-        "stop_recording",
-        "get_transcript",
-        "search_recordings",
-        "list_recent",
-        "set_title",
-        "set_favorite",
-        "suggest_tags",
-        "list_tags",
-        "summarize",
-        "rerun_cleanup",
-        "retranscribe",
-        "more_like_this",
-        "get_words",
-        "delete_recording",
-        "delete_tag",
-    ];
+    /// Default `limit` the registry applies — kept in step with the catalog.
+    const DEFAULT_LIMIT: usize = 10;
+
+    /// Every tool name this bridge exposes, in `tools/list` order. Sourced from
+    /// the shared registry, not hand-maintained: the adapter only re-shapes it.
+    fn expected_tools() -> Vec<&'static str> {
+        registry().specs().iter().map(|s| s.name).collect()
+    }
 
     #[test]
     fn tools_list_has_all_tools_with_schemas() {
         let list = tools_list();
         let tools = list["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), EXPECTED_TOOLS.len());
+        let expected = expected_tools();
+        assert_eq!(tools.len(), expected.len());
         for t in tools {
             let name = t["name"].as_str().expect("tool name");
-            assert!(EXPECTED_TOOLS.contains(&name), "unexpected tool {name}");
+            assert!(expected.contains(&name), "unexpected tool {name}");
             assert!(t["description"].is_string(), "{name} needs a description");
             assert_eq!(
                 t["inputSchema"]["type"], "object",
@@ -739,7 +290,22 @@ mod tests {
     }
 
     #[test]
-    fn tool_names_match_tools_list() {
+    fn tools_list_matches_agent_core_registry() {
+        // The MCP surface is exactly the agent-core registry, same names, same
+        // order — so the two can never drift again.
+        let list = tools_list();
+        let mcp_names: Vec<&str> = list["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        let core_names: Vec<&str> = registry().specs().iter().map(|s| s.name).collect();
+        assert_eq!(mcp_names, core_names);
+    }
+
+    #[test]
+    fn tool_names_are_all_dispatchable() {
         let list = tools_list();
         let names: Vec<&str> = list["tools"]
             .as_array()
@@ -747,7 +313,6 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, EXPECTED_TOOLS);
 
         // Every advertised name must be dispatchable in `build_request` — a name
         // is only "unknown" when it never appears in `tools_list`. Calling with
@@ -773,7 +338,6 @@ mod tests {
                 in_place: false,
                 recipe_id: None,
                 whisper_model: None,
-
                 source: None,
             }
         );
@@ -789,7 +353,6 @@ mod tests {
                 in_place: false,
                 recipe_id: None,
                 whisper_model: None,
-
                 source: None,
             }
         );
@@ -845,7 +408,7 @@ mod tests {
             req,
             Request::SemanticSearch {
                 query: "x".to_string(),
-                limit: DEFAULT_LIMIT as usize
+                limit: DEFAULT_LIMIT
             }
         );
         assert!(build_request("search_recordings", &json!({})).is_err());
@@ -945,7 +508,7 @@ mod tests {
         assert!(out.contains("alpha beta"));
     }
 
-    // ── New "act on it" tools ────────────────────────────────────────────
+    // ── "act on it" tools ────────────────────────────────────────────────
 
     #[test]
     fn set_title_some_vs_none() {
@@ -1044,7 +607,6 @@ mod tests {
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
-
                 recipe_id: None,
             }
         );
@@ -1061,7 +623,6 @@ mod tests {
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
-
                 recipe_id: None,
             }
         );
@@ -1074,7 +635,7 @@ mod tests {
             build_request("more_like_this", &json!({"id": id.as_str()})).unwrap(),
             Request::MoreLikeThis {
                 id: id.clone(),
-                limit: DEFAULT_LIMIT as usize
+                limit: DEFAULT_LIMIT
             }
         );
         assert_eq!(
