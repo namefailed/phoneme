@@ -113,6 +113,20 @@ pub fn render_result(tool: &str, value: &Value) -> String {
         "more_like_this" => render_search(value),
         "list_tags" => render_tags(value),
         "get_words" => render_words(value),
+        "get_segments" => render_segments(value),
+        // `list_meeting` is an array of recording DTOs, same shape `list_recent`
+        // renders.
+        "list_meeting" => render_recent(value),
+        "start_meeting" => match value.get("meeting_id").and_then(Value::as_str) {
+            Some(id) => format!("Meeting started. meeting_id: {id}"),
+            None => "Meeting started.".to_string(),
+        },
+        "stop_meeting" => match value.get("meeting_id").and_then(Value::as_str) {
+            Some(id) => format!("Meeting stopped. meeting_id: {id}"),
+            None => "Meeting stopped.".to_string(),
+        },
+        "recognize_speakers" => render_speaker_suggestions(value),
+        "list_named_voices" => render_named_voices(value),
         // The mutating tools all answer Ok `null` (a bare acknowledgement); a
         // short confirmation is the useful rendering.
         "set_title" => "Title updated.".to_string(),
@@ -123,6 +137,20 @@ pub fn render_result(tool: &str, value: &Value) -> String {
         "retranscribe" => "Re-transcription started.".to_string(),
         "delete_recording" => "Recording deleted.".to_string(),
         "delete_tag" => "Tag deleted.".to_string(),
+        "approve_tag_suggestion" => match value.get("name").and_then(Value::as_str) {
+            Some(name) => format!("Tag '{name}' approved and attached."),
+            None => "Tag suggestion approved.".to_string(),
+        },
+        "dismiss_tag_suggestion" => "Tag suggestion dismissed.".to_string(),
+        // The in-recording speaker edits answer Ok `{}`; a name set answers a
+        // propagation block. Either way a short confirmation reads best.
+        "set_speaker_name" => "Speaker name updated.".to_string(),
+        "reassign_speaker_segment" => "Segment reassigned.".to_string(),
+        "merge_speakers" => "Speakers merged.".to_string(),
+        "split_speaker" => "Speaker split.".to_string(),
+        "rename_named_voice" => "Named voice renamed.".to_string(),
+        "merge_named_voices" => "Named voices merged.".to_string(),
+        "forget_named_voice" => "Named voice forgotten.".to_string(),
         _ => pretty(value),
     }
 }
@@ -158,6 +186,62 @@ fn render_words(value: &Value) -> String {
         Some(_) => "No word-level timings for this recording yet.".to_string(),
         None => pretty(value),
     }
+}
+
+/// `get_segments`: an array of segment objects (`{start_ms, end_ms, text,
+/// speaker}`) → a count plus a note (the full timings are large; the agent reads
+/// them as structured data when it needs them).
+fn render_segments(value: &Value) -> String {
+    match value.as_array() {
+        Some(segs) if !segs.is_empty() => format!(
+            "{} transcript segments available (start/end offsets, text, and speaker label per segment).",
+            segs.len()
+        ),
+        Some(_) => "No transcript segments for this recording yet.".to_string(),
+        None => pretty(value),
+    }
+}
+
+/// `recognize_speakers`: an array of `SpeakerSuggestion` (`{speaker_label, name,
+/// …}`) → a bulleted "Speaker N → name" list, or a note when nothing matched.
+fn render_speaker_suggestions(value: &Value) -> String {
+    let Some(hits) = value.as_array() else {
+        return pretty(value);
+    };
+    if hits.is_empty() {
+        return "No named-speaker matches.".to_string();
+    }
+    let mut out = String::new();
+    for hit in hits {
+        let label = hit.get("speaker_label").and_then(Value::as_i64);
+        let name = hit.get("name").and_then(Value::as_str).unwrap_or("(unknown)");
+        match label {
+            Some(n) => out.push_str(&format!("- Speaker {n} → {name}\n")),
+            None => out.push_str(&format!("- {name}\n")),
+        }
+    }
+    out.trim_end().to_string()
+}
+
+/// `list_named_voices`: an array of `NamedVoice` (`{id, name, sample_count}`) → a
+/// bulleted list of names with their sample counts.
+fn render_named_voices(value: &Value) -> String {
+    let Some(voices) = value.as_array() else {
+        return pretty(value);
+    };
+    if voices.is_empty() {
+        return "No named voices enrolled yet.".to_string();
+    }
+    let mut out = String::new();
+    for v in voices {
+        let name = v.get("name").and_then(Value::as_str).unwrap_or("(unnamed)");
+        let samples = v.get("sample_count").and_then(Value::as_i64);
+        match samples {
+            Some(n) => out.push_str(&format!("- {name} ({n} samples)\n")),
+            None => out.push_str(&format!("- {name}\n")),
+        }
+    }
+    out.trim_end().to_string()
 }
 
 /// `get_transcript`: pull the transcript out of the recording DTO.
@@ -763,5 +847,231 @@ mod tests {
         assert!(out.contains("0.770"));
         assert!(out.contains("r9"));
         assert!(out.contains("Roadmap"));
+    }
+
+    // ── S5 batch: build_request mapping ───────────────────────────────────
+
+    #[test]
+    fn get_segments_maps_and_rejects_bad_id() {
+        let id = RecordingId::new();
+        assert_eq!(
+            build_request("get_segments", &json!({"id": id.as_str()})).unwrap(),
+            Request::GetSegments { id }
+        );
+        assert!(build_request("get_segments", &json!({"id": "nope"})).is_err());
+        assert!(build_request("get_segments", &json!({})).is_err());
+    }
+
+    #[test]
+    fn tag_suggestion_approve_dismiss_map() {
+        let id = RecordingId::new();
+        assert_eq!(
+            build_request(
+                "approve_tag_suggestion",
+                &json!({"id": id.as_str(), "name": "work"})
+            )
+            .unwrap(),
+            Request::ApproveTagSuggestion {
+                id: id.clone(),
+                name: "work".to_string()
+            }
+        );
+        assert_eq!(
+            build_request(
+                "dismiss_tag_suggestion",
+                &json!({"id": id.as_str(), "name": "spam"})
+            )
+            .unwrap(),
+            Request::DismissTagSuggestion {
+                id,
+                name: "spam".to_string()
+            }
+        );
+        assert!(build_request("approve_tag_suggestion", &json!({"id": "x"})).is_err());
+    }
+
+    #[test]
+    fn meeting_tools_map() {
+        assert_eq!(
+            build_request("start_meeting", &json!({})).unwrap(),
+            Request::StartMeeting
+        );
+        assert_eq!(
+            build_request("stop_meeting", &json!({})).unwrap(),
+            Request::StopMeeting
+        );
+        assert_eq!(
+            build_request("list_meeting", &json!({"meeting_id": "m1"})).unwrap(),
+            Request::ListMeeting {
+                meeting_id: "m1".to_string()
+            }
+        );
+        assert!(build_request("list_meeting", &json!({})).is_err());
+    }
+
+    #[test]
+    fn set_speaker_name_maps_and_allows_blank() {
+        let id = RecordingId::new();
+        assert_eq!(
+            build_request(
+                "set_speaker_name",
+                &json!({"id": id.as_str(), "speaker_label": 2, "name": "Alex"})
+            )
+            .unwrap(),
+            Request::SetSpeakerName {
+                id: id.clone(),
+                speaker_label: 2,
+                name: "Alex".to_string()
+            }
+        );
+        // Blank name clears the mapping (request still builds).
+        assert_eq!(
+            build_request(
+                "set_speaker_name",
+                &json!({"id": id.as_str(), "speaker_label": 1, "name": ""})
+            )
+            .unwrap(),
+            Request::SetSpeakerName {
+                id,
+                speaker_label: 1,
+                name: String::new()
+            }
+        );
+        // Missing name key, or a label below 1 → tool error.
+        let id2 = RecordingId::new();
+        assert!(build_request(
+            "set_speaker_name",
+            &json!({"id": id2.as_str(), "speaker_label": 1})
+        )
+        .is_err());
+        assert!(build_request(
+            "set_speaker_name",
+            &json!({"id": id2.as_str(), "speaker_label": 0, "name": "x"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn speaker_correction_tools_map() {
+        let id = RecordingId::new();
+        assert_eq!(
+            build_request(
+                "reassign_speaker_segment",
+                &json!({"id": id.as_str(), "idx": 0, "new_label": 3})
+            )
+            .unwrap(),
+            Request::ReassignSegmentSpeaker {
+                id: id.clone(),
+                idx: 0,
+                new_label: 3
+            }
+        );
+        assert_eq!(
+            build_request(
+                "merge_speakers",
+                &json!({"id": id.as_str(), "from_label": 2, "into_label": 1})
+            )
+            .unwrap(),
+            Request::MergeSpeakers {
+                id: id.clone(),
+                from_label: 2,
+                into_label: 1
+            }
+        );
+        assert_eq!(
+            build_request(
+                "split_speaker",
+                &json!({"id": id.as_str(), "label": 1, "segment_idxs": [0, 4], "new_label": 2})
+            )
+            .unwrap(),
+            Request::SplitSpeaker {
+                id: id.clone(),
+                label: 1,
+                segment_idxs: vec![0, 4],
+                new_label: 2
+            }
+        );
+        // split_speaker rejects an empty idx list.
+        assert!(build_request(
+            "split_speaker",
+            &json!({"id": id.as_str(), "label": 1, "segment_idxs": [], "new_label": 2})
+        )
+        .is_err());
+        assert_eq!(
+            build_request("recognize_speakers", &json!({"id": id.as_str()})).unwrap(),
+            Request::RecognizeSpeakers { id }
+        );
+    }
+
+    #[test]
+    fn named_voice_tools_map() {
+        assert_eq!(
+            build_request("list_named_voices", &json!({})).unwrap(),
+            Request::ListNamedVoices
+        );
+        assert_eq!(
+            build_request("rename_named_voice", &json!({"id": "v1", "name": "Sam"})).unwrap(),
+            Request::RenameNamedVoice {
+                id: "v1".to_string(),
+                name: "Sam".to_string()
+            }
+        );
+        assert_eq!(
+            build_request(
+                "merge_named_voices",
+                &json!({"from_id": "a", "into_id": "b"})
+            )
+            .unwrap(),
+            Request::MergeNamedVoices {
+                from_id: "a".to_string(),
+                into_id: "b".to_string()
+            }
+        );
+        assert_eq!(
+            build_request("forget_named_voice", &json!({"id": "v9"})).unwrap(),
+            Request::ForgetNamedVoice {
+                id: "v9".to_string()
+            }
+        );
+        assert!(build_request("rename_named_voice", &json!({"id": "v1"})).is_err());
+        assert!(build_request("merge_named_voices", &json!({"from_id": "a"})).is_err());
+        assert!(build_request("forget_named_voice", &json!({})).is_err());
+    }
+
+    // ── S5 batch: result rendering ────────────────────────────────────────
+
+    #[test]
+    fn render_s5_confirmations_and_lists() {
+        assert!(render_result("start_meeting", &json!({"meeting_id": "m1"})).contains("m1"));
+        assert!(render_result("stop_meeting", &json!({"meeting_id": "m1"})).contains("m1"));
+        assert_eq!(
+            render_result("dismiss_tag_suggestion", &Value::Null),
+            "Tag suggestion dismissed."
+        );
+        assert!(render_result("approve_tag_suggestion", &json!({"name": "work"})).contains("work"));
+        assert_eq!(
+            render_result("set_speaker_name", &json!({"propagation": {"policy": "off"}})),
+            "Speaker name updated."
+        );
+        assert_eq!(
+            render_result("merge_speakers", &json!({})),
+            "Speakers merged."
+        );
+
+        let segs = json!([{"start_ms": 0, "end_ms": 100, "text": "hi", "speaker": "Speaker 1"}]);
+        assert!(render_result("get_segments", &segs).contains('1'));
+        assert!(render_result("get_segments", &json!([])).contains("No transcript segments"));
+
+        let voices = json!([{"id": "v1", "name": "Sam", "sample_count": 3}]);
+        let out = render_result("list_named_voices", &voices);
+        assert!(out.contains("Sam"), "got: {out}");
+        assert!(out.contains('3'), "got: {out}");
+        assert!(render_result("list_named_voices", &json!([])).contains("No named voices"));
+
+        let suggestions = json!([{"speaker_label": 2, "name": "Alex"}]);
+        let out = render_result("recognize_speakers", &suggestions);
+        assert!(out.contains("Speaker 2"), "got: {out}");
+        assert!(out.contains("Alex"), "got: {out}");
+        assert!(render_result("recognize_speakers", &json!([])).contains("No named-speaker"));
     }
 }

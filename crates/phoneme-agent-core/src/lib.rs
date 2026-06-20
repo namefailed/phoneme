@@ -18,7 +18,11 @@
 //! Beyond the original five read-only tools (list/search/get/start/stop) it
 //! exposes "act on it" capabilities — set title/favorite, suggest & list tags,
 //! summarize, re-run cleanup, retranscribe, more-like-this, per-word timings, and
-//! the destructive prune tools (delete a recording / delete a tag).
+//! the destructive prune tools (delete a recording / delete a tag) — plus a
+//! meetings + speakers batch: start/stop a meeting, list a meeting's tracks, read
+//! a recording's timeline segments, approve/dismiss a suggested tag, name /
+//! reassign / merge / split a diarized speaker, recognize named speakers, and
+//! manage the named-voice library (list / rename / merge / forget).
 
 use phoneme_core::{ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::Request;
@@ -84,6 +88,25 @@ impl ToolRegistry {
         r.register(Box::new(Retranscribe));
         r.register(Box::new(MoreLikeThis));
         r.register(Box::new(GetWords));
+        r.register(Box::new(GetSegments));
+        r.register(Box::new(ApproveTagSuggestion));
+        r.register(Box::new(DismissTagSuggestion));
+        // Meetings.
+        r.register(Box::new(StartMeeting));
+        r.register(Box::new(StopMeeting));
+        r.register(Box::new(ListMeeting));
+        // Speaker correction + recognition.
+        r.register(Box::new(SetSpeakerName));
+        r.register(Box::new(ReassignSpeakerSegment));
+        r.register(Box::new(MergeSpeakers));
+        r.register(Box::new(SplitSpeaker));
+        r.register(Box::new(RecognizeSpeakers));
+        // Named-voice library.
+        r.register(Box::new(ListNamedVoices));
+        r.register(Box::new(RenameNamedVoice));
+        r.register(Box::new(MergeNamedVoices));
+        r.register(Box::new(ForgetNamedVoice));
+        // Destructive prune tools stay last.
         r.register(Box::new(DeleteRecordingTool));
         r.register(Box::new(DeleteTagTool));
         r
@@ -179,6 +202,33 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+/// Require a string argument that *may* be blank — the key must be present and a
+/// string, but an empty/whitespace value is meaningful (e.g. `set_speaker_name`
+/// uses a blank `name` to clear a label). Returned trimmed.
+fn require_present_str(args: &Value, key: &str, tool: &str) -> Result<String, ToolError> {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .ok_or_else(|| ToolError::BadArgs {
+            tool: tool.to_string(),
+            reason: format!("missing required string `{key}`"),
+        })
+}
+
+/// Require an integer argument that must be at least `min` (e.g. a 1-based speaker
+/// label, or a 0-based segment index). Rejects a missing/non-integer/too-small
+/// value with a clear `BadArgs` message.
+fn require_i64_min(args: &Value, key: &str, min: i64, tool: &str) -> Result<i64, ToolError> {
+    let n = require_i64(args, key, tool)?;
+    if n < min {
+        return Err(ToolError::BadArgs {
+            tool: tool.to_string(),
+            reason: format!("`{key}` must be at least {min}"),
+        });
+    }
+    Ok(n)
 }
 
 struct StartRecording;
@@ -619,6 +669,515 @@ impl Tool for GetWords {
     }
 }
 
+struct GetSegments;
+impl Tool for GetSegments {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "get_segments",
+            description: "Fetch a recording's transcript segments in timeline \
+                order (start/end offsets, text, and the diarized speaker label \
+                per segment) — e.g. for caption export or the timeline view.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "get_segments")?;
+        Ok(Request::GetSegments { id })
+    }
+}
+
+struct ApproveTagSuggestion;
+impl Tool for ApproveTagSuggestion {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "approve_tag_suggestion",
+            description: "Approve one of a recording's suggested tags by name: \
+                create the tag if needed, attach it, and drop it from the \
+                suggestion list.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording carrying the suggestion."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The suggested tag name to approve \
+                            (case-insensitive)."
+                    }
+                },
+                "required": ["id", "name"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "approve_tag_suggestion")?;
+        let name = require_str(args, "name", "approve_tag_suggestion")?;
+        Ok(Request::ApproveTagSuggestion { id, name })
+    }
+}
+
+struct DismissTagSuggestion;
+impl Tool for DismissTagSuggestion {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "dismiss_tag_suggestion",
+            description: "Dismiss one of a recording's suggested tags by name \
+                (drop it from the suggestion list without attaching it).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording carrying the suggestion."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The suggested tag name to dismiss \
+                            (case-insensitive)."
+                    }
+                },
+                "required": ["id", "name"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "dismiss_tag_suggestion")?;
+        let name = require_str(args, "name", "dismiss_tag_suggestion")?;
+        Ok(Request::DismissTagSuggestion { id, name })
+    }
+}
+
+struct StartMeeting;
+impl Tool for StartMeeting {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "start_meeting",
+            description: "Start a meeting recording (microphone + system-audio \
+                tracks on a shared timeline). Returns the new meeting id. Fails \
+                if a recording or meeting is already active.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, _args: &Value) -> Result<Request, ToolError> {
+        Ok(Request::StartMeeting)
+    }
+}
+
+struct StopMeeting;
+impl Tool for StopMeeting {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "stop_meeting",
+            description: "Stop the active meeting: both tracks are finalized and \
+                queued for transcription. Fails if no meeting is active.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, _args: &Value) -> Result<Request, ToolError> {
+        Ok(Request::StopMeeting)
+    }
+}
+
+struct ListMeeting;
+impl Tool for ListMeeting {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "list_meeting",
+            description: "List every recording (track) belonging to one meeting \
+                session, ordered by track then time.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "meeting_id": {
+                        "type": "string",
+                        "description": "The shared meeting id both tracks carry \
+                            (a recording DTO's `meeting_id`)."
+                    }
+                },
+                "required": ["meeting_id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let meeting_id = require_str(args, "meeting_id", "list_meeting")?;
+        Ok(Request::ListMeeting { meeting_id })
+    }
+}
+
+struct SetSpeakerName;
+impl Tool for SetSpeakerName {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "set_speaker_name",
+            description: "Set (or clear) the display name for one diarized \
+                speaker of a recording. A blank `name` reverts the label to the \
+                default 'Speaker N'. The stored transcript is never rewritten — \
+                names apply at display/export time — so a rename is reversible.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording whose speaker map to edit."
+                    },
+                    "speaker_label": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "1-based index matching the [Speaker N] \
+                            transcript marker."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The display name; blank clears the mapping."
+                    }
+                },
+                "required": ["id", "speaker_label", "name"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "set_speaker_name")?;
+        let speaker_label = require_i64_min(args, "speaker_label", 1, "set_speaker_name")?;
+        // A blank name is meaningful here (it clears the mapping), so the key
+        // must be present but may be empty.
+        let name = require_present_str(args, "name", "set_speaker_name")?;
+        Ok(Request::SetSpeakerName {
+            id,
+            speaker_label,
+            name,
+        })
+    }
+}
+
+struct ReassignSpeakerSegment;
+impl Tool for ReassignSpeakerSegment {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "reassign_speaker_segment",
+            description: "Reassign one transcript segment to a different speaker \
+                label. `idx` is the segment's 0-based index (from get_segments); \
+                `new_label` is the 1-based [Speaker N] label — a brand-new label \
+                simply starts existing.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording whose segment to reassign."
+                    },
+                    "idx": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "0-based segment index (the get_segments \
+                            array order)."
+                    },
+                    "new_label": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The 1-based [Speaker N] label to assign it to."
+                    }
+                },
+                "required": ["id", "idx", "new_label"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "reassign_speaker_segment")?;
+        let idx = require_i64_min(args, "idx", 0, "reassign_speaker_segment")?;
+        let new_label = require_i64_min(args, "new_label", 1, "reassign_speaker_segment")?;
+        Ok(Request::ReassignSegmentSpeaker {
+            id,
+            idx,
+            new_label,
+        })
+    }
+}
+
+struct MergeSpeakers;
+impl Tool for MergeSpeakers {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "merge_speakers",
+            description: "Merge two speakers in a recording: every `from_label` \
+                segment becomes `into_label`, then `from_label` ceases to exist. \
+                `into` keeps its name (adopts `from`'s only when unnamed).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording whose speakers to merge."
+                    },
+                    "from_label": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The 1-based label that ceases to exist."
+                    },
+                    "into_label": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The 1-based label that absorbs `from`'s segments."
+                    }
+                },
+                "required": ["id", "from_label", "into_label"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "merge_speakers")?;
+        let from_label = require_i64_min(args, "from_label", 1, "merge_speakers")?;
+        let into_label = require_i64_min(args, "into_label", 1, "merge_speakers")?;
+        Ok(Request::MergeSpeakers {
+            id,
+            from_label,
+            into_label,
+        })
+    }
+}
+
+struct SplitSpeaker;
+impl Tool for SplitSpeaker {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "split_speaker",
+            description: "Split some of a speaker's segments off onto a fresh \
+                label. The listed `segment_idxs` move from `label` to \
+                `new_label` (which starts with no name); every other segment of \
+                `label` stays.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording whose speaker to split."
+                    },
+                    "label": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The 1-based source label to split off of."
+                    },
+                    "segment_idxs": {
+                        "type": "array",
+                        "items": { "type": "integer", "minimum": 0 },
+                        "minItems": 1,
+                        "description": "The 0-based segment indices to move onto \
+                            `new_label`."
+                    },
+                    "new_label": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The 1-based fresh label to assign the \
+                            listed segments."
+                    }
+                },
+                "required": ["id", "label", "segment_idxs", "new_label"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "split_speaker")?;
+        let label = require_i64_min(args, "label", 1, "split_speaker")?;
+        let new_label = require_i64_min(args, "new_label", 1, "split_speaker")?;
+        // A non-empty array of non-negative segment indices.
+        let raw = args
+            .get("segment_idxs")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| ToolError::BadArgs {
+                tool: "split_speaker".to_string(),
+                reason: "missing required array `segment_idxs`".to_string(),
+            })?;
+        if raw.is_empty() {
+            return Err(ToolError::BadArgs {
+                tool: "split_speaker".to_string(),
+                reason: "`segment_idxs` must list at least one segment".to_string(),
+            });
+        }
+        let mut segment_idxs = Vec::with_capacity(raw.len());
+        for v in raw {
+            let n = v.as_i64().ok_or_else(|| ToolError::BadArgs {
+                tool: "split_speaker".to_string(),
+                reason: "`segment_idxs` must contain only integers".to_string(),
+            })?;
+            if n < 0 {
+                return Err(ToolError::BadArgs {
+                    tool: "split_speaker".to_string(),
+                    reason: "`segment_idxs` entries must be 0 or greater".to_string(),
+                });
+            }
+            segment_idxs.push(n);
+        }
+        Ok(Request::SplitSpeaker {
+            id,
+            label,
+            segment_idxs,
+            new_label,
+        })
+    }
+}
+
+struct RecognizeSpeakers;
+impl Tool for RecognizeSpeakers {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "recognize_speakers",
+            description: "Run named-speaker recognition for a recording: the \
+                still-unnamed diarized speakers whose voiceprints match a known \
+                voice. Returns the suggestions (empty when recognition is off or \
+                nothing matches).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording to recognize speakers in."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "recognize_speakers")?;
+        Ok(Request::RecognizeSpeakers { id })
+    }
+}
+
+struct ListNamedVoices;
+impl Tool for ListNamedVoices {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "list_named_voices",
+            description: "List the named-voice library — id, name, and sample \
+                count per enrolled voice.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, _args: &Value) -> Result<Request, ToolError> {
+        Ok(Request::ListNamedVoices)
+    }
+}
+
+struct RenameNamedVoice;
+impl Tool for RenameNamedVoice {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "rename_named_voice",
+            description: "Rename an enrolled named voice in the speaker library.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The named-voice id (from list_named_voices)."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The new display name."
+                    }
+                },
+                "required": ["id", "name"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_str(args, "id", "rename_named_voice")?;
+        let name = require_str(args, "name", "rename_named_voice")?;
+        Ok(Request::RenameNamedVoice { id, name })
+    }
+}
+
+struct MergeNamedVoices;
+impl Tool for MergeNamedVoices {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "merge_named_voices",
+            description: "Merge one named voice into another — re-points the \
+                source's samples onto the target and deletes the source.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "from_id": {
+                        "type": "string",
+                        "description": "The voice to merge FROM (removed on success)."
+                    },
+                    "into_id": {
+                        "type": "string",
+                        "description": "The voice to merge INTO (kept)."
+                    }
+                },
+                "required": ["from_id", "into_id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let from_id = require_str(args, "from_id", "merge_named_voices")?;
+        let into_id = require_str(args, "into_id", "merge_named_voices")?;
+        Ok(Request::MergeNamedVoices { from_id, into_id })
+    }
+}
+
+struct ForgetNamedVoice;
+impl Tool for ForgetNamedVoice {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "forget_named_voice",
+            description: "Forget a named voice — REVERSIBLY: it vanishes from the \
+                library and recognition and its captures are unlinked, but the \
+                raw per-recording voiceprints stay (an undo path exists in the \
+                app). Confirm with the user before calling.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The named-voice id to forget."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_str(args, "id", "forget_named_voice")?;
+        Ok(Request::ForgetNamedVoice { id })
+    }
+}
+
 struct DeleteRecordingTool;
 impl Tool for DeleteRecordingTool {
     fn spec(&self) -> ToolSpec {
@@ -705,6 +1264,21 @@ mod tests {
                 "retranscribe",
                 "more_like_this",
                 "get_words",
+                "get_segments",
+                "approve_tag_suggestion",
+                "dismiss_tag_suggestion",
+                "start_meeting",
+                "stop_meeting",
+                "list_meeting",
+                "set_speaker_name",
+                "reassign_speaker_segment",
+                "merge_speakers",
+                "split_speaker",
+                "recognize_speakers",
+                "list_named_voices",
+                "rename_named_voice",
+                "merge_named_voices",
+                "forget_named_voice",
                 "delete_recording",
                 "delete_tag",
             ]
@@ -1042,6 +1616,339 @@ mod tests {
         ));
         assert!(matches!(
             r.to_request("delete_tag", &json!({ "id": "nope" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    // ── S5 batch: segments, tag-suggestion approve/dismiss ───────────────
+
+    #[test]
+    fn get_segments_maps_and_validates_id() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request("get_segments", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::GetSegments { id }
+        );
+        assert!(matches!(
+            r.to_request("get_segments", &json!({ "id": "nope" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn approve_and_dismiss_tag_suggestion_require_name() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request(
+                "approve_tag_suggestion",
+                &json!({ "id": id.as_str(), "name": "work" })
+            )
+            .unwrap(),
+            Request::ApproveTagSuggestion {
+                id: id.clone(),
+                name: "work".to_string()
+            }
+        );
+        assert_eq!(
+            r.to_request(
+                "dismiss_tag_suggestion",
+                &json!({ "id": id.as_str(), "name": "spam" })
+            )
+            .unwrap(),
+            Request::DismissTagSuggestion {
+                id: id.clone(),
+                name: "spam".to_string()
+            }
+        );
+        // Missing / blank name → BadArgs (never reaches the daemon).
+        assert!(matches!(
+            r.to_request("approve_tag_suggestion", &json!({ "id": id.as_str() })),
+            Err(ToolError::BadArgs { .. })
+        ));
+        assert!(matches!(
+            r.to_request(
+                "dismiss_tag_suggestion",
+                &json!({ "id": id.as_str(), "name": "  " })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    // ── S5 batch: meetings ────────────────────────────────────────────────
+
+    #[test]
+    fn meeting_start_stop_are_unit() {
+        let r = ToolRegistry::with_phoneme_tools();
+        assert_eq!(
+            r.to_request("start_meeting", &json!({})).unwrap(),
+            Request::StartMeeting
+        );
+        assert_eq!(
+            r.to_request("stop_meeting", &json!({})).unwrap(),
+            Request::StopMeeting
+        );
+    }
+
+    #[test]
+    fn list_meeting_requires_meeting_id() {
+        let r = ToolRegistry::with_phoneme_tools();
+        assert_eq!(
+            r.to_request("list_meeting", &json!({ "meeting_id": "m-123" }))
+                .unwrap(),
+            Request::ListMeeting {
+                meeting_id: "m-123".to_string()
+            }
+        );
+        assert!(matches!(
+            r.to_request("list_meeting", &json!({})),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    // ── S5 batch: speaker correction + recognition ────────────────────────
+
+    #[test]
+    fn set_speaker_name_allows_blank_to_clear() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        // A real name.
+        assert_eq!(
+            r.to_request(
+                "set_speaker_name",
+                &json!({ "id": id.as_str(), "speaker_label": 2, "name": "Alex" })
+            )
+            .unwrap(),
+            Request::SetSpeakerName {
+                id: id.clone(),
+                speaker_label: 2,
+                name: "Alex".to_string()
+            }
+        );
+        // A blank name is meaningful — it clears the mapping; the request still
+        // builds (with an empty trimmed name).
+        assert_eq!(
+            r.to_request(
+                "set_speaker_name",
+                &json!({ "id": id.as_str(), "speaker_label": 1, "name": "  " })
+            )
+            .unwrap(),
+            Request::SetSpeakerName {
+                id: id.clone(),
+                speaker_label: 1,
+                name: String::new()
+            }
+        );
+        // A label below 1 → BadArgs.
+        assert!(matches!(
+            r.to_request(
+                "set_speaker_name",
+                &json!({ "id": id.as_str(), "speaker_label": 0, "name": "x" })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+        // A missing name key → BadArgs (the key must be present even when blank).
+        assert!(matches!(
+            r.to_request(
+                "set_speaker_name",
+                &json!({ "id": id.as_str(), "speaker_label": 1 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn reassign_speaker_segment_maps_and_validates_bounds() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request(
+                "reassign_speaker_segment",
+                &json!({ "id": id.as_str(), "idx": 0, "new_label": 3 })
+            )
+            .unwrap(),
+            Request::ReassignSegmentSpeaker {
+                id: id.clone(),
+                idx: 0,
+                new_label: 3
+            }
+        );
+        // idx must be 0 or greater; label 1 or greater.
+        assert!(matches!(
+            r.to_request(
+                "reassign_speaker_segment",
+                &json!({ "id": id.as_str(), "idx": -1, "new_label": 1 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+        assert!(matches!(
+            r.to_request(
+                "reassign_speaker_segment",
+                &json!({ "id": id.as_str(), "idx": 0, "new_label": 0 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn merge_speakers_maps_both_labels() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request(
+                "merge_speakers",
+                &json!({ "id": id.as_str(), "from_label": 2, "into_label": 1 })
+            )
+            .unwrap(),
+            Request::MergeSpeakers {
+                id: id.clone(),
+                from_label: 2,
+                into_label: 1
+            }
+        );
+        assert!(matches!(
+            r.to_request(
+                "merge_speakers",
+                &json!({ "id": id.as_str(), "from_label": 0, "into_label": 1 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn split_speaker_maps_and_validates_idx_list() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request(
+                "split_speaker",
+                &json!({ "id": id.as_str(), "label": 1, "segment_idxs": [0, 2, 5], "new_label": 2 })
+            )
+            .unwrap(),
+            Request::SplitSpeaker {
+                id: id.clone(),
+                label: 1,
+                segment_idxs: vec![0, 2, 5],
+                new_label: 2
+            }
+        );
+        // Empty list → BadArgs.
+        assert!(matches!(
+            r.to_request(
+                "split_speaker",
+                &json!({ "id": id.as_str(), "label": 1, "segment_idxs": [], "new_label": 2 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+        // Negative / non-integer entry → BadArgs.
+        assert!(matches!(
+            r.to_request(
+                "split_speaker",
+                &json!({ "id": id.as_str(), "label": 1, "segment_idxs": [-1], "new_label": 2 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+        assert!(matches!(
+            r.to_request(
+                "split_speaker",
+                &json!({ "id": id.as_str(), "label": 1, "segment_idxs": ["a"], "new_label": 2 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+        // Missing list → BadArgs.
+        assert!(matches!(
+            r.to_request(
+                "split_speaker",
+                &json!({ "id": id.as_str(), "label": 1, "new_label": 2 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn recognize_speakers_maps_and_validates_id() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request("recognize_speakers", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::RecognizeSpeakers { id }
+        );
+        assert!(matches!(
+            r.to_request("recognize_speakers", &json!({ "id": "nope" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    // ── S5 batch: named-voice library ─────────────────────────────────────
+
+    #[test]
+    fn list_named_voices_is_unit() {
+        let r = ToolRegistry::with_phoneme_tools();
+        assert_eq!(
+            r.to_request("list_named_voices", &json!({})).unwrap(),
+            Request::ListNamedVoices
+        );
+    }
+
+    #[test]
+    fn rename_named_voice_requires_id_and_name() {
+        let r = ToolRegistry::with_phoneme_tools();
+        assert_eq!(
+            r.to_request(
+                "rename_named_voice",
+                &json!({ "id": "v1", "name": "Sam" })
+            )
+            .unwrap(),
+            Request::RenameNamedVoice {
+                id: "v1".to_string(),
+                name: "Sam".to_string()
+            }
+        );
+        assert!(matches!(
+            r.to_request("rename_named_voice", &json!({ "id": "v1" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+        assert!(matches!(
+            r.to_request("rename_named_voice", &json!({ "name": "Sam" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn merge_named_voices_requires_both_ids() {
+        let r = ToolRegistry::with_phoneme_tools();
+        assert_eq!(
+            r.to_request(
+                "merge_named_voices",
+                &json!({ "from_id": "a", "into_id": "b" })
+            )
+            .unwrap(),
+            Request::MergeNamedVoices {
+                from_id: "a".to_string(),
+                into_id: "b".to_string()
+            }
+        );
+        assert!(matches!(
+            r.to_request("merge_named_voices", &json!({ "from_id": "a" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn forget_named_voice_requires_id() {
+        let r = ToolRegistry::with_phoneme_tools();
+        assert_eq!(
+            r.to_request("forget_named_voice", &json!({ "id": "v9" }))
+                .unwrap(),
+            Request::ForgetNamedVoice {
+                id: "v9".to_string()
+            }
+        );
+        assert!(matches!(
+            r.to_request("forget_named_voice", &json!({})),
             Err(ToolError::BadArgs { .. })
         ));
     }

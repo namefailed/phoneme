@@ -248,7 +248,12 @@ mod tests {
     async fn tools_list_returns_all_tools() {
         let (srv, _) = server_with(|_| ok_null());
         let r = unwrap_response(srv.handle("tools/list", &json!({}), json!(2)).await);
-        assert_eq!(r.result["tools"].as_array().unwrap().len(), 16);
+        // Derive the expected count from the shared registry so adding a tool
+        // there can't silently desync this assertion.
+        let expected = phoneme_agent_core::ToolRegistry::with_phoneme_tools()
+            .specs()
+            .len();
+        assert_eq!(r.result["tools"].as_array().unwrap().len(), expected);
     }
 
     #[tokio::test]
