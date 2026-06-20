@@ -19,6 +19,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { invoke } from "@tauri-apps/api/core";
+import { toWords, committedWordCount } from "./overlayTail";
 
 const root = document.getElementById("overlay-root")!;
 // Layout: a single tight row. On the left, the live dot + LIVE/LISTENING label
@@ -267,11 +268,15 @@ srcBtn.addEventListener("click", () => {
 // Set `preview_reveal_words_per_sec` to 0 to disable smoothing (instant text).
 const MAX_CHARS = 600;
 
-/** Tokenize into words (whitespace-separated). Empty/whitespace → []. */
-function toWords(text: string): string[] {
-  const t = text.trim();
-  return t ? t.split(/\s+/) : [];
-}
+// ── Tentative-tail split (P2) ────────────────────────────────────────────────
+// The daemon tags each partial with `committed_len`: the char length of the
+// stable prefix of `text`. Everything from there to the end is this tick's
+// freshly-appended, least-settled tail, which we render DIMMED (`.tentative`) so
+// the user can see which trailing words may still settle. `committed_len` is a
+// char offset; the reveal animation works in WORDS, so we convert the boundary to
+// a committed WORD COUNT (committedWordCount), then dim revealed words at/after
+// it. The pure helpers live in ./overlayTail so they're unit-testable without the
+// DOM (this module touches the DOM + Tauri APIs at load).
 
 /** Defense-in-depth dedup: if the text ends with an exact adjacent repetition of
  *  a trailing K-word phrase (the last K words equal the K words immediately
@@ -335,26 +340,50 @@ function fitTail(el: HTMLElement, words: string[]): string {
   return words.slice(start).join(" ");
 }
 
+/** HTML-escape so caption text can go through innerHTML for the solid/tentative
+ *  split without injecting markup. */
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 /** Render a one-line caption: fit the revealed words to the element width
- *  (dropping from the left) and anchor the tail so the newest word is visible. */
-function renderWords(el: HTMLElement | null, words: string[]) {
+ *  (dropping from the left) and anchor the tail so the newest word is visible.
+ *  `committedCount` words from the start render solid; the rest are wrapped in a
+ *  dimmed `.tentative` span. `committedCount >= words.length` (or the default) →
+ *  all solid, identical to the pre-P2 plain render. */
+function renderWords(el: HTMLElement | null, words: string[], committedCount = Infinity) {
   if (!el) return;
-  el.textContent = fitTail(el, words);
+  const fitted = toWords(fitTail(el, words)); // may have dropped words off the LEFT
+  // fitTail kept the trailing `fitted.length` words; the committed/tentative
+  // boundary is counted from the FULL word list, so shift it into the fitted
+  // window (a fully-tentative tail clamps the boundary to 0).
+  const droppedFromLeft = words.length - fitted.length;
+  const cut = Math.max(0, Math.min(fitted.length, committedCount - droppedFromLeft));
+  if (cut >= fitted.length) {
+    // All solid (no tentative tail visible) — plain text, no extra span.
+    el.textContent = fitted.join(" ");
+  } else {
+    const solid = fitted.slice(0, cut).join(" ");
+    const tentative = fitted.slice(cut).join(" ");
+    el.innerHTML =
+      (solid ? esc(solid) + " " : "") + `<span class="tentative">${esc(tentative)}</span>`;
+  }
   // Horizontal tail anchor — keep the latest words pinned to the right edge.
   el.scrollLeft = el.scrollWidth;
 }
 
 /** Plain render (no reveal animation): the Settings dummy preview and instant
- *  mode. Still fits to one line and anchors the tail. */
+ *  mode. Still fits to one line and anchors the tail. All solid (no dimming). */
 function renderText(el: HTMLElement | null, text: string | null) {
   if (!el) return;
   renderWords(el, toWords(text ?? ""));
 }
 
-/** Per-element reveal state: the full word list we're heading toward and how
- *  many words of it are currently shown (float, so sub-word budget carries
- *  between frames). */
-type Reveal = { target: string[]; shown: number };
+/** Per-element reveal state: the full word list we're heading toward, how many
+ *  words of it are currently shown (float, so sub-word budget carries between
+ *  frames), and how many leading words are committed (solid) — the rest render
+ *  dimmed as the tentative tail (P2). */
+type Reveal = { target: string[]; shown: number; committed: number };
 const reveals = new Map<HTMLElement, Reveal>();
 let revealRaf: number | null = null;
 let lastFrame = 0;
@@ -372,7 +401,7 @@ function stepReveal(now: number) {
     // If we've fallen too far behind, leap most of the way, then keep streaming.
     const step = behind > maxLag ? behind - maxLag + budget : budget;
     r.shown = Math.min(r.target.length, r.shown + step);
-    renderWords(el, r.target.slice(0, Math.floor(r.shown)));
+    renderWords(el, r.target.slice(0, Math.floor(r.shown)), r.committed);
     if (r.shown < r.target.length) anyPending = true;
   });
   if (anyPending) revealRaf = requestAnimationFrame(stepReveal);
@@ -384,20 +413,29 @@ function ensureRevealLoop() {
   revealRaf = requestAnimationFrame(stepReveal);
 }
 
-function queueText(el: HTMLElement | null, text: string | null) {
+function queueText(
+  el: HTMLElement | null,
+  text: string | null,
+  committedWords?: number | null,
+) {
   if (!el) return;
   const target = toWords(text ?? "");
+  // How many leading words are committed (solid); the rest render dimmed as the
+  // tentative tail. undefined/null (older daemon, or a clear) → all solid.
+  const committed = committedWords == null ? target.length : committedWords;
   // Instant mode (smoothing off) or an explicit clear: render straight away.
   if (revealWps <= 0 || target.length === 0) {
-    reveals.set(el, { target, shown: target.length });
-    renderWords(el, target);
+    reveals.set(el, { target, shown: target.length, committed });
+    renderWords(el, target, committed);
     return;
   }
   let r = reveals.get(el);
   if (!r) {
-    r = { target: [], shown: 0 };
+    r = { target: [], shown: 0, committed };
     reveals.set(el, r);
   }
+  const prevCommitted = r.committed;
+  r.committed = committed;
   const shownWords = r.target.slice(0, Math.floor(r.shown));
   const sharedWithShown = commonWordPrefixLen(shownWords, target);
   if (sharedWithShown === shownWords.length) {
@@ -410,6 +448,13 @@ function queueText(el: HTMLElement | null, text: string | null) {
     // text.
     r.shown = sharedWithShown;
     r.target = target;
+  }
+  // When the caption is already fully revealed and only the committed boundary
+  // moved (a tick that appended nothing but settled the previous tail), the
+  // reveal loop early-returns and would leave now-committed words dimmed a tick
+  // too long. Re-render immediately so they un-dim in step.
+  if (r.shown >= r.target.length && committed !== prevCommitted) {
+    renderWords(el, r.target.slice(0, Math.floor(r.shown)), r.committed);
   }
   ensureRevealLoop();
 }
@@ -542,16 +587,36 @@ void listen<any>("daemon-event", async (e) => {
     case "transcription_partial": {
       if (userHidden) break; // respect a manual hide until the next start
       const t = typeof p.text === "string" ? p.text.trim() : "";
+      // The daemon's tentative-tail boundary (P2): char length of the committed
+      // (stable) prefix of `p.text`. Optional — an older daemon omits it, then it
+      // stays undefined and the caption renders all-solid (back-compat). `p.text`
+      // has no leading whitespace, so the trim above (trailing only) doesn't move
+      // this front-anchored offset; it's still valid against `t`. Convert to a
+      // committed WORD count now, while still aligned to `t`, before the dedup /
+      // MAX_CHARS transforms below reshape the string.
+      const committedLen = typeof p.committed_len === "number" ? p.committed_len : null;
+      const committedOnT = committedWordCount(t, committedLen);
       // Defense-in-depth dedup: the daemon already collapses repeats, but as a
       // guard drop an exact adjacent repeated trailing phrase (if the last K
       // words equal the K words before them). Conservative — only exact adjacent
-      // repeats — so it never mangles legitimately repeated words.
-      const deduped = t ? dedupTrailingRepeat(t).slice(-MAX_CHARS) : "";
-      const text = deduped || null;
+      // repeats — so it never mangles legitimately repeated words. Dedup drops
+      // from the TAIL (the tentative side) so the committed prefix is untouched.
+      const dd = t ? dedupTrailingRepeat(t) : "";
+      // MAX_CHARS keeps only the trailing slice (drops oldest chars off the
+      // FRONT). Those dropped leading words are all committed (oldest), so shift
+      // the committed boundary back by however many leading words the slice ate.
+      const sliced = dd.slice(-MAX_CHARS);
+      const droppedLeadingWords = toWords(dd).length - toWords(sliced).length;
+      const text = sliced || null;
+      // Re-align the committed boundary to the final string, then clamp to its
+      // word count (dedup may have trimmed into the tail).
+      const finalWords = toWords(text ?? "").length;
+      const committed = Math.max(0, Math.min(finalWords, committedOnT - droppedLeadingWords));
       if (text) lastCaptionAt = Date.now(); // words flowing → "LIVE", not idle
       const track = meetingTracks.get(p.id);
-      if (shape === "both" && track) queueText(trackEls.get(track) ?? null, text);
-      else queueText(singleEl, text);
+      const el = shape === "both" && track ? (trackEls.get(track) ?? null) : singleEl;
+      // committedLen null → committedOnT == all words → committed == all → solid.
+      queueText(el, text, committed);
       break;
     }
     case "audio_level_sample":

@@ -285,6 +285,25 @@ fn merge_preview_tick(committed: &str, window: &str, window_slid: bool) -> Strin
     })
 }
 
+/// The committed (stable) prefix length to attach to a `TranscriptionPartial`:
+/// the char length of the caption shown BEFORE this tick's append, clamped to the
+/// merged caption's length. Everything in `merged` past this offset is this tick's
+/// freshly-appended, least-settled tail — the part the overlay dims as tentative.
+///
+/// `prev_committed` is the caption from the previous tick (empty on the first
+/// emit); `merged` is the result of [`merge_preview_tick`] for this tick. Because
+/// `merge_preview_tick` only ever keeps `prev_committed` verbatim and appends, the
+/// prefix length is normally `prev_committed.len()` and `≤ merged.len()`; the
+/// clamp is a guard so a future merge that ever shortened the caption could never
+/// produce an out-of-range boundary. On the first emit `prev_committed` is empty
+/// so the boundary is `0` (all fresh). When nothing new was appended the merged
+/// caption equals `prev_committed`, so the boundary equals the full length and the
+/// overlay dims nothing. Pulled out (not inlined) so the boundary rule is unit-
+/// testable without driving an audio/whisper round trip.
+fn preview_committed_len(prev_committed: &str, merged: &str) -> usize {
+    prev_committed.len().min(merged.len())
+}
+
 /// Open a [`Source`] for the current recording: returns a real CPAL source in
 /// production and a [`GeneratorSource`] when `PHONEME_AUDIO_BACKEND=synthetic`
 /// is set (CI / headless tests).
@@ -821,10 +840,22 @@ impl DaemonRecorder {
                             // "committed never rewrites" invariant the subsystem is
                             // built on).
                             let window_slid = total_len > PREVIEW_WINDOW_SAMPLES;
-                            committed = merge_preview_tick(&committed, text, window_slid);
+                            // The committed (stable) prefix before this tick's append.
+                            // Everything in the merged caption past this char boundary
+                            // is freshly appended this tick — the least-settled tail the
+                            // overlay dims. `merge_preview_tick` only ever keeps
+                            // `committed` verbatim and appends, so this prefix length
+                            // stays valid against the merged text; clamp anyway in case
+                            // a future merge ever shortens it. When nothing new was
+                            // appended (caption unchanged) this equals the full length,
+                            // so the overlay dims nothing.
+                            let prev_committed = std::mem::take(&mut committed);
+                            committed = merge_preview_tick(&prev_committed, text, window_slid);
+                            let committed_len = preview_committed_len(&prev_committed, &committed);
                             state.events.emit(DaemonEvent::TranscriptionPartial {
                                 id: id.clone(),
                                 text: committed.clone(),
+                                committed_len: Some(committed_len),
                             });
                             // Streaming-type (`[in_place].stream_type`): type the
                             // newly-finalized words live. Only CLEAN forward
@@ -2582,6 +2613,55 @@ mod tests {
                 "slid={slid}"
             );
         }
+    }
+
+    // ── preview_committed_len (tentative-tail boundary) ───────────────────────
+
+    #[test]
+    fn committed_len_is_zero_on_first_emit() {
+        // First tick: nothing committed yet, the whole window seeds the caption.
+        // Everything is fresh, so the boundary is 0 (overlay dims the whole line).
+        let prev = "";
+        let merged = merge_preview_tick(prev, "the quick brown fox", false);
+        let len = preview_committed_len(prev, &merged);
+        assert_eq!(len, 0);
+        assert!(len <= merged.len());
+    }
+
+    #[test]
+    fn committed_len_equals_prior_committed_len_on_append() {
+        // A normal append tick: the prior caption is kept verbatim and a new tail
+        // is appended. The boundary is exactly the prior committed char length, so
+        // only the appended tail dims.
+        let prev = "the quick brown fox";
+        let merged = merge_preview_tick(prev, "brown fox jumps over", /* slid */ true);
+        assert_eq!(merged, "the quick brown fox jumps over");
+        let len = preview_committed_len(prev, &merged);
+        assert_eq!(len, prev.len());
+        assert!(len <= merged.len());
+        // The dimmed tail is exactly the freshly-appended words.
+        assert_eq!(&merged[len..], " jumps over");
+    }
+
+    #[test]
+    fn committed_len_is_full_length_when_no_new_words() {
+        // The window is fully contained in the committed caption — nothing new.
+        // `merge_preview_tick` returns the caption unchanged, so the boundary is
+        // the full length and the overlay dims nothing.
+        let prev = "hello world how are you";
+        let merged = merge_preview_tick(prev, "are you", /* slid */ false);
+        assert_eq!(merged, prev);
+        let len = preview_committed_len(prev, &merged);
+        assert_eq!(len, merged.len());
+        assert!(merged[len..].is_empty());
+    }
+
+    #[test]
+    fn committed_len_clamps_when_caption_would_shrink() {
+        // Defensive: the boundary can never exceed the merged caption length even
+        // if a (hypothetical) merge shortened the caption.
+        let len = preview_committed_len("a long prior caption", "short");
+        assert_eq!(len, "short".len());
     }
 
     /// Build an `AppState` whose catalog/inbox/audio all live under a temp dir,

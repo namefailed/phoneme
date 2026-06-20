@@ -1205,6 +1205,18 @@ pub enum DaemonEvent {
         id: RecordingId,
         /// The latest best-effort transcript of the audio captured so far.
         text: String,
+        /// Char length of the committed (stable) prefix of `text`: everything
+        /// before this offset was shown on a prior tick and never rewrites;
+        /// everything from here to the end is this tick's freshly-appended,
+        /// least-settled tail, which the live-preview overlay dims to flag it as
+        /// tentative (it may still settle as more audio arrives). Equals
+        /// `text.len()` when nothing new was appended this tick (dim nothing) and
+        /// `0` on the very first emit (all fresh). Optional for backward
+        /// compatibility: a partial without this field (older daemon) deserializes
+        /// to `None` and the overlay renders the whole caption solid, exactly as
+        /// before this field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        committed_len: Option<usize>,
     },
     /// A live microphone-level sample for the "it hears me" waveform pill in the
     /// desktop overlay, emitted by a lightweight per-recording level loop at a

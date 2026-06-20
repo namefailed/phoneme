@@ -167,6 +167,7 @@ fn all_daemon_events_roundtrip() {
         DaemonEvent::TranscriptionPartial {
             id: id.clone(),
             text: "hel".into(),
+            committed_len: Some(2),
         },
         DaemonEvent::TranscriptionDone {
             id: id.clone(),
@@ -231,4 +232,33 @@ fn audio_level_sample_event_roundtrips() {
     roundtrip(&ev);
     let json = serde_json::to_string(&ev).unwrap();
     assert!(json.contains("\"event\":\"audio_level_sample\""), "{json}");
+}
+
+#[test]
+fn transcription_partial_emits_committed_len_on_the_wire() {
+    let ev = DaemonEvent::TranscriptionPartial {
+        id: RecordingId::new(),
+        text: "hello world".into(),
+        committed_len: Some(5),
+    };
+    let json = serde_json::to_string(&ev).unwrap();
+    assert!(json.contains("\"committed_len\":5"), "{json}");
+    // Round-trips back to the same value.
+    let parsed: DaemonEvent = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed, ev);
+}
+
+#[test]
+fn transcription_partial_without_committed_len_deserializes_to_none() {
+    // Back-compat: a partial from an older daemon has no `committed_len` on the
+    // wire. It must deserialize to `None` (overlay renders all-solid), never a
+    // default that would dim part of the caption.
+    let json = r#"{"event":"transcription_partial","id":"abc","text":"hello world"}"#;
+    let parsed: DaemonEvent = serde_json::from_str(json).unwrap();
+    match parsed {
+        DaemonEvent::TranscriptionPartial { committed_len, .. } => {
+            assert_eq!(committed_len, None);
+        }
+        other => panic!("expected TranscriptionPartial, got {other:?}"),
+    }
 }

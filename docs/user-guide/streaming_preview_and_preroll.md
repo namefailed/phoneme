@@ -75,6 +75,8 @@ Or **Settings → Capture → Streaming preview** (and the **System-wide overlay
 
 With `interface.preview_overlay = true`, the live caption also appears in a frameless, always-on-top window that floats over any app — useful during a meeting or screen share when the main window is hidden. It auto-shows when a recording or meeting starts, can be dragged anywhere (its position is remembered), and dims/hides shortly after capture stops. Off by default.
 
+**Tentative tail.** The overlay dims the trailing words it just appended this tick — the freshest, least-settled part of the caption, which may still revise as more audio arrives — while the stable prefix already shown stays solid. So you can tell at a glance which words are settled and which are still firming up. Nothing to configure; it follows the same word-by-word reveal as the rest of the caption (the dimming is about the committed boundary, not the reveal speed). The in-app caption and the final transcript are unaffected — this is overlay-only.
+
 ### Minimal recording indicator (no captions)
 
 If you want a clear *"you're recording"* cue but **not** the live caption, turn on **Settings → Transcription → Live Preview → "Recording indicator"** (`interface.recording_indicator = true`). It's a separate, tiny always-on-top pill that shows only a pulsing record dot, an audio-reactive waveform, and an mm:ss elapsed timer — no transcription text. Because it carries no captions, it needs no streaming preview at all and works even with live preview entirely off. It's fully independent of the caption overlay above: a different window with its own remembered position, so you can run either, both, or neither. Off by default.
