@@ -477,7 +477,20 @@ pub(crate) async fn type_at_cursor(text: &str, mode: &str) -> Result<(), String>
     .map_err(|e| format!("input task panicked: {e}"))?
 }
 
+/// True when real keystroke/clipboard injection must be suppressed so it never
+/// types into the developer's focused window: under `cargo test` (the daemon's
+/// own pipeline/in-place tests exercise the typing path), or when
+/// `PHONEME_DISABLE_INPUT_INJECTION` is set (CI and integration tests that spawn
+/// a real daemon subprocess, which inherits the env var). The typing path then
+/// no-ops successfully — callers see `Ok(())` and proceed as if it typed.
+fn input_injection_disabled() -> bool {
+    cfg!(test) || std::env::var_os("PHONEME_DISABLE_INPUT_INJECTION").is_some()
+}
+
 fn type_blocking(text: &str) -> Result<(), String> {
+    if input_injection_disabled() {
+        return Ok(());
+    }
     use enigo::Keyboard;
     let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
         .map_err(|e| format!("input simulator init failed: {e}"))?;
@@ -527,6 +540,9 @@ pub(crate) async fn reconcile_at_cursor(backspaces: usize, insert: &str) -> Resu
 }
 
 fn reconcile_blocking(backspaces: usize, insert: &str) -> Result<(), String> {
+    if input_injection_disabled() {
+        return Ok(());
+    }
     use enigo::{Direction, Key, Keyboard};
     let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
         .map_err(|e| format!("input simulator init failed: {e}"))?;
@@ -544,6 +560,9 @@ fn reconcile_blocking(backspaces: usize, insert: &str) -> Result<(), String> {
 }
 
 fn paste_blocking(text: &str) -> Result<(), String> {
+    if input_injection_disabled() {
+        return Ok(());
+    }
     use enigo::{Direction, Key, Keyboard};
     let mut clipboard =
         arboard::Clipboard::new().map_err(|e| format!("clipboard unavailable: {e}"))?;
@@ -584,7 +603,22 @@ fn paste_blocking(text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::dictation_title_snippet;
+    use super::{input_injection_disabled, paste_blocking, reconcile_blocking, type_blocking};
     use phoneme_core::config::InPlaceConfig;
+
+    /// Tests must NEVER inject real keystrokes/clipboard into the developer's
+    /// focused window. Under `cfg!(test)` the guard suppresses all three input
+    /// paths — they no-op to `Ok(())` instead of driving enigo. Regression: the
+    /// daemon pipeline tests reached this path and typed their fixtures
+    /// ("CLEANED", "raw words from whisper") into whatever window had focus
+    /// every time `cargo test` ran.
+    #[test]
+    fn input_injection_is_suppressed_under_test() {
+        assert!(input_injection_disabled());
+        assert_eq!(type_blocking("raw words from whisper"), Ok(()));
+        assert_eq!(reconcile_blocking(5, "CLEANED"), Ok(()));
+        assert_eq!(paste_blocking("CLEANED"), Ok(()));
+    }
 
     /// The exact resolution the dictation typing path relies on (6b): a per-app
     /// override decides type/paste/off for the focused app; an unlisted app —
