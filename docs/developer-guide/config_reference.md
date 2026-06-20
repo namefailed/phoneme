@@ -288,6 +288,18 @@ Settings → Capture → Dictation, including the `stt` picker (Automatic ↔ Cu
 | `stt` | *(unset)* | Optional dedicated STT provider table shaped like `[whisper]`. Unset: dictation follows the Live Preview's provider when the preview is enabled, else `[whisper]`. For a local model you can point it at an already-running server (the daemon reuses it), **or** set `stt.use_own_bundled_server = true` to have the daemon supervise a **dedicated third whisper-server** just for dictation — its own process and model on its own port, so dictation is never starved by a main-server restart or model override. Default off (the weak-box default reuses the main/preview server); opt in via Settings → Capture → Dictation → "Dedicated dictation server". This is a power-user / multi-server option: a third local model means materially more RAM. Note: dictation still waits on the shared whisper permit, so the dedicated server buys reliability/isolation, not parallelism with final transcription. |
 
 
+## `[filler]`
+
+Tuning for the **deterministic** filler-word transform — the non-LLM step. A `[[playbook]]` entry of `kind = "filler_removal"` (the seeded `filler_removal` entry, off by default) strips these from the transcript in pure Rust: no provider, no network, instant and repeatable. Add it to a recipe (or a Custom Hotkey) to use it.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `words` | `["um", "uh", "er", "ah", "hmm", "mhm"]` | Single filler words removed at word boundaries, case-insensitively (matched against each token's alphanumeric core, so `umbrella` survives). Conservative on purpose — every default is meaningless filler in any context. Replace the list to customize; an empty list removes no single words. |
+| `phrases` | `["you know", "i mean", "sort of", "kind of", "like"]` | Multi-word filler phrases, removed as whole-word units — **but only when `aggressive` is on.** These double as real speech (`I `**`like`**` it`, **`kind of`**` blue`), so they are opt-in. |
+| `aggressive` | `false` | Off (the safe path): only `words` are stripped. On: `phrases` are stripped too — more thorough, at the risk of removing a meaning-bearing `like` / `kind of`. |
+
+---
+
 ## `[[playbook]]`
 
 Reusable AI "moves" — the building blocks the recording pipeline and Custom Hotkeys run. An array-of-tables: each `[[playbook]]` block is one entry. Curated `builtin` entries (`cleanup`, `title`, `summary`, `auto_tag`) are seeded into a fresh config and are editable; users add their own. The Playbook is the **source of truth** for the whole post-transcription pipeline — the built-in entries drive each LLM step (replacing the legacy `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` sections), and `hook` entries run shell/webhook side-effects (replacing the legacy `[hook]` config). Both are migrated once (see `playbook_migrated` / `hooks_migrated` below). Edited in Settings → 🎭 Playbook.
@@ -298,7 +310,7 @@ Reusable AI "moves" — the building blocks the recording pipeline and Custom Ho
 | `name` | `""` | User-facing name shown in the Playbook manager |
 | `description` | `""` | One-line "what this does" hint |
 | `builtin` | `false` | Seeded by Phoneme (editable; "Reset to default" restores the seed) vs. user-created |
-| `kind` | `transform` | `transform` (LLM step that **rewrites** the running transcript text, feeding the next step), `enrichment` (LLM step that writes a named field — see `target`), or `hook` (a shell command / webhook) |
+| `kind` | `transform` | `transform` (LLM step that **rewrites** the running transcript text, feeding the next step), `filler_removal` (a **deterministic, non-LLM** rewrite — strips filler words per `[filler]`; the `llm` half is ignored), `enrichment` (LLM step that writes a named field — see `target`), or `hook` (a shell command / webhook) |
 | `target` | `""` | For `enrichment` only: the field to write — `title` \| `summary` \| `tags` \| `custom:<key>`. Ignored for other kinds. |
 | `llm.provider` | `""` | For `transform` / `enrichment`: provider id (`ollama` / `openai` / `groq` / `anthropic`); empty inherits the default `[llm_post_process]` connection |
 | `llm.model` | `""` | Empty inherits the provider's configured default |

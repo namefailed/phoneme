@@ -144,6 +144,11 @@ pub struct Config {
     /// [`InPlaceConfig`].
     #[serde(default)]
     pub in_place: InPlaceConfig,
+    /// Deterministic filler-word removal — the word/phrase lists and the
+    /// `aggressive` toggle a Playbook `FillerRemoval` step reads. See
+    /// [`FillerConfig`]. Inert until a recipe runs such a step.
+    #[serde(default)]
+    pub filler: FillerConfig,
     /// Hardware and threshold settings for the audio recording stream.
     pub recording: RecordingConfig,
     /// Settings governing external script execution (hooks) upon transcription success.
@@ -1804,6 +1809,63 @@ impl Default for HotkeyInPlace {
     }
 }
 
+/// Conservative default single-word fillers — the unambiguous spoken noise. Kept
+/// short on purpose: every word here is meaningless filler in any context, so
+/// stripping it never changes meaning. Anything that doubles as a real word
+/// (`like`, `so`, `well`) is left to the aggressive [`FillerConfig::phrases`]
+/// list, off by default.
+fn default_filler_words() -> Vec<String> {
+    ["um", "uh", "er", "ah", "hmm", "mhm"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Default filler PHRASES, applied only when [`FillerConfig::aggressive`] is on.
+/// These are real words/phrases in ordinary speech ("I *like* it", "*kind of*
+/// blue", "*you know* the answer"), so they are opt-in — a default run never
+/// touches them.
+fn default_filler_phrases() -> Vec<String> {
+    ["you know", "i mean", "sort of", "kind of", "like"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Tuning for the deterministic [`crate::filler::strip_fillers`] transform a
+/// Playbook `FillerRemoval` step runs. Both lists are user-editable; `aggressive`
+/// gates the meaning-bearing [`phrases`](Self::phrases) so the safe path (single
+/// words only) stays the default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FillerConfig {
+    /// Single filler words removed at word boundaries, case-insensitively
+    /// (matched against each token's alphanumeric core, so "umbrella" survives).
+    /// Defaults to the conservative set ([`default_filler_words`]); replace it to
+    /// customize. An empty list removes no single words.
+    #[serde(default = "default_filler_words")]
+    pub words: Vec<String>,
+    /// Multi-word filler phrases, removed as whole-word units — but ONLY when
+    /// [`aggressive`](Self::aggressive) is on, because the built-ins ("kind of",
+    /// "like", …) are real words elsewhere. Defaults to [`default_filler_phrases`].
+    #[serde(default = "default_filler_phrases")]
+    pub phrases: Vec<String>,
+    /// Off by default (the safe path: only [`words`](Self::words) are stripped).
+    /// On: the [`phrases`](Self::phrases) list is stripped too — more aggressive,
+    /// at the risk of removing a meaning-bearing "like"/"kind of".
+    #[serde(default)]
+    pub aggressive: bool,
+}
+
+impl Default for FillerConfig {
+    fn default() -> Self {
+        Self {
+            words: default_filler_words(),
+            phrases: default_filler_phrases(),
+            aggressive: false,
+        }
+    }
+}
+
 // ── Playbook ────────────────────────────────────────────────────────────────
 // The Playbook is the unified, reusable library of LLM/hook "moves" (entries)
 // and ordered chains of them (recipes) that power BOTH the default recording
@@ -1827,6 +1889,13 @@ pub enum PlaybookKind {
     Enrichment,
     /// A shell command or webhook fired with the recording JSON (like an Integration).
     Hook,
+    /// A DETERMINISTIC (non-LLM) text transform that rewrites the running
+    /// transcript like a `Transform`, but in pure Rust — no provider, no network,
+    /// no prompt. Today the only one is filler-word removal
+    /// ([`crate::filler::strip_fillers`]), driven by the `[filler]` config; the
+    /// `llm` half is ignored. Runs in the same in-memory rewrite phase as
+    /// `Transform`, so it can chain with cleanup in either order.
+    FillerRemoval,
 }
 
 /// The LLM half of a Playbook entry (used when `kind` is `Transform`/`Enrichment`).
@@ -2113,6 +2182,17 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
         // Example entries (NOT in the `default` recipe, so they don't auto-run) —
         // they show off what the Playbook can do. Edit them, add them to a recipe
         // or a custom hotkey, or delete them.
+        PlaybookEntry {
+            id: "filler_removal".into(),
+            name: "Remove fillers".into(),
+            description: "Deterministically strip filler words (\"um\", \"uh\", …) — no AI, instant. Tune the lists under [filler].".into(),
+            builtin: false,
+            kind: PlaybookKind::FillerRemoval,
+            // FillerRemoval reads `[filler]`, not the LLM half — kept default.
+            llm: PlaybookLlm::default(),
+            target: String::new(),
+            hook: PlaybookHook::default(),
+        },
         PlaybookEntry {
             id: "prompt_polish".into(),
             name: "Prompt polish".into(),
@@ -3306,6 +3386,7 @@ impl Default for Config {
             },
             in_place_hotkey: default_in_place_hotkey(),
             in_place: InPlaceConfig::default(),
+            filler: FillerConfig::default(),
             meeting_hotkey: default_meeting_hotkey(),
             // One disabled example so a fresh install shows what a custom hotkey
             // looks like (its own combo + recipe + per-binding hook). Off by

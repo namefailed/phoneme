@@ -1892,6 +1892,7 @@ fn step_label(step: &crate::pipeline::ResolvedStep) -> &'static str {
     use crate::pipeline::ResolvedStep::*;
     match step {
         Transform { .. } => "transform",
+        FillerRemoval { .. } => "filler_removal",
         Title { .. } => "title",
         Summary { .. } => "summary",
         Tags { .. } => "tags",
@@ -1980,6 +1981,30 @@ fn resolve_recipe_includes_hook_steps_and_skips_empty_ones() {
         labels,
         vec!["transform", "hook"],
         "the journal Hook entry resolves a hook step; the empty hook is skipped"
+    );
+}
+
+/// A recipe with the seeded `filler_removal` entry resolves a deterministic
+/// `filler_removal` step (no LLM provider involved) — the non-LLM Transform path.
+#[test]
+fn resolve_recipe_includes_filler_removal_step() {
+    use phoneme_core::config::PlaybookRecipe;
+    let mut cfg = config_with_custom_recipe();
+    cfg.recipes.push(PlaybookRecipe {
+        id: "tidy".into(),
+        name: "Tidy".into(),
+        description: "Strip fillers, then clean up.".into(),
+        builtin: false,
+        steps: vec!["filler_removal".into(), "cleanup".into()],
+    });
+    let labels: Vec<_> = crate::pipeline::resolve_recipe(&cfg, "tidy")
+        .iter()
+        .map(step_label)
+        .collect();
+    assert_eq!(
+        labels,
+        vec!["filler_removal", "transform"],
+        "the filler_removal entry resolves a deterministic step before cleanup"
     );
 }
 

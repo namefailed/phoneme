@@ -32,6 +32,8 @@
 //!   falls back to the raw transcript.
 //! - [`dictation`] — the zero-latency rule-based text polish behind the in-place
 //!   fast lane (filler stripping, stutter collapse, capitalization).
+//! - [`filler`] — a deterministic (non-LLM) filler-word transform a Playbook
+//!   `FillerRemoval` step runs over the transcript; configurable via `[filler]`.
 //! - [`title`] — derive a short display title from a transcript (a pure
 //!   heuristic; the optional LLM title is orchestrated by the pipeline).
 //! - [`chunk`] — split a transcript into sentence-aware overlapping windows so
@@ -98,6 +100,7 @@ pub mod embed;
 pub mod endpoints;
 pub mod error;
 pub mod export;
+pub mod filler;
 // Foreground-window detection for per-app dictation overrides. Exported on every
 // platform — the module ships a non-Windows stub so the daemon can call it
 // unconditionally and just get `None` off Windows.
