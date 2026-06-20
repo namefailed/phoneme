@@ -26,7 +26,9 @@ fn parse_id_and_label(id_str: &str, label: i64) -> Result<RecordingId, ExitCode>
         ExitCode::FAILURE
     })?;
     if label < 1 {
-        eprintln!("error: speaker label must be 1 or greater (it is the 1-based [Speaker N] index)");
+        eprintln!(
+            "error: speaker label must be 1 or greater (it is the 1-based [Speaker N] index)"
+        );
         return Err(ExitCode::FAILURE);
     }
     Ok(id)

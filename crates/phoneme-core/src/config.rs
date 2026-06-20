@@ -1432,7 +1432,7 @@ pub struct InPlaceConfig {
     /// first; an unlisted app falls back to `type_mode`. **Default empty** — no
     /// overrides, so every app uses `type_mode` exactly as before.
     ///
-    /// Keys are lowercased on load (see [`deserialize_lowercase_keys`]) so a
+    /// Keys are lowercased on load (see `deserialize_lowercase_keys`) so a
     /// hand-edited cased entry like `Code` still matches the lowercased
     /// foreground stem instead of silently no-opping to `type_mode`.
     #[serde(default, deserialize_with = "deserialize_lowercase_keys")]
@@ -1493,7 +1493,7 @@ impl InPlaceConfig {
     /// `type_mode` — byte-for-byte today's behavior.
     ///
     /// Matching is case-insensitive on BOTH sides: keys loaded from disk are
-    /// already lowercased (see [`deserialize_lowercase_keys`]) and the foreground
+    /// already lowercased (see `deserialize_lowercase_keys`) and the foreground
     /// stem is lowercased, but a key added in memory (the Settings form, a test)
     /// may carry mixed case — so an override matches regardless of either side's
     /// case rather than silently no-opping to `type_mode`. `app_overrides` holds
@@ -2873,7 +2873,11 @@ impl Config {
         let timeout = self.hook.timeout_secs;
         let mut entries: Vec<PlaybookEntry> = Vec::new();
         let mut step_ids: Vec<String> = Vec::new();
-        let push = |hook: PlaybookHook, name: String, description: &str, entries: &mut Vec<PlaybookEntry>, step_ids: &mut Vec<String>| {
+        let push = |hook: PlaybookHook,
+                    name: String,
+                    description: &str,
+                    entries: &mut Vec<PlaybookEntry>,
+                    step_ids: &mut Vec<String>| {
             let id = format!("legacy_hook_{}", step_ids.len() + 1);
             entries.push(PlaybookEntry {
                 id: id.clone(),
@@ -3043,10 +3047,7 @@ impl Config {
         // one. If the smallest local model IS the main model (or no lighter
         // tier exists), fall back to reusing the main provider unchanged.
         let main_name = main_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let pick_name = smallest
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let pick_name = smallest.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if whisper_model_cost(pick_name) >= whisper_model_cost(main_name) {
             return None;
         }
@@ -4287,7 +4288,9 @@ mod tests {
             VoiceprintScoreNorm::Off
         );
         assert_eq!(
-            Config::default().diarization.voiceprint_score_norm_threshold,
+            Config::default()
+                .diarization
+                .voiceprint_score_norm_threshold,
             2.0
         );
     }
@@ -4298,7 +4301,10 @@ mod tests {
         // load and default to Off — zero behavior change for existing users.
         let cfg = Config::default();
         let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
-        if let Some(diar) = toml_val.get_mut("diarization").and_then(|v| v.as_table_mut()) {
+        if let Some(diar) = toml_val
+            .get_mut("diarization")
+            .and_then(|v| v.as_table_mut())
+        {
             diar.remove("voiceprint_score_norm");
             diar.remove("voiceprint_score_norm_threshold");
         }
@@ -4481,10 +4487,9 @@ mod tests {
         // serialize → deserialize cycle must return the original map (DPAPI
         // round-trips on Windows, passthrough off it). Keys stay verbatim.
         let mut cfg = Config::default();
-        cfg.webhook.custom_headers.insert(
-            "Authorization".into(),
-            "Bearer super-secret-token".into(),
-        );
+        cfg.webhook
+            .custom_headers
+            .insert("Authorization".into(), "Bearer super-secret-token".into());
         cfg.webhook
             .custom_headers
             .insert("X-Webhook-Source".into(), "phoneme".into());

@@ -38,7 +38,9 @@ impl NativeWhisperProvider {
         let params = WhisperContextParameters::default();
         let context =
             WhisperContext::new_with_params(model_path.to_string_lossy().as_ref(), params)
-                .map_err(|e| Error::Internal(format!("failed to load native whisper model: {e}")))?;
+                .map_err(|e| {
+                    Error::Internal(format!("failed to load native whisper model: {e}"))
+                })?;
         Ok(Self {
             context,
             prompt: prompt.filter(|p| !p.trim().is_empty()),

@@ -338,13 +338,19 @@ mod tests {
 
     #[test]
     fn reconcile_noop_when_identical() {
-        assert_eq!(reconcile_edit("hello world", "hello world"), (0, String::new()));
+        assert_eq!(
+            reconcile_edit("hello world", "hello world"),
+            (0, String::new())
+        );
     }
 
     #[test]
     fn reconcile_patches_only_the_divergent_tail() {
         // "wrld" → "world": common prefix "hello w", delete "rld" (3), type "orld".
-        assert_eq!(reconcile_edit("hello wrld", "hello world"), (3, "orld".into()));
+        assert_eq!(
+            reconcile_edit("hello wrld", "hello world"),
+            (3, "orld".into())
+        );
     }
 
     #[test]

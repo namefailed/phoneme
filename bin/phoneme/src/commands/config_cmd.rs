@@ -126,7 +126,10 @@ fn redact_secrets_for_display(doc: &mut toml_edit::DocumentMut) {
         mask_field(webhook, "hmac_secret");
     }
     // Each playbook entry carries its own LLM key (`playbook[].llm.api_key`).
-    if let Some(arr) = doc.get_mut("playbook").and_then(|p| p.as_array_of_tables_mut()) {
+    if let Some(arr) = doc
+        .get_mut("playbook")
+        .and_then(|p| p.as_array_of_tables_mut())
+    {
         for entry in arr.iter_mut() {
             if let Some(llm) = entry.get_mut("llm").and_then(|l| l.as_table_like_mut()) {
                 mask_field(llm, "api_key");
@@ -259,7 +262,10 @@ mod tests {
             let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let prev = std::env::var("PHONEME_CONFIG").ok();
             std::env::set_var("PHONEME_CONFIG", path);
-            Self { prev, _guard: guard }
+            Self {
+                prev,
+                _guard: guard,
+            }
         }
     }
 
@@ -435,7 +441,8 @@ mod tests {
         // it) is shown verbatim. Asserting the absence of the marker keeps this
         // platform-independent.
         let mut cfg = Config::default();
-        cfg.whisper.set_api_key("sk-live-super-secret-123".to_owned());
+        cfg.whisper
+            .set_api_key("sk-live-super-secret-123".to_owned());
 
         let rendered = render_config(&cfg, true).expect("render succeeds");
 

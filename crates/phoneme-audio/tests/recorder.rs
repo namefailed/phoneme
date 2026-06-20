@@ -686,7 +686,10 @@ async fn device_loss_finalizes_partial_and_flags_device_lost() {
         "a mid-capture device failure must set device_lost"
     );
     // The partial take is still saved exactly as a normal recording.
-    assert!(wav_path.exists(), "the partial recording must still be written");
+    assert!(
+        wav_path.exists(),
+        "the partial recording must still be written"
+    );
     let (samples, _) = wav::read_wav(&wav_path).unwrap();
     assert!(
         samples.len() >= 16_000 - 200,

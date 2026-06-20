@@ -62,17 +62,19 @@ pub fn tools_list() -> Value {
     let tools: Vec<Value> = registry()
         .specs()
         .iter()
-        .map(|ToolSpec {
+        .map(
+            |ToolSpec {
                  name,
                  description,
                  input_schema,
              }| {
-            json!({
-                "name": name,
-                "description": description,
-                "inputSchema": input_schema,
-            })
-        })
+                json!({
+                    "name": name,
+                    "description": description,
+                    "inputSchema": input_schema,
+                })
+            },
+        )
         .collect();
     json!({ "tools": tools })
 }
@@ -214,7 +216,10 @@ fn render_speaker_suggestions(value: &Value) -> String {
     let mut out = String::new();
     for hit in hits {
         let label = hit.get("speaker_label").and_then(Value::as_i64);
-        let name = hit.get("name").and_then(Value::as_str).unwrap_or("(unknown)");
+        let name = hit
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("(unknown)");
         match label {
             Some(n) => out.push_str(&format!("- Speaker {n} → {name}\n")),
             None => out.push_str(&format!("- {name}\n")),
@@ -1050,7 +1055,10 @@ mod tests {
         );
         assert!(render_result("approve_tag_suggestion", &json!({"name": "work"})).contains("work"));
         assert_eq!(
-            render_result("set_speaker_name", &json!({"propagation": {"policy": "off"}})),
+            render_result(
+                "set_speaker_name",
+                &json!({"propagation": {"policy": "off"}})
+            ),
             "Speaker name updated."
         );
         assert_eq!(

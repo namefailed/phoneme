@@ -74,7 +74,10 @@ pub async fn run(args: ImportBackupArgs, cfg: &Config) -> ExitCode {
     let catalog = match Catalog::open(&catalog_path).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("error: could not open catalog at {}: {e}", catalog_path.display());
+            eprintln!(
+                "error: could not open catalog at {}: {e}",
+                catalog_path.display()
+            );
             return ExitCode::from(exit::GENERIC_FAIL);
         }
     };

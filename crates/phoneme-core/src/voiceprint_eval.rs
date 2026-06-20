@@ -314,11 +314,21 @@ mod tests {
         let speakers = vec![
             (
                 "a".to_string(),
-                vec![at_angle(0.00), at_angle(0.02), at_angle(0.04), at_angle(0.06)],
+                vec![
+                    at_angle(0.00),
+                    at_angle(0.02),
+                    at_angle(0.04),
+                    at_angle(0.06),
+                ],
             ),
             (
                 "b".to_string(),
-                vec![at_angle(0.01), at_angle(0.03), at_angle(0.05), at_angle(0.07)],
+                vec![
+                    at_angle(0.01),
+                    at_angle(0.03),
+                    at_angle(0.05),
+                    at_angle(0.07),
+                ],
             ),
         ];
         let r = calibrate(&speakers);
@@ -368,7 +378,10 @@ mod tests {
         let impostor = vec![0.1, 0.2];
         let r = compute_eer(&genuine, &impostor);
         let first = r.curve.first().unwrap();
-        assert!(approx(first.far, 1.0) && approx(first.frr, 0.0), "{first:?}");
+        assert!(
+            approx(first.far, 1.0) && approx(first.frr, 0.0),
+            "{first:?}"
+        );
         let last = r.curve.last().unwrap();
         assert!(approx(last.far, 0.0), "{last:?}");
     }
@@ -434,7 +447,10 @@ mod tests {
         let (genuine, impostor) = trial_scores(&speakers);
         assert_eq!(genuine.len(), 1);
         assert!(impostor.is_empty());
-        assert!(approx(genuine[0], cosine_similarity(&[1.0, 0.0], &[3.0, 0.0])));
+        assert!(approx(
+            genuine[0],
+            cosine_similarity(&[1.0, 0.0], &[3.0, 0.0])
+        ));
         assert!(approx(genuine[0], 1.0));
     }
 }

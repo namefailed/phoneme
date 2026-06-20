@@ -375,7 +375,8 @@ impl DaemonRecorder {
             );
             for (idx, (id, _, snapshot)) in sources.into_iter().enumerate() {
                 let secondary = dual && idx > 0;
-                self.start_preview(state, id, snapshot, secondary, false).await;
+                self.start_preview(state, id, snapshot, secondary, false)
+                    .await;
             }
         } else {
             // "toggle": start on the mic (the dense local voice the user is

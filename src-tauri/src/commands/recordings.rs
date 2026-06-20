@@ -1168,8 +1168,14 @@ mod tests {
         // `143500042.wav` stem. The flat-name entry collapsed them and one was
         // lost on restore; preserving the day folder keeps both.
         let dir = std::path::Path::new("/data/audio");
-        let a = audio_zip_entry_name(dir, std::path::Path::new("/data/audio/2026-05-19/143500042.wav"));
-        let b = audio_zip_entry_name(dir, std::path::Path::new("/data/audio/2026-05-20/143500042.wav"));
+        let a = audio_zip_entry_name(
+            dir,
+            std::path::Path::new("/data/audio/2026-05-19/143500042.wav"),
+        );
+        let b = audio_zip_entry_name(
+            dir,
+            std::path::Path::new("/data/audio/2026-05-20/143500042.wav"),
+        );
         assert_ne!(a, b, "same-ms-different-day files must not collide");
     }
 

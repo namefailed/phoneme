@@ -453,12 +453,7 @@ impl Catalog {
     /// Insert or update a saved search by id. The frontend owns the by-name
     /// upsert and rename-conflict rules (it picks the id to write), so this is a
     /// plain by-id upsert — `created_at` is set once, `updated_at` on every write.
-    pub async fn upsert_saved_search(
-        &self,
-        id: &str,
-        name: &str,
-        filter_json: &str,
-    ) -> Result<()> {
+    pub async fn upsert_saved_search(&self, id: &str, name: &str, filter_json: &str) -> Result<()> {
         sqlx::query(
             "INSERT INTO saved_searches (id, name, filter_json, created_at, updated_at) \
              VALUES (?, ?, ?, datetime('now'), datetime('now')) \
@@ -2606,8 +2601,7 @@ impl Catalog {
         .await?;
         let mut samples: Vec<(Vec<f32>, f64)> = Vec::with_capacity(rows.len());
         for r in rows {
-            let centroid =
-                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            let centroid = serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
             let duration_ms: i64 = r.try_get("duration_ms")?;
             samples.push((centroid, duration_ms as f64));
         }
@@ -2673,8 +2667,7 @@ impl Catalog {
                 continue;
             }
             let id: String = r.try_get("id")?;
-            let centroid =
-                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            let centroid = serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
             // A centroid whose dimension differs from the probe came from a
             // different embedding model — cosine would silently return 0.0, so
             // such a library would go quietly unmatched. Skip it with a signal
@@ -2705,11 +2698,13 @@ impl Catalog {
         if name.is_empty() {
             return Ok(());
         }
-        sqlx::query("UPDATE named_voiceprints SET name = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(name)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE named_voiceprints SET name = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(name)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -2779,10 +2774,12 @@ impl Catalog {
         .bind(id)
         .execute(&mut *tx)
         .await?;
-        sqlx::query("UPDATE speaker_voiceprints SET named_voice_id = NULL WHERE named_voice_id = ?")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "UPDATE speaker_voiceprints SET named_voice_id = NULL WHERE named_voice_id = ?",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(true)
     }
@@ -2885,8 +2882,7 @@ impl Catalog {
 
         let mut out: Vec<PropagationCandidate> = Vec::new();
         for r in rows {
-            let centroid =
-                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            let centroid = serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
             // A dimension mismatch (cross-model capture) scores cosine 0.0 and
             // won't clear any sane threshold — same skip the recognizer makes.
             let score = crate::voiceprint::normalized_score(&centroid, &cohort, target_idx, mode);
@@ -3003,8 +2999,7 @@ impl Catalog {
         let mut out = Vec::with_capacity(rows.len());
         for r in rows {
             let label: i64 = r.try_get("speaker_label")?;
-            let centroid =
-                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            let centroid = serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
             out.push((label, centroid));
         }
         Ok(out)
@@ -3060,8 +3055,7 @@ impl Catalog {
             if samples <= 0 {
                 continue;
             }
-            let centroid =
-                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            let centroid = serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
             out.push((
                 NamedVoice {
                     id: r.try_get("id")?,
@@ -3084,7 +3078,7 @@ impl Catalog {
     /// cosine matrix is scored once, then the best pairs are taken in descending
     /// score so no two speakers in the same recording can be handed the same
     /// name (audit H2). A pair is only emitted when it clears `threshold` AND
-    /// beats that speaker's own second-best candidate by [`Self::MARGIN`] — an
+    /// beats that speaker's own second-best candidate by `MARGIN` — an
     /// ambiguous speaker (two library voices nearly tied) is left unknown rather
     /// than guessed. The result holds at most one suggestion per captured speaker
     /// and per name, ordered by `speaker_label`.
@@ -3131,7 +3125,7 @@ impl Catalog {
     /// Builds the score matrix, then repeatedly takes the highest remaining
     /// `(speaker, voice)` cell whose speaker and voice are both still free, the
     /// score clears `threshold`, and the score beats that speaker's *second-best
-    /// over the whole library* by [`Self::MARGIN`]. Each speaker and each named
+    /// over the whole library* by `MARGIN`. Each speaker and each named
     /// voice is used at most once. Output is sorted by `speaker_label` for a
     /// stable suggestion order.
     ///
@@ -3339,8 +3333,7 @@ impl Catalog {
                 id: format!("segment {idx} of recording {}", recording_id.as_str()),
             });
         };
-        let (start_ms, end_ms): (i64, i64) =
-            (span.try_get("start_ms")?, span.try_get("end_ms")?);
+        let (start_ms, end_ms): (i64, i64) = (span.try_get("start_ms")?, span.try_get("end_ms")?);
         sqlx::query(
             "UPDATE transcript_segments SET speaker = ? WHERE recording_id = ? AND idx = ?",
         )
@@ -3619,13 +3612,12 @@ impl Catalog {
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         recording_id: &RecordingId,
     ) -> Result<()> {
-        let current: Option<String> = sqlx::query_scalar(
-            "SELECT transcript FROM recordings WHERE id = ?",
-        )
-        .bind(recording_id.as_str())
-        .fetch_optional(&mut **tx)
-        .await?
-        .flatten();
+        let current: Option<String> =
+            sqlx::query_scalar("SELECT transcript FROM recordings WHERE id = ?")
+                .bind(recording_id.as_str())
+                .fetch_optional(&mut **tx)
+                .await?
+                .flatten();
         let Some(current) = current else {
             return Ok(()); // No transcript row/text — nothing to keep consistent.
         };
@@ -3970,7 +3962,10 @@ mod tests {
             .unwrap();
         let big = &db.list_ai_activity(Some("b"), 1).await.unwrap()[0];
         assert!(big.prompt.ends_with("… [truncated]"), "prompt not marked");
-        assert!(big.response.ends_with("… [truncated]"), "response not marked");
+        assert!(
+            big.response.ends_with("… [truncated]"),
+            "response not marked"
+        );
         // Kept chars = the cap; the marker is the only thing past it.
         let kept = big.prompt.chars().take(AI_ACTIVITY_FIELD_MAX_CHARS).count();
         assert_eq!(kept, AI_ACTIVITY_FIELD_MAX_CHARS);
@@ -5790,7 +5785,9 @@ mod tests {
         assert_eq!(labels(&segs), vec![Some("1"), Some("3"), Some("1")]);
         assert_eq!(
             transcript_text(&db, &r.id).await.as_deref(),
-            Some("[Speaker 1]: hello there\n\n[Speaker 3]: hi yourself\n\n[Speaker 1]: how are you"),
+            Some(
+                "[Speaker 1]: hello there\n\n[Speaker 3]: hi yourself\n\n[Speaker 1]: how are you"
+            ),
         );
     }
 
@@ -5803,8 +5800,16 @@ mod tests {
 
         let err = db.reassign_segment(&r.id, 99, 2).await.unwrap_err();
         assert!(matches!(err, crate::error::Error::NotFound { .. }));
-        assert_eq!(db.segments_for(&r.id).await.unwrap(), before, "no segment write");
-        assert_eq!(transcript_text(&db, &r.id).await, before_text, "no text write");
+        assert_eq!(
+            db.segments_for(&r.id).await.unwrap(),
+            before,
+            "no segment write"
+        );
+        assert_eq!(
+            transcript_text(&db, &r.id).await,
+            before_text,
+            "no text write"
+        );
 
         // A label < 1 is rejected before any write too.
         assert!(db.reassign_segment(&r.id, 0, 0).await.is_err());
@@ -5867,19 +5872,33 @@ mod tests {
         db.save_speaker_voiceprint(r.id.as_str(), 2, &[0.0, 1.0, 0.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(r.id.as_str(), 1, "Ada").await.unwrap().unwrap();
-        let bob = db.enroll_speaker(r.id.as_str(), 2, "Bob").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(r.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
+        let bob = db
+            .enroll_speaker(r.id.as_str(), 2, "Bob")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(named_voice_samples(&db, &bob).await, 1);
 
         // Merge 2 → 1: from's (2) capture is dropped; Bob's library entry
         // recomputes to zero linked samples.
         db.merge_speakers(&r.id, 2, 1).await.unwrap();
         assert!(
-            db.speaker_voiceprint(r.id.as_str(), 2).await.unwrap().is_none(),
+            db.speaker_voiceprint(r.id.as_str(), 2)
+                .await
+                .unwrap()
+                .is_none(),
             "from's capture row is deleted"
         );
         assert!(
-            db.speaker_voiceprint(r.id.as_str(), 1).await.unwrap().is_some(),
+            db.speaker_voiceprint(r.id.as_str(), 1)
+                .await
+                .unwrap()
+                .is_some(),
             "into's capture is untouched"
         );
         assert_eq!(
@@ -5917,7 +5936,9 @@ mod tests {
         assert_eq!(labels(&segs), vec![Some("1"), Some("2"), Some("3")]);
         assert_eq!(
             transcript_text(&db, &r.id).await.as_deref(),
-            Some("[Speaker 1]: hello there\n\n[Speaker 2]: hi yourself\n\n[Speaker 3]: how are you"),
+            Some(
+                "[Speaker 1]: hello there\n\n[Speaker 2]: hi yourself\n\n[Speaker 3]: how are you"
+            ),
         );
         // The new label has no name and no voiceprint until enrolled.
         assert!(db
@@ -5926,7 +5947,11 @@ mod tests {
             .unwrap()
             .iter()
             .all(|n| n.speaker_label != 3));
-        assert!(db.speaker_voiceprint(r.id.as_str(), 3).await.unwrap().is_none());
+        assert!(db
+            .speaker_voiceprint(r.id.as_str(), 3)
+            .await
+            .unwrap()
+            .is_none());
         // The word in segment 2's span followed.
         let words = db.words_for(&r.id).await.unwrap();
         assert_eq!(words[2].speaker.as_deref(), Some("3"));
@@ -6058,8 +6083,16 @@ mod tests {
         db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0, 0.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
-        let bob = db.enroll_speaker(src.id.as_str(), 2, "Bob").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
+        let bob = db
+            .enroll_speaker(src.id.as_str(), 2, "Bob")
+            .await
+            .unwrap()
+            .unwrap();
 
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
@@ -6123,8 +6156,16 @@ mod tests {
         db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0, 0.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
-        let bob = db.enroll_speaker(src.id.as_str(), 2, "Bob").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
+        let bob = db
+            .enroll_speaker(src.id.as_str(), 2, "Bob")
+            .await
+            .unwrap()
+            .unwrap();
 
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
@@ -6165,8 +6206,16 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
-        let bob = db.enroll_speaker(src.id.as_str(), 2, "Bob").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
+        let bob = db
+            .enroll_speaker(src.id.as_str(), 2, "Bob")
+            .await
+            .unwrap()
+            .unwrap();
         db.enroll_speaker(src.id.as_str(), 3, "Cleo").await.unwrap();
 
         let rec = embedded_recording(None);
@@ -6239,9 +6288,15 @@ mod tests {
         db.save_speaker_voiceprint(rec.id.as_str(), 4, &[-1.0, 0.0, 0.0], 0) // outlier
             .await
             .unwrap();
-        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(rec.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         for label in [2i64, 3, 4] {
-            db.enroll_speaker(rec.id.as_str(), label, "Ada").await.unwrap();
+            db.enroll_speaker(rec.id.as_str(), label, "Ada")
+                .await
+                .unwrap();
         }
 
         // Four captures linked, but the outlier is pruned → 3 effective samples.
@@ -6253,7 +6308,10 @@ mod tests {
         // The surviving centroid still points at the cluster (cosine ~1 to it).
         let probe = vec![1.0f32, 0.0, 0.0];
         let (_, score) = db.recognize_voice(&probe, 0.5).await.unwrap().unwrap();
-        assert!(score > 0.95, "centroid stays on the genuine cluster: {score}");
+        assert!(
+            score > 0.95,
+            "centroid stays on the genuine cluster: {score}"
+        );
     }
 
     #[tokio::test]
@@ -6269,7 +6327,11 @@ mod tests {
         db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.0, 1.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(rec.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         db.enroll_speaker(rec.id.as_str(), 2, "Ada").await.unwrap();
         assert_eq!(
             named_voice_samples(&db, &ada).await,
@@ -6280,11 +6342,12 @@ mod tests {
 
     /// The named voice's cached centroid, read straight from the library row.
     async fn named_voice_centroid(db: &Catalog, id: &str) -> Vec<f32> {
-        let json: String = sqlx::query_scalar("SELECT centroid FROM named_voiceprints WHERE id = ?")
-            .bind(id)
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        let json: String =
+            sqlx::query_scalar("SELECT centroid FROM named_voiceprints WHERE id = ?")
+                .bind(id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
         serde_json::from_str(&json).unwrap()
     }
 
@@ -6296,13 +6359,21 @@ mod tests {
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        let vecs = [vec![1.0f32, 0.0, 0.0], vec![0.0, 1.0, 0.0], vec![0.7, 0.7, 0.0]];
+        let vecs = [
+            vec![1.0f32, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![0.7, 0.7, 0.0],
+        ];
         for (i, v) in vecs.iter().enumerate() {
             db.save_speaker_voiceprint(rec.id.as_str(), (i + 1) as i64, v, 0)
                 .await
                 .unwrap();
         }
-        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(rec.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         db.enroll_speaker(rec.id.as_str(), 2, "Ada").await.unwrap();
         db.enroll_speaker(rec.id.as_str(), 3, "Ada").await.unwrap();
 
@@ -6312,7 +6383,10 @@ mod tests {
         let got = named_voice_centroid(&db, &ada).await;
         assert_eq!(got.len(), expected.len());
         for (g, e) in got.iter().zip(expected.iter()) {
-            assert!((g - e).abs() < 1e-6, "legacy recompute drifted: {got:?} vs {expected:?}");
+            assert!(
+                (g - e).abs() < 1e-6,
+                "legacy recompute drifted: {got:?} vs {expected:?}"
+            );
         }
     }
 
@@ -6333,7 +6407,11 @@ mod tests {
         db.save_speaker_voiceprint(rec.id.as_str(), 2, &short_dir, 2_000)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(rec.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         db.enroll_speaker(rec.id.as_str(), 2, "Ada").await.unwrap();
 
         let centroid = named_voice_centroid(&db, &ada).await;
@@ -6366,7 +6444,10 @@ mod tests {
 
         // Probe a 2-dim vector: dimension mismatch → skipped → no match.
         let got = db.recognize_voice(&[1.0, 0.0], 0.5).await.unwrap();
-        assert!(got.is_none(), "a cross-model library entry is skipped, not matched at 0.0");
+        assert!(
+            got.is_none(),
+            "a cross-model library entry is skipped, not matched at 0.0"
+        );
     }
 
     #[tokio::test]
@@ -6379,7 +6460,11 @@ mod tests {
         db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(rec.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(named_voice_samples(&db, &ada).await, 1);
 
         db.clear_all_recordings().await.unwrap();
@@ -6405,7 +6490,11 @@ mod tests {
         db.save_speaker_voiceprint(old.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(old.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(old.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(named_voice_samples(&db, &ada).await, 1);
 
         let cfg = crate::config::RetentionConfig {
@@ -6446,7 +6535,11 @@ mod tests {
         db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
 
         // rec_match: one UNNAMED speaker that matches Ada.
         let rec_match = embedded_recording(None);
@@ -6548,7 +6641,10 @@ mod tests {
         assert_eq!(display_name(&db, &rec_named, 1).await, before_named1);
         assert_eq!(display_name(&db, &rec_named, 2).await, before_named2);
         assert!(
-            db.named_voice_for(rec_match.as_str(), 1).await.unwrap().is_none(),
+            db.named_voice_for(rec_match.as_str(), 1)
+                .await
+                .unwrap()
+                .is_none(),
             "Ask enrolls nothing in the candidate recordings"
         );
         // Ada's sample count is unchanged (only the source sample).
@@ -6571,14 +6667,26 @@ mod tests {
         assert_eq!(applied, 2, "both unnamed Ada-matches back-filled");
 
         // The unnamed speakers now read "Ada" and are enrolled under it.
-        assert_eq!(display_name(&db, &rec_match, 1).await.as_deref(), Some("Ada"));
-        assert_eq!(display_name(&db, &rec_named, 1).await.as_deref(), Some("Ada"));
         assert_eq!(
-            db.named_voice_for(rec_match.as_str(), 1).await.unwrap().as_deref(),
+            display_name(&db, &rec_match, 1).await.as_deref(),
+            Some("Ada")
+        );
+        assert_eq!(
+            display_name(&db, &rec_named, 1).await.as_deref(),
+            Some("Ada")
+        );
+        assert_eq!(
+            db.named_voice_for(rec_match.as_str(), 1)
+                .await
+                .unwrap()
+                .as_deref(),
             Some(ada.as_str())
         );
         // The already-named "Bob" is untouched.
-        assert_eq!(display_name(&db, &rec_named, 2).await.as_deref(), Some("Bob"));
+        assert_eq!(
+            display_name(&db, &rec_named, 2).await.as_deref(),
+            Some("Bob")
+        );
         // The dissimilar "far" voice is never named.
         assert!(display_name(&db, &far, 1).await.is_none());
 
@@ -6603,7 +6711,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(applied, 0, "an already-named speaker is skipped");
-        assert_eq!(display_name(&db, &rec_named, 2).await.as_deref(), Some("Bob"));
+        assert_eq!(
+            display_name(&db, &rec_named, 2).await.as_deref(),
+            Some("Bob")
+        );
     }
 
     #[tokio::test]
@@ -6617,13 +6728,20 @@ mod tests {
         db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
 
         // A recording with NO voiceprint for label 1.
         let novp = embedded_recording(None);
         db.insert(&novp).await.unwrap();
 
-        let applied = db.apply_propagation(&ada, &[(novp.id.clone(), 1)]).await.unwrap();
+        let applied = db
+            .apply_propagation(&ada, &[(novp.id.clone(), 1)])
+            .await
+            .unwrap();
         assert_eq!(applied, 0, "no voiceprint → nothing enrolled");
         assert!(
             display_name(&db, &novp.id, 1).await.is_none(),
@@ -6650,8 +6768,14 @@ mod tests {
             .await
             .unwrap();
         let ids: Vec<&str> = strict.iter().map(|c| c.recording_id.as_str()).collect();
-        assert!(ids.contains(&rec_match.as_str()), "strong match survives 0.8");
-        assert!(!ids.contains(&marg.id.as_str()), "0.6 match is below 0.8 bar");
+        assert!(
+            ids.contains(&rec_match.as_str()),
+            "strong match survives 0.8"
+        );
+        assert!(
+            !ids.contains(&marg.id.as_str()),
+            "0.6 match is below 0.8 bar"
+        );
     }
 
     // ---- Reversible forget (soft-delete) (V5) -------------------------------
@@ -6664,11 +6788,18 @@ mod tests {
         db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 5000)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(db.list_named_voices().await.unwrap().len(), 1);
 
         // Forget hides it from listing and recognition.
-        assert!(db.forget_named_voice(&ada).await.unwrap(), "live voice forgotten");
+        assert!(
+            db.forget_named_voice(&ada).await.unwrap(),
+            "live voice forgotten"
+        );
         assert!(
             db.list_named_voices().await.unwrap().is_empty(),
             "forgotten voice is hidden from list-named-voices"
@@ -6680,22 +6811,39 @@ mod tests {
             .unwrap();
         assert!(sugg.is_empty(), "a forgotten voice never matches");
         // Its capture is unlinked.
-        assert!(db.named_voice_for(src.id.as_str(), 1).await.unwrap().is_none());
+        assert!(db
+            .named_voice_for(src.id.as_str(), 1)
+            .await
+            .unwrap()
+            .is_none());
 
         // Idempotent: forgetting again is a no-op.
-        assert!(!db.forget_named_voice(&ada).await.unwrap(), "already forgotten");
+        assert!(
+            !db.forget_named_voice(&ada).await.unwrap(),
+            "already forgotten"
+        );
 
         // Undo restores it: visible again, capture re-linked, centroid recomputed.
-        assert!(db.undo_forget(&ada).await.unwrap(), "forgotten voice restored");
+        assert!(
+            db.undo_forget(&ada).await.unwrap(),
+            "forgotten voice restored"
+        );
         let voices = db.list_named_voices().await.unwrap();
         assert_eq!(voices.len(), 1, "restored voice is listed again");
         assert_eq!(voices[0].id, ada);
         assert_eq!(
-            db.named_voice_for(src.id.as_str(), 1).await.unwrap().as_deref(),
+            db.named_voice_for(src.id.as_str(), 1)
+                .await
+                .unwrap()
+                .as_deref(),
             Some(ada.as_str()),
             "the capture is re-linked on undo"
         );
-        assert_eq!(named_voice_samples(&db, &ada).await, 1, "centroid recomputed");
+        assert_eq!(
+            named_voice_samples(&db, &ada).await,
+            1,
+            "centroid recomputed"
+        );
 
         // Idempotent: undo on a live voice is a no-op.
         assert!(!db.undo_forget(&ada).await.unwrap(), "already live");
@@ -6711,22 +6859,37 @@ mod tests {
         db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
 
         db.forget_named_voice(&ada).await.unwrap();
         // Re-name that speaker to Bob while Ada is forgotten.
         db.set_speaker_name(&src.id, 1, "Bob").await.unwrap();
-        let bob = db.enroll_speaker(src.id.as_str(), 1, "Bob").await.unwrap().unwrap();
+        let bob = db
+            .enroll_speaker(src.id.as_str(), 1, "Bob")
+            .await
+            .unwrap()
+            .unwrap();
         assert_ne!(bob, ada);
 
         // Undo Ada — must NOT steal the capture back from Bob.
         assert!(db.undo_forget(&ada).await.unwrap());
         assert_eq!(
-            db.named_voice_for(src.id.as_str(), 1).await.unwrap().as_deref(),
+            db.named_voice_for(src.id.as_str(), 1)
+                .await
+                .unwrap()
+                .as_deref(),
             Some(bob.as_str()),
             "a re-enrolled capture keeps its newer voice"
         );
-        assert_eq!(named_voice_samples(&db, &ada).await, 0, "Ada has no captures back");
+        assert_eq!(
+            named_voice_samples(&db, &ada).await,
+            0,
+            "Ada has no captures back"
+        );
     }
 
     #[tokio::test]
@@ -6739,7 +6902,11 @@ mod tests {
         db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        let ada1 = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada1 = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         db.forget_named_voice(&ada1).await.unwrap();
 
         let rec = embedded_recording(None);
@@ -6747,7 +6914,11 @@ mod tests {
         db.save_speaker_voiceprint(rec.id.as_str(), 1, &[0.0, 1.0, 0.0], 0)
             .await
             .unwrap();
-        let ada2 = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada2 = db
+            .enroll_speaker(rec.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         assert_ne!(ada1, ada2, "a forgotten name yields a fresh voice id");
         let voices = db.list_named_voices().await.unwrap();
         assert_eq!(voices.len(), 1, "only the new live Ada is listed");
@@ -6765,8 +6936,7 @@ mod tests {
         let off: crate::config::NamePropagation = serde_json::from_str("\"off\"").unwrap();
         assert_eq!(off, crate::config::NamePropagation::Off);
         // A config missing the field deserializes to Ask (serde default).
-        let de: crate::config::NamePropagation =
-            serde_json::from_str("null").unwrap_or_default();
+        let de: crate::config::NamePropagation = serde_json::from_str("null").unwrap_or_default();
         assert_eq!(de, crate::config::NamePropagation::Ask);
     }
 
@@ -6781,7 +6951,11 @@ mod tests {
         db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
-        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let ada = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
         // Stamp deleted_at directly (the column exists post-migration).
         sqlx::query("UPDATE named_voiceprints SET deleted_at = datetime('now') WHERE id = ?")
             .bind(&ada)

@@ -584,7 +584,12 @@ mod tests {
             ..Default::default()
         };
         let err = client
-            .post(&server.uri(), Duration::from_secs(5), &sample_payload(), &policy)
+            .post(
+                &server.uri(),
+                Duration::from_secs(5),
+                &sample_payload(),
+                &policy,
+            )
             .await
             .expect_err("a persistent 503 must fail after exhausting retries");
         assert!(

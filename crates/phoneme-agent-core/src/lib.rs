@@ -910,11 +910,7 @@ impl Tool for ReassignSpeakerSegment {
         let id = require_recording_id(args, "reassign_speaker_segment")?;
         let idx = require_i64_min(args, "idx", 0, "reassign_speaker_segment")?;
         let new_label = require_i64_min(args, "new_label", 1, "reassign_speaker_segment")?;
-        Ok(Request::ReassignSegmentSpeaker {
-            id,
-            idx,
-            new_label,
-        })
+        Ok(Request::ReassignSegmentSpeaker { id, idx, new_label })
     }
 }
 
@@ -1897,11 +1893,8 @@ mod tests {
     fn rename_named_voice_requires_id_and_name() {
         let r = ToolRegistry::with_phoneme_tools();
         assert_eq!(
-            r.to_request(
-                "rename_named_voice",
-                &json!({ "id": "v1", "name": "Sam" })
-            )
-            .unwrap(),
+            r.to_request("rename_named_voice", &json!({ "id": "v1", "name": "Sam" }))
+                .unwrap(),
             Request::RenameNamedVoice {
                 id: "v1".to_string(),
                 name: "Sam".to_string()

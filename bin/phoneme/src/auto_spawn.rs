@@ -125,7 +125,9 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
                 // Give the OS a moment to clean up after the kill before probing.
                 tokio::time::sleep(Duration::from_millis(200)).await;
             } else {
-                tracing::warn!("stale daemon did not exit within 12 s and its PID is unknown; spawn may race");
+                tracing::warn!(
+                    "stale daemon did not exit within 12 s and its PID is unknown; spawn may race"
+                );
             }
         }
     }

@@ -762,7 +762,7 @@ pub enum Request {
     /// clear-failed`.
     ClearFailed,
     /// Remove ONE quarantined payload from the inbox `failed/` folder by id — the
-    /// per-item counterpart to [`ClearFailed`], so a single acknowledged failure
+    /// per-item counterpart to [`Self::ClearFailed`], so a single acknowledged failure
     /// can be dismissed without wiping the whole quarantine. The catalog row is
     /// untouched. Ok `{"removed":bool}`; emits `QueueDepthChanged` when something
     /// was removed. GUI per-item dismiss, `phoneme queue dismiss-failed <id>`.

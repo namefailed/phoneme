@@ -672,16 +672,28 @@ mod tests {
         // The window is entirely a suffix of the committed text — nothing new.
         let committed = "hello world how are you";
         let window = "how are you";
-        assert_eq!(stitch_preview(committed, window), Some(committed.to_string()));
+        assert_eq!(
+            stitch_preview(committed, window),
+            Some(committed.to_string())
+        );
     }
 
     #[test]
     fn stitch_preview_handles_empty_inputs() {
-        assert_eq!(stitch_preview("", "hello world"), Some("hello world".to_string()));
-        assert_eq!(stitch_preview("already here", ""), Some("already here".to_string()));
+        assert_eq!(
+            stitch_preview("", "hello world"),
+            Some("hello world".to_string())
+        );
+        assert_eq!(
+            stitch_preview("already here", ""),
+            Some("already here".to_string())
+        );
         assert_eq!(stitch_preview("", ""), Some(String::new()));
         // Whitespace-only window is treated as empty.
-        assert_eq!(stitch_preview("keep me", "   "), Some("keep me".to_string()));
+        assert_eq!(
+            stitch_preview("keep me", "   "),
+            Some("keep me".to_string())
+        );
     }
 
     #[test]

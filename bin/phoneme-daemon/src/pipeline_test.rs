@@ -2575,9 +2575,15 @@ async fn run_hook_steps_honors_trigger_and_required() {
     // A keyword trigger that doesn't match the transcript → the hook is skipped
     // (webhook never hit, nothing recorded).
     let mut sf = None;
-    let out = run_hook_steps(&state, &cfg, &[hook_step("ABSENT", false)], &payload, &mut sf)
-        .await
-        .expect("a skipped hook is not an error");
+    let out = run_hook_steps(
+        &state,
+        &cfg,
+        &[hook_step("ABSENT", false)],
+        &payload,
+        &mut sf,
+    )
+    .await
+    .expect("a skipped hook is not an error");
     assert!(!out.ran, "keyword miss is skipped");
     assert!(sf.is_none(), "a skipped hook records no failure");
 
@@ -2595,7 +2601,10 @@ async fn run_hook_steps_honors_trigger_and_required() {
     // Webhook fails, required = true → Err: the hook quarantines the recording.
     let mut sf = None;
     let res = run_hook_steps(&state, &cfg, &[hook_step("", true)], &payload, &mut sf).await;
-    assert!(res.is_err(), "a required webhook failure fails the recording");
+    assert!(
+        res.is_err(),
+        "a required webhook failure fails the recording"
+    );
 }
 
 /// `skip_active_queue_item` must only honor the global skip broadcast for the
@@ -2635,18 +2644,23 @@ async fn skip_only_fires_for_the_active_processing_item() {
     // A skip aimed at a NON-active recording must NOT resolve: the helper wakes
     // on each broadcast, sees it isn't the active item, and re-arms. The timeout
     // is the assertion that it stays parked despite the steady pulses.
-    let parked =
-        tokio::time::timeout(Duration::from_millis(150), skip_active_queue_item(&state, &other))
-            .await;
+    let parked = tokio::time::timeout(
+        Duration::from_millis(150),
+        skip_active_queue_item(&state, &other),
+    )
+    .await;
     assert!(
         parked.is_err(),
         "a skip for a non-active recording must not resolve skip_active_queue_item"
     );
 
     // A skip aimed at the ACTIVE recording resolves on the next broadcast.
-    tokio::time::timeout(Duration::from_millis(500), skip_active_queue_item(&state, &active))
-        .await
-        .expect("skip for the active item must resolve before the timeout");
+    tokio::time::timeout(
+        Duration::from_millis(500),
+        skip_active_queue_item(&state, &active),
+    )
+    .await
+    .expect("skip for the active item must resolve before the timeout");
 
     pulse.abort();
 }
@@ -2779,9 +2793,16 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
     // The shell hook ran EXACTLY once: one appended line, not two.
     let fires = std::fs::read_to_string(&marker).expect("the migrated hook wrote its marker");
     let lines = fires.lines().filter(|l| !l.trim().is_empty()).count();
-    assert_eq!(lines, 1, "the configured hook fired exactly once, got: {fires:?}");
+    assert_eq!(
+        lines, 1,
+        "the configured hook fired exactly once, got: {fires:?}"
+    );
 
     // The webhook POSTed EXACTLY once.
     let received = webhook_server.received_requests().await.unwrap();
-    assert_eq!(received.len(), 1, "the configured webhook fired exactly once");
+    assert_eq!(
+        received.len(),
+        1,
+        "the configured webhook fired exactly once"
+    );
 }

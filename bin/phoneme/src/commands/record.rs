@@ -463,9 +463,12 @@ mod tests {
             in_place: false,
             recipe: Some("no-such-recipe".into()),
         };
-        let code = tokio::time::timeout(Duration::from_secs(5), run(args_action(action), &cfg, false))
-            .await
-            .expect("must return promptly");
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            run(args_action(action), &cfg, false),
+        )
+        .await
+        .expect("must return promptly");
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
         assert!(
             mock.received().is_empty(),

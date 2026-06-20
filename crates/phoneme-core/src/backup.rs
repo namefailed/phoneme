@@ -501,10 +501,8 @@ mod tests {
         let mut zip = zip::ZipWriter::new(file);
         let opts = zip::write::SimpleFileOptions::default();
         zip.start_file(CATALOG_ENTRY, opts).unwrap();
-        zip.write_all(
-            br#"{"version": 999, "recordings": [], "tags": []}"#,
-        )
-        .unwrap();
+        zip.write_all(br#"{"version": 999, "recordings": [], "tags": []}"#)
+            .unwrap();
         zip.finish().unwrap();
 
         let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();

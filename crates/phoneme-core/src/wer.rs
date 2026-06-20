@@ -90,7 +90,11 @@ impl WerReport {
 pub fn tokenize_words(text: &str) -> Vec<String> {
     text.to_ascii_lowercase()
         .split_ascii_whitespace()
-        .map(|w| w.chars().filter(|c| !c.is_ascii_punctuation()).collect::<String>())
+        .map(|w| {
+            w.chars()
+                .filter(|c| !c.is_ascii_punctuation())
+                .collect::<String>()
+        })
         .filter(|w| !w.is_empty())
         .collect()
 }

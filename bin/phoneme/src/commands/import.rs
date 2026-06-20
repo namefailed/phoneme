@@ -132,7 +132,9 @@ fn run_with_timeout(
     mut cmd: Command,
     timeout: Duration,
 ) -> Result<std::process::ExitStatus, String> {
-    let mut child = cmd.spawn().map_err(|e| format!("failed to run yt-dlp: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to run yt-dlp: {e}"))?;
     let start = Instant::now();
     loop {
         match child.try_wait() {

@@ -210,7 +210,7 @@ fn mean_std(xs: &[f32]) -> Option<(f64, f64)> {
 ///   candidates).
 ///
 /// When a side's cohort is degenerate (fewer than two members, or zero spread —
-/// see [`mean_std`]) that side falls back to the raw cosine, so a cohort of size
+/// see `mean_std`) that side falls back to the raw cosine, so a cohort of size
 /// 1 gracefully degrades to raw with no `NaN`/divide-by-zero. AS-norm with one
 /// degenerate side uses the well-defined side alone.
 pub fn normalized_score(
@@ -412,8 +412,8 @@ mod tests {
     fn best_match_picks_highest_above_threshold() {
         let probe = vec![1.0, 0.0];
         let candidates = vec![
-            vec![0.0, 1.0],  // orthogonal → 0.0
-            vec![0.9, 0.1],  // close
+            vec![0.0, 1.0],   // orthogonal → 0.0
+            vec![0.9, 0.1],   // close
             vec![0.99, 0.01], // closest
         ];
         let (idx, score) = best_match(&probe, &candidates, 0.5).unwrap();
@@ -459,7 +459,10 @@ mod tests {
         for mode in [ScoreNorm::SNorm, ScoreNorm::ASNorm] {
             let s = normalized_score(&probe, &cands, 0, mode);
             assert!(s.is_finite(), "{mode:?} produced non-finite {s}");
-            assert!((s - raw).abs() < 1e-6, "{mode:?} should fall back to raw {raw}, got {s}");
+            assert!(
+                (s - raw).abs() < 1e-6,
+                "{mode:?} should fall back to raw {raw}, got {s}"
+            );
         }
     }
 
@@ -479,7 +482,10 @@ mod tests {
         let raw = cosine_similarity(&probe, &cands[0]);
         let s = normalized_score(&probe, &cands, 0, ScoreNorm::SNorm);
         assert!(s.is_finite());
-        assert!((s - raw).abs() < 1e-6, "expected raw fallback {raw}, got {s}");
+        assert!(
+            (s - raw).abs() < 1e-6,
+            "expected raw fallback {raw}, got {s}"
+        );
     }
 
     #[test]
@@ -502,7 +508,11 @@ mod tests {
         // cos(A,B) and merely reorders the two averaged terms → identical.
         let a = vec![1.0, 0.2, 0.0];
         let b = vec![0.3, 1.0, 0.1];
-        let cohort = [vec![0.0, 0.0, 1.0], vec![0.5, 0.5, 0.5], vec![0.2, 0.9, 0.3]];
+        let cohort = [
+            vec![0.0, 0.0, 1.0],
+            vec![0.5, 0.5, 0.5],
+            vec![0.2, 0.9, 0.3],
+        ];
 
         // Candidate list for direction A→B: [B, cohort...]; probe = A, target = B
         // at index 0. Cohort (leave-one-out on target B) = the shared cohort, and
@@ -573,12 +583,31 @@ mod tests {
         };
         let speakers: Vec<(&str, Vec<Vec<f32>>)> = vec![
             // A: tight cluster near 0°.
-            ("a", vec![at(0.0, 0.00), at(0.0, 0.03), at(0.0, -0.03), at(0.0, 0.05)]),
+            (
+                "a",
+                vec![at(0.0, 0.00), at(0.0, 0.03), at(0.0, -0.03), at(0.0, 0.05)],
+            ),
             // B: tight cluster near 70°.
-            ("b", vec![at(70.0, 0.00), at(70.0, 0.03), at(70.0, -0.03), at(70.0, 0.05)]),
+            (
+                "b",
+                vec![
+                    at(70.0, 0.00),
+                    at(70.0, 0.03),
+                    at(70.0, -0.03),
+                    at(70.0, 0.05),
+                ],
+            ),
             // C: WIDE cluster near 35° (between A and B) — large intra-speaker
             // spread, so its raw genuine scores run lower than A's/B's.
-            ("c", vec![at(35.0, 0.00), at(35.0, 0.30), at(35.0, -0.30), at(35.0, 0.18)]),
+            (
+                "c",
+                vec![
+                    at(35.0, 0.00),
+                    at(35.0, 0.30),
+                    at(35.0, -0.30),
+                    at(35.0, 0.18),
+                ],
+            ),
         ];
 
         let ((g_raw, i_raw), (g_norm, i_norm)) = raw_and_norm_trials(&speakers, ScoreNorm::SNorm);
@@ -606,9 +635,28 @@ mod tests {
             vec![t.cos(), t.sin()]
         };
         let speakers: Vec<(&str, Vec<Vec<f32>>)> = vec![
-            ("a", vec![at(0.0, 0.00), at(0.0, 0.03), at(0.0, -0.03), at(0.0, 0.05)]),
-            ("b", vec![at(70.0, 0.00), at(70.0, 0.03), at(70.0, -0.03), at(70.0, 0.05)]),
-            ("c", vec![at(35.0, 0.00), at(35.0, 0.30), at(35.0, -0.30), at(35.0, 0.18)]),
+            (
+                "a",
+                vec![at(0.0, 0.00), at(0.0, 0.03), at(0.0, -0.03), at(0.0, 0.05)],
+            ),
+            (
+                "b",
+                vec![
+                    at(70.0, 0.00),
+                    at(70.0, 0.03),
+                    at(70.0, -0.03),
+                    at(70.0, 0.05),
+                ],
+            ),
+            (
+                "c",
+                vec![
+                    at(35.0, 0.00),
+                    at(35.0, 0.30),
+                    at(35.0, -0.30),
+                    at(35.0, 0.18),
+                ],
+            ),
         ];
         let ((g_raw, i_raw), (g_norm, i_norm)) = raw_and_norm_trials(&speakers, ScoreNorm::ASNorm);
         let eer_raw = compute_eer(&g_raw, &i_raw).eer.expect("raw EER defined");

@@ -1539,8 +1539,7 @@ fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
                 // webhook POST), gated by its keyword trigger — see
                 // `run_hook_steps`. An entry with neither a command nor a URL is
                 // a no-op, so skip it rather than push an empty step.
-                if entry.hook.command.trim().is_empty()
-                    && entry.hook.webhook_url.trim().is_empty()
+                if entry.hook.command.trim().is_empty() && entry.hook.webhook_url.trim().is_empty()
                 {
                     tracing::warn!(step = %step_id, "Hook entry has no command or webhook; skipping");
                 } else {
@@ -1720,7 +1719,9 @@ async fn run_enrichment_steps(
             }
             // Transform + Title are handled in their own phases (before the
             // commit), and Hook steps in run_hook_steps; ignore them here.
-            ResolvedStep::Transform { .. } | ResolvedStep::Title { .. } | ResolvedStep::Hook { .. } => {}
+            ResolvedStep::Transform { .. }
+            | ResolvedStep::Title { .. }
+            | ResolvedStep::Hook { .. } => {}
         }
     }
 }
@@ -1770,8 +1771,7 @@ async fn run_hook_steps(
         if !cmd.is_empty() {
             out.ran = true;
             out.last_label = cmd.to_string();
-            let runner =
-                HookRunner::new(phoneme_core::config::expand_cmd(cmd), timeout);
+            let runner = HookRunner::new(phoneme_core::config::expand_cmd(cmd), timeout);
             match runner.run(payload).await {
                 Ok(result) => {
                     out.total_ms += result.duration_ms;
@@ -1810,7 +1810,11 @@ async fn run_hook_steps(
         if !url.is_empty() {
             out.ran = true;
             out.last_label = format!("webhook: {url}");
-            if let Err(e) = state.webhook.post(url, timeout, payload, &cfg.webhook).await {
+            if let Err(e) = state
+                .webhook
+                .post(url, timeout, payload, &cfg.webhook)
+                .await
+            {
                 if hook.required {
                     return Err(e);
                 }

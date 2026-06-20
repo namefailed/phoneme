@@ -390,9 +390,12 @@ async fn transcribe_polish_type(
         // For "type" we patch streamed → polished; for paste/off the streamed
         // live text must be removed (target = ""), since the live typing should
         // only ever have landed in "type" mode.
-        let target = if type_mode == "type" { polished.as_str() } else { "" };
-        let (backspaces, insert) =
-            phoneme_core::dictation::reconcile_edit(&streamed, target);
+        let target = if type_mode == "type" {
+            polished.as_str()
+        } else {
+            ""
+        };
+        let (backspaces, insert) = phoneme_core::dictation::reconcile_edit(&streamed, target);
         // SAFETY GUARD (audit H1/M14): those backspaces only land safely while
         // the SAME window the text streamed into still owns the caret. If the
         // user alt-tabbed (or moved the caret) between live streaming and stop,
@@ -420,7 +423,9 @@ async fn transcribe_polish_type(
             tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to reconcile streamed text");
             state.events.emit(DaemonEvent::TranscriptionFailed {
                 id: id.clone(),
-                error: format!("dictation transcribed but couldn't reconcile the streamed text: {e}"),
+                error: format!(
+                    "dictation transcribed but couldn't reconcile the streamed text: {e}"
+                ),
             });
         }
         // After the live text is cleared (and focus held), a paste-mode flip

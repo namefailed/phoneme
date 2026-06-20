@@ -289,12 +289,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(()) => Response::Ok(serde_json::json!({})),
             Err(e) => err_response(&e),
         },
-        Request::DeleteSavedSearch { id } => {
-            match state.catalog.delete_saved_search(&id).await {
-                Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
-                Err(e) => err_response(&e),
-            }
-        }
+        Request::DeleteSavedSearch { id } => match state.catalog.delete_saved_search(&id).await {
+            Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
+            Err(e) => err_response(&e),
+        },
         Request::ListMeeting { meeting_id } => {
             match state.catalog.list_by_meeting(&meeting_id).await {
                 Ok(rows) => serialize_response(rows),
@@ -350,8 +348,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             let embedder = state.embedder.read().await.as_ref().cloned();
             if let Some(embedder) = embedder {
                 let q = query.clone();
-                let embed_res =
-                    tokio::task::spawn_blocking(move || embedder.embed_query(&q)).await;
+                let embed_res = tokio::task::spawn_blocking(move || embedder.embed_query(&q)).await;
                 match embed_res {
                     Ok(Ok(query_vec)) => match state
                         .catalog
@@ -480,13 +477,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                                     );
                                     return;
                                 };
-                                crate::pipeline::embed_and_store(
-                                    embedder,
-                                    &bg.catalog,
-                                    &r.id,
-                                    t,
-                                )
-                                .await;
+                                crate::pipeline::embed_and_store(embedder, &bg.catalog, &r.id, t)
+                                    .await;
                                 done += 1;
                             }
                             tracing::info!("re-embed complete ({done}/{total} recordings)");
@@ -820,14 +812,20 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     // — recognition is a convenience, never a reason to fail the
                     // rename.
                     let enrolled_id = if name.trim().is_empty() {
-                        if let Err(e) =
-                            state.catalog.unenroll_speaker(id.as_str(), speaker_label).await
+                        if let Err(e) = state
+                            .catalog
+                            .unenroll_speaker(id.as_str(), speaker_label)
+                            .await
                         {
                             tracing::warn!(id = %id.as_str(), label = speaker_label, "voiceprint unenroll failed: {e}");
                         }
                         None
                     } else {
-                        match state.catalog.enroll_speaker(id.as_str(), speaker_label, &name).await {
+                        match state
+                            .catalog
+                            .enroll_speaker(id.as_str(), speaker_label, &name)
+                            .await
+                        {
                             Ok(nid) => nid,
                             Err(e) => {
                                 tracing::warn!(id = %id.as_str(), label = speaker_label, "voiceprint enroll failed: {e}");
@@ -835,7 +833,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             }
                         }
                     };
-                    state.events.emit(DaemonEvent::SpeakerNameUpdated { id: id.clone() });
+                    state
+                        .events
+                        .emit(DaemonEvent::SpeakerNameUpdated { id: id.clone() });
 
                     // Name propagation (V5): when the speaker actually enrolled
                     // into the library, optionally back-fill that name onto the
@@ -862,11 +862,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         // every view the user sees agrees. They emit `SpeakerNameUpdated` so
         // open clients refresh the recording (segments, names, prose).
         Request::ReassignSegmentSpeaker { id, idx, new_label } => {
-            match state
-                .catalog
-                .reassign_segment(&id, idx, new_label)
-                .await
-            {
+            match state.catalog.reassign_segment(&id, idx, new_label).await {
                 Ok(()) => {
                     state
                         .events
@@ -2652,7 +2648,11 @@ async fn speaker_name_propagation(
                 .iter()
                 .map(|c| (c.recording_id.clone(), c.speaker_label))
                 .collect();
-            let applied = match state.catalog.apply_propagation(named_voice_id, &targets).await {
+            let applied = match state
+                .catalog
+                .apply_propagation(named_voice_id, &targets)
+                .await
+            {
                 Ok(n) => n,
                 Err(e) => {
                     tracing::warn!(voice = %named_voice_id, "propagation apply failed: {e}");

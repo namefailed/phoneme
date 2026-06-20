@@ -15,10 +15,8 @@ pub fn save_window_state(app: tauri::AppHandle) -> Result<(), CommandError> {
     // DECORATIONS would persist a stripped titlebar and recreate the window
     // frameless next launch (Windows can't re-add the native frame at runtime).
     // Must mirror the plugin's flags in lib.rs.
-    app.save_window_state(
-        StateFlags::all() & !StateFlags::VISIBLE & !StateFlags::DECORATIONS,
-    )
-    .map_err(|e| CommandError::new("internal", e.to_string()))
+    app.save_window_state(StateFlags::all() & !StateFlags::VISIBLE & !StateFlags::DECORATIONS)
+        .map_err(|e| CommandError::new("internal", e.to_string()))
 }
 
 /// Read the config for the WebView with all API keys masked, so secrets never

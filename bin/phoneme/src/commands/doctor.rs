@@ -260,8 +260,7 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
                         // rather than probing blind.
                         Err(_) => whisper_ports,
                     };
-                    let recheck =
-                        doctor::run_backend_checks_with_ports(cfg, &fresh_ports).await;
+                    let recheck = doctor::run_backend_checks_with_ports(cfg, &fresh_ports).await;
                     // Replace the stale backend results with the fresh probes.
                     checks.retain(|c| !recheck.iter().any(|r| r.name == c.name));
                     checks.extend(recheck);

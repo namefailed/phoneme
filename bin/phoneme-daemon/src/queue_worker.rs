@@ -303,9 +303,9 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                         if let Ok(resp) = client.get(&health).send().await {
                             if resp.status().is_success() {
                                 whisper_unreachable = false;
-                                state.events.emit(DaemonEvent::WhisperStatusChanged {
-                                    reachable: true,
-                                });
+                                state
+                                    .events
+                                    .emit(DaemonEvent::WhisperStatusChanged { reachable: true });
                             }
                         }
                     }

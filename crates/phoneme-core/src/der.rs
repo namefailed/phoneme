@@ -100,7 +100,7 @@ fn active(segs: &[DerSegment], a: f64, b: f64) -> HashSet<&str> {
 /// The timeline is split at every segment boundary from both sides; each
 /// elementary interval is then scored against the speaker mapping that maximizes
 /// total ref↔hyp overlap. That mapping is the *optimal* one-to-one assignment
-/// (max-weight bipartite matching, see [`max_overlap_assignment`]) — strict
+/// (max-weight bipartite matching, see `max_overlap_assignment`) — strict
 /// NIST DER, not a greedy approximation that can strand a speaker into confusion.
 /// Overlapping speech is handled NIST-style: per interval the error is
 /// `max(n_ref, n_hyp) - n_correct`. With no reference speech, `der` is 0.0 (any
@@ -404,10 +404,14 @@ SPEAKER meeting 1 bad dur <NA> <NA> C <NA> <NA>";
         // The optimal one-to-one assignment is X→B, Y→A, Z→C, capturing
         // 2+9+7 = 18s, so only 12s is confusion → DER 12/30 = 0.4 — strictly
         // lower, and the correct (NIST) answer.
-        let reference = vec![seg(0.0, 10.0, "A"), seg(10.0, 20.0, "B"), seg(20.0, 30.0, "C")];
+        let reference = vec![
+            seg(0.0, 10.0, "A"),
+            seg(10.0, 20.0, "B"),
+            seg(20.0, 30.0, "C"),
+        ];
         let hypothesis = vec![
-            seg(0.0, 1.0, "X"),  // A∩X = 1
-            seg(1.0, 10.0, "Y"), // A∩Y = 9
+            seg(0.0, 1.0, "X"),   // A∩X = 1
+            seg(1.0, 10.0, "Y"),  // A∩Y = 9
             seg(10.0, 12.0, "X"), // B∩X = 2
             seg(12.0, 20.0, "Z"), // B∩Z = 8
             seg(20.0, 23.0, "Y"), // C∩Y = 3

@@ -140,8 +140,14 @@ pub fn router(state: AppState) -> Router {
             "/api/recordings/{id}/favorite",
             post(handlers::set_favorite),
         )
-        .route("/api/recordings/{id}/cleanup", post(handlers::rerun_cleanup))
-        .route("/api/recordings/{id}/summary", post(handlers::rerun_summary))
+        .route(
+            "/api/recordings/{id}/cleanup",
+            post(handlers::rerun_cleanup),
+        )
+        .route(
+            "/api/recordings/{id}/summary",
+            post(handlers::rerun_summary),
+        )
         .route("/api/tags", get(handlers::list_tags))
         .route("/api/queue", get(handlers::list_queue))
         .route("/api/search", get(handlers::search))
@@ -674,7 +680,11 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert_eq!(resp.status(), StatusCode::OK, "POST .../{path} should be 200");
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "POST .../{path} should be 200"
+            );
         }
 
         let got = mock.received();

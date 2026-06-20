@@ -1226,9 +1226,11 @@ fn merge_similar_clusters(
         let mut merged_any = false;
         'outer: for a in 0..groups.len() {
             for b in (a + 1)..groups.len() {
-                let all_clear = groups[a]
-                    .iter()
-                    .all(|&i| groups[b].iter().all(|&j| cos(i, j).is_some_and(|v| v >= threshold)));
+                let all_clear = groups[a].iter().all(|&i| {
+                    groups[b]
+                        .iter()
+                        .all(|&j| cos(i, j).is_some_and(|v| v >= threshold))
+                });
                 if all_clear {
                     let moved = std::mem::take(&mut groups[b]);
                     groups[a].extend(moved);
@@ -1492,7 +1494,14 @@ pub fn run_local_diarization(
         // reflects the speakers actually live after that first pass.
         let active: Vec<usize> = (0..num_cols)
             .filter(|&c| canon[c] == c)
-            .filter(|&c| result.discrete_diarization.0.column(c).iter().any(|&v| v != 0.0))
+            .filter(|&c| {
+                result
+                    .discrete_diarization
+                    .0
+                    .column(c)
+                    .iter()
+                    .any(|&v| v != 0.0)
+            })
             .collect();
         if active.len() > target {
             let exp_canon = merge_to_expected_count(
@@ -2401,7 +2410,10 @@ mod tests {
         let canon = merge_similar_clusters(&embeddings, &hard, 3, 0.5);
         // No chain-collapse: A,B,C are not all one column. C in particular stays
         // its own canonical column — it is a genuinely distinct voice from A.
-        assert_eq!(canon[2], 2, "C (cos≈0.30 vs A) keeps its own column, no chaining");
+        assert_eq!(
+            canon[2], 2,
+            "C (cos≈0.30 vs A) keeps its own column, no chaining"
+        );
         assert!(
             canon[0] != canon[2],
             "A and C never share a speaker via the B bridge: {canon:?}"
@@ -2415,14 +2427,16 @@ mod tests {
     fn voiceprint_merge_still_merges_a_true_over_split_pair() {
         // A=[1,0], B=[0.9,~0.436] → cos(A,B)=0.9 ≥ 0.5.
         let b1 = 0.9_f32;
-        let embeddings = ndarray::Array3::from_shape_vec(
-            (2, 1, 2),
-            vec![1.0, 0.0, b1, (1.0 - b1 * b1).sqrt()],
-        )
-        .unwrap();
+        let embeddings =
+            ndarray::Array3::from_shape_vec((2, 1, 2), vec![1.0, 0.0, b1, (1.0 - b1 * b1).sqrt()])
+                .unwrap();
         let hard = ndarray::Array2::from_shape_vec((2, 1), vec![0, 1]).unwrap();
         let canon = merge_similar_clusters(&embeddings, &hard, 2, 0.5);
-        assert_eq!(canon, vec![0, 0], "a true over-split pair still folds into one");
+        assert_eq!(
+            canon,
+            vec![0, 0],
+            "a true over-split pair still folds into one"
+        );
     }
 
     // ── Expected-speakers prior (V3) ─────────────────────────────────────────
@@ -2445,7 +2459,11 @@ mod tests {
         // the lower index, and the distinct voice 2 must stay its own speaker.
         let centroids = vec![unit2(0.0), unit2(0.2), unit2(1.5)];
         let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 2);
-        assert_eq!(canon, vec![0, 0, 2], "the two nearest merge; the far one stays");
+        assert_eq!(
+            canon,
+            vec![0, 0, 2],
+            "the two nearest merge; the far one stays"
+        );
     }
 
     #[test]
@@ -2454,7 +2472,11 @@ mod tests {
         // than the detected count is also a no-op (the prior never splits).
         let centroids = vec![unit2(0.0), unit2(0.2), unit2(1.5)];
         let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 3);
-        assert_eq!(canon, vec![0, 1, 2], "expected >= detected leaves clusters intact");
+        assert_eq!(
+            canon,
+            vec![0, 1, 2],
+            "expected >= detected leaves clusters intact"
+        );
     }
 
     #[test]
@@ -2462,7 +2484,11 @@ mod tests {
         // Asking for more speakers than were found can't manufacture any — identity.
         let centroids = vec![unit2(0.0), unit2(1.0)];
         let canon = merge_to_expected_count(&centroids, &[0, 1], 5);
-        assert_eq!(canon, vec![0, 1], "expected > detected leaves clusters intact");
+        assert_eq!(
+            canon,
+            vec![0, 1],
+            "expected > detected leaves clusters intact"
+        );
     }
 
     #[test]
@@ -2472,7 +2498,11 @@ mod tests {
         // canonical speaker regardless of merge order.
         let centroids = vec![unit2(0.0), unit2(0.3), unit2(0.7), unit2(1.2)];
         let canon = merge_to_expected_count(&centroids, &[0, 1, 2, 3], 1);
-        assert_eq!(canon, vec![0, 0, 0, 0], "expected 1 collapses every voice into one");
+        assert_eq!(
+            canon,
+            vec![0, 0, 0, 0],
+            "expected 1 collapses every voice into one"
+        );
     }
 
     #[test]
@@ -2482,7 +2512,11 @@ mod tests {
         // speakers. The merged group's canonical column is the smaller index (1).
         let centroids = vec![unit2(0.0), unit2(1.0), unit2(1.1)];
         let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 2);
-        assert_eq!(canon, vec![0, 1, 1], "the nearest pair (1,2) merges, not (0,1)");
+        assert_eq!(
+            canon,
+            vec![0, 1, 1],
+            "the nearest pair (1,2) merges, not (0,1)"
+        );
     }
 
     #[test]
@@ -2494,7 +2528,11 @@ mod tests {
         // two speakers without forcing an impossible merge.
         let centroids = vec![unit2(0.0), unit2(0.1), None];
         let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 2);
-        assert_eq!(canon, vec![0, 0, 2], "real voices merge; the centroid-less stays");
+        assert_eq!(
+            canon,
+            vec![0, 0, 2],
+            "real voices merge; the centroid-less stays"
+        );
     }
 
     /// Diagnostic (ignored): for each WAV in CAL_WAV1/CAL_WAV2, print speakrs'

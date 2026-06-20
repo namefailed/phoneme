@@ -87,7 +87,9 @@ pub async fn search(
 }
 
 /// `GET /api/tags` — tags attached to at least one recording.
-pub async fn list_tags(State(state): State<AppState>) -> Result<Json<serde_json::Value>, RestError> {
+pub async fn list_tags(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, RestError> {
     let value = daemon::forward(&state.pipe_name, request_map::list_tags()).await?;
     Ok(Json(value))
 }
