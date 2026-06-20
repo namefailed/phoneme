@@ -164,6 +164,20 @@ entirely for **single** (non-meeting) recordings: a solo note reads as plain pro
 and is never split into `[Speaker N]` turns. Meetings (separate mic/system tracks)
 and genuinely multi-speaker files are unaffected.
 
+### 🔢 Tell Phoneme how many speakers to expect
+
+When you already know the headcount — a 1:1 call, a fixed panel — you can hand the
+diarizer that number as a prior. Set **`[diarization] expected_speakers`** to `n`
+and, if the local model still comes back with *more* than `n` speakers (one voice
+over-split into several), Phoneme greedily merges the closest voices until exactly
+`n` remain. It only ever merges down: if it finds `n` or fewer, nothing changes —
+the prior means "no more than this many voices", not "force at least this many", so
+a too-high guess can't manufacture phantom speakers. Unset (the default, or `0`)
+keeps today's behavior. This is stronger than the automatic voiceprint merge above,
+which only joins voices that look clearly identical; the expected count fires even
+between distinct-sounding voices, so reach for it only when you're sure of the
+number. Local diarization only — cloud providers ignore it.
+
 ### 🎯 Recognize named speakers across recordings
 
 Diarization tells you *that* there are two speakers; recognition tells you *who*

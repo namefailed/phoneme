@@ -149,6 +149,14 @@ trust boundary.*
   emit `speaker_name_updated`) + Tauri commands, and CLI `phoneme speaker reassign|merge|split`.
   The in-app detail-pane merge/split editor is a planned follow-up; the wire contract above is
   what it will call.
+- [x] **Expected-speakers prior** — `[diarization].expected_speakers = n` tells the local
+  diarizer how many voices to expect. If it still finds MORE than `n` (one voice over-split
+  into several), Phoneme greedily merges the closest clusters by voiceprint cosine until exactly
+  `n` remain; finding `n` or fewer is left untouched (it never splits). speakrs has no native
+  target-count knob — it clusters by similarity threshold only — so this rides as a
+  post-clustering merge (`merge_to_expected_count` in `diarization.rs`, sharing the matrix-fold
+  /relabel path with the automatic voiceprint merge). Unset (or `0`) keeps today's behavior;
+  cloud providers ignore it. Local diarization only.
 
 ### CLI
 

@@ -387,6 +387,15 @@ models_dir = ""
 # Deprecated / unused — superseded by models_dir (it was never wired into the load
 # path). Kept so older configs keep parsing.
 local_model_path = ""
+# Expected speaker count, as a PRIOR on the auto-detected count. Unset (or 0) =
+# trust whatever the model clusters (the default). Set to n and, if the local
+# pipeline finds MORE than n speakers, the closest voices are greedily merged (by
+# voiceprint cosine) until exactly n remain. It never splits — finding n or fewer is
+# left untouched (the prior is "no more than this many voices"). speakrs has no
+# native target-count knob, so this is a post-clustering merge; cloud providers
+# ignore it. Use when you know the headcount (a 1:1 call, a fixed panel) and the
+# model over-splits one voice. Stronger than the automatic voiceprint merge.
+#expected_speakers = 2
 # Recognize named speakers across recordings: capture a voiceprint per diarized
 # speaker and, once you've named a speaker, suggest that name on later recordings
 # where the voice matches. Naming enrolls the voice into a cross-recording library.

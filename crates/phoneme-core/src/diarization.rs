@@ -1194,9 +1194,10 @@ fn cluster_centroids(
 /// distinct voices — under-clustering, the worst diarization failure for a user.
 /// Requiring all cross-pairs to clear keeps that transitive collapse from
 /// happening: a borderline-similar pair only merges its own two fragments.
-// TODO(audit): an expected-speakers prior (clamp/seed the merged count toward a
-// caller-supplied target speaker count) would go here, gating or guiding which
-// groups merge. Deferred — out of this lane.
+///
+/// This is the *automatic* merge — it only joins clearly-identical voices. The
+/// caller-supplied expected-speakers prior ([`merge_to_expected_count`]) is the
+/// stronger, count-driven merge that runs after this one.
 fn merge_similar_clusters(
     embeddings: &Array3<f32>,
     hard_clusters: &Array2<i32>,
@@ -1249,6 +1250,133 @@ fn merge_similar_clusters(
         let root = *group.iter().min().expect("group is never empty");
         for &c in group {
             canon[c] = root;
+        }
+    }
+    canon
+}
+
+/// Apply a `canon` column-mapping (column `c` folds into `canon[c]`, with
+/// `canon[c] == c` meaning "stays") to a raw speakrs result in place: sum each
+/// non-canonical column of the per-frame matrix into its canonical column (then
+/// zero it), relabel the segment spans through the map, and remap `hard_clusters`
+/// so a merged speaker's persisted voiceprint aggregates ALL its source clusters'
+/// embeddings (audit M1). `canon` must be length `num_cols` (the matrix column
+/// count). Returns whether anything actually moved — a pure-identity map is a
+/// no-op and returns `false`. Shared by the voiceprint-similarity merge and the
+/// expected-speakers prior, so both rewrite the result identically.
+fn apply_canon_mapping(result: &mut speakrs::DiarizationResult, canon: &[usize]) -> bool {
+    let num_cols = result.discrete_diarization.0.ncols();
+    if !(0..num_cols).any(|c| canon[c] != c) {
+        return false;
+    }
+    for (c, &p) in canon.iter().enumerate() {
+        if p == c {
+            continue;
+        }
+        let dropped = result.discrete_diarization.0.column(c).to_owned();
+        {
+            let mut keep = result.discrete_diarization.0.column_mut(p);
+            keep += &dropped;
+        }
+        result.discrete_diarization.0.column_mut(c).fill(0.0);
+    }
+    for seg in result.segments.iter_mut() {
+        if let Some(k) = parse_speaker_column(&seg.speaker) {
+            if k < num_cols && canon[k] != k {
+                seg.speaker = column_label(canon[k]);
+            }
+        }
+    }
+    // `-1` (unassigned) cells are left as-is.
+    for v in result.hard_clusters.0.iter_mut() {
+        if *v >= 0 {
+            let c = *v as usize;
+            if c < num_cols {
+                *v = canon[c] as i32;
+            }
+        }
+    }
+    true
+}
+
+/// Greedy "expected-speakers" merge (V3): given per-column `centroids` (cluster id
+/// == column index; `None` for a column with no embedding) and the list of
+/// currently-`active` canonical columns, merge the two closest active clusters (by
+/// centroid cosine) over and over until exactly `target` clusters remain, then
+/// return a `canon` map of length `centroids.len()` (column `c` → its surviving
+/// column). The smallest column index in a merged group is the canonical one, so
+/// first-appearance numbering stays sensible.
+///
+/// Unlike [`merge_similar_clusters`] (which only merges pairs over a similarity
+/// threshold), this fires unconditionally to hit the user-asserted count — it is
+/// the "I KNOW there are `n` voices" prior, so it will collapse the closest pair
+/// even when no two are especially similar. A no-op (identity map) when
+/// `active.len() <= target` or when fewer than two mergeable centroids remain;
+/// columns without a centroid can never be a merge target and are left as their
+/// own speaker. Pure and unit-testable on synthetic centroids.
+///
+/// A merged group keeps comparing on its canonical column's centroid (rather than
+/// re-averaging) — cheap, deterministic, and good enough for this greedy pass;
+/// every voiceprint already lives on the unit sphere from [`cluster_centroids`].
+fn merge_to_expected_count(
+    centroids: &[Option<Vec<f32>>],
+    active: &[usize],
+    target: usize,
+) -> Vec<usize> {
+    let num_cols = centroids.len();
+    let mut canon: Vec<usize> = (0..num_cols).collect();
+    if target == 0 || active.len() <= target {
+        return canon;
+    }
+
+    let cos = |i: usize, j: usize| -> Option<f32> {
+        match (&centroids[i], &centroids[j]) {
+            (Some(ci), Some(cj)) => Some(ci.iter().zip(cj).map(|(a, b)| a * b).sum()),
+            _ => None,
+        }
+    };
+
+    // Each group is one surviving cluster, identified by its canonical (smallest)
+    // column; `rep` is the column whose centroid represents the group for cosine
+    // comparisons. Only clusters WITH a centroid can merge, so seed the working
+    // set from those; centroid-less actives stay their own speaker and still count
+    // toward the live total.
+    let mut groups: Vec<(usize, Vec<usize>)> = active
+        .iter()
+        .filter(|&&c| centroids[c].is_some())
+        .map(|&c| (c, vec![c]))
+        .collect();
+    let centroid_less = active.len() - groups.len();
+
+    // Merge the closest pair until the live count (mergeable groups + the
+    // un-mergeable centroid-less actives) drops to the target, or nothing is left
+    // to merge.
+    while groups.len() + centroid_less > target && groups.len() >= 2 {
+        let mut best: Option<(usize, usize, f32)> = None;
+        for a in 0..groups.len() {
+            for b in (a + 1)..groups.len() {
+                if let Some(sim) = cos(groups[a].0, groups[b].0) {
+                    if best.is_none_or(|(_, _, s)| sim > s) {
+                        best = Some((a, b, sim));
+                    }
+                }
+            }
+        }
+        let Some((a, b, _)) = best else { break };
+        let (keep, drop) = if groups[a].0 <= groups[b].0 {
+            (a, b)
+        } else {
+            (b, a)
+        };
+        let moved = groups.remove(drop);
+        // `remove` may have shifted `keep`'s index when drop < keep.
+        let keep = if drop < keep { keep - 1 } else { keep };
+        groups[keep].1.extend(moved.1);
+    }
+
+    for (root, members) in &groups {
+        for &c in members {
+            canon[c] = *root;
         }
     }
     canon
@@ -1343,44 +1471,43 @@ pub fn run_local_diarization(
         num_cols,
         SPEAKER_MERGE_COSINE,
     );
-    if (0..num_cols).any(|c| canon[c] != c) {
-        for (c, &p) in canon.iter().enumerate() {
-            if p == c {
-                continue;
-            }
-            let dropped = result.discrete_diarization.0.column(c).to_owned();
-            {
-                let mut keep = result.discrete_diarization.0.column_mut(p);
-                keep += &dropped;
-            }
-            result.discrete_diarization.0.column_mut(c).fill(0.0);
-        }
-        for seg in result.segments.iter_mut() {
-            if let Some(k) = parse_speaker_column(&seg.speaker) {
-                if k < num_cols && canon[k] != k {
-                    seg.speaker = column_label(canon[k]);
-                }
-            }
-        }
-        // Remap hard_clusters through canon too. `speaker_voiceprints` computes a
-        // persisted voiceprint via `cluster_centroids`, which buckets embeddings by
-        // hard_clusters id — without this remap a merged speaker's centroid would
-        // aggregate only its canonical column's ORIGINAL fragment, dropping the
-        // merged-in clusters' embeddings and weakening cross-recording matching
-        // (audit M1). `-1` (unassigned) cells are left as-is.
-        for v in result.hard_clusters.0.iter_mut() {
-            if *v >= 0 {
-                let c = *v as usize;
-                if c < num_cols {
-                    *v = canon[c] as i32;
-                }
-            }
-        }
+    if apply_canon_mapping(&mut result, &canon) {
         tracing::info!(
             from = num_cols,
             to = (0..num_cols).filter(|&c| canon[c] == c).count(),
             "voiceprint merge collapsed over-clustered speakers"
         );
+    }
+
+    // Expected-speakers prior (V3): if the user told us how many voices to expect
+    // and the pipeline still came back with MORE clusters than that, greedily
+    // merge the closest remaining clusters (by centroid cosine) until exactly that
+    // many remain. This runs AFTER the similarity merge above — it's the harder
+    // prior that fires even between genuinely-distinct-looking voices, so it only
+    // engages when the user has explicitly asserted a count. speakrs has no native
+    // target-count knob (it clusters by threshold only), so the prior lives here
+    // as a post-clustering merge. It never splits: detecting `<= n` is left alone.
+    if let Some(target) = cfg.expected_speakers.filter(|&n| n > 0) {
+        // Count over the columns the similarity merge left canonical, so "detected"
+        // reflects the speakers actually live after that first pass.
+        let active: Vec<usize> = (0..num_cols)
+            .filter(|&c| canon[c] == c)
+            .filter(|&c| result.discrete_diarization.0.column(c).iter().any(|&v| v != 0.0))
+            .collect();
+        if active.len() > target {
+            let exp_canon = merge_to_expected_count(
+                &cluster_centroids(&result.embeddings.0, &result.hard_clusters.0, num_cols),
+                &active,
+                target,
+            );
+            if apply_canon_mapping(&mut result, &exp_canon) {
+                tracing::info!(
+                    detected = active.len(),
+                    expected = target,
+                    "expected-speakers prior merged clusters down to the target count"
+                );
+            }
+        }
     }
 
     // `result.segments` carries correctly-scaled (seconds) turns — that part of
@@ -2296,6 +2423,78 @@ mod tests {
         let hard = ndarray::Array2::from_shape_vec((2, 1), vec![0, 1]).unwrap();
         let canon = merge_similar_clusters(&embeddings, &hard, 2, 0.5);
         assert_eq!(canon, vec![0, 0], "a true over-split pair still folds into one");
+    }
+
+    // ── Expected-speakers prior (V3) ─────────────────────────────────────────
+    //
+    // `merge_to_expected_count` is pure over per-column centroids + the active
+    // column list, so these synthesize centroids directly (no models). A unit
+    // centroid `[cos θ, sin θ]` makes the pairwise cosine the exact angle cosine,
+    // so "closest pair" is "smallest angle apart".
+
+    /// L2-normalized 2-D centroid at angle `ang` (radians). Two of these have
+    /// cosine == cos(angle difference), so proximity is purely angular.
+    fn unit2(ang: f32) -> Option<Vec<f32>> {
+        Some(vec![ang.cos(), ang.sin()])
+    }
+
+    #[test]
+    fn expected_count_merges_the_two_nearest_of_three() {
+        // Three voices: 0 and 1 sit 0.2 rad apart (the closest pair); 2 is far off
+        // at 1.5 rad. Expecting 2 speakers, the nearest pair (0,1) must merge into
+        // the lower index, and the distinct voice 2 must stay its own speaker.
+        let centroids = vec![unit2(0.0), unit2(0.2), unit2(1.5)];
+        let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 2);
+        assert_eq!(canon, vec![0, 0, 2], "the two nearest merge; the far one stays");
+    }
+
+    #[test]
+    fn expected_count_none_path_is_unchanged() {
+        // `expected_speakers = None` never calls this, but `target` larger-or-equal
+        // than the detected count is also a no-op (the prior never splits).
+        let centroids = vec![unit2(0.0), unit2(0.2), unit2(1.5)];
+        let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 3);
+        assert_eq!(canon, vec![0, 1, 2], "expected >= detected leaves clusters intact");
+    }
+
+    #[test]
+    fn expected_count_above_detected_is_unchanged() {
+        // Asking for more speakers than were found can't manufacture any — identity.
+        let centroids = vec![unit2(0.0), unit2(1.0)];
+        let canon = merge_to_expected_count(&centroids, &[0, 1], 5);
+        assert_eq!(canon, vec![0, 1], "expected > detected leaves clusters intact");
+    }
+
+    #[test]
+    fn expected_count_collapses_iteratively_to_one() {
+        // Four voices, expected 1: every cluster collapses into column 0. Each step
+        // greedily takes the closest remaining pair, but the end state is a single
+        // canonical speaker regardless of merge order.
+        let centroids = vec![unit2(0.0), unit2(0.3), unit2(0.7), unit2(1.2)];
+        let canon = merge_to_expected_count(&centroids, &[0, 1, 2, 3], 1);
+        assert_eq!(canon, vec![0, 0, 0, 0], "expected 1 collapses every voice into one");
+    }
+
+    #[test]
+    fn expected_count_picks_closest_pair_not_lowest_index() {
+        // Closeness, not index order, drives the merge: voices 1 and 2 are the
+        // nearest pair (0.1 rad), so they merge — leaving 0 and {1,2} as the two
+        // speakers. The merged group's canonical column is the smaller index (1).
+        let centroids = vec![unit2(0.0), unit2(1.0), unit2(1.1)];
+        let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 2);
+        assert_eq!(canon, vec![0, 1, 1], "the nearest pair (1,2) merges, not (0,1)");
+    }
+
+    #[test]
+    fn expected_count_leaves_centroid_less_columns_alone() {
+        // A column with no centroid (silent/filtered cluster) can't merge. With two
+        // real voices close together and one centroid-less active, expecting 2 still
+        // merges the two real voices and never touches the centroid-less column —
+        // and the centroid-less active counts toward the live total, so it stops at
+        // two speakers without forcing an impossible merge.
+        let centroids = vec![unit2(0.0), unit2(0.1), None];
+        let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 2);
+        assert_eq!(canon, vec![0, 0, 2], "real voices merge; the centroid-less stays");
     }
 
     /// Diagnostic (ignored): for each WAV in CAL_WAV1/CAL_WAV2, print speakrs'
