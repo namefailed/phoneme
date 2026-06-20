@@ -183,6 +183,17 @@ trust boundary.*
   appended — with a phase-aware fallback that never blindly re-appends a
   re-transcribed tail (the old duplicated-runs bug). It also advances ~2× more
   smoothly (0.5s min-new gate); weak machines still self-throttle.
+- [x] **Live preview auto-picks the smallest local model** — when `[preview_whisper]`
+  is unset and your final `[whisper]` is a local bundled model, the daemon now runs
+  the preview on the **smallest local Whisper model it finds beside the final one**
+  (e.g. a `large` final still gets `tiny`/`base` captions) via a dedicated, thread-
+  capped second server — automatically, no setup. Resolved once per config (re)load
+  and held in-memory only (never written to `config.toml`). Kicks in only when a
+  strictly smaller local model exists; cloud/external mains, or a setup whose only
+  local model is the final one, fall back to reusing the final provider exactly as
+  before. The auto version of the old "Use a dedicated Tiny model" nudge — **final
+  transcription accuracy is unchanged** (preview is a separate fast lane). Set
+  `[preview_whisper]` to override the pick.
 - [x] **Live preview now works during in-place dictation** — dictation previously
   showed no overlay caption at all (the streaming-preview loop was hard-skipped for
   dictation to protect paste latency). It now drives the overlay like any recording,

@@ -927,6 +927,95 @@ fn default_initial_prompt() -> String {
     "Voice memo. Common markers: Action Item:, Task:, To-do:, Follow up:, Decision:, Idea:, Question:, Reminder:.".into()
 }
 
+/// Relative "cost" of a whisper model, parsed from its file name — smaller is
+/// faster/lighter. Used to auto-pick the smallest LOCAL model for the live
+/// preview when `[preview_whisper]` is unset (see
+/// [`Config::materialize_auto_preview`]). NOT a real byte size: it is a
+/// filename-derived rank, deliberately the same family of tiers
+/// (`tiny < base < small < medium < large`) the Doctor's heavy-model warning
+/// keys off. A higher number is heavier.
+///
+/// Tier first (the dominant cost), then a small penalty for non-quantized vs
+/// quantized of the SAME tier (`ggml-base-q5_0` < `ggml-base`), then `turbo`
+/// and `v2/v3` as tie-break bumps. Unknown names get a middling tier so a
+/// custom file never silently outranks a real `tiny`/`base` for the preview.
+fn whisper_model_cost(file_name: &str) -> u32 {
+    let stem = std::path::Path::new(file_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(file_name)
+        .to_ascii_lowercase();
+
+    // Base tier — checked largest-first so "large-v3" doesn't match "base" etc.
+    // Units of 100 so the sub-tier adjustments below never cross a tier line.
+    let tier: u32 = if stem.contains("large") {
+        500
+    } else if stem.contains("medium") {
+        400
+    } else if stem.contains("small") {
+        300
+    } else if stem.contains("base") {
+        200
+    } else if stem.contains("tiny") {
+        100
+    } else {
+        // Unknown: between small and medium so a mystery file is never auto-
+        // selected over a genuine tiny/base, and never preferred over a real
+        // small either — it just won't win the "smallest" race in practice.
+        350
+    };
+
+    // Quantized variants of a tier are lighter than the full-precision one of
+    // the same tier (q5/q8/etc.). A tiny per-step bump keeps them strictly
+    // ordered within the tier without ever reaching the next tier.
+    let quantized = stem.contains("-q") || stem.contains("_q") || stem.contains("quant");
+    let quant_bump = if quantized { 0 } else { 5 };
+
+    // `turbo` is the large-v3 distilled variant — fast for its tier but still a
+    // heavy download; a small bump so two same-tier files order deterministically.
+    let turbo_bump = if stem.contains("turbo") { 1 } else { 0 };
+
+    tier + quant_bump + turbo_bump
+}
+
+/// A whisper model file name (case-insensitive). Recognized extensions are
+/// whisper.cpp's GGML/GGUF model files.
+fn is_whisper_model_file(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    lower.ends_with(".bin") || lower.ends_with(".gguf")
+}
+
+/// Pure ranking: given a list of file names, return the index of the SMALLEST
+/// (cheapest) whisper model, ignoring non-model files. `None` when the list has
+/// no recognizable model file. On a tie the earlier name wins (stable), so the
+/// result is deterministic. Separated from the directory scan so the ranking is
+/// unit-testable on a plain list of names without touching the filesystem.
+pub fn smallest_whisper_model_index(file_names: &[&str]) -> Option<usize> {
+    file_names
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| is_whisper_model_file(n))
+        .min_by_key(|(_, n)| whisper_model_cost(n))
+        .map(|(i, _)| i)
+}
+
+/// Scan `dir` for whisper model files and return the path to the SMALLEST one,
+/// or `None` when the directory is unreadable or holds no model file. Thin
+/// filesystem wrapper over [`smallest_whisper_model_index`] — the ranking logic
+/// lives there and is tested without real files. Does NOT recurse; whisper
+/// models live flat in their models dir.
+pub fn smallest_whisper_model_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let idx = smallest_whisper_model_index(&refs)?;
+    Some(dir.join(&names[idx]))
+}
+
 /// Defines the execution strategy for the Whisper transcription model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -2876,6 +2965,113 @@ impl Config {
         self.preview_whisper.as_ref().unwrap_or(&self.whisper)
     }
 
+    /// The transcription provider config the live preview should use, **owned**,
+    /// including the auto-default: a borrow of [`preview_whisper`](Self::preview_whisper)
+    /// when the user set one, a borrow of [`whisper`](Self::whisper) for the
+    /// historical fallback, or an OWNED derived config when the auto-default
+    /// applies (see [`Self::derived_auto_preview`]). The final transcript always
+    /// uses `whisper`.
+    ///
+    /// Callers that have already had [`Self::materialize_auto_preview`] folded
+    /// into the config (the daemon, after `load_config`) can keep using
+    /// [`Self::preview_provider_config`] — once materialized, the derived config
+    /// is just a `Some(preview_whisper)` and both methods agree. This `Cow`
+    /// variant is for call sites holding a config that has NOT been materialized
+    /// and want the effective answer without mutating it.
+    pub fn effective_preview_provider_config(&self) -> std::borrow::Cow<'_, WhisperConfig> {
+        if let Some(pv) = &self.preview_whisper {
+            return std::borrow::Cow::Borrowed(pv);
+        }
+        match self.derived_auto_preview() {
+            Some(derived) => std::borrow::Cow::Owned(derived),
+            None => std::borrow::Cow::Borrowed(&self.whisper),
+        }
+    }
+
+    /// The synthesized `[preview_whisper]` for the auto-default, or `None` when
+    /// it does not apply. Applies ONLY when ALL of:
+    /// - `preview_whisper` is unset (a user-set preview is honored verbatim);
+    /// - the main `[whisper]` is a LOCAL bundled model (cloud/external mains are
+    ///   left alone — the preview keeps reusing the main provider);
+    /// - the main `model_path` is absolute/expanded and points at a real file
+    ///   (so we can find its models dir and compare against it);
+    /// - that models dir holds a local model STRICTLY smaller than the main one.
+    ///
+    /// The result is a clone of the main `WhisperConfig` (same mode/provider/args
+    /// /timeout) with `model_path` swapped to the smaller model and
+    /// `bundled_server_port` bumped to the conventional preview port
+    /// (`whisper.bundled_server_port + 1`, default 5810) so the supervisor runs
+    /// it as a dedicated second server — a whisper.cpp server loads one model, so
+    /// the preview only actually runs lighter if it talks to a server that loaded
+    /// the lighter model.
+    ///
+    /// This does filesystem I/O (a single non-recursive directory scan). It is
+    /// meant to be called ONCE per config (re)load via
+    /// [`Self::materialize_auto_preview`], NOT from a hot path.
+    pub fn derived_auto_preview(&self) -> Option<WhisperConfig> {
+        if self.preview_whisper.is_some() {
+            return None;
+        }
+        // Local bundled main only. Cloud/external/bundled-download-without-file
+        // mains keep today's fallback (reuse the main provider, no scan).
+        if self.whisper.provider != TranscriptionBackend::Local
+            || self.whisper.mode != WhisperMode::BundledModel
+        {
+            return None;
+        }
+        let main_path = std::path::Path::new(&self.whisper.model_path);
+        if self.whisper.model_path.trim().is_empty() || !main_path.is_file() {
+            return None;
+        }
+        let dir = main_path.parent()?;
+        let smallest = smallest_whisper_model_in_dir(dir)?;
+
+        // Only override when the chosen model is STRICTLY smaller than the main
+        // one. If the smallest local model IS the main model (or no lighter
+        // tier exists), fall back to reusing the main provider unchanged.
+        let main_name = main_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let pick_name = smallest
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        if whisper_model_cost(pick_name) >= whisper_model_cost(main_name) {
+            return None;
+        }
+
+        let mut derived = self.whisper.clone();
+        derived.model_path = smallest.to_string_lossy().into_owned();
+        // Conventional dedicated preview port (main + 1, default 5810). The
+        // supervisor's pre-flight probe routes around a squatter, so this is a
+        // preference, not a hard bind.
+        derived.bundled_server_port = self.whisper.bundled_server_port.saturating_add(1);
+        // The preview never spawns its OWN dictation server off this synthesized
+        // block — that opt-in only makes sense on a user-authored block.
+        derived.use_own_bundled_server = false;
+        Some(derived)
+    }
+
+    /// Fold the auto-default preview model into this config IN PLACE when it
+    /// applies (see [`Self::derived_auto_preview`]): sets `preview_whisper` to
+    /// the synthesized smaller-model block so every existing
+    /// `preview_whisper`-keyed consumer — the preview loop, the supervisor's
+    /// `preview_needs_own_server` gate, port resolution, the spec-change watch —
+    /// sees ONE materialized config and stays in agreement. Returns `true` if it
+    /// changed the config.
+    ///
+    /// The daemon calls this once per config (re)load, AFTER path expansion and
+    /// AFTER the on-disk persist, so the synthesized block is in-memory only and
+    /// is never written back to `config.toml`. A no-op when `preview_whisper` is
+    /// already set or the auto-default does not apply.
+    pub fn materialize_auto_preview(&mut self) -> bool {
+        match self.derived_auto_preview() {
+            Some(derived) => {
+                self.preview_whisper = Some(derived);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The STT provider for in-place dictation's fast lane:
     /// `[in_place].stt` when set, else the live preview's provider when the
     /// preview is enabled (it already runs a fast model — and when it's a
@@ -3774,6 +3970,181 @@ mod tests {
             api.preview_provider_config().provider,
             TranscriptionBackend::Groq
         );
+    }
+
+    // ---- P1: auto-default the live preview to the smallest local model ----
+
+    #[test]
+    fn whisper_model_tier_ranking() {
+        // Tier order: tiny < base < small < medium < large.
+        assert!(whisper_model_cost("ggml-tiny.bin") < whisper_model_cost("ggml-base.bin"));
+        assert!(whisper_model_cost("ggml-base.bin") < whisper_model_cost("ggml-small.bin"));
+        assert!(whisper_model_cost("ggml-small.bin") < whisper_model_cost("ggml-medium.bin"));
+        assert!(whisper_model_cost("ggml-medium.bin") < whisper_model_cost("ggml-large-v3.bin"));
+        // `.en` variants rank with their base tier (tiny.en is still a tiny).
+        assert!(whisper_model_cost("ggml-tiny.en.bin") < whisper_model_cost("ggml-base.en.bin"));
+        assert!(whisper_model_cost("ggml-base.en.bin") < whisper_model_cost("ggml-small.bin"));
+        // A quantized variant of a tier is lighter than the full one of the SAME
+        // tier, but never crosses into a lower tier.
+        assert!(whisper_model_cost("ggml-base-q5_0.bin") < whisper_model_cost("ggml-base.bin"));
+        assert!(whisper_model_cost("ggml-tiny.bin") < whisper_model_cost("ggml-base-q5_0.bin"));
+        // turbo is a large variant — still heavier than a real small.
+        assert!(
+            whisper_model_cost("ggml-large-v3-turbo.bin") > whisper_model_cost("ggml-small.bin")
+        );
+    }
+
+    #[test]
+    fn smallest_index_picks_tiny_and_ignores_non_models() {
+        let names = [
+            "notes.txt",
+            "ggml-large-v3.bin",
+            "ggml-base.en.bin",
+            "ggml-tiny.bin",
+            "README.md",
+        ];
+        let idx = smallest_whisper_model_index(&names).expect("a model is present");
+        assert_eq!(names[idx], "ggml-tiny.bin");
+
+        // .gguf is recognized too.
+        let g = ["x.gguf"];
+        assert_eq!(smallest_whisper_model_index(&g), Some(0));
+
+        // No model files → None.
+        assert_eq!(smallest_whisper_model_index(&["a.txt", "b.json"]), None);
+        // Empty list → None.
+        assert_eq!(smallest_whisper_model_index(&[]), None);
+    }
+
+    /// Build a default config whose main `[whisper]` is a local bundled model
+    /// pointing at `model_path`, with the named model files created in `dir`.
+    fn local_main_cfg(dir: &std::path::Path, main_file: &str, others: &[&str]) -> Config {
+        for f in std::iter::once(&main_file).chain(others.iter()) {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = dir.join(main_file).to_string_lossy().into_owned();
+        cfg.whisper.bundled_server_port = 5809;
+        cfg
+    }
+
+    #[test]
+    fn auto_preview_unset_local_with_smaller_model_swaps_model() {
+        let dir = TempDir::new().unwrap();
+        let cfg = local_main_cfg(
+            dir.path(),
+            "ggml-large-v3.bin",
+            &["ggml-tiny.en.bin", "ggml-base.bin"],
+        );
+        let derived = cfg.derived_auto_preview().expect("should auto-derive");
+        // Swapped to the smallest local model, same mode/provider.
+        assert!(derived.model_path.ends_with("ggml-tiny.en.bin"));
+        assert_eq!(derived.mode, WhisperMode::BundledModel);
+        assert_eq!(derived.provider, TranscriptionBackend::Local);
+        // Dedicated preview port (main + 1) so the supervisor runs a 2nd server.
+        assert_eq!(derived.bundled_server_port, 5810);
+
+        // effective_preview_provider_config returns the derived (owned) block.
+        assert!(cfg
+            .effective_preview_provider_config()
+            .model_path
+            .ends_with("ggml-tiny.en.bin"));
+    }
+
+    #[test]
+    fn auto_preview_unset_local_only_main_model_falls_back() {
+        let dir = TempDir::new().unwrap();
+        // Only the main model present → nothing strictly smaller → no override.
+        let cfg = local_main_cfg(dir.path(), "ggml-base.bin", &[]);
+        assert!(cfg.derived_auto_preview().is_none());
+        // Fallback: effective preview is the MAIN provider, unchanged.
+        let eff = cfg.effective_preview_provider_config();
+        assert_eq!(eff.model_path, cfg.whisper.model_path);
+        assert_eq!(eff.bundled_server_port, cfg.whisper.bundled_server_port);
+    }
+
+    #[test]
+    fn auto_preview_unset_local_smaller_only_quant_still_swaps() {
+        let dir = TempDir::new().unwrap();
+        // Main is base; a base quant is present — strictly smaller, so it wins.
+        let cfg = local_main_cfg(dir.path(), "ggml-base.bin", &["ggml-base-q5_0.bin"]);
+        let derived = cfg.derived_auto_preview().expect("quant is smaller");
+        assert!(derived.model_path.ends_with("ggml-base-q5_0.bin"));
+    }
+
+    #[test]
+    fn auto_preview_unset_local_main_is_smallest_falls_back() {
+        let dir = TempDir::new().unwrap();
+        // Main is tiny; only a larger base is also present → main is already the
+        // smallest → no override (don't make the preview HEAVIER).
+        let cfg = local_main_cfg(dir.path(), "ggml-tiny.bin", &["ggml-base.bin"]);
+        assert!(cfg.derived_auto_preview().is_none());
+    }
+
+    #[test]
+    fn auto_preview_set_preview_returned_unchanged() {
+        let dir = TempDir::new().unwrap();
+        let mut cfg = local_main_cfg(dir.path(), "ggml-large-v3.bin", &["ggml-tiny.bin"]);
+        let mut pv = cfg.whisper.clone();
+        pv.model_path = "C:/custom/ggml-small.bin".into();
+        pv.bundled_server_port = 5810;
+        cfg.preview_whisper = Some(pv);
+        // User set it → never auto-derive, never materialize.
+        assert!(cfg.derived_auto_preview().is_none());
+        let mut m = cfg.clone();
+        assert!(!m.materialize_auto_preview());
+        // effective config is the user's preview, borrowed unchanged.
+        assert_eq!(
+            cfg.effective_preview_provider_config().model_path,
+            "C:/custom/ggml-small.bin"
+        );
+    }
+
+    #[test]
+    fn auto_preview_cloud_main_falls_back() {
+        let dir = TempDir::new().unwrap();
+        // Even with a smaller local file sitting in the dir, a CLOUD main never
+        // auto-derives a local preview server.
+        std::fs::write(dir.path().join("ggml-tiny.bin"), b"x").unwrap();
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Groq;
+        cfg.whisper.model_path = dir
+            .path()
+            .join("ggml-tiny.bin")
+            .to_string_lossy()
+            .into_owned();
+        assert!(cfg.derived_auto_preview().is_none());
+
+        // External (bundled) main also falls back.
+        let mut ext = Config::default();
+        ext.whisper.provider = TranscriptionBackend::Local;
+        ext.whisper.mode = WhisperMode::External;
+        ext.whisper.model_path = dir
+            .path()
+            .join("ggml-tiny.bin")
+            .to_string_lossy()
+            .into_owned();
+        assert!(ext.derived_auto_preview().is_none());
+    }
+
+    #[test]
+    fn materialize_auto_preview_keeps_loop_and_supervisor_in_agreement() {
+        let dir = TempDir::new().unwrap();
+        let mut cfg = local_main_cfg(dir.path(), "ggml-large-v3.bin", &["ggml-tiny.bin"]);
+        // Preview must be ON for the supervisor gate to fire.
+        cfg.recording.streaming_preview = true;
+        assert!(cfg.materialize_auto_preview());
+        // Now the supervisor gate sees a local bundled preview → owns a server.
+        assert!(cfg.preview_needs_own_server());
+        // And the loop's provider config is the SAME derived block (same model
+        // + same port) the supervisor will spawn — they agree.
+        let loop_cfg = cfg.preview_provider_config();
+        assert!(loop_cfg.model_path.ends_with("ggml-tiny.bin"));
+        assert_eq!(loop_cfg.bundled_server_port, 5810);
+        // Idempotent: a second materialize is a no-op (already set).
+        assert!(!cfg.clone().materialize_auto_preview());
     }
 
     #[test]

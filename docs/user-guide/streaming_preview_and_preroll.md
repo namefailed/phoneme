@@ -55,6 +55,7 @@ Enable `recording.streaming_preview = true`. While recording, the daemon periodi
 - **Preview does not run during [in-place dictation](transcribe_in_place.md).** A quick dictation has no overlay to feed, and the per-second preview ticks would contend with the dictation's own latency-critical transcribe-and-paste on the single whisper permit — so Phoneme skips the preview loop entirely for in-place recordings.
 - Preview costs extra CPU/GPU while recording. Disable on low-end hardware.
 - Optionally use a separate, faster provider just for the preview — see the `[preview_whisper]` section in the [Configuration Reference](../developer-guide/config_reference.md).
+- **Auto-fast preview (default).** When you leave `[preview_whisper]` unset and your final model is a **local bundled** one, Phoneme automatically runs the preview on the **smallest local Whisper model it finds next to your final model** — so a `large`/`medium` final transcription still gets snappy `tiny`/`base` captions, on its own thread-capped preview server, with no setup. It only kicks in when a strictly smaller local model is actually present; if the only local model *is* your final one (or the final model is a cloud/external provider), the preview reuses the final provider exactly as before. This affects **only** the live captions — the final transcript always uses `[whisper]`. Set `[preview_whisper]` explicitly to override the pick.
 
 ### Configuration
 

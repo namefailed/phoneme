@@ -352,5 +352,36 @@ pub fn load_config() -> anyhow::Result<phoneme_core::Config> {
             tracing::warn!(error = %e, "failed to persist config migration; will retry next reload");
         }
     }
+
+    // Auto-default the live preview to the smallest LOCAL whisper model when
+    // `[preview_whisper]` is unset and the main provider is a local bundled
+    // model (P1). Resolved AFTER the on-disk persist above so the synthesized
+    // block is in-memory only and never written to config.toml. The scan needs
+    // a real, absolute model file, so derive against an EXPANDED view (paths
+    // resolved) and copy the resulting absolute-path block onto the unexpanded
+    // config we return — `expanded()` later no-ops on an already-absolute path,
+    // so the supervisor and preview loop agree on the same model/port. A no-op
+    // when the user set `preview_whisper`, the main is cloud/external, or no
+    // smaller local model exists.
+    if cfg.preview_whisper.is_none() {
+        match cfg.expanded() {
+            Ok(mut expanded) => {
+                if expanded.materialize_auto_preview() {
+                    if let Some(pv) = expanded.preview_whisper {
+                        tracing::info!(
+                            model = %pv.model_path,
+                            port = pv.bundled_server_port,
+                            "live preview auto-defaulted to the smallest local whisper model"
+                        );
+                        cfg.preview_whisper = Some(pv);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "could not expand config to auto-default the preview model; preview will reuse the main provider");
+            }
+        }
+    }
+
     Ok(cfg)
 }
