@@ -61,6 +61,14 @@ trust boundary.*
   harness that runs the local diarizer on an audio fixture and scores it against a
   reference RTTM — for measuring diarizer quality / catching regressions (an
   optional nightly check, never a PR gate).
+- [x] **Voiceprint EER calibration harness (dev)** — a pure, unit-tested metric
+  (`phoneme_core::voiceprint_eval`: `calibrate`, `trial_scores`, `compute_eer`)
+  that turns a set of labelled voiceprints into the verification calibration
+  curve. Genuine (same-speaker) and impostor (different-speaker) vector pairs are
+  scored with the recognizer's own `voiceprint::cosine_similarity`, then a
+  threshold sweep gives FAR/FRR at each point and the interpolated **equal error
+  rate** + its threshold. Gives `voiceprint_match_threshold` (~0.5, eyeballed) a
+  measured basis. Not wired into the pipeline — an eval harness like the DER one.
 - [x] **Custom local diarization models** — `[diarization].models_dir` points the local
   diarizer at a folder holding your own speakrs bundle (segmentation + embedding ONNX),
   loaded via `OwnedDiarizationPipeline::from_dir` instead of the pretrained download;
