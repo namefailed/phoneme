@@ -1331,6 +1331,13 @@ enum ResolvedStep {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
     },
+    /// A DETERMINISTIC transform (`PlaybookKind::FillerRemoval`): rewrite the
+    /// running transcript by stripping filler words in pure Rust — no provider,
+    /// no network. Runs in the same in-memory rewrite phase as `Transform`,
+    /// carrying the `[filler]` config it reads.
+    FillerRemoval {
+        cfg: phoneme_core::config::FillerConfig,
+    },
     /// Enrichment writing the recording title. Carries the entry-resolved LLM
     /// config + prompt so the title step reads the migrated `title` Playbook
     /// entry (Strategy B), not the legacy `[title]` section.
@@ -1514,6 +1521,9 @@ fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
                 llm_cfg: entry_llm_config(cfg, &entry.llm),
                 prompt: entry.llm.prompt.clone(),
             }),
+            PlaybookKind::FillerRemoval => steps.push(ResolvedStep::FillerRemoval {
+                cfg: cfg.filler.clone(),
+            }),
             PlaybookKind::Enrichment => {
                 let target = entry.target.trim();
                 match target {
@@ -1579,6 +1589,14 @@ async fn run_transform_steps(
     let mut transcript = transcript;
     let mut cleanup_model: Option<String> = None;
     for step in steps {
+        // Deterministic filler removal: a pure, instant text rewrite — no
+        // provider, no network, never fails. It rewrites the running transcript
+        // like an LLM Transform and feeds the next step, so it chains with
+        // cleanup either way. It doesn't set `cleanup_model` (no model ran).
+        if let ResolvedStep::FillerRemoval { cfg } = step {
+            transcript = phoneme_core::filler::strip_fillers(&transcript, cfg);
+            continue;
+        }
         let ResolvedStep::Transform { llm_cfg, prompt } = step else {
             continue;
         };
@@ -1717,9 +1735,11 @@ async fn run_enrichment_steps(
                     "recipe enrichment target has no backing store yet; skipping"
                 );
             }
-            // Transform + Title are handled in their own phases (before the
-            // commit), and Hook steps in run_hook_steps; ignore them here.
+            // Transform / FillerRemoval + Title are handled in their own phases
+            // (before the commit), and Hook steps in run_hook_steps; ignore them
+            // here.
             ResolvedStep::Transform { .. }
+            | ResolvedStep::FillerRemoval { .. }
             | ResolvedStep::Title { .. }
             | ResolvedStep::Hook { .. } => {}
         }

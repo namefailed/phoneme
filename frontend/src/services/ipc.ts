@@ -135,9 +135,10 @@ export type HotkeyBinding = {
 };
 
 /** What a {@link PlaybookEntry} does (mirrors the Rust `PlaybookKind`):
- *  `transform` rewrites the running transcript text; `enrichment` writes a
- *  named field (see `target`); `hook` fires a command/webhook. */
-export type PlaybookKind = "transform" | "enrichment" | "hook";
+ *  `transform` rewrites the running transcript text via an LLM; `filler_removal`
+ *  does the same deterministically (no AI, reads `[filler]`); `enrichment` writes
+ *  a named field (see `target`); `hook` fires a command/webhook. */
+export type PlaybookKind = "transform" | "filler_removal" | "enrichment" | "hook";
 
 /** The LLM half of a Playbook entry (used for transform/enrichment). The API key
  *  is resolved from the matching provider section at run time, never stored here. */

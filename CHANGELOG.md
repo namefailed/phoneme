@@ -550,6 +550,16 @@ trust boundary.*
 
 ### Playbook & Custom Hotkeys
 
+- [x] **Deterministic filler removal (no AI)** — a new `filler_removal` Playbook
+  kind strips spoken filler ("um", "uh", "er", …) from the transcript in pure
+  Rust: no provider, no network, instant and repeatable. It rewrites the running
+  text like an LLM Transform — chain it with cleanup either way — and tidies the
+  spacing/punctuation the removal leaves behind. Tuned under `[filler]`:
+  `words` (conservative default list), `phrases` (multi-word, e.g. "kind of"),
+  and an `aggressive` toggle (default off) that gates the meaning-bearing phrases
+  so a real "like" / "kind of" is never stripped by accident. Seeded as the
+  off-by-default **Remove fillers** entry; the transform lives in
+  `phoneme-core::filler`.
 - [x] **Re-run through a recipe** — the Re-run / Quick-Model-Switcher modal now
   has a **Recipe to run** picker in Re-run mode: re-run a recording through any
   Playbook recipe (the chain that owns cleanup / title / summary / tags / hooks),

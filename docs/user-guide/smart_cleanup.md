@@ -50,6 +50,20 @@ bound.
 > The panel isn't a modal — close it with **`g A`** again, the ✕ button, or
 > **Esc** while it's focused.
 
+## 🧹 Filler removal (no AI)
+
+Smart Cleanup uses an LLM. If all you want is the filler words gone — "um", "uh", "er" — you don't need one. Phoneme ships a **deterministic** filler-removal transform that runs in pure Rust: no provider, no network, instant, and the same input always gives the same output. It strips configured fillers at word boundaries and tidies the spacing/punctuation the removal leaves behind (no stray " ," or doubled spaces).
+
+It's a Playbook step, off by default. Add the seeded **Remove fillers** entry (`filler_removal`) to a recipe — or wire it to a Custom Hotkey — and it rewrites the transcript like a cleanup step, just without the AI. Chain it before or after LLM cleanup as you like.
+
+Tune it under `[filler]` in your config:
+
+- **`words`** — the single fillers stripped, case-insensitively, at word boundaries (so "umbrella" survives). Defaults to a conservative set: `um`, `uh`, `er`, `ah`, `hmm`, `mhm`.
+- **`phrases`** — multi-word fillers like "you know", "i mean", "sort of", "kind of", "like". These are **opt-in** because they double as real speech — "I *like* it", "*kind of* blue" — so they only apply when `aggressive` is on.
+- **`aggressive`** — off by default (only `words` are stripped). Turn it on to also strip the `phrases` list, at the risk of removing a meaning-bearing "like".
+
+See [config_reference → `[filler]`](../developer-guide/config_reference.md#filler) for the exact keys.
+
 ## ☁️ Provider Options
 
 In keeping with Phoneme's philosophy, you have total control over *where* your data is processed. Configure cleanup under **Settings → Post-Processing → AI Post-Processing**.
