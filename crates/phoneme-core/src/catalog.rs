@@ -169,6 +169,73 @@ fn sanitize_fts5_query(query: &str) -> String {
     terms.join(" AND ")
 }
 
+/// The result of a [`Catalog::find_replace_transcript`] (S6): how many
+/// occurrences were replaced and the resulting transcript. On a no-match,
+/// `replaced` is 0 and `transcript` is the unchanged text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindReplaceOutcome {
+    /// Number of occurrences replaced (0 = no-op, nothing written).
+    pub replaced: usize,
+    /// The transcript after the replacement (unchanged on a no-match).
+    pub transcript: String,
+}
+
+/// Case-insensitive literal find-replace over `haystack`: every run that equals
+/// `needle` ignoring ASCII/Unicode case is replaced with `replacement` verbatim.
+/// Returns `(count, new_string)`. Matching is by lowercased comparison; the
+/// substituted text is always the caller's `replacement` (the matched run's
+/// original casing is not preserved). `needle` is assumed non-empty (the caller
+/// guards the empty case as a no-op).
+///
+/// Implementation note: matching walks the LOWERCASED haystack but copies from
+/// the ORIGINAL, advancing by the original byte length of each matched run.
+/// `char::to_lowercase` can change a string's length (e.g. some locale-specific
+/// folds), so we compare per-`char`-boundary on the original rather than slicing
+/// the lowercased copy back onto original byte offsets — keeping byte offsets
+/// valid and the un-matched text byte-for-byte intact.
+fn replace_ignore_case(haystack: &str, needle: &str, replacement: &str) -> (usize, String) {
+    let needle_lower = needle.to_lowercase();
+    let mut out = String::with_capacity(haystack.len());
+    let mut count = 0usize;
+    let mut rest = haystack;
+    loop {
+        // Find the next case-insensitive match start by scanning char boundaries
+        // of `rest` and lowercasing the candidate window for comparison.
+        let mut matched_at: Option<(usize, usize)> = None; // (start_byte, end_byte) in `rest`
+        for (start, _) in rest.char_indices() {
+            let window = &rest[start..];
+            if window.to_lowercase().starts_with(&needle_lower) {
+                // Recover the original-byte length of the matched run: take chars
+                // from `window` until the lowercased prefix covers `needle_lower`.
+                let mut consumed = 0usize;
+                let mut low_len = 0usize;
+                for ch in window.chars() {
+                    consumed += ch.len_utf8();
+                    low_len += ch.to_lowercase().map(|c| c.len_utf8()).sum::<usize>();
+                    if low_len >= needle_lower.len() {
+                        break;
+                    }
+                }
+                matched_at = Some((start, start + consumed));
+                break;
+            }
+        }
+        match matched_at {
+            Some((start, end)) => {
+                out.push_str(&rest[..start]);
+                out.push_str(replacement);
+                count += 1;
+                rest = &rest[end..];
+            }
+            None => {
+                out.push_str(rest);
+                break;
+            }
+        }
+    }
+    (count, out)
+}
+
 impl Catalog {
     /// Open (or create) a catalog database at `path`. Runs pending migrations.
     ///
@@ -485,6 +552,37 @@ impl Catalog {
         Ok(res.rows_affected() > 0)
     }
 
+    /// Execute a stored saved search by id, server-side: look up its
+    /// `filter_json`, parse it into a [`ListFilter`], and run the normal
+    /// [`Self::list`] query — so a saved search produces the *same* recordings
+    /// shape as a plain list without the frontend re-deriving the filter (S2).
+    ///
+    /// The persisted filter is the frontend's `UiFilter`
+    /// ([`crate::SavedSearchFilter`]); the four-way `kind` and `tag_state` are
+    /// mapped onto the daemon's `kind`/`favorite`/`in_place`/`tagged` exactly as
+    /// the frontend's `toWireFilter` does, and UI-only display state (semantic /
+    /// like-mode) is ignored — executing a saved search runs the *list* query,
+    /// not a similarity/semantic search.
+    ///
+    /// Errors: [`crate::Error::NotFound`] for an unknown id, and
+    /// [`crate::Error::InvalidConfig`] when the stored `filter_json` won't parse
+    /// (a hand-edit, a stale shape) — surfaced to the client verbatim rather than
+    /// silently running the whole library.
+    pub async fn run_saved_search(&self, id: &str) -> Result<Vec<Recording>> {
+        let row = sqlx::query("SELECT filter_json FROM saved_searches WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else {
+            return Err(crate::error::Error::NotFound {
+                id: format!("saved search {id}"),
+            });
+        };
+        let filter_json: String = row.try_get("filter_json")?;
+        let filter = crate::SavedSearchFilter::parse_to_list_filter(&filter_json)?;
+        self.list(&filter).await
+    }
+
     /// Insert a new recording row. The pipeline calls this once, when capture
     /// starts; later stages update the same row in place.
     pub async fn insert(&self, r: &Recording) -> Result<()> {
@@ -765,6 +863,78 @@ impl Catalog {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Find-and-replace across a recording's stored **live** transcript (S6).
+    ///
+    /// ### Semantics
+    /// - **Literal** substring replacement, NOT regex — the safest default (no
+    ///   accidental metacharacter surprises on a transcript). `find` is matched
+    ///   verbatim; `replace` is inserted verbatim.
+    /// - **Case sensitivity** is opt-out via `case_sensitive`. A case-insensitive
+    ///   match still substitutes the user's `replace` text exactly (the original
+    ///   casing of each matched run is not preserved — documented).
+    /// - Returns the **count** of occurrences replaced.
+    ///
+    /// ### Scope
+    /// Only the live `transcript` is rewritten — the same column hand edits and
+    /// `update_user_transcript` touch. The preserved `original_transcript`
+    /// (machine output) and `clean_transcript` (pipeline output) are deliberately
+    /// left intact so the edit stays revertible; per-segment / per-word layers are
+    /// re-flowed by the caller (the daemon) exactly as for a normal transcript
+    /// edit. The recording is marked `user_edited`.
+    ///
+    /// ### No-op safety
+    /// An empty `find`, or zero matches, performs **no write** and returns 0 — a
+    /// no-match never rewrites (and so never corrupts) the transcript, and never
+    /// touches `updated_at`/`user_edited`.
+    ///
+    /// Errors: [`crate::Error::NotFound`] when the id is unknown OR the recording
+    /// has no transcript yet (nothing to edit).
+    pub async fn find_replace_transcript(
+        &self,
+        id: &RecordingId,
+        find: &str,
+        replace: &str,
+        case_sensitive: bool,
+    ) -> Result<FindReplaceOutcome> {
+        // Empty needle: defined as a no-op (replacing "" would otherwise splice
+        // `replace` between every char). Resolve the id first so an unknown id
+        // still reports NotFound rather than a silent 0.
+        let Some(rec) = self.get(id).await? else {
+            return Err(crate::error::Error::NotFound { id: id.to_string() });
+        };
+        let Some(current) = rec.transcript else {
+            return Err(crate::error::Error::NotFound {
+                id: format!("{id} (no transcript to edit)"),
+            });
+        };
+        if find.is_empty() {
+            return Ok(FindReplaceOutcome {
+                replaced: 0,
+                transcript: current,
+            });
+        }
+
+        let (count, new_text) = if case_sensitive {
+            (current.matches(find).count(), current.replace(find, replace))
+        } else {
+            replace_ignore_case(&current, find, replace)
+        };
+
+        // No match → no write (no-op safety: never rewrite on zero matches).
+        if count == 0 {
+            return Ok(FindReplaceOutcome {
+                replaced: 0,
+                transcript: current,
+            });
+        }
+
+        self.update_user_transcript(id, &new_text).await?;
+        Ok(FindReplaceOutcome {
+            replaced: count,
+            transcript: new_text,
+        })
     }
 
     /// Replace the LLM-suggested tags awaiting approval for a recording.
@@ -1391,13 +1561,53 @@ impl Catalog {
     /// lexical retriever are exempt from this threshold — if a user searches for an
     /// exact word that is present in the transcript, it is returned even if the
     /// semantic similarity score is low.
+    /// ### Optional filter (S3)
+    /// When `filter` is `Some`, the fused results are restricted to recordings
+    /// matching the same constraints as the plain [`Self::list`] — tag, status,
+    /// date range, kind, favorite, in-place, tag-presence — so a meaning-search
+    /// can be scoped exactly like the Library. The restriction is applied
+    /// **after ranking, before the `limit` truncation**, so the top-`limit`
+    /// in-scope results come back (not the top-`limit` overall, then thinned).
+    /// A meeting passes when *either* track matches (the candidate set is keyed
+    /// by the same meeting-stable dedupe key). The filter's query/pagination
+    /// fields — `search` (the query is the separate `query`/`query_vec`),
+    /// `limit`, `offset`, `sort_desc` — are ignored for the restriction; only
+    /// its predicate fields scope the candidate set. `None` = today's behavior,
+    /// unchanged.
     pub async fn hybrid_search(
         &self,
         query: &str,
         query_vec: &[f32],
         limit: usize,
         min_relevance: f32,
+        filter: Option<&ListFilter>,
     ) -> Result<Vec<(RecordingId, f32)>> {
+        // S3: when a filter is given, pre-compute the in-scope dedupe keys so the
+        // fused ranking can be restricted to them. Built from the SAME `list`
+        // query the Library uses (predicate fields only — query/pagination are
+        // dropped), then mapped to dedupe keys so a meeting passes if either of
+        // its tracks matches.
+        let allowed_keys: Option<std::collections::HashSet<String>> = match filter {
+            Some(f) => {
+                let scoped = ListFilter {
+                    // Drop query + pagination + sort: this list is only used to
+                    // derive the in-scope candidate set, not to order/page it.
+                    search: None,
+                    limit: None,
+                    offset: None,
+                    sort_desc: None,
+                    ..f.clone()
+                };
+                let rows = self.list(&scoped).await?;
+                Some(
+                    rows.into_iter()
+                        .map(|r| r.meeting_id.unwrap_or_else(|| r.id.as_str().to_string()))
+                        .collect(),
+                )
+            }
+            None => None,
+        };
+
         let vec_rank = self.vector_ranking(query_vec).await?;
         let mut lex_rank = self.lexical_ranking(query).await?;
         // Fold tag-name matches into the lexical (exact-intent) set so searching
@@ -1458,6 +1668,14 @@ impl Catalog {
 
         let mut results: Vec<(RecordingId, f32)> = Vec::new();
         for (key, _fused_score) in fused {
+            // S3: restrict to the in-scope candidate set when a filter was given.
+            // Applied here — after ranking, before the `truncate(limit)` below —
+            // so the top in-scope results survive rather than the top overall.
+            if let Some(allowed) = &allowed_keys {
+                if !allowed.contains(&key) {
+                    continue;
+                }
+            }
             let Some(rec_id) = rec_id_by_key.get(&key).cloned() else {
                 continue;
             };
@@ -3853,6 +4071,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn replace_ignore_case_handles_counts_overlap_and_unicode() {
+        // Basic multi-match, case-insensitive.
+        let (n, s) = replace_ignore_case("The THE the", "the", "x");
+        assert_eq!(n, 3);
+        assert_eq!(s, "x x x");
+
+        // No match → zero, original returned.
+        let (n, s) = replace_ignore_case("hello", "zzz", "q");
+        assert_eq!(n, 0);
+        assert_eq!(s, "hello");
+
+        // Replacement containing the needle does NOT recurse (we advance past the
+        // inserted text), so "a" → "aa" over "aaa" yields exactly 3 replacements.
+        let (n, s) = replace_ignore_case("aaa", "a", "aa");
+        assert_eq!(n, 3);
+        assert_eq!(s, "aaaaaa");
+
+        // Unicode needle, mixed case, with surrounding multibyte text intact.
+        let (n, s) = replace_ignore_case("Café CAFÉ déjà", "café", "tea");
+        assert_eq!(n, 2);
+        assert_eq!(s, "tea tea déjà");
+    }
+
+    #[test]
     fn parse_status_round_trips_all_variants_incl_paused() {
         // Regression: `parse_status` lacked a "paused" arm, so the moment a
         // recording was paused, `catalog.list()`/`get()` failed for the ENTIRE
@@ -4419,11 +4661,11 @@ mod tests {
 
         // hybrid_search shares the same cache; its top hit must be stable.
         let h1 = db
-            .hybrid_search("x", &[1.0, 0.0, 0.0], 10, -1.0)
+            .hybrid_search("x", &[1.0, 0.0, 0.0], 10, -1.0, None)
             .await
             .unwrap();
         let h2 = db
-            .hybrid_search("x", &[1.0, 0.0, 0.0], 10, -1.0)
+            .hybrid_search("x", &[1.0, 0.0, 0.0], 10, -1.0, None)
             .await
             .unwrap();
         let scores1: std::collections::HashMap<_, _> = h1
@@ -4862,7 +5104,7 @@ mod tests {
         // Hybrid search, same min_relevance the daemon uses (0.12). Despite the
         // lexical miss, the semantic signal surfaces the target, ranked first.
         let results = db
-            .hybrid_search("database migration", &query_vec, 10, 0.12)
+            .hybrid_search("database migration", &query_vec, 10, 0.12, None)
             .await
             .unwrap();
         assert!(
@@ -4903,7 +5145,7 @@ mod tests {
         // The user types the exact distinctive term; the query vector is the
         // unrelated x-axis.
         let results = db
-            .hybrid_search("Kubernetes", &[1.0, 0.0, 0.0], 10, 0.12)
+            .hybrid_search("Kubernetes", &[1.0, 0.0, 0.0], 10, 0.12, None)
             .await
             .unwrap();
         assert_eq!(results.len(), 1, "the exact-term hit must survive");
@@ -4941,7 +5183,7 @@ mod tests {
             .unwrap();
 
         let results = db
-            .hybrid_search("Kubernetes", &[1.0, 0.0, 0.0], 10, 0.12)
+            .hybrid_search("Kubernetes", &[1.0, 0.0, 0.0], 10, 0.12, None)
             .await
             .unwrap();
         assert_eq!(

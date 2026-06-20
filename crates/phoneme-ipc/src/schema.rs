@@ -220,6 +220,21 @@ pub enum Request {
         /// The saved-search id to remove.
         id: String,
     },
+    /// Execute a stored saved search by id, server-side (S2): the daemon parses
+    /// the saved search's `filter_json` into a `ListFilter` and runs the same
+    /// list query as [`Request::ListRecordings`], so a saved search can be run
+    /// by id without the client re-deriving the filter. Ok = the SAME JSON array
+    /// of recording DTOs `ListRecordings` returns. The stored filter is the
+    /// frontend's `UiFilter` (`phoneme_core::SavedSearchFilter`); its four-way
+    /// `kind` and `tag_state` map onto the daemon's `kind`/`favorite`/`in_place`/
+    /// `tagged`, and UI-only display state (semantic / like-mode) is ignored —
+    /// this runs the *list* query, not a similarity/semantic search. Errors:
+    /// `not_found` for an unknown id, `invalid_config` when the stored
+    /// `filter_json` won't parse. `phoneme list --saved <id>`.
+    RunSavedSearch {
+        /// The saved-search id to execute.
+        id: String,
+    },
     /// Fetch all recordings belonging to a single meeting session (the two
     /// tracks linked by a shared `meeting_id`), ordered by track then time.
     /// Additive to `ListRecordings` — grouping is a presentation concern, so
@@ -455,6 +470,30 @@ pub enum Request {
         id: RecordingId,
         /// The full replacement transcript text.
         text: String,
+    },
+    /// Find-and-replace across a recording's stored live transcript (S6):
+    /// **literal** (not regex) substring replacement, case-sensitive by default.
+    /// The same preserve-and-re-flow path as [`Request::UpdateTranscript`] —
+    /// only the live `transcript` is rewritten (the preserved original/clean
+    /// copies stay, so the edit is revertible), the word/segment timing layers
+    /// are re-flowed onto the result, and the new text is re-embedded. A zero-
+    /// match (or empty `find`) is a no-op: nothing is written. Ok =
+    /// `{"replaced":N}` (occurrences replaced); emits
+    /// [`DaemonEvent::TranscriptUpdated`] only when `N > 0`. Errors: `not_found`
+    /// for an unknown id or a recording with no transcript yet. GUI find/replace
+    /// in the transcript editor, `phoneme find-replace <ID> <FIND> <REPLACE>`.
+    FindReplace {
+        /// The recording whose transcript to edit.
+        id: RecordingId,
+        /// The literal text to find (empty = no-op).
+        find: String,
+        /// The literal text to substitute for each match.
+        replace: String,
+        /// `false` (default) = case-insensitive match; `true` = exact case.
+        /// Serde-defaulted so a client omitting it gets case-insensitive, the
+        /// more forgiving default for hand-driven edits.
+        #[serde(default)]
+        case_sensitive: bool,
     },
     /// Set (`Some`) or clear (`None`) a meeting session's display name. Ok
     /// `null`; emits [`DaemonEvent::MeetingNameUpdated`]. GUI meeting
@@ -946,6 +985,15 @@ pub enum Request {
         query: String,
         /// Maximum number of results.
         limit: usize,
+        /// Optional Library scope (S3): when present, results are restricted to
+        /// recordings matching the same constraints as `ListRecordings` — tag,
+        /// status, date range, kind, favorite, in-place, tag-presence — applied
+        /// after ranking, before the limit. The filter's `search` (the query is
+        /// the field above), `limit`/`offset`, and `sort_desc` are ignored for
+        /// the restriction. `None` = unscoped (today's behavior). Serde-defaulted
+        /// so older clients omitting it still decode.
+        #[serde(default)]
+        filter: Option<ListFilter>,
     },
     /// "More like this": find recordings semantically similar to a stored
     /// one, using its already-stored vectors as the query — no fresh query

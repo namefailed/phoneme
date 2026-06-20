@@ -123,7 +123,7 @@ pub mod voiceprint_eval;
 pub mod webhook;
 pub mod wer;
 
-pub use catalog::Catalog;
+pub use catalog::{Catalog, FindReplaceOutcome};
 pub use chunk::chunk_transcript;
 pub use config::Config;
 pub use embed::Embedder;
@@ -139,5 +139,6 @@ pub use transcription::{
 };
 pub use types::{
     HookMetadata, HookPayload, ListFilter, ListKind, MeetingTrack, RecordMode, Recording,
-    RecordingStatus, SpeakerName, TranscriptSegment,
+    RecordingStatus, SavedSearch, SavedSearchFilter, SavedSearchKind, SavedSearchTagState,
+    SpeakerName, TranscriptSegment,
 };

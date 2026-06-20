@@ -18,6 +18,7 @@ Commands:
   suggest-tags   Re-run the LLM tag-suggestion step on a recording on demand
   notes          Get or set a recording's free-form notes
   edit           Edit a recording's transcript and/or metadata (title, favorite)
+  find-replace   Find-and-replace literal text across a recording's transcript
   speaker        Rename or clear a recording's diarized speaker labels
   search         Semantic (embedding) search over transcripts
   reembed        Clear all embeddings and re-embed the whole library with the current model

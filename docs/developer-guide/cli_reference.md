@@ -210,6 +210,11 @@ phoneme list --semantic "database migration plan"
 # Filter by recording type: all (default), single (voice notes), or meeting.
 # Applied by the daemon in SQL, before --limit/--offset, so pages stay full.
 phoneme list --kind meeting
+
+# Run (or list) a saved search by id — the daemon parses the stored filter and
+# runs the list query server-side, so a saved search is reproducible from the CLI.
+phoneme list --saved          # list the saved searches (id + name)
+phoneme list --saved ss_a1b2  # run the saved search with that id
 ```
 
 ### 👁️ `phoneme show <ID>`
@@ -350,6 +355,26 @@ phoneme edit 20260519T143500823 --text "Fixed." --title "Standup notes"
 
 A metadata-only edit (e.g. just `--favorite`) never blocks reading stdin.
 
+### 🔁 `phoneme find-replace <ID> <FIND> <REPLACE>`
+
+Find-and-replace **literal** text (not a regex) across a recording's stored
+transcript. Case-insensitive by default; pass `--case-sensitive` for an exact
+match. Only the live transcript is rewritten — the preserved original (machine)
+and unedited (pipeline) copies stay intact, so the change is revertible, and the
+timing layers are re-flowed onto the result like any hand edit. A no-match is a
+no-op (nothing is written). Prints the number of occurrences replaced.
+
+```bash
+# Fix a recurring misspelling across the whole transcript
+phoneme find-replace 20260519T143500823 "teh" "the"
+
+# Exact-case replacement
+phoneme find-replace 20260519T143500823 "API" "api" --case-sensitive
+
+# Machine-readable count
+phoneme --json find-replace 20260519T143500823 "teh" "the"   # → {"replaced":3}
+```
+
 ### 🗒️ `phoneme notes <ID>`
 
 Get or set a recording's free-form notes (independent of the transcript).
@@ -414,9 +439,16 @@ enabled and the embedding model present. Prints `score  id  preview` per hit.
 ```bash
 phoneme search "database migration plan"
 phoneme search "database migration plan" --limit 5
+
+# Scope a meaning-search like the Library: --tag (id or name), --status, --kind
+# (single|meeting). The scope restricts the candidate set; an unscoped search is
+# unchanged. Combinable.
+phoneme search "budget" --tag work
+phoneme search "budget" --status done --kind meeting
 ```
 
-> `phoneme list --semantic "<query>"` runs the same search, reusing `--limit`.
+> `phoneme list --semantic "<query>"` runs the same search, reusing `--limit`
+> and forwarding any `--tag` / `--status` / `--kind` scope.
 
 **`--like <RECORDING_ID>`** — "more like this": instead of embedding a text
 query, rank the library by similarity to a stored recording, using its

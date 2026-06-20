@@ -17,11 +17,18 @@ use crate::client::Client;
 use crate::exit;
 use crate::output;
 use phoneme_core::types::ListKind;
-use phoneme_core::{Config, ListFilter, Recording, RecordingStatus};
+use phoneme_core::{Config, ListFilter, Recording, RecordingStatus, SavedSearch};
 use phoneme_ipc::Request;
 use std::process::ExitCode;
 
 pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
+    // `--saved` runs (or lists) saved searches server-side, short-circuiting the
+    // normal filter flow. An empty value (`--saved` with no id) lists the stored
+    // searches; an id executes that one. Other list filters are ignored here.
+    if let Some(saved) = args.saved.clone() {
+        return run_saved(saved, cfg, json).await;
+    }
+
     // `--semantic` short-circuits to an embedding search, reusing --limit.
     if let Some(query) = args.semantic.clone() {
         return crate::commands::search::run(
@@ -29,6 +36,11 @@ pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
                 query: Some(query),
                 like: None,
                 limit: args.limit.map(|n| n as usize).unwrap_or(20),
+                // `list --semantic` forwards the existing list scope flags so a
+                // scoped semantic search works via either entry point (S3).
+                tag: args.tag.clone(),
+                status: args.status.clone(),
+                kind: args.kind.clone(),
             },
             cfg,
             json,
@@ -55,6 +67,58 @@ pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
     // pagination caused pages to be mostly empty for the non-default kind.
     let filter = build_filter(args, tag_id);
     let value = match client.send(Request::ListRecordings { filter }).await {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+    let rows: Vec<Recording> = match serde_json::from_value(value) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: parsing list response: {e}");
+            return ExitCode::from(exit::GENERIC_FAIL);
+        }
+    };
+    if json {
+        output::print_json_lines(&rows);
+    } else {
+        output::print_list_pretty(&rows);
+    }
+    ExitCode::SUCCESS
+}
+
+/// `phoneme list --saved [ID]`: run a stored saved search by id, or — with no
+/// id — list the available saved searches (id + name) so the user can pick one.
+async fn run_saved(id: String, cfg: &Config, json: bool) -> ExitCode {
+    let mut client = match Client::connect_observe(cfg).await {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+
+    // No id given (`--saved` alone): list the saved searches instead of running.
+    if id.is_empty() {
+        let value = match client.send(Request::ListSavedSearches).await {
+            Ok(v) => v,
+            Err(code) => return code,
+        };
+        let searches: Vec<SavedSearch> = match serde_json::from_value(value) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: parsing saved searches: {e}");
+                return ExitCode::from(exit::GENERIC_FAIL);
+            }
+        };
+        if json {
+            output::print_json_lines(&searches);
+        } else if searches.is_empty() {
+            println!("no saved searches");
+        } else {
+            for s in &searches {
+                println!("{}  {}", s.id, s.name);
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    let value = match client.send(Request::RunSavedSearch { id }).await {
         Ok(v) => v,
         Err(code) => return code,
     };

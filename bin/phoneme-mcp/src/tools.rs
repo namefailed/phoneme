@@ -480,7 +480,8 @@ mod tests {
             req,
             Request::SemanticSearch {
                 query: "budget meeting".to_string(),
-                limit: 3
+                limit: 3,
+                filter: None,
             }
         );
     }
@@ -492,7 +493,8 @@ mod tests {
             req,
             Request::SemanticSearch {
                 query: "x".to_string(),
-                limit: DEFAULT_LIMIT
+                limit: DEFAULT_LIMIT,
+                filter: None,
             }
         );
         assert!(build_request("search_recordings", &json!({})).is_err());

@@ -53,6 +53,8 @@ pub enum Command {
     Notes(NotesArgs),
     /// Edit a recording's transcript and/or metadata (title, favorite).
     Edit(EditArgs),
+    /// Find-and-replace literal text across a recording's transcript.
+    FindReplace(FindReplaceArgs),
     /// Rename or clear a recording's diarized speaker labels.
     Speaker(SpeakerArgs),
     /// Semantic (embedding) search over transcripts.
@@ -225,6 +227,11 @@ pub struct ListArgs {
     /// Library filter.
     #[arg(long, value_name = "KIND", value_parser = ["all", "single", "meeting"])]
     pub kind: Option<String>,
+    /// Run a stored saved search by id (the daemon parses its filter and runs
+    /// the list query). Lists saved-search ids/names with no value; the other
+    /// list filters are ignored when this is given.
+    #[arg(long, value_name = "ID", num_args = 0..=1, default_missing_value = "")]
+    pub saved: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -413,6 +420,19 @@ pub struct EditArgs {
 }
 
 #[derive(Debug, clap::Args)]
+pub struct FindReplaceArgs {
+    /// The recording whose transcript to edit.
+    pub id: String,
+    /// Literal text to find (not a regex). Empty matches nothing (no-op).
+    pub find: String,
+    /// Literal text to substitute for each match.
+    pub replace: String,
+    /// Match case exactly (default is case-insensitive).
+    #[arg(long)]
+    pub case_sensitive: bool,
+}
+
+#[derive(Debug, clap::Args)]
 pub struct SearchArgs {
     /// The semantic search query.
     #[arg(required_unless_present = "like", conflicts_with = "like")]
@@ -424,6 +444,18 @@ pub struct SearchArgs {
     /// Maximum number of results.
     #[arg(long, value_name = "N", default_value_t = 20)]
     pub limit: usize,
+    /// Scope the meaning-search to recordings carrying this tag (id or name).
+    /// Mirrors `phoneme list --tag`. Ignored with `--like`.
+    #[arg(long, value_name = "ID|NAME", conflicts_with = "like")]
+    pub tag: Option<String>,
+    /// Scope to recordings in this status (e.g. `done`, `transcribe_failed`).
+    /// Ignored with `--like`.
+    #[arg(long, value_name = "STATUS", conflicts_with = "like")]
+    pub status: Option<String>,
+    /// Scope by recording type: `single` (voice notes) or `meeting`. Ignored
+    /// with `--like`.
+    #[arg(long, value_name = "KIND", value_parser = ["single", "meeting"], conflicts_with = "like")]
+    pub kind: Option<String>,
 }
 
 /// Audio format yt-dlp extracts to when `phoneme import` is given a URL. All

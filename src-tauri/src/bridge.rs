@@ -156,6 +156,8 @@ fn is_retry_safe(req: &Request) -> bool {
         | GetRecording { .. }
         | ListAiActivity { .. }
         | ListSavedSearches
+        // Runs a stored saved search server-side: a pure list query, idempotent.
+        | RunSavedSearch { .. }
         | RecognizeSpeakers { .. }
         | ListNamedVoices
         | ListMeeting { .. }
@@ -206,6 +208,10 @@ fn is_retry_safe(req: &Request) -> bool {
         | RerunSummary { .. }
         // Transcript & metadata edits.
         | UpdateTranscript { .. }
+        // Find-replace mutates the transcript; classified single-attempt like
+        // UpdateTranscript (a re-send after a lost reply could re-apply against
+        // already-changed text), so never blind-retry.
+        | FindReplace { .. }
         | UpdateMeetingName { .. }
         | UpdateNotes { .. }
         | SetFavorite { .. }

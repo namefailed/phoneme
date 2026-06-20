@@ -295,6 +295,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        // S2: run a stored saved search by id server-side. Same recordings shape
+        // as ListRecordings — the catalog parses filter_json into a ListFilter
+        // and runs the normal list query.
+        Request::RunSavedSearch { id } => match state.catalog.run_saved_search(&id).await {
+            Ok(rows) => serialize_response(rows),
+            Err(e) => err_response(&e),
+        },
         Request::ListMeeting { meeting_id } => {
             match state.catalog.list_by_meeting(&meeting_id).await {
                 Ok(rows) => serialize_response(rows),
@@ -338,7 +345,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
             Err(e) => err_response(&e),
         },
-        Request::SemanticSearch { query, limit } => {
+        Request::SemanticSearch {
+            query,
+            limit,
+            filter,
+        } => {
             // Clamp the client-supplied limit so a huge value can't force an
             // unbounded result allocation + JSON serialization over the pipe.
             let limit = limit.min(MAX_SEARCH_RESULTS);
@@ -355,7 +366,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 match embed_res {
                     Ok(Ok(query_vec)) => match state
                         .catalog
-                        .hybrid_search(&query, &query_vec, limit, SEMANTIC_MIN_RELEVANCE)
+                        .hybrid_search(
+                            &query,
+                            &query_vec,
+                            limit,
+                            SEMANTIC_MIN_RELEVANCE,
+                            filter.as_ref(),
+                        )
                         .await
                     {
                         Ok(results) => {
@@ -597,46 +614,34 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::UpdateTranscript { id, text } => {
             match state.catalog.update_user_transcript(&id, &text).await {
                 Ok(()) => {
-                    // Re-flow the per-word / per-segment timing layers onto the
-                    // edited text so the Synced + Timeline views (and click-to-seek)
-                    // follow the edit. Best-effort: a failure here must not fail the
-                    // save — the prose is already persisted. Gated by an opt-out so
-                    // users who prefer the original machine timings can disable it.
-                    if state.config.load().editor.resync_views_on_edit {
-                        match state.catalog.words_for(&id).await {
-                            Ok(old_words) => {
-                                if let Some(r) =
-                                    phoneme_core::realign::realign_transcript(&text, &old_words)
-                                {
-                                    if let Err(e) = state.catalog.replace_words(&id, &r.words).await
-                                    {
-                                        tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed words");
-                                    }
-                                    if let Err(e) =
-                                        state.catalog.replace_segments(&id, &r.segments).await
-                                    {
-                                        tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed segments");
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(id = %id, error = %e, "re-align: could not load words; leaving timing layers untouched");
-                            }
-                        }
-                    }
-
-                    let embedder = state.embedder.read().await.as_ref().cloned();
-                    if let Some(embedder) = embedder {
-                        crate::pipeline::embed_and_store(embedder, &state.catalog, &id, &text)
-                            .await;
-                    }
-
-                    state.events.emit(DaemonEvent::TranscriptUpdated { id });
+                    reflow_and_reembed_after_edit(state, &id, &text).await;
                     ok_null()
                 }
                 Err(e) => err_response(&e),
             }
         }
+        // S6: literal find-and-replace across the live transcript. The catalog
+        // does the replacement + persist (no-op + NotFound handled there); we
+        // run the same re-flow/re-embed/event upkeep as a hand edit — but ONLY
+        // when something actually changed, so a zero-match is a true no-op.
+        Request::FindReplace {
+            id,
+            find,
+            replace,
+            case_sensitive,
+        } => match state
+            .catalog
+            .find_replace_transcript(&id, &find, &replace, case_sensitive)
+            .await
+        {
+            Ok(outcome) => {
+                if outcome.replaced > 0 {
+                    reflow_and_reembed_after_edit(state, &id, &outcome.transcript).await;
+                }
+                Response::Ok(serde_json::json!({ "replaced": outcome.replaced }))
+            }
+            Err(e) => err_response(&e),
+        },
         Request::UpdateMeetingName { meeting_id, name } => {
             match state
                 .catalog
@@ -2679,6 +2684,46 @@ async fn speaker_name_propagation(
             })
         }
     }
+}
+
+/// Post-edit upkeep shared by `UpdateTranscript` and `FindReplace`: re-flow the
+/// per-word / per-segment timing layers onto `new_text` (so the Synced/Timeline
+/// views follow the edit), re-embed the new text for semantic search, then emit
+/// `TranscriptUpdated`. Best-effort throughout: the prose is already persisted by
+/// the caller, so a re-align or re-embed failure is logged, not surfaced. The
+/// re-flow is gated by `editor.resync_views_on_edit` (an opt-out for users who
+/// prefer the original machine timings).
+async fn reflow_and_reembed_after_edit(
+    state: &AppState,
+    id: &phoneme_core::RecordingId,
+    new_text: &str,
+) {
+    if state.config.load().editor.resync_views_on_edit {
+        match state.catalog.words_for(id).await {
+            Ok(old_words) => {
+                if let Some(r) = phoneme_core::realign::realign_transcript(new_text, &old_words) {
+                    if let Err(e) = state.catalog.replace_words(id, &r.words).await {
+                        tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed words");
+                    }
+                    if let Err(e) = state.catalog.replace_segments(id, &r.segments).await {
+                        tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed segments");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(id = %id, error = %e, "re-align: could not load words; leaving timing layers untouched");
+            }
+        }
+    }
+
+    let embedder = state.embedder.read().await.as_ref().cloned();
+    if let Some(embedder) = embedder {
+        crate::pipeline::embed_and_store(embedder, &state.catalog, id, new_text).await;
+    }
+
+    state
+        .events
+        .emit(DaemonEvent::TranscriptUpdated { id: id.clone() });
 }
 
 fn err_response(e: &phoneme_core::Error) -> Response {
