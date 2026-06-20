@@ -84,6 +84,10 @@ active recording has nothing new to attach them to):
 - `update_transcript`, `update_notes`, `update_meeting_name`
 - `get_original_transcript` (raw machine transcript), `get_clean_transcript` (cleaned, pre-edit)
 - `set_favorite` (star/unstar), `set_speaker_name` (rename a diarized `[Speaker N]` label; never rewrites the stored transcript)
+- **In-recording speaker correction** (fix the diarizer's per-segment assignments — `transcript_segments` stays authoritative, and each op rebuilds the prose transcript's `[Speaker N]:` markers in the same transaction so every view agrees; all three are mutating, not retry-safe, and emit `speaker_name_updated`):
+  - `reassign_segment_speaker` (`{ "id", "idx": 0-based segment index, "new_label": 1-based label }`) — move one segment to another speaker; a brand-new label simply starts existing.
+  - `merge_speakers` (`{ "id", "from_label", "into_label" }`) — every `from` segment becomes `into`, then `from` ceases to exist. `into` keeps its name (adopts `from`'s only when unnamed); `from`'s captured voiceprint is dropped (the centroid is per-label — a retranscribe re-captures the merged label) and any affected named voice is recomputed.
+  - `split_speaker` (`{ "id", "label", "segment_idxs": [0-based, …], "new_label" }`) — move the listed segments from `label` onto a fresh `new_label` (no name/voiceprint until enrolled). An unknown idx, or one not currently `label`, aborts the whole op with no write.
 - `set_recording_title` (`{ "id", "title": string|null }`) — set a display title; a non-null title is marked **user-owned** so auto-generation never overwrites it, while `null`/empty clears back to auto (regenerated on the next pipeline run). Emits the same `transcript_updated` refresh event edits use.
 
 **Tag suggestions (LLM auto-tag):**

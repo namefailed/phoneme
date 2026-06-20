@@ -856,6 +856,61 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        // ── In-recording speaker correction (U1) ─────────────────────────
+        // Each op keeps `transcript_segments` authoritative and rebuilds the
+        // prose `[Speaker N]:` markers in one transaction (catalog side), so
+        // every view the user sees agrees. They emit `SpeakerNameUpdated` so
+        // open clients refresh the recording (segments, names, prose).
+        Request::ReassignSegmentSpeaker { id, idx, new_label } => {
+            match state
+                .catalog
+                .reassign_segment(&id, idx, new_label)
+                .await
+            {
+                Ok(()) => {
+                    state
+                        .events
+                        .emit(DaemonEvent::SpeakerNameUpdated { id: id.clone() });
+                    ok_null()
+                }
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::MergeSpeakers {
+            id,
+            from_label,
+            into_label,
+        } => match state
+            .catalog
+            .merge_speakers(&id, from_label, into_label)
+            .await
+        {
+            Ok(()) => {
+                state
+                    .events
+                    .emit(DaemonEvent::SpeakerNameUpdated { id: id.clone() });
+                ok_null()
+            }
+            Err(e) => err_response(&e),
+        },
+        Request::SplitSpeaker {
+            id,
+            label,
+            segment_idxs,
+            new_label,
+        } => match state
+            .catalog
+            .split_speaker(&id, label, &segment_idxs, new_label)
+            .await
+        {
+            Ok(()) => {
+                state
+                    .events
+                    .emit(DaemonEvent::SpeakerNameUpdated { id: id.clone() });
+                ok_null()
+            }
+            Err(e) => err_response(&e),
+        },
         Request::RecognizeSpeakers { id } => {
             let cfg = state.config.load();
             if cfg.diarization.recognize_speakers {

@@ -110,6 +110,27 @@ fn transcript_segment_roundtrips() {
 }
 
 #[test]
+fn speaker_correction_requests_roundtrip() {
+    // The U1 in-recording speaker-correction requests on the wire.
+    roundtrip(&Request::ReassignSegmentSpeaker {
+        id: RecordingId::new(),
+        idx: 4,
+        new_label: 2,
+    });
+    roundtrip(&Request::MergeSpeakers {
+        id: RecordingId::new(),
+        from_label: 2,
+        into_label: 1,
+    });
+    roundtrip(&Request::SplitSpeaker {
+        id: RecordingId::new(),
+        label: 1,
+        segment_idxs: vec![2, 5, 7],
+        new_label: 3,
+    });
+}
+
+#[test]
 fn ok_response_with_null_payload_roundtrips() {
     roundtrip(&Response::Ok(serde_json::Value::Null));
 }

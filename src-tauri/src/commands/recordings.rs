@@ -923,6 +923,74 @@ pub async fn set_speaker_name(
     .await
 }
 
+/// Reassign one transcript segment to a different speaker label (U1). `idx` is
+/// the 0-based segment index from `get_segments`; `new_label` is the 1-based
+/// `[Speaker N]` index (a brand-new label simply starts existing). Segments stay
+/// authoritative and the prose markers are rebuilt to match; a `SpeakerNameUpdated`
+/// event fires so the detail view refreshes.
+#[tauri::command]
+pub async fn reassign_segment_speaker(
+    bridge: Br<'_>,
+    id: String,
+    idx: i64,
+    new_label: i64,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::ReassignSegmentSpeaker { id, idx, new_label },
+    )
+    .await
+}
+
+/// Merge two speakers in a recording (U1): every `from_label` segment becomes
+/// `into_label`, then `from_label` ceases to exist. `into` keeps its name (adopts
+/// `from`'s only when unnamed); `from`'s voiceprint is dropped and any affected
+/// named voice recomputed. Fires `SpeakerNameUpdated`.
+#[tauri::command]
+pub async fn merge_speakers(
+    bridge: Br<'_>,
+    id: String,
+    from_label: i64,
+    into_label: i64,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::MergeSpeakers {
+            id,
+            from_label,
+            into_label,
+        },
+    )
+    .await
+}
+
+/// Split some of a speaker's segments off onto a fresh label (U1). The listed
+/// `segment_idxs` move from `label` to `new_label` (which starts with no
+/// name/voiceprint); every other segment of `label` stays. Fires
+/// `SpeakerNameUpdated`.
+#[tauri::command]
+pub async fn split_speaker(
+    bridge: Br<'_>,
+    id: String,
+    label: i64,
+    segment_idxs: Vec<i64>,
+    new_label: i64,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::SplitSpeaker {
+            id,
+            label,
+            segment_idxs,
+            new_label,
+        },
+    )
+    .await
+}
+
 /// Current capture status: `{ recording: bool, id: Option<String>, meeting: bool }`.
 /// Lets the UI re-sync its record/meeting buttons after a reload, since the
 /// daemon outlives the app window and a meeting may already be in progress.

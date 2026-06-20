@@ -342,10 +342,13 @@ phoneme notes 20260519T143500823 --set "Follow up with Alex."
 
 ### 🎭 `phoneme speaker`
 
-Name a recording's diarized speaker labels (the CLI face of the GUI speaker
-chips). The `<LABEL>` is the 1-based `[Speaker N]` index from the transcript.
-The stored transcript keeps its canonical `[Speaker N]` markers — names are
-applied at display/export time — so a rename is reversible.
+Name and correct a recording's diarized speaker labels (the CLI face of the GUI
+speaker chips and the in-recording speaker correction). Every `<LABEL>` is the
+1-based `[Speaker N]` index from the transcript; `<IDX>` values are the 0-based
+segment indices from `phoneme show --segments`.
+
+**Naming** (`rename` / `clear`) never rewrites the transcript text — names are
+applied at display/export time, so a rename is reversible:
 
 ```bash
 # Give [Speaker 2] a display name
@@ -355,7 +358,31 @@ phoneme speaker rename 20260519T143500823 2 "Sarah"
 phoneme speaker clear 20260519T143500823 2
 ```
 
-A label below 1 is rejected locally (exit 1) before any request is sent.
+**Correcting assignments** (`reassign` / `merge` / `split`) actually changes
+which segment belongs to which speaker. The stored `transcript_segments` stays
+authoritative (the timeline / Synced views re-derive from it) and the prose
+transcript's `[Speaker N]:` markers are rebuilt to match, in one transaction —
+so the change shows up everywhere the user sees speakers:
+
+```bash
+# Reassign segment 5 to [Speaker 2] (a brand-new label simply starts existing)
+phoneme speaker reassign 20260519T143500823 5 2
+
+# Merge [Speaker 2] into [Speaker 1]: every 2-segment becomes 1, then 2 is gone.
+# Speaker 1 keeps its name (adopts 2's only if 1 is unnamed); 2's captured
+# voiceprint is dropped (the centroid is per-label — a retranscribe re-captures
+# the merged label) and any affected named voice is recomputed.
+phoneme speaker merge 20260519T143500823 2 1
+
+# Split segments 4 and 7 off [Speaker 1] onto a fresh [Speaker 3]
+# (the new label has no name or voiceprint until you name / re-enroll it)
+phoneme speaker split 20260519T143500823 1 3 4 7
+```
+
+A label below 1, a self-merge, a split onto the same label, or a negative index
+is rejected locally (exit 1) before any request is sent. An unknown segment
+index, or a `merge from` / `split` index that doesn't currently carry the named
+label, errors with no partial write.
 
 ### 🔎 `phoneme search <QUERY>`
 

@@ -220,6 +220,10 @@ fn is_retry_safe(req: &Request) -> bool {
         | SkipCurrentStage
         | SetPreviewSource { .. }
         | SetSpeakerName { .. }
+        // In-recording speaker correction (U1) — mutate segments + prose markers.
+        | ReassignSegmentSpeaker { .. }
+        | MergeSpeakers { .. }
+        | SplitSpeaker { .. }
         // Queue management.
         | CancelQueued { .. }
         | ReorderQueue { .. }

@@ -602,6 +602,57 @@ pub enum Request {
         name: String,
     },
 
+    // ── In-recording speaker correction (U1) ─────────────────────────────
+    // Fix the diarizer's per-segment speaker assignments. `transcript_segments`
+    // is authoritative (the timeline / Synced views re-derive from it); each op
+    // also rebuilds the prose transcript's `[Speaker N]:` markers in the same
+    // transaction so the detail prose view and rename modal stay consistent.
+    // All three are mutating (not retry-safe) and emit `SpeakerNameUpdated`.
+    /// Reassign one transcript segment to a different speaker label. Ok = `{}`.
+    /// `idx` is the segment's 0-based index (as returned by `GetSegments`);
+    /// `new_label` is the 1-based `[Speaker N]` index — a brand-new label simply
+    /// starts existing (no name/voiceprint). An unknown `idx`, or a label below
+    /// 1, errors with no write. GUI segment speaker-picker (NV follow-up).
+    ReassignSegmentSpeaker {
+        /// The recording whose segment to reassign.
+        id: RecordingId,
+        /// 0-based segment index (the `GetSegments` array order).
+        idx: i64,
+        /// The 1-based `[Speaker N]` label to assign it to.
+        new_label: i64,
+    },
+    /// Merge two speakers in a recording: every `from_label` segment becomes
+    /// `into_label`, then `from_label` ceases to exist. Ok = `{}`. `into` keeps
+    /// its name (adopts `from`'s only when `into` is unnamed); `from`'s captured
+    /// voiceprint is dropped (the centroid is per-label — a re-transcribe
+    /// re-captures the merged label), and any affected named voice is recomputed.
+    /// Labels must be 1 or greater and differ; a `from` carried by no segment
+    /// errors with no write. GUI merge-speakers action (NV follow-up).
+    MergeSpeakers {
+        /// The recording whose speakers to merge.
+        id: RecordingId,
+        /// The 1-based label that ceases to exist.
+        from_label: i64,
+        /// The 1-based label that absorbs `from`'s segments.
+        into_label: i64,
+    },
+    /// Split some of a speaker's segments off onto a fresh label. Ok = `{}`. The
+    /// listed `segment_idxs` move from `label` to `new_label` (which starts with
+    /// no name/voiceprint); every other segment of `label` stays. Labels must be
+    /// 1 or greater and differ, the idx list non-empty; any idx that is unknown
+    /// or not currently `label` aborts the whole op with no write. GUI
+    /// split-speaker action (NV follow-up).
+    SplitSpeaker {
+        /// The recording whose speaker to split.
+        id: RecordingId,
+        /// The 1-based source label to split segments off of.
+        label: i64,
+        /// The 0-based segment indices to move onto `new_label`.
+        segment_idxs: Vec<i64>,
+        /// The 1-based fresh label to assign the listed segments.
+        new_label: i64,
+    },
+
     // ── Named-speaker recognition (#9) ───────────────────────────────────
     /// On-demand named-speaker recognition for a recording: the still-unnamed
     /// diarized speakers whose voiceprints match a known voice. Ok = JSON array

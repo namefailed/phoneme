@@ -3225,6 +3225,383 @@ impl Catalog {
             .collect()
     }
 
+    // ── In-recording speaker correction (U1) ───────────────────────────────
+    //
+    // Let the user fix the diarizer's per-segment speaker assignments after the
+    // fact: reassign one segment, merge two speakers into one, or split some
+    // segments off into a fresh speaker. `transcript_segments.speaker` is the
+    // authoritative store (the timeline / Synced views re-derive from it). The
+    // prose `transcript` text's `[Speaker N]:` markers are a SEPARATE display
+    // source (the detail prose view and the rename modal read them), so every
+    // op that changes which segment belongs to which speaker also rebuilds those
+    // markers from the updated segments in the SAME transaction — otherwise the
+    // prose view would disagree with the timeline. Labels are the 1-based
+    // integer `[Speaker N]` index that also keys `speaker_names` /
+    // `speaker_voiceprints`; in `transcript_segments`/`transcript_words` they are
+    // stored as that integer's text form ("1", "2", …).
+
+    /// Reassign one segment to a different speaker label.
+    ///
+    /// Sets `transcript_segments[idx].speaker` to `new_label` (and the matching
+    /// `transcript_words` rows, so the word layer agrees), then rebuilds the
+    /// prose transcript's `[Speaker N]:` markers from the updated segments. A
+    /// brand-new `new_label` simply starts existing — no name or voiceprint is
+    /// created for it. Errors with [`Error::NotFound`](crate::error::Error) if no
+    /// segment has that `idx` (no write happens). `new_label` must be ≥ 1.
+    pub async fn reassign_segment(
+        &self,
+        recording_id: &RecordingId,
+        idx: i64,
+        new_label: i64,
+    ) -> Result<()> {
+        if new_label < 1 {
+            return Err(crate::error::Error::Internal(format!(
+                "invalid speaker label {new_label} (must be >= 1)"
+            )));
+        }
+        let mut tx = self.pool.begin().await?;
+        let label_text = new_label.to_string();
+        // Match the segment by idx; capture its span so the word layer can be
+        // repointed to the same speaker over the same time window.
+        let span = sqlx::query(
+            "SELECT start_ms, end_ms FROM transcript_segments WHERE recording_id = ? AND idx = ?",
+        )
+        .bind(recording_id.as_str())
+        .bind(idx)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(span) = span else {
+            return Err(crate::error::Error::NotFound {
+                id: format!("segment {idx} of recording {}", recording_id.as_str()),
+            });
+        };
+        let (start_ms, end_ms): (i64, i64) =
+            (span.try_get("start_ms")?, span.try_get("end_ms")?);
+        sqlx::query(
+            "UPDATE transcript_segments SET speaker = ? WHERE recording_id = ? AND idx = ?",
+        )
+        .bind(&label_text)
+        .bind(recording_id.as_str())
+        .bind(idx)
+        .execute(&mut *tx)
+        .await?;
+        // Keep the per-word layer in step: words inside the segment's span get
+        // the same new label. Words carry no idx tie to a segment, so the span
+        // is the join (the diarizer builds both from one attribution, so a
+        // word's span lies within its segment's).
+        sqlx::query(
+            "UPDATE transcript_words SET speaker = ? \
+             WHERE recording_id = ? AND start_ms >= ? AND start_ms < ?",
+        )
+        .bind(&label_text)
+        .bind(recording_id.as_str())
+        .bind(start_ms)
+        .bind(end_ms)
+        .execute(&mut *tx)
+        .await?;
+        Self::rebuild_transcript_markers_tx(&mut tx, recording_id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Merge `from_label` into `into_label`: every segment (and word) of `from`
+    /// becomes `into`, the `from` label ceases to exist.
+    ///
+    /// Consistency, all in one transaction:
+    /// - **Segments / words**: repoint `speaker = from` → `into`.
+    /// - **Names**: keep `into`'s name; if `into` has none, adopt `from`'s. The
+    ///   now-defunct `from` name row is deleted either way.
+    /// - **Voiceprints**: the captured centroid is *per recording-label*, so a
+    ///   merged speaker's two captures can't be averaged into one meaningful
+    ///   centroid here (we'd need the raw frames). The simplest correct choice is
+    ///   to **drop `from`'s capture row** (and recompute its formerly-linked named
+    ///   voice so the library no longer counts it); `into` keeps its own capture.
+    ///   A re-transcribe re-captures a fresh, correct centroid for the merged
+    ///   label. This favours a clean library over a blended centroid built from
+    ///   the wrong inputs.
+    ///
+    /// Errors with [`Error::NotFound`](crate::error::Error) when no segment
+    /// carries `from_label` (nothing to merge → no write). `from`/`into` must be
+    /// ≥ 1 and differ.
+    pub async fn merge_speakers(
+        &self,
+        recording_id: &RecordingId,
+        from_label: i64,
+        into_label: i64,
+    ) -> Result<()> {
+        if from_label < 1 || into_label < 1 {
+            return Err(crate::error::Error::Internal(format!(
+                "invalid speaker labels (from={from_label}, into={into_label}; must be >= 1)"
+            )));
+        }
+        if from_label == into_label {
+            return Err(crate::error::Error::Internal(
+                "cannot merge a speaker into itself".into(),
+            ));
+        }
+        let rid = recording_id.as_str();
+        let from_text = from_label.to_string();
+        let into_text = into_label.to_string();
+
+        // The named voice `from`'s capture was enrolled under (if any) must be
+        // recomputed AFTER its row is gone, so it stops counting the dropped
+        // sample. Read it before the transaction's writes.
+        let from_named_voice = self.named_voice_for(rid, from_label).await?;
+
+        let mut tx = self.pool.begin().await?;
+        // Guard: `from` must actually appear, else this is a no-op the caller
+        // should hear about as an error (not a silent success).
+        let from_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM transcript_segments WHERE recording_id = ? AND speaker = ?",
+        )
+        .bind(rid)
+        .bind(&from_text)
+        .fetch_one(&mut *tx)
+        .await?;
+        if from_count == 0 {
+            return Err(crate::error::Error::NotFound {
+                id: format!("speaker {from_label} of recording {rid}"),
+            });
+        }
+        // Segments + words: repoint from → into.
+        sqlx::query(
+            "UPDATE transcript_segments SET speaker = ? WHERE recording_id = ? AND speaker = ?",
+        )
+        .bind(&into_text)
+        .bind(rid)
+        .bind(&from_text)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE transcript_words SET speaker = ? WHERE recording_id = ? AND speaker = ?",
+        )
+        .bind(&into_text)
+        .bind(rid)
+        .bind(&from_text)
+        .execute(&mut *tx)
+        .await?;
+
+        // Names: `into` keeps its own; adopt `from`'s only when `into` is unnamed.
+        let into_named: Option<String> = sqlx::query_scalar(
+            "SELECT name FROM speaker_names WHERE recording_id = ? AND speaker_label = ?",
+        )
+        .bind(rid)
+        .bind(into_label)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let from_named: Option<String> = sqlx::query_scalar(
+            "SELECT name FROM speaker_names WHERE recording_id = ? AND speaker_label = ?",
+        )
+        .bind(rid)
+        .bind(from_label)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if into_named.is_none() {
+            if let Some(name) = from_named {
+                sqlx::query(
+                    "INSERT INTO speaker_names (recording_id, speaker_label, name) \
+                     VALUES (?, ?, ?) \
+                     ON CONFLICT(recording_id, speaker_label) DO UPDATE SET name = excluded.name",
+                )
+                .bind(rid)
+                .bind(into_label)
+                .bind(&name)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        // The `from` name row is now defunct — drop it.
+        sqlx::query("DELETE FROM speaker_names WHERE recording_id = ? AND speaker_label = ?")
+            .bind(rid)
+            .bind(from_label)
+            .execute(&mut *tx)
+            .await?;
+
+        // Voiceprints: drop `from`'s capture (documented choice — see doc above).
+        // `into`'s capture is left untouched.
+        sqlx::query("DELETE FROM speaker_voiceprints WHERE recording_id = ? AND speaker_label = ?")
+            .bind(rid)
+            .bind(from_label)
+            .execute(&mut *tx)
+            .await?;
+        // Any dismissed-suggestion row for the now-gone label is dead weight.
+        sqlx::query(
+            "DELETE FROM dismissed_speaker_suggestions WHERE recording_id = ? AND speaker_label = ?",
+        )
+        .bind(rid)
+        .bind(from_label)
+        .execute(&mut *tx)
+        .await?;
+
+        Self::rebuild_transcript_markers_tx(&mut tx, recording_id).await?;
+        tx.commit().await?;
+
+        // Recompute the library entry `from` fed, now that its sample is gone, so
+        // the cross-recording centroid/count no longer reflect the dropped row.
+        if let Some(nid) = from_named_voice {
+            self.recompute_named_centroid(&nid).await?;
+        }
+        Ok(())
+    }
+
+    /// Split: move `segment_idxs` from `label` onto a fresh `new_label`.
+    ///
+    /// The listed segments (and their words) become `new_label`; every other
+    /// segment of `label` stays put. The new label has no name and no voiceprint
+    /// until the user names / re-enrolls it. The prose markers are rebuilt from
+    /// the updated segments. Errors with [`Error::NotFound`](crate::error::Error)
+    /// if any listed idx is missing or doesn't currently carry `label` (no
+    /// partial write). `label`/`new_label` must be ≥ 1 and differ, and the idx
+    /// list must be non-empty.
+    pub async fn split_speaker(
+        &self,
+        recording_id: &RecordingId,
+        label: i64,
+        segment_idxs: &[i64],
+        new_label: i64,
+    ) -> Result<()> {
+        if label < 1 || new_label < 1 {
+            return Err(crate::error::Error::Internal(format!(
+                "invalid speaker labels (label={label}, new={new_label}; must be >= 1)"
+            )));
+        }
+        if label == new_label {
+            return Err(crate::error::Error::Internal(
+                "split target label must differ from the source".into(),
+            ));
+        }
+        if segment_idxs.is_empty() {
+            return Err(crate::error::Error::Internal(
+                "split requires at least one segment index".into(),
+            ));
+        }
+        let rid = recording_id.as_str();
+        let label_text = label.to_string();
+        let new_text = new_label.to_string();
+
+        let mut tx = self.pool.begin().await?;
+        // Validate every idx first (must exist AND currently belong to `label`),
+        // collecting spans so the word layer can be repointed. A single bad idx
+        // aborts the whole op with no write (the transaction is rolled back).
+        let mut spans: Vec<(i64, i64)> = Vec::with_capacity(segment_idxs.len());
+        for &idx in segment_idxs {
+            let row = sqlx::query(
+                "SELECT start_ms, end_ms, speaker FROM transcript_segments \
+                 WHERE recording_id = ? AND idx = ?",
+            )
+            .bind(rid)
+            .bind(idx)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(row) = row else {
+                return Err(crate::error::Error::NotFound {
+                    id: format!("segment {idx} of recording {rid}"),
+                });
+            };
+            let cur: Option<String> = row.try_get("speaker")?;
+            if cur.as_deref() != Some(label_text.as_str()) {
+                return Err(crate::error::Error::Internal(format!(
+                    "segment {idx} is not currently speaker {label} (it is {})",
+                    cur.as_deref().unwrap_or("unassigned")
+                )));
+            }
+            spans.push((row.try_get("start_ms")?, row.try_get("end_ms")?));
+        }
+        for (&idx, (start_ms, end_ms)) in segment_idxs.iter().zip(&spans) {
+            sqlx::query(
+                "UPDATE transcript_segments SET speaker = ? WHERE recording_id = ? AND idx = ?",
+            )
+            .bind(&new_text)
+            .bind(rid)
+            .bind(idx)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE transcript_words SET speaker = ? \
+                 WHERE recording_id = ? AND start_ms >= ? AND start_ms < ?",
+            )
+            .bind(&new_text)
+            .bind(rid)
+            .bind(*start_ms)
+            .bind(*end_ms)
+            .execute(&mut *tx)
+            .await?;
+        }
+        Self::rebuild_transcript_markers_tx(&mut tx, recording_id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Rebuild the prose `transcript` text's `[Speaker N]:` markers from the
+    /// current `transcript_segments`, inside an open transaction.
+    ///
+    /// The prose view and the rename modal read speaker structure from the stored
+    /// `transcript` text, while the timeline / Synced views re-derive from
+    /// segments — so after a label edit the text must be re-rendered to agree.
+    /// Only diarized transcripts (those that already carry `[Speaker N]:`
+    /// markers) are rebuilt; a plain (un-diarized) transcript has no markers to
+    /// keep consistent and is left untouched. Consecutive same-label segments are
+    /// coalesced into one `[Speaker N]: <text>` turn, turns joined by `\n\n` —
+    /// the same shape the diarizer emits. Segments with no speaker are skipped
+    /// from marker emission (they can't appear in a diarized turn anyway).
+    ///
+    /// The rebuild uses each segment's stored `text` joined with a space, which
+    /// reproduces the diarized turn text for the local/cloud paths that build
+    /// both from one attribution. It deliberately does NOT touch
+    /// `original_transcript`/`clean_transcript` (machine truth is preserved) and
+    /// does NOT set `user_edited` (a label correction is not a transcript hand
+    /// edit).
+    async fn rebuild_transcript_markers_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        recording_id: &RecordingId,
+    ) -> Result<()> {
+        let current: Option<String> = sqlx::query_scalar(
+            "SELECT transcript FROM recordings WHERE id = ?",
+        )
+        .bind(recording_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await?
+        .flatten();
+        let Some(current) = current else {
+            return Ok(()); // No transcript row/text — nothing to keep consistent.
+        };
+        // Only diarized prose carries the markers we own; leave plain text alone.
+        if !current.contains("[Speaker ") {
+            return Ok(());
+        }
+        let rows = sqlx::query(
+            "SELECT text, speaker FROM transcript_segments WHERE recording_id = ? ORDER BY idx",
+        )
+        .bind(recording_id.as_str())
+        .fetch_all(&mut **tx)
+        .await?;
+        let mut rebuilt = String::new();
+        let mut current_label: Option<String> = None;
+        for r in rows {
+            let text: String = r.try_get("text")?;
+            let speaker: Option<String> = r.try_get("speaker")?;
+            let Some(label) = speaker else { continue };
+            if current_label.as_deref() != Some(label.as_str()) {
+                if !rebuilt.is_empty() {
+                    rebuilt.push_str("\n\n");
+                }
+                rebuilt.push_str(&format!("[Speaker {label}]: "));
+                current_label = Some(label);
+            } else {
+                rebuilt.push(' ');
+            }
+            rebuilt.push_str(text.trim());
+        }
+        sqlx::query(
+            "UPDATE recordings SET transcript = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(&rebuilt)
+        .bind(recording_id.as_str())
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
+    }
+
     /// Replace a recording's machine transcript words with a fresh set.
     ///
     /// The word-level twin of [`replace_segments`](Self::replace_segments):
@@ -5248,6 +5625,299 @@ mod tests {
         assert!(
             db.words_for(&r.id).await.unwrap().is_empty(),
             "words must be cascade-deleted with their recording"
+        );
+    }
+
+    // ── In-recording speaker correction (U1) ───────────────────────────────
+
+    /// Read the prose transcript text straight from the row.
+    async fn transcript_text(db: &Catalog, id: &RecordingId) -> Option<String> {
+        sqlx::query_scalar::<_, Option<String>>("SELECT transcript FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_one(&db.pool)
+            .await
+            .unwrap()
+    }
+
+    fn seg(start_ms: i64, end_ms: i64, text: &str, speaker: &str) -> TranscriptSegment {
+        TranscriptSegment {
+            start_ms,
+            end_ms,
+            text: text.into(),
+            speaker: Some(speaker.into()),
+        }
+    }
+
+    /// Seed a two-speaker diarized recording: segments, the matching prose
+    /// transcript, and one word per segment.
+    async fn seed_diarized(db: &Catalog) -> Recording {
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+        let segs = vec![
+            seg(0, 1000, "hello there", "1"),
+            seg(1000, 2000, "hi yourself", "2"),
+            seg(2000, 3000, "how are you", "1"),
+        ];
+        db.replace_segments(&r.id, &segs).await.unwrap();
+        let words = vec![
+            TranscriptWord {
+                start_ms: 0,
+                end_ms: 1000,
+                text: "hello there".into(),
+                leading_space: true,
+                speaker: Some("1".into()),
+                confidence: None,
+            },
+            TranscriptWord {
+                start_ms: 1000,
+                end_ms: 2000,
+                text: "hi yourself".into(),
+                leading_space: true,
+                speaker: Some("2".into()),
+                confidence: None,
+            },
+            TranscriptWord {
+                start_ms: 2000,
+                end_ms: 3000,
+                text: "how are you".into(),
+                leading_space: true,
+                speaker: Some("1".into()),
+                confidence: None,
+            },
+        ];
+        db.replace_words(&r.id, &words).await.unwrap();
+        db.update_transcript(
+            &r.id,
+            "[Speaker 1]: hello there\n\n[Speaker 2]: hi yourself\n\n[Speaker 1]: how are you",
+            "orig",
+            "tiny",
+        )
+        .await
+        .unwrap();
+        r
+    }
+
+    fn labels(segs: &[TranscriptSegment]) -> Vec<Option<&str>> {
+        segs.iter().map(|s| s.speaker.as_deref()).collect()
+    }
+
+    #[tokio::test]
+    async fn reassign_segment_moves_to_existing_and_brand_new_label() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = seed_diarized(&db).await;
+
+        // Move the middle segment (idx 1) from speaker 2 → speaker 1.
+        db.reassign_segment(&r.id, 1, 1).await.unwrap();
+        let segs = db.segments_for(&r.id).await.unwrap();
+        assert_eq!(labels(&segs), vec![Some("1"), Some("1"), Some("1")]);
+        // All three turns now coalesce under one speaker in the prose markers.
+        assert_eq!(
+            transcript_text(&db, &r.id).await.as_deref(),
+            Some("[Speaker 1]: hello there hi yourself how are you"),
+            "consecutive same-label segments coalesce into one turn"
+        );
+        // The word layer for that segment's span followed.
+        let words = db.words_for(&r.id).await.unwrap();
+        assert_eq!(words[1].speaker.as_deref(), Some("1"));
+
+        // Reassign the same segment to a brand-new label 3 — it simply starts.
+        db.reassign_segment(&r.id, 1, 3).await.unwrap();
+        let segs = db.segments_for(&r.id).await.unwrap();
+        assert_eq!(labels(&segs), vec![Some("1"), Some("3"), Some("1")]);
+        assert_eq!(
+            transcript_text(&db, &r.id).await.as_deref(),
+            Some("[Speaker 1]: hello there\n\n[Speaker 3]: hi yourself\n\n[Speaker 1]: how are you"),
+        );
+    }
+
+    #[tokio::test]
+    async fn reassign_segment_unknown_idx_errors_with_no_mutation() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = seed_diarized(&db).await;
+        let before = db.segments_for(&r.id).await.unwrap();
+        let before_text = transcript_text(&db, &r.id).await;
+
+        let err = db.reassign_segment(&r.id, 99, 2).await.unwrap_err();
+        assert!(matches!(err, crate::error::Error::NotFound { .. }));
+        assert_eq!(db.segments_for(&r.id).await.unwrap(), before, "no segment write");
+        assert_eq!(transcript_text(&db, &r.id).await, before_text, "no text write");
+
+        // A label < 1 is rejected before any write too.
+        assert!(db.reassign_segment(&r.id, 0, 0).await.is_err());
+        assert_eq!(db.segments_for(&r.id).await.unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn merge_speakers_repoints_segments_and_keeps_into_name() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = seed_diarized(&db).await;
+        db.set_speaker_name(&r.id, 1, "Ada").await.unwrap();
+        db.set_speaker_name(&r.id, 2, "Bob").await.unwrap();
+
+        // Merge speaker 2 into speaker 1: every 2-segment becomes 1.
+        db.merge_speakers(&r.id, 2, 1).await.unwrap();
+        let segs = db.segments_for(&r.id).await.unwrap();
+        assert_eq!(labels(&segs), vec![Some("1"), Some("1"), Some("1")]);
+        // `into` (1) keeps its name; `from` (2) name row is gone.
+        let names = db.speaker_names_for(&r.id).await.unwrap();
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0].speaker_label, 1);
+        assert_eq!(names[0].name, "Ada", "into keeps its own name");
+        // Prose markers reflect the merge.
+        assert_eq!(
+            transcript_text(&db, &r.id).await.as_deref(),
+            Some("[Speaker 1]: hello there hi yourself how are you"),
+        );
+        // Words followed too.
+        let words = db.words_for(&r.id).await.unwrap();
+        assert!(words.iter().all(|w| w.speaker.as_deref() == Some("1")));
+    }
+
+    #[tokio::test]
+    async fn merge_speakers_into_adopts_froms_name_when_into_unnamed() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = seed_diarized(&db).await;
+        // Only `from` (2) is named; `into` (1) is not.
+        db.set_speaker_name(&r.id, 2, "Bob").await.unwrap();
+
+        db.merge_speakers(&r.id, 2, 1).await.unwrap();
+        let names = db.speaker_names_for(&r.id).await.unwrap();
+        assert_eq!(
+            names,
+            vec![SpeakerName {
+                speaker_label: 1,
+                name: "Bob".into()
+            }],
+            "an unnamed into adopts from's name; the from row is removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_speakers_drops_froms_voiceprint_and_recomputes_library() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = seed_diarized(&db).await;
+        // Both labels captured and enrolled under DIFFERENT named voices.
+        db.save_speaker_voiceprint(r.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(r.id.as_str(), 2, &[0.0, 1.0, 0.0], 0)
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(r.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let bob = db.enroll_speaker(r.id.as_str(), 2, "Bob").await.unwrap().unwrap();
+        assert_eq!(named_voice_samples(&db, &bob).await, 1);
+
+        // Merge 2 → 1: from's (2) capture is dropped; Bob's library entry
+        // recomputes to zero linked samples.
+        db.merge_speakers(&r.id, 2, 1).await.unwrap();
+        assert!(
+            db.speaker_voiceprint(r.id.as_str(), 2).await.unwrap().is_none(),
+            "from's capture row is deleted"
+        );
+        assert!(
+            db.speaker_voiceprint(r.id.as_str(), 1).await.unwrap().is_some(),
+            "into's capture is untouched"
+        );
+        assert_eq!(
+            named_voice_samples(&db, &bob).await,
+            0,
+            "Bob no longer counts the dropped capture"
+        );
+        assert_eq!(named_voice_samples(&db, &ada).await, 1, "Ada untouched");
+    }
+
+    #[tokio::test]
+    async fn merge_speakers_unknown_from_errors_with_no_mutation() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = seed_diarized(&db).await;
+        let before = db.segments_for(&r.id).await.unwrap();
+
+        // No segment carries label 5.
+        let err = db.merge_speakers(&r.id, 5, 1).await.unwrap_err();
+        assert!(matches!(err, crate::error::Error::NotFound { .. }));
+        assert_eq!(db.segments_for(&r.id).await.unwrap(), before);
+
+        // Self-merge and bad labels are rejected.
+        assert!(db.merge_speakers(&r.id, 1, 1).await.is_err());
+        assert!(db.merge_speakers(&r.id, 0, 1).await.is_err());
+        assert_eq!(db.segments_for(&r.id).await.unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn split_speaker_moves_listed_segments_only() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = seed_diarized(&db).await;
+        // Speaker 1 owns segments 0 and 2. Split segment 2 off onto a fresh 3.
+        db.split_speaker(&r.id, 1, &[2], 3).await.unwrap();
+        let segs = db.segments_for(&r.id).await.unwrap();
+        assert_eq!(labels(&segs), vec![Some("1"), Some("2"), Some("3")]);
+        assert_eq!(
+            transcript_text(&db, &r.id).await.as_deref(),
+            Some("[Speaker 1]: hello there\n\n[Speaker 2]: hi yourself\n\n[Speaker 3]: how are you"),
+        );
+        // The new label has no name and no voiceprint until enrolled.
+        assert!(db
+            .speaker_names_for(&r.id)
+            .await
+            .unwrap()
+            .iter()
+            .all(|n| n.speaker_label != 3));
+        assert!(db.speaker_voiceprint(r.id.as_str(), 3).await.unwrap().is_none());
+        // The word in segment 2's span followed.
+        let words = db.words_for(&r.id).await.unwrap();
+        assert_eq!(words[2].speaker.as_deref(), Some("3"));
+    }
+
+    #[tokio::test]
+    async fn split_speaker_rejects_idx_not_owned_by_label_with_no_mutation() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = seed_diarized(&db).await;
+        let before = db.segments_for(&r.id).await.unwrap();
+
+        // Segment 1 belongs to speaker 2, not 1 — the whole op must abort.
+        let err = db.split_speaker(&r.id, 1, &[0, 1], 3).await.unwrap_err();
+        assert!(matches!(err, crate::error::Error::Internal(_)));
+        assert_eq!(
+            db.segments_for(&r.id).await.unwrap(),
+            before,
+            "one bad idx rolls back the whole split (segment 0 not moved)"
+        );
+
+        // Unknown idx, empty list, self-target, bad labels all error cleanly.
+        assert!(matches!(
+            db.split_speaker(&r.id, 1, &[99], 3).await.unwrap_err(),
+            crate::error::Error::NotFound { .. }
+        ));
+        assert!(db.split_speaker(&r.id, 1, &[], 3).await.is_err());
+        assert!(db.split_speaker(&r.id, 1, &[0], 1).await.is_err());
+        assert_eq!(db.segments_for(&r.id).await.unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn speaker_edit_leaves_plain_transcript_markers_untouched() {
+        // A non-diarized transcript has no `[Speaker N]` markers to keep
+        // consistent — the rebuild must leave the prose text alone (segments
+        // still update, driving the timeline views).
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+        db.replace_segments(&r.id, &[seg(0, 1000, "just one voice", "1")])
+            .await
+            .unwrap();
+        db.update_transcript(&r.id, "just one voice", "orig", "tiny")
+            .await
+            .unwrap();
+
+        db.reassign_segment(&r.id, 0, 2).await.unwrap();
+        assert_eq!(
+            transcript_text(&db, &r.id).await.as_deref(),
+            Some("just one voice"),
+            "plain prose is never marker-rewritten"
+        );
+        assert_eq!(
+            db.segments_for(&r.id).await.unwrap()[0].speaker.as_deref(),
+            Some("2"),
+            "the segment label still updates"
         );
     }
 
