@@ -139,6 +139,78 @@ async fn transcript_versions_round_trip_and_replace() {
 }
 
 #[tokio::test]
+async fn timing_variants_are_independent() {
+    use phoneme_core::types::{TranscriptSegment, TranscriptWord};
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+
+    let seg = |t: &str| TranscriptSegment {
+        start_ms: 0,
+        end_ms: 1000,
+        text: t.into(),
+        speaker: None,
+    };
+    // raw via the back-compat wrapper, cleaned via the variant method.
+    catalog
+        .replace_segments(&rec.id, &[seg("um hello")])
+        .await
+        .unwrap();
+    catalog
+        .replace_segments_variant(&rec.id, "cleaned", &[seg("Hello.")])
+        .await
+        .unwrap();
+
+    // Default reads are the raw machine-truth variant (unchanged behavior).
+    assert_eq!(
+        catalog.segments_for(&rec.id).await.unwrap()[0].text,
+        "um hello"
+    );
+    assert_eq!(
+        catalog
+            .segments_for_variant(&rec.id, "cleaned")
+            .await
+            .unwrap()[0]
+            .text,
+        "Hello."
+    );
+    // Replacing raw leaves cleaned intact.
+    catalog
+        .replace_segments(&rec.id, &[seg("redo")])
+        .await
+        .unwrap();
+    assert_eq!(catalog.segments_for(&rec.id).await.unwrap()[0].text, "redo");
+    assert_eq!(
+        catalog
+            .segments_for_variant(&rec.id, "cleaned")
+            .await
+            .unwrap()[0]
+            .text,
+        "Hello."
+    );
+
+    // Words: same independence.
+    let word = |t: &str| TranscriptWord {
+        start_ms: 0,
+        end_ms: 500,
+        text: t.into(),
+        leading_space: false,
+        speaker: None,
+        confidence: None,
+    };
+    catalog.replace_words(&rec.id, &[word("um")]).await.unwrap();
+    catalog
+        .replace_words_variant(&rec.id, "cleaned", &[word("Hello")])
+        .await
+        .unwrap();
+    assert_eq!(catalog.words_for(&rec.id).await.unwrap()[0].text, "um");
+    assert_eq!(
+        catalog.words_for_variant(&rec.id, "cleaned").await.unwrap()[0].text,
+        "Hello"
+    );
+}
+
+#[tokio::test]
 async fn get_missing_returns_none() {
     let (_dir, catalog) = fresh_catalog().await;
     let id = RecordingId::new();

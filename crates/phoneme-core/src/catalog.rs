@@ -199,6 +199,27 @@ pub struct TranscriptVersion {
     pub text: String,
 }
 
+/// Table holding a recording's segment timeline for a timing variant (TL-CONSISTENCY):
+/// `"cleaned"` → the post-cleanup re-aligned `transcript_segments_clean`, anything
+/// else → the raw machine-truth `transcript_segments`. The returned name is a fixed
+/// literal (never user input), so it is safe to interpolate into a query string.
+fn segments_table(variant: &str) -> &'static str {
+    if variant == "cleaned" {
+        "transcript_segments_clean"
+    } else {
+        "transcript_segments"
+    }
+}
+
+/// Word-level twin of [`segments_table`].
+fn words_table(variant: &str) -> &'static str {
+    if variant == "cleaned" {
+        "transcript_words_clean"
+    } else {
+        "transcript_words"
+    }
+}
+
 /// Case-insensitive literal find-replace over `haystack`: every run that equals
 /// `needle` ignoring ASCII/Unicode case is replaced with `replacement` verbatim.
 /// Returns `(count, new_string)`. Matching is by lowercased comparison; the
@@ -3493,16 +3514,38 @@ impl Catalog {
         recording_id: &RecordingId,
         segments: &[TranscriptSegment],
     ) -> Result<()> {
+        self.replace_segments_variant(recording_id, "raw", segments)
+            .await
+    }
+
+    /// Replace one timing variant of a recording's segments, leaving the other
+    /// variant intact (TL-CONSISTENCY). `"raw"` is the machine-truth timeline (what
+    /// [`replace_segments`](Self::replace_segments) writes); `"cleaned"` is the
+    /// timeline re-aligned to the post-cleanup transcript. Same
+    /// replace-on-(re)transcribe semantics, scoped to `variant`.
+    ///
+    /// NOTE: the U1 speaker-correction ops (`reassign_segment`/merge/split) edit
+    /// `transcript_segments` by `(recording_id, idx)` without a variant filter;
+    /// before `"cleaned"` rows exist that is harmless (only `"raw"` rows are
+    /// present), but those ops must be scoped to `"raw"` once the cleaned re-flow
+    /// is wired.
+    pub async fn replace_segments_variant(
+        &self,
+        recording_id: &RecordingId,
+        variant: &str,
+        segments: &[TranscriptSegment],
+    ) -> Result<()> {
+        let table = segments_table(variant);
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM transcript_segments WHERE recording_id = ?")
+        sqlx::query(&format!("DELETE FROM {table} WHERE recording_id = ?"))
             .bind(recording_id.as_str())
             .execute(&mut *tx)
             .await?;
         for (idx, seg) in segments.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO transcript_segments (recording_id, idx, start_ms, end_ms, text, speaker) \
-                 VALUES (?, ?, ?, ?, ?, ?)",
-            )
+            sqlx::query(&format!(
+                "INSERT INTO {table} (recording_id, idx, start_ms, end_ms, text, speaker) \
+                 VALUES (?, ?, ?, ?, ?, ?)"
+            ))
             .bind(recording_id.as_str())
             .bind(idx as i64)
             .bind(seg.start_ms)
@@ -3521,10 +3564,22 @@ impl Catalog {
     /// timing data — callers must treat "no segments" as a normal state, not
     /// an error.
     pub async fn segments_for(&self, recording_id: &RecordingId) -> Result<Vec<TranscriptSegment>> {
-        let rows = sqlx::query(
-            "SELECT start_ms, end_ms, text, speaker FROM transcript_segments \
-             WHERE recording_id = ? ORDER BY idx",
-        )
+        self.segments_for_variant(recording_id, "raw").await
+    }
+
+    /// A recording's segments for one timing `variant` (`"raw"` or `"cleaned"`),
+    /// in timeline order. Empty when that variant has no rows (a recording with no
+    /// cleanup has no `"cleaned"` timeline) — a normal state, not an error.
+    pub async fn segments_for_variant(
+        &self,
+        recording_id: &RecordingId,
+        variant: &str,
+    ) -> Result<Vec<TranscriptSegment>> {
+        let table = segments_table(variant);
+        let rows = sqlx::query(&format!(
+            "SELECT start_ms, end_ms, text, speaker FROM {table} \
+             WHERE recording_id = ? ORDER BY idx"
+        ))
         .bind(recording_id.as_str())
         .fetch_all(&self.pool)
         .await?;
@@ -4017,16 +4072,30 @@ impl Catalog {
         recording_id: &RecordingId,
         words: &[TranscriptWord],
     ) -> Result<()> {
+        self.replace_words_variant(recording_id, "raw", words).await
+    }
+
+    /// Replace one timing variant of a recording's words (`"raw"` machine-truth or
+    /// `"cleaned"`, re-aligned to the post-cleanup text), leaving the other intact
+    /// (TL-CONSISTENCY). The word-level twin of
+    /// [`replace_segments_variant`](Self::replace_segments_variant).
+    pub async fn replace_words_variant(
+        &self,
+        recording_id: &RecordingId,
+        variant: &str,
+        words: &[TranscriptWord],
+    ) -> Result<()> {
+        let table = words_table(variant);
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM transcript_words WHERE recording_id = ?")
+        sqlx::query(&format!("DELETE FROM {table} WHERE recording_id = ?"))
             .bind(recording_id.as_str())
             .execute(&mut *tx)
             .await?;
         for (idx, word) in words.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO transcript_words (recording_id, idx, start_ms, end_ms, text, speaker, confidence, leading_space) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            )
+            sqlx::query(&format!(
+                "INSERT INTO {table} (recording_id, idx, start_ms, end_ms, text, speaker, confidence, leading_space) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            ))
             .bind(recording_id.as_str())
             .bind(idx as i64)
             .bind(word.start_ms)
@@ -4046,10 +4115,21 @@ impl Catalog {
     /// recording predates word capture or its provider returned no per-word
     /// timing — callers must treat "no words" as a normal state, not an error.
     pub async fn words_for(&self, recording_id: &RecordingId) -> Result<Vec<TranscriptWord>> {
-        let rows = sqlx::query(
-            "SELECT start_ms, end_ms, text, speaker, confidence, leading_space FROM transcript_words \
-             WHERE recording_id = ? ORDER BY idx",
-        )
+        self.words_for_variant(recording_id, "raw").await
+    }
+
+    /// A recording's words for one timing `variant` (`"raw"` or `"cleaned"`), in
+    /// timeline order. Empty when that variant has no rows — a normal state.
+    pub async fn words_for_variant(
+        &self,
+        recording_id: &RecordingId,
+        variant: &str,
+    ) -> Result<Vec<TranscriptWord>> {
+        let table = words_table(variant);
+        let rows = sqlx::query(&format!(
+            "SELECT start_ms, end_ms, text, speaker, confidence, leading_space FROM {table} \
+             WHERE recording_id = ? ORDER BY idx"
+        ))
         .bind(recording_id.as_str())
         .fetch_all(&self.pool)
         .await?;
