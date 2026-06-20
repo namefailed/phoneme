@@ -19,6 +19,7 @@ use phoneme_core::Config;
 use phoneme_ipc::Request;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::time::{Duration, Instant};
 
 /// Extensions the daemon can decode. Kept in sync with
 /// `phoneme_audio::SUPPORTED_EXTENSIONS`; duplicated here so the CLI doesn't
@@ -88,6 +89,15 @@ fn download_audio(url: &str, format: AudioFormat) -> Result<(tempfile::TempDir, 
         .arg("--audio-format")
         .arg(format.as_str())
         .arg("--no-playlist") // a playlist URL imports just the one video
+        // Bound the download so a stall or a hostile URL can't wedge the CLI or
+        // fill the disk: abort a stalled connection, refuse an oversize file before
+        // it lands (the daemon's import cap is 2 GiB), and --no-part keeps a single
+        // clean output file so the post-download pick stays deterministic.
+        .arg("--socket-timeout")
+        .arg("30")
+        .arg("--max-filesize")
+        .arg("2G")
+        .arg("--no-part")
         .arg("-o")
         .arg(&out_template);
     // Give YouTube's extractor a JS runtime when one is installed, otherwise
@@ -95,10 +105,12 @@ fn download_audio(url: &str, format: AudioFormat) -> Result<(tempfile::TempDir, 
     if let Some(rt) = js_runtime() {
         cmd.arg("--js-runtimes").arg(rt);
     }
-    let status = cmd
-        .arg(url)
-        .status()
-        .map_err(|e| format!("failed to run yt-dlp: {e}"))?;
+    // `--` ends option parsing so a URL can never be mistaken for a yt-dlp flag
+    // (defense-in-depth; `is_url` already requires an http(s) prefix).
+    cmd.arg("--").arg(url);
+    // Wall-clock backstop: even past the per-socket timeout, a hung yt-dlp (or one
+    // blocked on a prompt) can't hang the CLI forever — kill it after 15 min.
+    let status = run_with_timeout(cmd, Duration::from_secs(900))?;
     if !status.success() {
         return Err(format!("yt-dlp failed ({status})"));
     }
@@ -112,14 +124,47 @@ fn download_audio(url: &str, format: AudioFormat) -> Result<(tempfile::TempDir, 
     Ok((dir, file))
 }
 
+/// Run `cmd` to completion or kill it after `timeout`. `std::process` has no
+/// built-in timeout, so spawn and poll `try_wait` — a hung child (stalled network
+/// past the socket timeout, or one blocked on a prompt) is killed rather than
+/// hanging the CLI forever.
+fn run_with_timeout(
+    mut cmd: Command,
+    timeout: Duration,
+) -> Result<std::process::ExitStatus, String> {
+    let mut child = cmd.spawn().map_err(|e| format!("failed to run yt-dlp: {e}"))?;
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "yt-dlp timed out after {}s — aborted",
+                        timeout.as_secs()
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            Err(e) => return Err(format!("failed to wait on yt-dlp: {e}")),
+        }
+    }
+}
+
 pub async fn run(args: ImportArgs, cfg: &Config) -> ExitCode {
     // For a URL, download first; hold the temp dir alive for the whole function
     // so the file survives until the daemon has decoded it (the import call
     // blocks until decode completes), then it's cleaned up on return.
+    // Trim once: `is_url` trims internally for its prefix test, but the raw value
+    // was being handed to yt-dlp / used as the path — a "  https://… " input then
+    // failed confusingly. Use the trimmed value everywhere.
+    let input = args.file.trim();
     let _tmp: Option<tempfile::TempDir>;
-    let local_path: PathBuf = if is_url(&args.file) {
-        eprintln!("downloading audio from {} …", args.file);
-        match download_audio(&args.file, args.format) {
+    let local_path: PathBuf = if is_url(input) {
+        eprintln!("downloading audio from {input} …");
+        match download_audio(input, args.format) {
             Ok((dir, file)) => {
                 _tmp = Some(dir);
                 file
@@ -131,7 +176,7 @@ pub async fn run(args: ImportArgs, cfg: &Config) -> ExitCode {
         }
     } else {
         _tmp = None;
-        PathBuf::from(&args.file)
+        PathBuf::from(input)
     };
 
     if !local_path.exists() {

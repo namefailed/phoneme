@@ -26,9 +26,11 @@ export function closeModalOverlay(overlay: HTMLElement, done: () => void): void 
 
   overlay.classList.add("modal-overlay--closing");
   let settled = false;
+  let safety = 0;
   const finish = () => {
     if (settled) return;
     settled = true;
+    if (safety) clearTimeout(safety);
     overlay.removeEventListener("animationend", onEnd);
     done();
   };
@@ -40,8 +42,9 @@ export function closeModalOverlay(overlay: HTMLElement, done: () => void): void 
   };
   overlay.addEventListener("animationend", onEnd);
   // Safety net: if animationend never fires (node detached early, a display
-  // swap, etc.) still clean up shortly after the expected duration.
-  window.setTimeout(finish, ms + 120);
+  // swap, etc.) still clean up shortly after the expected duration. Cleared in
+  // finish() when animationend wins, so no stray timer dangles.
+  safety = window.setTimeout(finish, ms + 120);
 }
 
 /**
