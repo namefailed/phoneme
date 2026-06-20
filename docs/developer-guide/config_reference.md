@@ -312,6 +312,7 @@ Reusable AI "moves" — the building blocks the recording pipeline and Custom Ho
 | `builtin` | `false` | Seeded by Phoneme (editable; "Reset to default" restores the seed) vs. user-created |
 | `kind` | `transform` | `transform` (LLM step that **rewrites** the running transcript text, feeding the next step), `filler_removal` (a **deterministic, non-LLM** rewrite — strips filler words per `[filler]`; the `llm` half is ignored), `enrichment` (LLM step that writes a named field — see `target`), or `hook` (a shell command / webhook) |
 | `target` | `""` | For `enrichment` only: the field to write — `title` \| `summary` \| `tags` \| `custom:<key>`. Ignored for other kinds. |
+| `input` | `previous` | For a `transform` step: which transcript it reads — `previous` (the running text, so chained transforms **compound**, each refining the last toward a "perfect" transcript) or `base` (the raw transcription, an independent pass off the original, ignoring earlier steps). Ignored for non-transform kinds. |
 | `llm.provider` | `""` | For `transform` / `enrichment`: provider id (`ollama` / `openai` / `groq` / `anthropic`); empty inherits the default `[llm_post_process]` connection |
 | `llm.model` | `""` | Empty inherits the provider's configured default |
 | `llm.prompt` | `""` | The step's system/instruction prompt |

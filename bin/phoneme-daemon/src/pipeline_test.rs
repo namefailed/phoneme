@@ -1962,6 +1962,7 @@ fn resolve_recipe_includes_hook_steps_and_skips_empty_ones() {
         description: String::new(),
         builtin: false,
         kind: PlaybookKind::Hook,
+        input: Default::default(),
         llm: Default::default(),
         target: String::new(),
         hook: PlaybookHook::default(),

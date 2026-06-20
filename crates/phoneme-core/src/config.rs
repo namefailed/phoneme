@@ -1898,6 +1898,21 @@ pub enum PlaybookKind {
     FillerRemoval,
 }
 
+/// Which transcript a Transform step reads as its input (compounding, PB-COMPOUND):
+/// the `Previous` running text (the default — steps chain, each refining the last,
+/// toward a "perfect" transcript) or the immutable `Base` raw transcription (an
+/// independent pass off the original, ignoring earlier steps). A flat discriminant
+/// so it round-trips through TOML and stays forward-compatible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StepInput {
+    /// Read the running transcript — this step's output feeds the next (chaining).
+    #[default]
+    Previous,
+    /// Read the original raw transcription, ignoring earlier steps' output.
+    Base,
+}
+
 /// The LLM half of a Playbook entry (used when `kind` is `Transform`/`Enrichment`).
 /// A leaner sibling of [`LlmPostProcessConfig`]: the API key is resolved from the
 /// matching provider section at run time, so it is never stored per entry.
@@ -2068,6 +2083,11 @@ pub struct PlaybookEntry {
     /// What this entry does.
     #[serde(default)]
     pub kind: PlaybookKind,
+    /// For a `Transform` step: which transcript it reads — the previous step's
+    /// output (default, chaining) or the raw base transcription (PB-COMPOUND).
+    /// Ignored for non-Transform kinds.
+    #[serde(default)]
+    pub input: StepInput,
     /// LLM config (used for `Transform`/`Enrichment`).
     #[serde(default)]
     pub llm: PlaybookLlm,
@@ -2145,6 +2165,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Tidy stutters, repetitions, and phonetic slips while keeping the original tone.".into(),
             builtin: true,
             kind: PlaybookKind::Transform,
+            input: StepInput::Previous,
             llm: llm("Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone."),
             target: String::new(),
             hook: PlaybookHook::default(),
@@ -2155,6 +2176,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Generate a short title for the recording.".into(),
             builtin: true,
             kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
             llm: llm("You title voice-note transcripts. Reply with ONLY a short title for the transcript: at most 8 words, plain text, no quotes, no trailing punctuation, no preamble."),
             target: "title".into(),
             hook: PlaybookHook::default(),
@@ -2165,6 +2187,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Summarize the transcript into a few clear bullet points.".into(),
             builtin: true,
             kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
             llm: llm("Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble."),
             target: "summary".into(),
             hook: PlaybookHook::default(),
@@ -2175,6 +2198,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Suggest tags for the recording (you approve before they apply).".into(),
             builtin: true,
             kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
             llm: llm("Suggest a few short topical tags for this transcript. Reply with ONLY a comma-separated list of lowercase tags, no preamble."),
             target: "tags".into(),
             hook: PlaybookHook::default(),
@@ -2188,6 +2212,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Deterministically strip filler words (\"um\", \"uh\", …) — no AI, instant. Tune the lists under [filler].".into(),
             builtin: false,
             kind: PlaybookKind::FillerRemoval,
+            input: StepInput::Previous,
             // FillerRemoval reads `[filler]`, not the LLM half — kept default.
             llm: PlaybookLlm::default(),
             target: String::new(),
@@ -2199,6 +2224,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Reshape a rough dictation into a clean, well-structured LLM prompt.".into(),
             builtin: false,
             kind: PlaybookKind::Transform,
+            input: StepInput::Previous,
             llm: llm("Rewrite the following dictation into a single clear, well-structured prompt for an AI assistant. Keep the intent; fix grammar; output only the prompt."),
             target: String::new(),
             hook: PlaybookHook::default(),
@@ -2209,6 +2235,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Pull any action items out of the transcript into a custom field.".into(),
             builtin: false,
             kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
             llm: llm("List any action items from this transcript as a short bulleted list. If there are none, reply 'None'."),
             target: "custom:action_items".into(),
             hook: PlaybookHook::default(),
@@ -2219,6 +2246,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "A Hook step (no AI): append the transcript to a daily journal file.".into(),
             builtin: false,
             kind: PlaybookKind::Hook,
+            input: StepInput::Previous,
             llm: PlaybookLlm::default(),
             target: String::new(),
             hook: PlaybookHook {
@@ -2232,6 +2260,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Rewrite the transcript in a polished, professional tone.".into(),
             builtin: false,
             kind: PlaybookKind::Transform,
+            input: StepInput::Previous,
             llm: llm("Rewrite the following transcript in a clear, professional tone. Keep all meaning; fix grammar and remove filler. Output only the rewritten text."),
             target: String::new(),
             hook: PlaybookHook::default(),
@@ -2242,6 +2271,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Condense the transcript into concise bullet points.".into(),
             builtin: false,
             kind: PlaybookKind::Transform,
+            input: StepInput::Previous,
             llm: llm("Condense the following transcript into concise, well-organized bullet points capturing every key point. Output only the bullets."),
             target: String::new(),
             hook: PlaybookHook::default(),
@@ -2252,6 +2282,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Tag the overall sentiment of the transcript into a custom field.".into(),
             builtin: false,
             kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
             llm: llm("Classify the overall sentiment of this transcript as exactly one word: Positive, Neutral, or Negative. Reply with only that word."),
             target: "custom:sentiment".into(),
             hook: PlaybookHook::default(),
@@ -2262,6 +2293,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "Extract the key topics from the transcript into a custom field.".into(),
             builtin: false,
             kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
             llm: llm("Extract the 3-7 most important topics or keywords from this transcript. Reply with only a comma-separated list, lowercase."),
             target: "custom:keywords".into(),
             hook: PlaybookHook::default(),
@@ -2272,6 +2304,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             description: "A keyword-triggered Hook: when the transcript contains \"Todo:\", append it to a to-do file.".into(),
             builtin: false,
             kind: PlaybookKind::Hook,
+            input: StepInput::Previous,
             llm: PlaybookLlm::default(),
             target: String::new(),
             hook: PlaybookHook {
@@ -2972,6 +3005,7 @@ impl Config {
                 description: description.to_string(),
                 builtin: false,
                 kind: PlaybookKind::Hook,
+                input: StepInput::Previous,
                 llm: PlaybookLlm::default(),
                 target: String::new(),
                 hook,

@@ -1330,6 +1330,9 @@ enum ResolvedStep {
     Transform {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
+        /// Which transcript this step reads (PB-COMPOUND): the running text
+        /// (default, chaining) or the raw base transcription.
+        input: phoneme_core::config::StepInput,
     },
     /// A DETERMINISTIC transform (`PlaybookKind::FillerRemoval`): rewrite the
     /// running transcript by stripping filler words in pure Rust — no provider,
@@ -1520,6 +1523,7 @@ fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
             PlaybookKind::Transform => steps.push(ResolvedStep::Transform {
                 llm_cfg: entry_llm_config(cfg, &entry.llm),
                 prompt: entry.llm.prompt.clone(),
+                input: entry.input,
             }),
             PlaybookKind::FillerRemoval => steps.push(ResolvedStep::FillerRemoval {
                 cfg: cfg.filler.clone(),
@@ -1594,6 +1598,10 @@ async fn run_transform_steps(
     Canceled,
 > {
     use phoneme_core::catalog::TranscriptVersion;
+    use phoneme_core::config::StepInput;
+    // The immutable raw transcription, for steps configured to read `Base` rather
+    // than the running (chained) text (PB-COMPOUND per-step input).
+    let base = transcript.clone();
     let mut transcript = transcript;
     let mut cleanup_model: Option<String> = None;
     // Record each step's output (PB-COMPOUND). The caller prepends the raw ASR as
@@ -1615,8 +1623,20 @@ async fn run_transform_steps(
             });
             continue;
         }
-        let ResolvedStep::Transform { llm_cfg, prompt } = step else {
+        let ResolvedStep::Transform {
+            llm_cfg,
+            prompt,
+            input,
+        } = step
+        else {
             continue;
+        };
+        // Per-step input (PB-COMPOUND): `Base` reads the raw transcription, else
+        // the running (chained) text so steps compound toward a perfect transcript.
+        let source = if *input == StepInput::Base {
+            &base
+        } else {
+            &transcript
         };
         let Some(llm) = llm_provider_for_run(state, llm_cfg).await else {
             // No usable provider for this Transform — same as the legacy gate
@@ -1640,7 +1660,7 @@ async fn run_transform_steps(
                 finalize_canceled(state, id).await;
                 return Err(Canceled);
             }
-            r = run_llm_stage(state, id, PipelineStage::CleaningUp, &*llm, prompt, &transcript) => r,
+            r = run_llm_stage(state, id, PipelineStage::CleaningUp, &*llm, prompt, source) => r,
         };
         match cleanup_result {
             Ok(processed) => {

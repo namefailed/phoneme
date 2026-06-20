@@ -9,6 +9,20 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 *Workspace version `1.8.1`. Closing promise-vs-reality gaps and hardening the
 trust boundary.*
 
+### Transcripts
+
+- [x] **Compounding Playbook steps** — a recipe's `transform` steps chain by
+  default (each refines the previous, toward a "perfect" transcript), with a new
+  per-step `input = previous | base` to instead run an independent pass off the raw
+  transcription. Every step's output is recorded as an inspectable, revertible
+  **version**: Compare-versions shows the full chain and a "Revert to this version"
+  restores it (re-flowing timing + re-embedding).
+- [x] **Timeline matches the cleaned transcript** — the Timeline/Synced views used
+  to keep the raw machine timing even after cleanup rewrote the text, so they
+  disagreed with the panel. Cleanup now re-aligns the words onto the cleaned text
+  into a separate "cleaned" timing layer (the raw machine truth is preserved), and
+  both views gained a **Raw ⇄ Cleaned** toggle.
+
 ### Recall
 
 - [x] **Chunked hybrid semantic search** — transcripts are split into overlapping,
