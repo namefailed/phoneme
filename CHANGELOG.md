@@ -699,6 +699,13 @@ trust boundary.*
 
 ### Developer experience
 
+- [x] **CI inject-guard gate** — `cargo test` in CI now runs with
+  `PHONEME_DISABLE_INPUT_INJECTION=1`, and the daemon E2E harness spawns its real
+  daemon with the same var set, so tests can never type/paste into a real window
+  (the daemon binary isn't `cfg!(test)`, so the env var is its only guard). A CI
+  step also fails if any of the `type`/`paste`/`reconcile` blocking paths stops
+  checking `input_injection_disabled()`, so the guard can't regress.
+
 - [x] **Browser preview without the daemon** — a dev-only mock IPC
   (`frontend/src/services/tauriDevMock.ts`) feeds canned, fully-synthetic data so
   the whole UI renders in a plain browser (`cd frontend; npm run dev`), for fast

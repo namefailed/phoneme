@@ -8,7 +8,7 @@ Five jobs run on every push/PR to `main`/`master`:
 
 | Job | Commands |
 |-----|----------|
-| **Rust** | `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo test --workspace -- --test-threads=1` |
+| **Rust** | `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · an inject-guard assertion step · `cargo test --workspace -- --test-threads=1` (with `PHONEME_DISABLE_INPUT_INJECTION=1`) |
 | **Rustdoc** | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` — fails on any rustdoc warning, including a `missing_docs` gap or a broken intra-doc link |
 | **Frontend** | `pnpm install --frozen-lockfile` · `pnpm lint` · `pnpm exec vitest run` · `pnpm type-check` · `pnpm build` |
 | **Tauri build** | `cargo build --workspace` then `cargo tauri build --debug` — runs only after Rust + Frontend pass |
@@ -97,6 +97,29 @@ which feeds silence/sine blocks so the whole pipeline runs on a headless CI runn
 with no audio hardware. Set `PHONEME_AUDIO_BACKEND=synthetic` to make the daemon's
 recorder pick `GeneratorSource` instead of CPAL — this is how the daemon E2E tests
 (e.g. `tests/record_synthetic.rs`) drive capture.
+
+### The inject-guard contract (no real keystrokes/clipboard in tests)
+
+Dictation types/pastes the transcript at the system cursor via `enigo`/`arboard`
+(`in_place.rs`). A test must NEVER drive that into the developer's (or a CI
+runner's) focused window. Two layers stop it, both routed through
+`in_place::input_injection_disabled()`, which gates every `type_blocking` /
+`reconcile_blocking` / `paste_blocking`:
+
+- **In-crate unit tests** run under `cfg!(test)`, which the guard treats as
+  disabled — the typing path no-ops to `Ok(())`.
+- **The daemon E2E harness** (`tests/common/mod.rs`) spawns a real
+  `phoneme-daemon` binary, which is *not* `cfg!(test)`. So the harness sets
+  `PHONEME_DISABLE_INPUT_INJECTION=1` on the child (the guard's env path), and
+  CI sets the same var on the whole `cargo test` step. The current E2E tests use
+  `in_place: false` and never reach the typing path, but the guard is
+  defense-in-depth: a future in-place E2E test still can't type into a real
+  window.
+
+CI also runs a small grep step that fails if any of the three blocking input
+functions stops checking `input_injection_disabled()` — so the guard can't
+silently regress. Before any **unattended** local test loop, set
+`PHONEME_DISABLE_INPUT_INJECTION=1` too.
 
 ### Meeting alignment tests
 
