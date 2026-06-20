@@ -2759,6 +2759,7 @@ impl Catalog {
         &self,
         recording_id: &str,
         threshold: f32,
+        mode: crate::voiceprint::ScoreNorm,
     ) -> Result<Vec<SpeakerSuggestion>> {
         let captured = self.speaker_voiceprints_for(recording_id).await?;
         if captured.is_empty() {
@@ -2785,7 +2786,7 @@ impl Catalog {
             return Ok(Vec::new());
         }
         let library = self.named_voice_centroids().await?;
-        Ok(Self::assign_speakers(&probes, &library, threshold))
+        Ok(Self::assign_speakers(&probes, &library, threshold, mode))
     }
 
     /// Margin a winning match must beat the speaker's second-best by — below
@@ -2794,29 +2795,38 @@ impl Catalog {
 
     /// One-to-one greedy assignment of captured speakers to named voices.
     ///
-    /// Builds the cosine matrix, then repeatedly takes the highest remaining
+    /// Builds the score matrix, then repeatedly takes the highest remaining
     /// `(speaker, voice)` cell whose speaker and voice are both still free, the
     /// score clears `threshold`, and the score beats that speaker's *second-best
     /// over the whole library* by [`Self::MARGIN`]. Each speaker and each named
     /// voice is used at most once. Output is sorted by `speaker_label` for a
     /// stable suggestion order.
+    ///
+    /// `mode` selects the scorer (V2): [`ScoreNorm::Off`](crate::voiceprint::ScoreNorm::Off)
+    /// uses raw cosine and `threshold` is the cosine bar (unchanged behavior);
+    /// `s_norm`/`as_norm` z-score each probe against the rest of the *library*
+    /// (the cohort) and `threshold` is then a z-score bar. The library is the
+    /// cohort for both probe-side and (AS-norm) target-side normalization.
     fn assign_speakers(
         probes: &[(i64, Vec<f32>)],
         library: &[(NamedVoice, Vec<f32>)],
         threshold: f32,
+        mode: crate::voiceprint::ScoreNorm,
     ) -> Vec<SpeakerSuggestion> {
         if library.is_empty() {
             return Vec::new();
         }
-        // Per-speaker scores against every library voice. A dimension mismatch
-        // yields cosine 0.0 (treated as no signal), matching `recognize_voice`'s
-        // skip; the margin test below keeps such a row from ever winning.
+        // Cohort = the library centroids; normalize each probe against the *other*
+        // library voices. With ScoreNorm::Off this is exactly the raw cosine, so
+        // the default path is unchanged. A dimension mismatch yields cosine 0.0
+        // (treated as no signal), matching `recognize_voice`'s skip; the margin
+        // test below keeps such a row from ever winning.
+        let cohort: Vec<Vec<f32>> = library.iter().map(|(_, c)| c.clone()).collect();
         let scores: Vec<Vec<f32>> = probes
             .iter()
             .map(|(_, probe)| {
-                library
-                    .iter()
-                    .map(|(_, c)| crate::voiceprint::cosine_similarity(probe, c))
+                (0..cohort.len())
+                    .map(|ti| crate::voiceprint::normalized_score(probe, &cohort, ti, mode))
                     .collect()
             })
             .collect();
@@ -5012,7 +5022,10 @@ mod tests {
             .await
             .unwrap();
 
-        let sugg = db.recognize_speakers_for(rec.id.as_str(), 0.5).await.unwrap();
+        let sugg = db
+            .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
         let to_ada: Vec<_> = sugg.iter().filter(|s| s.named_voice_id == ada).collect();
         assert_eq!(
             to_ada.len(),
@@ -5054,7 +5067,10 @@ mod tests {
             .await
             .unwrap();
 
-        let sugg = db.recognize_speakers_for(rec.id.as_str(), 0.5).await.unwrap();
+        let sugg = db
+            .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
         assert_eq!(sugg.len(), 2, "both speakers recognized");
         assert_eq!(sugg[0].speaker_label, 1, "sorted by speaker_label");
         assert_eq!(sugg[0].named_voice_id, ada);
@@ -5083,8 +5099,91 @@ mod tests {
         db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 1.0])
             .await
             .unwrap();
-        let sugg = db.recognize_speakers_for(rec.id.as_str(), 0.5).await.unwrap();
+        let sugg = db
+            .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
         assert!(sugg.is_empty(), "an ambiguous speaker is left unknown");
+    }
+
+    #[tokio::test]
+    async fn recognize_speakers_off_mode_unchanged_from_raw_assign() {
+        // V2 default-off contract at the catalog layer: routing through the new
+        // mode argument with ScoreNorm::Off produces the same assignment as the
+        // raw assign_speakers it delegates to.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0, 0.0])
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let bob = db.enroll_speaker(src.id.as_str(), 2, "Bob").await.unwrap().unwrap();
+
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[0.98, 0.02, 0.0])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.02, 0.98, 0.0])
+            .await
+            .unwrap();
+
+        let off = db
+            .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
+        assert_eq!(off.len(), 2);
+        assert_eq!(off[0].speaker_label, 1);
+        assert_eq!(off[0].named_voice_id, ada);
+        assert_eq!(off[1].named_voice_id, bob);
+        // Off scores are still raw cosines (≈1), not z-scores.
+        assert!(off[0].score > 0.9 && off[1].score > 0.9, "{off:?}");
+    }
+
+    #[tokio::test]
+    async fn recognize_speakers_snorm_routes_and_assigns() {
+        // V2 on-path smoke test: with S-norm the scores are z-scores (can exceed
+        // 1 / be negative), so the threshold is a z-bar. The two clearly-distinct
+        // speakers still each get their own name. Cohort = the 3 library voices.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        // Three enrolled voices spread out so each probe has a real cohort.
+        for (label, v) in [
+            (1i64, [1.0f32, 0.0, 0.0]),
+            (2, [0.0, 1.0, 0.0]),
+            (3, [0.0, 0.0, 1.0]),
+        ] {
+            db.save_speaker_voiceprint(src.id.as_str(), label, &v)
+                .await
+                .unwrap();
+        }
+        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let bob = db.enroll_speaker(src.id.as_str(), 2, "Bob").await.unwrap().unwrap();
+        db.enroll_speaker(src.id.as_str(), 3, "Cleo").await.unwrap();
+
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[0.99, 0.01, 0.0]) // ~Ada
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.01, 0.99, 0.0]) // ~Bob
+            .await
+            .unwrap();
+
+        // z-bar ~1.0: a genuine match stands well above its cohort mean.
+        let sugg = db
+            .recognize_speakers_for(rec.id.as_str(), 1.0, crate::voiceprint::ScoreNorm::SNorm)
+            .await
+            .unwrap();
+        assert_eq!(sugg.len(), 2, "both distinct speakers recognized: {sugg:?}");
+        assert_eq!(sugg[0].speaker_label, 1);
+        assert_eq!(sugg[0].named_voice_id, ada);
+        assert_eq!(sugg[1].named_voice_id, bob);
     }
 
     #[tokio::test]

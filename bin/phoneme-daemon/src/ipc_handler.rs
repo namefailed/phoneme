@@ -844,10 +844,19 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::RecognizeSpeakers { id } => {
             let cfg = state.config.load();
             if cfg.diarization.recognize_speakers {
-                let threshold = cfg.diarization.voiceprint_match_threshold as f32;
+                // V2 score normalization: when off (default), use the raw cosine
+                // bar exactly as before; when on, switch to the z-score bar.
+                let mode = phoneme_core::voiceprint::ScoreNorm::from(
+                    cfg.diarization.voiceprint_score_norm,
+                );
+                let threshold = if mode == phoneme_core::voiceprint::ScoreNorm::Off {
+                    cfg.diarization.voiceprint_match_threshold as f32
+                } else {
+                    cfg.diarization.voiceprint_score_norm_threshold as f32
+                };
                 match state
                     .catalog
-                    .recognize_speakers_for(id.as_str(), threshold)
+                    .recognize_speakers_for(id.as_str(), threshold, mode)
                     .await
                 {
                     Ok(suggestions) => serialize_response(suggestions),
