@@ -7,7 +7,7 @@
 //! bind logic stays in `main`.
 
 use axum::extract::Request;
-use axum::http::{header, Method, StatusCode};
+use axum::http::{header, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -41,15 +41,19 @@ fn origin_is_loopback(origin: &str) -> bool {
 /// Reject browser cross-origin / DNS-rebinding attacks against the loopback API.
 ///
 /// The server binds to loopback, but a *browser* on the same machine can still
-/// reach it: a malicious page can POST to it (CSRF) or rebind a hostname it
-/// controls to `127.0.0.1` and read responses (DNS rebinding). Both always carry
-/// a foreign `Host` (rebinding) or `Origin` (cross-site fetch) header — a browser
+/// reach it: a malicious page can POST to it (CSRF), open an `EventSource` to
+/// exhaust SSE slots, or rebind a hostname it controls to `127.0.0.1` and read
+/// responses (DNS rebinding). All such requests carry a foreign `Host`
+/// (rebinding) or `Origin` (cross-site fetch/EventSource) header — a browser
 /// cannot forge those — so:
 /// * any request whose `Host` is present and NOT loopback is refused (rebinding);
-/// * any state-changing `POST` whose `Origin` is present and NOT loopback is
-///   refused (CSRF).
+/// * any request whose `Origin` is present and NOT loopback is refused (CSRF /
+///   cross-origin SSE). The check applies to ALL methods, not just `POST`, so a
+///   cross-origin `GET /api/events` EventSource cannot exhaust SSE slots.
 ///
 /// Non-browser local clients (curl, the CLI) omit both headers and are unaffected.
+/// A same-origin browser dashboard either omits `Origin` on same-origin GET or
+/// sends a loopback Origin, so neither path is blocked.
 async fn loopback_guard(req: Request, next: Next) -> Response {
     if let Some(host) = req
         .headers()
@@ -60,15 +64,13 @@ async fn loopback_guard(req: Request, next: Next) -> Response {
             return (StatusCode::FORBIDDEN, "host not allowed").into_response();
         }
     }
-    if req.method() == Method::POST {
-        if let Some(origin) = req
-            .headers()
-            .get(header::ORIGIN)
-            .and_then(|v| v.to_str().ok())
-        {
-            if !origin_is_loopback(origin) {
-                return (StatusCode::FORBIDDEN, "cross-origin request rejected").into_response();
-            }
+    if let Some(origin) = req
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+    {
+        if !origin_is_loopback(origin) {
+            return (StatusCode::FORBIDDEN, "cross-origin request rejected").into_response();
         }
     }
     next.run(req).await
@@ -450,6 +452,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(local.status(), StatusCode::OK);
+    }
+
+    /// A cross-origin `GET` (e.g. EventSource from a foreign page) is refused
+    /// with 403, matching the existing POST guard. This closes the SSE slot-
+    /// exhaustion vector described in audit finding R27.
+    #[tokio::test]
+    async fn cross_origin_get_is_403() {
+        let mock = MockDaemon::spawn("xorigin-get", |_req| Response::Ok(serde_json::Value::Null));
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let resp = app
+            .oneshot(
+                HttpRequest::builder()
+                    .method("GET")
+                    .uri("/api/recordings")
+                    .header("origin", "http://evil.example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert!(
+            mock.received().is_empty(),
+            "a cross-origin GET must be rejected before any IPC request is sent"
+        );
     }
 
     #[test]

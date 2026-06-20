@@ -342,10 +342,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             // Clamp the client-supplied limit so a huge value can't force an
             // unbounded result allocation + JSON serialization over the pipe.
             let limit = limit.min(MAX_SEARCH_RESULTS);
-            let embedder_guard = state.embedder.read().await;
-            if let Some(embedder) = embedder_guard.as_ref() {
-                match embedder.embed_query(&query) {
-                    Ok(query_vec) => match state
+            // Clone the Arc and drop the read guard before embedding: ONNX
+            // inference is CPU-bound and runs under a std Mutex inside the
+            // embedder, so doing it inline would block this Tokio worker (and
+            // every config-reload writer) for the whole inference. Hand it to
+            // spawn_blocking, matching the ingest path in pipeline.rs.
+            let embedder = state.embedder.read().await.as_ref().cloned();
+            if let Some(embedder) = embedder {
+                let q = query.clone();
+                let embed_res =
+                    tokio::task::spawn_blocking(move || embedder.embed_query(&q)).await;
+                match embed_res {
+                    Ok(Ok(query_vec)) => match state
                         .catalog
                         .hybrid_search(&query, &query_vec, limit, SEMANTIC_MIN_RELEVANCE)
                         .await
@@ -364,9 +372,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         }
                         Err(e) => err_response(&e),
                     },
-                    Err(e) => Response::Err(IpcError {
+                    Ok(Err(e)) => Response::Err(IpcError {
                         kind: IpcErrorKind::Internal,
                         message: format!("embedding failed: {e}"),
+                    }),
+                    Err(e) => Response::Err(IpcError {
+                        kind: IpcErrorKind::Internal,
+                        message: format!("embedding task failed: {e}"),
                     }),
                 }
             } else {
@@ -420,62 +432,71 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     message: "embedding model is not loaded (check the model path)".into(),
                 })
             } else {
-                // Clear every old vector, then re-embed the whole library in the
-                // background with the current model. Returns immediately.
-                match state.catalog.clear_all_embeddings().await {
-                    Ok(()) => {
-                        let bg = state.clone();
-                        tokio::spawn(async move {
-                            if bg.embedder.read().await.is_none() {
-                                return;
-                            }
-                            match bg.catalog.list_recordings_without_chunk_embeddings().await {
-                                Ok(records) => {
-                                    let n = records.len();
-                                    tracing::info!(
-                                        "re-embedding {n} recordings with the current model"
-                                    );
-                                    for r in records {
-                                        let Some(t) = r.transcript.as_ref() else {
-                                            continue;
-                                        };
-                                        // Re-acquire the embedder PER ITEM: this
-                                        // loop runs for minutes on a big library,
-                                        // and holding the read guard across it
-                                        // blocks every config-reload write. Clone
-                                        // the Arc, drop the guard, then embed —
-                                        // writers interleave between items. Gone
-                                        // mid-run (semantic search turned off) =
-                                        // stop, matching the old early exit.
-                                        let embedder = bg.embedder.read().await.as_ref().cloned();
-                                        let Some(embedder) = embedder else {
-                                            tracing::info!(
-                                                "re-embed stopped: embedding model unloaded"
-                                            );
-                                            return;
-                                        };
-                                        crate::pipeline::embed_and_store(
-                                            embedder,
-                                            &bg.catalog,
-                                            &r.id,
-                                            t,
-                                        )
-                                        .await;
-                                    }
-                                    tracing::info!("re-embed complete ({n} recordings)");
-                                }
-                                Err(e) => {
-                                    tracing::error!(error = %e, "re-embed: failed to list recordings")
-                                }
-                            }
-                        });
-                        ok_null()
+                // Re-embed the WHOLE library with the current model, IN PLACE,
+                // one recording at a time — never an upfront global wipe. The old
+                // code did `clear_all_embeddings()` first, so a crash/kill/model-
+                // unload between the clear and the end of the background loop left
+                // the entire library permanently un-embedded with no recovery.
+                //
+                // `embed_and_store` → `upsert_chunk_embeddings` replaces a single
+                // recording's chunks atomically (DELETE-then-INSERT in one tx), so
+                // each step swaps that recording's old-model vectors for new-model
+                // ones with no gap. If the pass is interrupted, the recordings not
+                // yet reached keep their old-model embeddings and stay searchable;
+                // the worst case is a partly-migrated library, not a wiped one.
+                // Returns immediately; the work runs in the background.
+                let bg = state.clone();
+                tokio::spawn(async move {
+                    if bg.embedder.read().await.is_none() {
+                        return;
                     }
-                    Err(e) => Response::Err(IpcError {
-                        kind: error_to_kind(&e),
-                        message: format!("failed to clear embeddings: {e}"),
-                    }),
-                }
+                    // Every recording with a transcript (no chunk-presence filter:
+                    // we want to OVERWRITE existing vectors, not skip them).
+                    let filter = phoneme_core::ListFilter::default();
+                    match bg.catalog.list(&filter).await {
+                        Ok(records) => {
+                            let total = records.len();
+                            tracing::info!(
+                                "re-embedding {total} recordings in place with the current model"
+                            );
+                            let mut done = 0usize;
+                            for r in records {
+                                let Some(t) = r.transcript.as_ref().filter(|t| !t.is_empty())
+                                else {
+                                    continue;
+                                };
+                                // Re-acquire the embedder PER ITEM: this loop runs
+                                // for minutes on a big library, and holding the
+                                // read guard across it blocks every config-reload
+                                // write. Clone the Arc, drop the guard, then embed
+                                // — writers interleave between items. Gone mid-run
+                                // (semantic search turned off) = stop; recordings
+                                // already done keep their fresh vectors and the
+                                // rest keep their old (still-searchable) ones.
+                                let embedder = bg.embedder.read().await.as_ref().cloned();
+                                let Some(embedder) = embedder else {
+                                    tracing::info!(
+                                        "re-embed stopped after {done}/{total}: embedding model unloaded"
+                                    );
+                                    return;
+                                };
+                                crate::pipeline::embed_and_store(
+                                    embedder,
+                                    &bg.catalog,
+                                    &r.id,
+                                    t,
+                                )
+                                .await;
+                                done += 1;
+                            }
+                            tracing::info!("re-embed complete ({done}/{total} recordings)");
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "re-embed: failed to list recordings")
+                        }
+                    }
+                });
+                ok_null()
             }
         }
         Request::DeleteRecording { id, keep_audio } => match state.catalog.get(&id).await {
@@ -526,11 +547,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // unless keep_audio — and only when it's under our audio dir. One
                 // track failing doesn't abandon the rest; each removed track emits
                 // its own RecordingDeleted so every view drops it.
+                let total = tracks.len();
                 let mut deleted = 0usize;
                 let mut last_err = None;
                 for r in tracks {
                     if let Err(e) = state.catalog.delete(&r.id).await {
-                        tracing::warn!(id = %r.id, session = %meeting_id, error = %e, "session delete: track row delete failed");
+                        // Error, not warn: a track that survives the delete is a
+                        // real partial failure the client must hear about (it's
+                        // reflected in the error response below), not a routine
+                        // best-effort miss like an already-gone audio file.
+                        tracing::error!(id = %r.id, session = %meeting_id, error = %e, "session delete: track row delete failed");
                         last_err = Some(e);
                         continue;
                     }
@@ -548,13 +574,21 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         .emit(DaemonEvent::RecordingDeleted { id: r.id.clone() });
                     deleted += 1;
                 }
-                if deleted > 0 {
-                    ok_null()
-                } else {
-                    match last_err {
-                        Some(e) => err_response(&e),
-                        None => not_found(format!("meeting {meeting_id} had no deletable tracks")),
-                    }
+                // Report any failure to the client instead of silently returning
+                // Ok when some tracks were removed — matching DeleteRecording,
+                // which always surfaces a delete error. The removed tracks already
+                // emitted RecordingDeleted (so views drop them); a partial failure
+                // returns an error carrying the deleted/total counts so the client
+                // knows the session is only partly gone.
+                match last_err {
+                    None => ok_null(),
+                    Some(e) if deleted == 0 => err_response(&e),
+                    Some(e) => Response::Err(IpcError {
+                        kind: error_to_kind(&e),
+                        message: format!(
+                            "session partly deleted: {deleted}/{total} tracks removed, last error: {e}"
+                        ),
+                    }),
                 }
             }
             Ok(_) => not_found(format!("meeting {meeting_id} not found")),
@@ -1890,6 +1924,23 @@ async fn rerun_cleanup(
                     tracing::warn!(error = %e, "rerun_cleanup: failed to update processing meta");
                 }
 
+                // A re-run was requested precisely because the prior cleanup
+                // failed — so clear the terminal CleanupFailed status now that it
+                // succeeded, otherwise the recording reads as failed forever even
+                // though it cleaned fine. `update_transcript` above already cleared
+                // the error_kind/error_message columns; only the status remained.
+                // Best-effort + scoped to CleanupFailed so a re-run never masks an
+                // unrelated terminal status (e.g. HookFailed).
+                if recording.status == RecordingStatus::CleanupFailed {
+                    if let Err(e) = task_state
+                        .catalog
+                        .update_status(&id, RecordingStatus::Done)
+                        .await
+                    {
+                        tracing::warn!(error = %e, "rerun_cleanup: failed to clear CleanupFailed status");
+                    }
+                }
+
                 // Re-embed the new text so semantic search stays consistent,
                 // mirroring the pipeline and UpdateTranscript paths.
                 let embedder = task_state.embedder.read().await.as_ref().cloned();
@@ -2028,6 +2079,9 @@ async fn rerun_summary(
         });
     }
 
+    // Snapshot the status so the spawned task can clear a stale SummarizeFailed
+    // on success without re-fetching (RecordingStatus is Copy).
+    let prev_status = recording.status;
     let task_state = state.clone();
     tokio::spawn(async move {
         // Surface this re-run in the queue as an active "Summarizing…" item.
@@ -2068,6 +2122,22 @@ async fn rerun_summary(
                         error: e.to_string(),
                     });
                     return;
+                }
+                // Clear a stale SummarizeFailed status now that the summary
+                // succeeded — otherwise the recording reads as failed forever
+                // even though the re-run worked. Best-effort + scoped to
+                // SummarizeFailed so a re-run never masks an unrelated terminal
+                // status. (The error_kind/error_message columns are left as-is;
+                // the list/detail "failed" state keys off `status`, which is now
+                // Done, so the recording no longer surfaces as failed.)
+                if prev_status == RecordingStatus::SummarizeFailed {
+                    if let Err(e) = task_state
+                        .catalog
+                        .update_status(&id, RecordingStatus::Done)
+                        .await
+                    {
+                        tracing::warn!(error = %e, "rerun_summary: failed to clear SummarizeFailed status");
+                    }
                 }
                 task_state.events.emit(DaemonEvent::SummaryUpdated { id });
             }

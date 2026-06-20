@@ -471,7 +471,13 @@ pub(crate) async fn run_llm_stage(
         };
         tokio::select! {
             r = provider.process_streaming(prompt, text, &mut on_delta) => r,
-            _ = state.skip_stage.notified() => {
+            // `skip_stage` is a global broadcast: `notify_waiters()` wakes EVERY
+            // in-flight LLM stage at once. The user's ⏭ targets the queue's
+            // ACTIVE item only, so honor the wake solely for the recording that
+            // is currently in `state.processing`; any other concurrent stage
+            // (an on-demand re-run, which is never the processing item) re-arms
+            // and keeps streaming instead of being collaterally aborted.
+            _ = skip_active_queue_item(state, id) => {
                 tracing::info!(?stage, "stage skipped by user");
                 Err(phoneme_core::Error::Internal(STAGE_SKIPPED_REASON.into()))
             }
@@ -511,6 +517,33 @@ pub(crate) async fn run_llm_stage(
     }
 
     result
+}
+
+/// Resolve to a completed future ONLY when the user's ⏭ ("skip current step")
+/// is meant for `id` — i.e. `id` is the queue's currently-processing item.
+///
+/// `state.skip_stage` is a single global `Notify`: `notify_waiters()` wakes every
+/// LLM stage that happens to be streaming. That over-fires when an on-demand
+/// re-run (`rerun_cleanup` / `rerun_summary`) is in flight at the same time as a
+/// queue stage — one ⏭ would abort both. The queue worker publishes the one
+/// active item in `state.processing`, so we treat the wake as a skip only for
+/// that item; for anything else we simply re-arm and wait again (re-runs are
+/// never the processing item, so they never get skipped this way). Until the
+/// matching item's skip arrives this future stays pending, so the `select!` arm
+/// parks and the stream wins.
+async fn skip_active_queue_item(state: &AppState, id: &RecordingId) {
+    loop {
+        state.skip_stage.notified().await;
+        let is_active = match state.processing.lock() {
+            Ok(slot) => matches!(slot.as_ref(), Some((pid, _)) if pid == id),
+            // A poisoned lock shouldn't strand the user's skip on the real
+            // active item, but we can't prove identity — don't skip.
+            Err(_) => false,
+        };
+        if is_active {
+            return;
+        }
+    }
 }
 use std::time::Duration;
 
@@ -2401,10 +2434,13 @@ pub async fn run(
         .catalog
         .update_status(&id, RecordingStatus::HookRunning)
         .await?;
-    state.events.emit(DaemonEvent::TranscriptionDone {
-        id: id.clone(),
-        transcript: transcript.clone(),
-    });
+    // NB: `TranscriptionDone` is NOT emitted here. The UI re-fetches the
+    // recording on that event, and the hook provenance (hook_command /
+    // hook_exit_code / hook_duration_ms) isn't written until `update_hook_result`
+    // runs after all hooks finish — so emitting now would hand the UI a recording
+    // with null hook fields, and a client that doesn't also listen for `HookDone`
+    // would see that stale state forever. The transcript is already persisted, so
+    // nothing is lost by deferring the event to after the provenance write below.
 
     // Hooks.
     state
@@ -2420,7 +2456,14 @@ pub async fn run(
     let mut total_duration = 0;
     let mut last_cmd = String::new();
 
-    let expanded_cfg = cfg.expanded().unwrap_or_else(|_| cfg.clone());
+    // Expand env vars / `~` in the legacy [hook].commands. If expansion fails we
+    // fall back to the unexpanded config, but LOG it first: a silent fallback
+    // leaves literal `%APPDATA%` / `~/` tokens in the command, so every hook then
+    // fails with a confusing path error and no clue why.
+    let expanded_cfg = cfg.expanded().unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "config expansion failed; hook env vars may not expand correctly");
+        cfg.clone()
+    });
 
     for cmd in &expanded_cfg.hook.commands {
         let trimmed = cmd.trim();
@@ -2563,6 +2606,14 @@ pub async fn run(
             .update_hook_result(&id, &last_cmd, final_exit_code, total_duration)
             .await?;
     }
+    // Now that the hook provenance is on the row, announce the transcript. A UI
+    // re-fetch on this event sees the complete hook state (not the null fields it
+    // would have seen had we emitted before the hooks ran). `HookDone` below is
+    // the hook-specific signal; this is the transcript-ready one.
+    state.events.emit(DaemonEvent::TranscriptionDone {
+        id: id.clone(),
+        transcript: transcript.clone(),
+    });
     // A failed optional step becomes the terminal status (filterable, reason
     // persisted), like hook_failed; otherwise Done.
     finalize_step_status(state, &id, step_failure).await?;

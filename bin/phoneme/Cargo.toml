@@ -16,7 +16,7 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 clap_complete = "4"
 comfy-table.workspace = true
 colored.workspace = true

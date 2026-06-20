@@ -236,11 +236,19 @@ srcBtn.addEventListener("click", () => {
   activeTrack = other;
   updateSrcButton();
   srcBtn.disabled = true; // re-enabled when PreviewSourceChanged confirms
-  void invoke("set_preview_source", { track: other }).catch(() => {
-    activeTrack = prev;
-    srcBtn.disabled = false;
-    updateSrcButton();
-  });
+  void invoke("set_preview_source", { track: other })
+    .then(() => {
+      // Success ⇒ re-enable so the button isn't stranded disabled if the daemon
+      // no-op'd (already on that track) and emitted no PreviewSourceChanged. The
+      // icon is NOT touched here — PreviewSourceChanged remains authoritative for
+      // which track the loop actually follows; this only restores clickability.
+      srcBtn.disabled = false;
+    })
+    .catch(() => {
+      activeTrack = prev;
+      srcBtn.disabled = false;
+      updateSrcButton();
+    });
 });
 
 // ── Live-text rendering: word-by-word, single-line reveal (1d) ──────────────
@@ -469,11 +477,23 @@ document.getElementById("ov-close")?.addEventListener("click", () => {
   void win.hide().catch(() => {});
 });
 
+// Recording ids that have stopped/cancelled/been deleted SINCE the most recent
+// recording_started began its async config read. recording_started is async —
+// it awaits `invoke(read_config)` before showOverlay() — so a stop arriving in
+// that window would otherwise: schedule its hide, then the resumed start would
+// clearTimers() + re-show the overlay for a recording that already ended,
+// leaving it stuck open with no stop event left to close it (TOCTOU). The start
+// handler checks this set after the await and bails if ITS recording is in it.
+// Scoped by id (not a bare counter) so an unrelated track stopping mid-await
+// during a multi-track meeting doesn't suppress a still-live track's overlay.
+const stoppedDuringStart = new Set<string>();
+
 // ── Daemon event stream ─────────────────────────────────────────────────────
 void listen<any>("daemon-event", async (e) => {
   const p = e.payload;
   switch (p?.event) {
     case "recording_started": {
+      stoppedDuringStart.clear(); // only stops AFTER this start matter
       previewPinned = false; // a real recording ends any manual preview pinning
       // Re-read the feel/perf knobs so a Settings change (reveal speed, waveform,
       // idle window, meeting layout) takes effect on the very next recording — no
@@ -484,6 +504,10 @@ void listen<any>("daemon-event", async (e) => {
         startCfg = await invoke<any>("read_config");
         applyPreviewTuning(startCfg);
       } catch { /* keep last-known tuning */ }
+      // A stop/cancel/delete for THIS recording arrived while we awaited the
+      // config read — it's already over. Bail instead of showing an overlay that
+      // would never receive its own stop event to close.
+      if (stoppedDuringStart.has(p.id)) break;
       // Off-switch authoritative at show time: even if this window still exists
       // (created earlier, then the setting was turned off before its destroy
       // landed), never auto-show for a recording when `interface.preview_overlay`
@@ -537,6 +561,7 @@ void listen<any>("daemon-event", async (e) => {
     case "recording_stopped":
     case "recording_cancelled":
     case "recording_deleted":
+      if (typeof p.id === "string") stoppedDuringStart.add(p.id); // see recording_started TOCTOU guard
       meetingTracks.delete(p.id);
       // A meeting has two tracks: a stop on one shouldn't tear the overlay down
       // while the other is still live. Only schedule the dim/hide once no track

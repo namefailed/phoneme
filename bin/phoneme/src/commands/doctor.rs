@@ -235,7 +235,33 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
                 Ok(_) => {
                     // Give the supervisors a moment to respawn, then re-probe.
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    let recheck = doctor::run_backend_checks_with_ports(cfg, &whisper_ports).await;
+                    // The supervisor's port-fallback may have rebound on a
+                    // different port; re-query DaemonStatus to get the live
+                    // effective ports before probing, so we don't dial the
+                    // old (now-dead) port and falsely report the server down.
+                    // Reuse the same `c` borrow that is already live in this
+                    // `else if` arm — a second borrow of `client_result` would
+                    // not compile here.
+                    let fresh_ports = match c.send(Request::DaemonStatus).await {
+                        Ok(value) => {
+                            let port = |k: &str| {
+                                value
+                                    .get(k)
+                                    .and_then(|v| v.as_u64())
+                                    .and_then(|n| u16::try_from(n).ok())
+                            };
+                            doctor::EffectiveWhisperPorts {
+                                main: port("whisper_effective_port"),
+                                preview: port("preview_whisper_effective_port"),
+                                in_place: port("dictation_whisper_effective_port"),
+                            }
+                        }
+                        // If status fails, fall back to the pre-restart ports
+                        // rather than probing blind.
+                        Err(_) => whisper_ports,
+                    };
+                    let recheck =
+                        doctor::run_backend_checks_with_ports(cfg, &fresh_ports).await;
                     // Replace the stale backend results with the fresh probes.
                     checks.retain(|c| !recheck.iter().any(|r| r.name == c.name));
                     checks.extend(recheck);

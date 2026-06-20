@@ -626,7 +626,13 @@ impl DaemonRecorder {
         // Wait for the idle task to exit and return the source it was using.
         // This fully tears down the idle loop before the recording opens its own source,
         // or allows us to reuse the already-running stream to avoid initialization gaps.
-        let source = task.await.unwrap_or(None);
+        let source = match task.await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "pre-roll idle task panicked; starting without pre-roll source");
+                None
+            }
+        };
         let samples = ring.lock().await.to_vec();
         if !samples.is_empty() {
             tracing::info!(
@@ -2241,7 +2247,16 @@ impl DaemonRecorder {
         if snap.recording.normalize {
             phoneme_audio::normalize_peak(&mut samples, snap.recording.normalize_target_dbfs);
         }
-        phoneme_audio::wav::write_wav(&audio_path, &samples, audio_cfg)?;
+        // Write on a blocking thread — at 16 kHz mono i16 a 60-minute meeting
+        // track is ~115 MB; writing synchronously on the async executor stalls
+        // other tasks for hundreds of milliseconds. Consistent with the preview
+        // WAV path which already uses spawn_blocking.
+        let audio_path_write = audio_path.clone();
+        tokio::task::spawn_blocking(move || {
+            phoneme_audio::wav::write_wav(&audio_path_write, &samples, audio_cfg)
+        })
+        .await
+        .map_err(|e| Error::Internal(format!("spawn_blocking for WAV write panicked: {e}")))??;
 
         // Update catalog with the (possibly padded) duration. A meeting track
         // always rides the serial queue, so it starts Queued; the pipeline

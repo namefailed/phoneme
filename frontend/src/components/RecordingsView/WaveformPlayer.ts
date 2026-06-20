@@ -144,20 +144,30 @@ export class WaveformPlayerElement extends LitElement {
  *  reused rather than rebuilt; callbacks adapt the element's CustomEvents. */
 export class WaveformPlayer {
   private element: WaveformPlayerElement;
+  // The element is reused for the life of the host pane, so each setOn* call
+  // must drop its previous listener before adding a new one — otherwise every
+  // recording opened in the same pane stacks another callback on the SAME
+  // element and a single event fires all of them (remove-before-add).
+  private onPlayStateChange: ((e: Event) => void) | null = null;
+  private onTimeUpdate: ((e: Event) => void) | null = null;
   constructor() {
     this.element = document.createElement('ph-waveform-player') as WaveformPlayerElement;
   }
 
   setOnPlayStateChange(cb: (playing: boolean) => void) {
-    this.element.addEventListener('play-state-change', (e: Event) => {
-      cb((e as CustomEvent<boolean>).detail);
-    });
+    if (this.onPlayStateChange) {
+      this.element.removeEventListener('play-state-change', this.onPlayStateChange);
+    }
+    this.onPlayStateChange = (e: Event) => cb((e as CustomEvent<boolean>).detail);
+    this.element.addEventListener('play-state-change', this.onPlayStateChange);
   }
 
   setOnTimeUpdate(cb: (seconds: number) => void) {
-    this.element.addEventListener('time-update', (e: Event) => {
-      cb((e as CustomEvent<number>).detail);
-    });
+    if (this.onTimeUpdate) {
+      this.element.removeEventListener('time-update', this.onTimeUpdate);
+    }
+    this.onTimeUpdate = (e: Event) => cb((e as CustomEvent<number>).detail);
+    this.element.addEventListener('time-update', this.onTimeUpdate);
   }
 
   seekTo(seconds: number) {

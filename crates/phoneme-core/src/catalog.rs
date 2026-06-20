@@ -137,6 +137,14 @@ const MAX_CACHED_VECTORS: usize = 200_000;
 /// window so the table stays bounded no matter how much the AI runs.
 const AI_ACTIVITY_KEEP: i64 = 1_000;
 
+/// Per-field char cap on a stored AI-activity `prompt`/`response`. Row count is
+/// already bounded by `AI_ACTIVITY_KEEP`, but each prompt embeds the whole
+/// transcript, so 1 000 long-meeting rows could still grow the table by
+/// hundreds of MB. This ceiling sits far above any normal prompt or response —
+/// so the 🧠 popout redisplays them verbatim — and only an extreme outlier is
+/// truncated (with a marker) rather than stored in full.
+const AI_ACTIVITY_FIELD_MAX_CHARS: usize = 64 * 1024;
+
 /// Sanitizes a user-provided string for use in an FTS5 MATCH query.
 ///
 /// Extracts alphanumeric terms and joins them with `* AND ` to perform a robust
@@ -341,14 +349,31 @@ impl Catalog {
         prompt: &str,
         response: &str,
     ) -> Result<()> {
+        // Cap each field so a pathologically long transcript can't bloat the row.
+        // Truncate on a char boundary (these fields are UTF-8 transcript text) so
+        // a multi-byte character is never split, and append a marker so the popout
+        // shows the text was clipped rather than silently ending mid-word.
+        let cap = |s: &str| -> String {
+            if s.chars().count() <= AI_ACTIVITY_FIELD_MAX_CHARS {
+                return s.to_string();
+            }
+            let end = s
+                .char_indices()
+                .nth(AI_ACTIVITY_FIELD_MAX_CHARS)
+                .map(|(i, _)| i)
+                .unwrap_or(s.len());
+            format!("{}… [truncated]", &s[..end])
+        };
+        let prompt = cap(prompt);
+        let response = cap(response);
         sqlx::query(
             "INSERT INTO ai_activity (recording_id, stage, prompt, response, created_at) \
              VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
         )
         .bind(recording_id)
         .bind(stage)
-        .bind(prompt)
-        .bind(response)
+        .bind(&prompt)
+        .bind(&response)
         .execute(&self.pool)
         .await?;
         sqlx::query(
@@ -3202,6 +3227,34 @@ mod tests {
 
         // `limit` caps the result.
         assert_eq!(db.list_ai_activity(None, 1).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ai_activity_caps_oversized_prompt_and_response() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+        // A normal-sized field round-trips verbatim — the popout still sees it all.
+        db.insert_ai_activity("a", "cleaning_up", "short prompt", "short response")
+            .await
+            .unwrap();
+        let small = &db.list_ai_activity(Some("a"), 1).await.unwrap()[0];
+        assert_eq!(small.prompt, "short prompt");
+        assert_eq!(small.response, "short response");
+
+        // A field past the cap is truncated on a char boundary with a marker, so
+        // the stored row can't grow without bound. Use multi-byte chars to prove
+        // truncation never splits one (a byte-offset cut would panic or corrupt).
+        let huge = "é".repeat(AI_ACTIVITY_FIELD_MAX_CHARS + 500);
+        db.insert_ai_activity("b", "summarizing", &huge, &huge)
+            .await
+            .unwrap();
+        let big = &db.list_ai_activity(Some("b"), 1).await.unwrap()[0];
+        assert!(big.prompt.ends_with("… [truncated]"), "prompt not marked");
+        assert!(big.response.ends_with("… [truncated]"), "response not marked");
+        // Kept chars = the cap; the marker is the only thing past it.
+        let kept = big.prompt.chars().take(AI_ACTIVITY_FIELD_MAX_CHARS).count();
+        assert_eq!(kept, AI_ACTIVITY_FIELD_MAX_CHARS);
+        assert!(big.prompt.chars().count() < huge.chars().count());
     }
 
     #[tokio::test]
