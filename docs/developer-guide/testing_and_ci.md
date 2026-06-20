@@ -166,6 +166,47 @@ PHONEME_DER_MAX=0.4 \
 It prints the full missed / false-alarm / confusion breakdown and fails when the
 DER exceeds `PHONEME_DER_MAX` (default 0.5).
 
+## Word Error Rate (WER) harness
+
+`phoneme_core::wer` is a pure, unit-tested **WER / CER** metric for measuring
+ASR accuracy against a reference transcript:
+
+```
+WER = (substitutions + insertions + deletions) / reference_word_count
+CER = (substitutions + insertions + deletions) / reference_character_count
+```
+
+Both are Levenshtein edit-distance metrics; WER counts at the word level, CER
+at the character level. Tokenization lowercases and strips ASCII punctuation
+before comparison, so "Hello, World!" and "hello world" are identical — apply
+any deeper normalization (numeral expansion, disfluency removal) to both sides
+before calling the functions.
+
+```rust
+use phoneme_core::wer::{compute_wer, compute_cer};
+
+let r = compute_wer(reference_text, hypothesis_text);
+// r.wer   — None when reference is empty (metric undefined), Some(f64) otherwise
+// r.substitutions / r.insertions / r.deletions — breakdown
+// r.ref_units — reference word count (the denominator)
+
+let cer = compute_cer(reference_text, hypothesis_text);
+// same struct; ref_units is character count
+```
+
+WER can exceed `1.0` when the hypothesis inserts many extra words — not capped,
+matching standard ASR benchmarking convention (NIST STM/CTM scoring).
+
+The metric has no external dependencies and runs inline; no fixture set is
+needed to unit-test it. To drive it against a real ASR output, feed the raw
+transcript text from a recording directly:
+
+```rust
+let r = compute_wer(&reference_transcript, &recording.transcript);
+println!("WER {:.1}%  S={} I={} D={}", r.wer.unwrap_or(f64::NAN) * 100.0,
+    r.substitutions, r.insertions, r.deletions);
+```
+
 ## Voiceprint EER calibration harness
 
 `phoneme_core::voiceprint_eval` is a pure, unit-tested companion to `der` for the

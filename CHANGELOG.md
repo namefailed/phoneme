@@ -69,6 +69,16 @@ trust boundary.*
   threshold sweep gives FAR/FRR at each point and the interpolated **equal error
   rate** + its threshold. Gives `voiceprint_match_threshold` (~0.5, eyeballed) a
   measured basis. Not wired into the pipeline — an eval harness like the DER one.
+- [x] **WER / CER accuracy harness (dev)** — `phoneme_core::wer` adds the
+  headline ASR accuracy metric: `WER = (substitutions + insertions + deletions)
+  / reference_word_count`, scored with Levenshtein edit distance. `compute_wer`
+  works at the word level; `compute_cer` at the character level. Both normalize
+  the input (lowercase + strip ASCII punctuation) so surface formatting doesn't
+  inflate the score. Returns a `WerReport` with the full S/I/D breakdown and
+  `ref_units`; `wer` is `None` when the reference is empty (denominator
+  undefined). WER can exceed 1.0 when the hypothesis has many extra words — not
+  capped. Pure, dependency-free, thoroughly unit-tested; not wired into the live
+  pipeline.
 - [x] **Cohort score normalization for speaker matching (S-norm / AS-norm)** —
   raw cosine sits on a different scale per voice (some speakers are "closer" to
   the whole cohort than others), so one global threshold over-accepts central

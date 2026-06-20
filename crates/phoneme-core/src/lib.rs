@@ -73,6 +73,14 @@
 //! - [`job`] (Windows only) — a kill-on-close Job Object: the OS-level safety
 //!   net that reaps spawned children when their owner dies.
 //!
+//! **Dev / eval metrics** (not wired into the pipeline)
+//! - [`der`] — Diarization Error Rate: missed + false-alarm + confusion /
+//!   total reference speech. Scored against RTTM reference files.
+//! - [`voiceprint_eval`] — EER calibration for the named-speaker recognizer:
+//!   genuine vs impostor FAR/FRR sweep to pick `voiceprint_match_threshold`.
+//! - [`wer`] — Word Error Rate (and CER): Levenshtein edit distance at the
+//!   word or character level; the headline ASR accuracy metric.
+//!
 //! `secret_crypto` (private) holds the DPAPI round-trip that keeps API keys off
 //! disk in the clear; it is an implementation detail of [`config`].
 
@@ -112,6 +120,7 @@ pub mod types;
 pub mod voiceprint;
 pub mod voiceprint_eval;
 pub mod webhook;
+pub mod wer;
 
 pub use catalog::Catalog;
 pub use chunk::chunk_transcript;
