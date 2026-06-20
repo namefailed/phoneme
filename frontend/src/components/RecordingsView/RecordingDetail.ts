@@ -5,6 +5,8 @@ import {
   updateTranscript,
   getOriginalTranscript,
   getCleanTranscript,
+  listTranscriptVersions,
+  revertToVersion,
   rerunSummary,
   setRecordingTitle,
   setSpeakerName,
@@ -873,9 +875,10 @@ export class RecordingDetail {
     });
     overlay.querySelector(".tdiff-modal-close")?.addEventListener("click", close);
 
-    const [original, clean] = await Promise.all([
+    const [original, clean, steps] = await Promise.all([
       getOriginalTranscript(r.id).catch(() => null),
       getCleanTranscript(r.id).catch(() => null),
+      listTranscriptVersions(r.id).catch(() => []),
     ]);
     // Bail if the modal was closed or the selection changed while loading. The
     // closing-class check matters now that close() animates out: the overlay
@@ -890,7 +893,23 @@ export class RecordingDetail {
     const body = overlay.querySelector<HTMLElement>("#tdiff-modal-body");
     if (body) {
       body.innerHTML = "";
-      new TranscriptDiff(body, { original, clean, current: r.transcript ?? "" });
+      new TranscriptDiff(
+        body,
+        { original, clean, current: r.transcript ?? "", steps },
+        {
+          // Revert the live transcript to the selected step version (PB-COMPOUND);
+          // the daemon re-flows timing + re-embeds and emits TranscriptUpdated,
+          // which refreshes the detail. Close the modal on success.
+          onRevert: (idx) => {
+            void revertToVersion(r.id, idx)
+              .then(() => {
+                showToast("Transcript reverted to the selected version.", "success");
+                this.activeModalClose?.();
+              })
+              .catch((e) => showToast(`Revert failed: ${errText(e)}`, "error"));
+          },
+        },
+      );
     }
   }
 

@@ -2898,6 +2898,23 @@ ph-sidebar .queue-item-main.kbd-cursor {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--accent);
 }
+/* "Revert to <version>" — shown when a step version (compounding chain) is the
+   selected side and a revert hook is wired (PB-COMPOUND). */
+.tdiff-revert {
+  margin-left: auto;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-size: 0.7857rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--ui-motion-fast) ease;
+}
+.tdiff-revert:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
 .tdiff-legend {
   display: flex;
   align-items: center;

@@ -1,5 +1,6 @@
 import { escapeHtml } from "../../utils/format";
 import { diffTextDetailed, type DiffOp, type DiffOpType, type DiffMode, type DiffOutcome } from "../../utils/diff";
+import type { TranscriptVersion } from "../../services/ipc";
 
 /**
  * Read-only side-by-side-ish DIFF of a recording's transcript layers
@@ -20,8 +21,9 @@ import { diffTextDetailed, type DiffOp, type DiffOpType, type DiffMode, type Dif
  * (RecordingDetail) fetches `original`/`clean` once via IPC before mounting.
  */
 
-/** One of the three comparable transcript layers (see the file-top comment). */
-export type LayerKey = "original" | "clean" | "current";
+/** A comparable transcript layer key. The fixed layers are "original", "clean",
+ *  "current"; compounding step versions add "step:<idx>" keys. */
+export type LayerKey = string;
 
 /** The already-resolved text of each layer, as the host fetched it. */
 export interface TranscriptLayers {
@@ -31,35 +33,72 @@ export interface TranscriptLayers {
   clean: string | null;
   /** The current (possibly edited) transcript. */
   current: string | null;
+  /** Compounding chain (PB-COMPOUND): raw ASR at idx 0, then each Transform
+   *  step's output. When more than one step ran, the chain REPLACES the single
+   *  "clean" layer in the picker so every intermediate step is comparable. */
+  steps?: TranscriptVersion[];
 }
 
-const LAYER_LABELS: Record<LayerKey, string> = {
-  original: "Original (raw machine)",
-  clean: "Cleaned (pre-edit)",
-  current: "Current",
-};
-
-const LAYER_ORDER: LayerKey[] = ["original", "clean", "current"];
+/** Host hooks for the otherwise read-only diff. */
+export interface TranscriptDiffOpts {
+  /** Revert the live transcript to a step version (by `idx`). Omitted = no
+   *  revert button (read-only). The host owns the IPC + any refresh. */
+  onRevert?: (idx: number) => void;
+}
 
 /** The diff view's controller. Plain class: RecordingDetail mounts one with
  *  the pre-fetched layers; it owns the layer pickers, the word↔line mode
- *  toggle, and re-rendering — fully self-contained and read-only from there
- *  (no IPC, no events). Unmount by clearing the container. */
+ *  toggle, and re-rendering. Read-only except for an optional revert hook the
+ *  host wires (the component never does IPC itself). Unmount by clearing the
+ *  container. */
 export class TranscriptDiff {
   private container: HTMLElement;
-  private layers: TranscriptLayers;
+  /** Selectable layer keys in display order. */
+  private keys: LayerKey[];
+  private labels: Record<string, string>;
+  private values: Record<string, string | null>;
+  /** Layer key → its version `idx`, for "step:*" layers only (drives revert). */
+  private stepIdx: Record<string, number>;
+  private onRevert?: (idx: number) => void;
   private left: LayerKey;
   private right: LayerKey;
   private mode: DiffMode = "word";
 
-  constructor(container: HTMLElement, layers: TranscriptLayers) {
+  constructor(container: HTMLElement, layers: TranscriptLayers, opts: TranscriptDiffOpts = {}) {
     this.container = container;
-    this.layers = layers;
-    // Default: original ↔ current (the most useful "what changed overall?" view).
-    // If a side's default layer is missing, fall back to the first available one
-    // so the diff isn't pointless on first open.
-    this.left = this.firstAvailable(["original", "clean", "current"]);
-    this.right = this.firstAvailable(["current", "clean", "original"]);
+    this.onRevert = opts.onRevert;
+    this.labels = {};
+    this.values = {};
+    this.stepIdx = {};
+    const steps = layers.steps ?? [];
+    if (steps.length > 1) {
+      // Full compounding chain: original(raw)=idx0 → each step → current. The
+      // chain subsumes "clean" (the last step == the cleaned pre-edit text).
+      this.keys = [];
+      for (const v of steps) {
+        const key = `step:${v.idx}`;
+        this.keys.push(key);
+        this.labels[key] = v.idx === 0 ? "Original (raw machine)" : (v.label ?? `Step ${v.idx}`);
+        this.values[key] = v.text;
+        this.stepIdx[key] = v.idx;
+      }
+      this.keys.push("current");
+      this.labels.current = "Current";
+      this.values.current = layers.current;
+    } else {
+      // No (multi-step) chain: the classic three fixed layers.
+      this.keys = ["original", "clean", "current"];
+      this.labels = {
+        original: "Original (raw machine)",
+        clean: "Cleaned (pre-edit)",
+        current: "Current",
+      };
+      this.values = { original: layers.original, clean: layers.clean, current: layers.current };
+    }
+    // Default: first ↔ last (the most useful "what changed overall?" view),
+    // falling back to the first available layer so the diff isn't pointless.
+    this.left = this.firstAvailable([this.keys[0], ...this.keys]);
+    this.right = this.firstAvailable([this.keys[this.keys.length - 1], ...[...this.keys].reverse()]);
     this.render();
   }
 
@@ -69,12 +108,30 @@ export class TranscriptDiff {
   }
 
   private valueOf(key: LayerKey): string | null {
-    return this.layers[key];
+    return this.values[key] ?? null;
   }
 
   private hasContent(key: LayerKey): boolean {
     const v = this.valueOf(key);
     return v != null && v.trim().length > 0;
+  }
+
+  /** The step `idx` a revert would target — the selected step version (right side
+   *  preferred, else left), or null when neither side is a revertable step
+   *  version or no revert hook was provided. */
+  private revertTarget(): number | null {
+    if (!this.onRevert) return null;
+    if (this.stepIdx[this.right] !== undefined) return this.stepIdx[this.right];
+    if (this.stepIdx[this.left] !== undefined) return this.stepIdx[this.left];
+    return null;
+  }
+
+  /** The "Revert to <version>" button, or "" when nothing revertable is selected. */
+  private revertHtml(): string {
+    const idx = this.revertTarget();
+    if (idx == null) return "";
+    const label = this.labels[`step:${idx}`] ?? "this version";
+    return `<button class="tdiff-revert" data-idx="${idx}" title="Replace the live transcript with this version (re-flows the timing + re-embeds)">↩ Revert to ${escapeHtml(label)}</button>`;
   }
 
   private render() {
@@ -94,6 +151,7 @@ export class TranscriptDiff {
             <button class="tdiff-mode ${this.mode === "word" ? "active" : ""}" data-mode="word">Words</button>
             <button class="tdiff-mode ${this.mode === "line" ? "active" : ""}" data-mode="line">Lines</button>
           </div>
+          ${this.revertHtml()}
         </div>
         <div class="tdiff-legend">
           <span class="tdiff-stat" id="tdiff-stats">${this.statsHtml(outcome)}</span>
@@ -121,11 +179,13 @@ export class TranscriptDiff {
   }
 
   private selectHtml(side: "left" | "right", selected: LayerKey): string {
-    const opts = LAYER_ORDER.map((k) => {
-      const missing = !this.hasContent(k);
-      const label = LAYER_LABELS[k] + (missing ? " — n/a" : "");
-      return `<option value="${k}"${k === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
-    }).join("");
+    const opts = this.keys
+      .map((k) => {
+        const missing = !this.hasContent(k);
+        const label = this.labels[k] + (missing ? " — n/a" : "");
+        return `<option value="${k}"${k === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
+      })
+      .join("");
     return `<select class="tdiff-select" data-side="${side}" aria-label="${side} version">${opts}</select>`;
   }
 
@@ -136,8 +196,8 @@ export class TranscriptDiff {
     // "nothing to compare", but the message is friendlier when we name which
     // side is missing.
     const missing: string[] = [];
-    if (!this.hasContent(this.left)) missing.push(LAYER_LABELS[this.left]);
-    if (!this.hasContent(this.right) && this.right !== this.left) missing.push(LAYER_LABELS[this.right]);
+    if (!this.hasContent(this.left)) missing.push(this.labels[this.left]);
+    if (!this.hasContent(this.right) && this.right !== this.left) missing.push(this.labels[this.right]);
     if (missing.length > 0) {
       const which = missing.join(" and ");
       return `<div class="tdiff-empty">No ${escapeHtml(which.toLowerCase())} version is available for this recording, so there's nothing to compare.</div>`;
@@ -265,8 +325,14 @@ export class TranscriptDiff {
         const key = sel.value as LayerKey;
         if (side === "left") this.left = key;
         else this.right = key;
-        this.refresh();
+        // Full re-render (not just refresh) so the revert button reflects the
+        // newly-selected layer.
+        this.render();
       });
+    });
+    this.container.querySelector<HTMLButtonElement>(".tdiff-revert")?.addEventListener("click", () => {
+      const idx = this.revertTarget();
+      if (idx != null) this.onRevert?.(idx);
     });
     this.container.querySelector<HTMLButtonElement>(".tdiff-swap")?.addEventListener("click", () => {
       [this.left, this.right] = [this.right, this.left];
