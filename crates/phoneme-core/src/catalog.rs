@@ -3130,8 +3130,11 @@ impl Catalog {
         // no display name (`speaker_names`) — a speaker can carry a display name
         // without being enrolled (e.g. the pipeline's "You" default, or a name set
         // on a cloud-diarized recording with no voiceprint), and propagation must
-        // never overwrite such a name. Also exclude recordings already enrolled
-        // under THIS voice, keeping a recording out of its own back-fill.
+        // never overwrite such a name. The "already under this voice" guard is
+        // scoped to the SPEAKER, not the whole recording: a recording can hold a
+        // speaker enrolled as this voice AND a *second*, still-unnamed speaker of
+        // the same voice that we DO want to back-fill — a recording-wide exclusion
+        // wrongly dropped that second speaker.
         let rows = sqlx::query(
             "SELECT sv.recording_id AS recording_id, sv.speaker_label AS speaker_label, \
                     sv.centroid AS centroid \
@@ -3140,8 +3143,10 @@ impl Catalog {
                AND NOT EXISTS (SELECT 1 FROM speaker_names sn \
                      WHERE sn.recording_id = sv.recording_id \
                        AND sn.speaker_label = sv.speaker_label) \
-               AND sv.recording_id NOT IN \
-                 (SELECT recording_id FROM speaker_voiceprints WHERE named_voice_id = ?)",
+               AND NOT EXISTS (SELECT 1 FROM speaker_voiceprints sv2 \
+                     WHERE sv2.recording_id = sv.recording_id \
+                       AND sv2.speaker_label = sv.speaker_label \
+                       AND sv2.named_voice_id = ?)",
         )
         .bind(named_voice_id)
         .fetch_all(&self.pool)
@@ -3188,7 +3193,8 @@ impl Catalog {
     /// Safety + idempotency: a target whose speaker is ALREADY named is skipped (we
     /// never overwrite a name), as is a target with no captured voiceprint or one
     /// already enrolled under this voice. Re-running with the same targets does no
-    /// duplicate work. Returns how many targets were actually back-filled.
+    /// duplicate work. Returns the targets actually back-filled (so callers can
+    /// refresh exactly those recordings, not every candidate).
     ///
     /// Best-effort per target: the voice must exist and be live (a forgotten voice
     /// back-fills nothing).
@@ -3196,7 +3202,7 @@ impl Catalog {
         &self,
         named_voice_id: &str,
         targets: &[(RecordingId, i64)],
-    ) -> Result<usize> {
+    ) -> Result<Vec<(RecordingId, i64)>> {
         // Resolve the name from the LIVE library; a forgotten/unknown voice can't
         // be propagated.
         let name: Option<String> = sqlx::query_scalar(
@@ -3207,10 +3213,10 @@ impl Catalog {
         .await?;
         let name = match name {
             Some(n) => n,
-            None => return Ok(0),
+            None => return Ok(Vec::new()),
         };
 
-        let mut applied = 0usize;
+        let mut applied: Vec<(RecordingId, i64)> = Vec::new();
         for (recording_id, speaker_label) in targets {
             // Never overwrite an existing name — only back-fill an unnamed speaker.
             let already_named: Option<String> = sqlx::query_scalar(
@@ -3242,7 +3248,7 @@ impl Catalog {
                 .enroll_speaker(recording_id.as_str(), *speaker_label, &name)
                 .await
             {
-                Ok(Some(_)) => applied += 1,
+                Ok(Some(_)) => applied.push((recording_id.clone(), *speaker_label)),
                 Ok(None) => {
                     // No voiceprint to enroll — undo the name we just wrote so a target
                     // with no capture isn't half-applied (display-named but unenrolled).
@@ -7115,7 +7121,7 @@ mod tests {
             .collect();
 
         let applied = db.apply_propagation(&ada, &targets).await.unwrap();
-        assert_eq!(applied, 2, "both unnamed Ada-matches back-filled");
+        assert_eq!(applied.len(), 2, "both unnamed Ada-matches back-filled");
 
         // The unnamed speakers now read "Ada" and are enrolled under it.
         assert_eq!(
@@ -7143,7 +7149,10 @@ mod tests {
 
         // Idempotent: re-running with the same targets back-fills nothing new.
         let again = db.apply_propagation(&ada, &targets).await.unwrap();
-        assert_eq!(again, 0, "re-running propagation does no duplicate work");
+        assert!(
+            again.is_empty(),
+            "re-running propagation does no duplicate work"
+        );
         // And re-scanning yields no candidates (they're all named now).
         let after = db
             .propagation_candidates(&ada, 0.5, crate::voiceprint::ScoreNorm::Off)
@@ -7161,7 +7170,7 @@ mod tests {
             .apply_propagation(&ada, &[(rec_named.clone(), 2)]) // label 2 == "Bob"
             .await
             .unwrap();
-        assert_eq!(applied, 0, "an already-named speaker is skipped");
+        assert!(applied.is_empty(), "an already-named speaker is skipped");
         assert_eq!(
             display_name(&db, &rec_named, 2).await.as_deref(),
             Some("Bob")
@@ -7193,7 +7202,7 @@ mod tests {
             .apply_propagation(&ada, &[(novp.id.clone(), 1)])
             .await
             .unwrap();
-        assert_eq!(applied, 0, "no voiceprint → nothing enrolled");
+        assert!(applied.is_empty(), "no voiceprint → nothing enrolled");
         assert!(
             display_name(&db, &novp.id, 1).await.is_none(),
             "the name is rolled back so the target isn't half-applied"

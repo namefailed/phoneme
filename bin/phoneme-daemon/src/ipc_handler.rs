@@ -482,6 +482,20 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     kind: IpcErrorKind::Internal,
                     message: "embedding model is not loaded (check the model path)".into(),
                 })
+            } else if state
+                .reembed_in_flight
+                .compare_exchange(
+                    false,
+                    true,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                )
+                .is_err()
+            {
+                Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: "a re-embed is already running — wait for it to finish".into(),
+                })
             } else {
                 // Re-embed the WHOLE library with the current model, IN PLACE,
                 // one recording at a time — never an upfront global wipe. The old
@@ -498,6 +512,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // Returns immediately; the work runs in the background.
                 let bg = state.clone();
                 tokio::spawn(async move {
+                    // Clear the in-flight flag on EVERY exit path (incl. the early
+                    // returns below) so a future ReembedAll isn't locked out.
+                    struct InFlightGuard(std::sync::Arc<std::sync::atomic::AtomicBool>);
+                    impl Drop for InFlightGuard {
+                        fn drop(&mut self) {
+                            self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }
+                    let _in_flight = InFlightGuard(bg.reembed_in_flight.clone());
                     if bg.embedder.read().await.is_none() {
                         return;
                     }
@@ -506,7 +529,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     let filter = phoneme_core::ListFilter::default();
                     match bg.catalog.list(&filter).await {
                         Ok(records) => {
-                            let total = records.len();
+                            // Count only embeddable rows (non-empty transcript), so
+                            // the progress/completion log reads N/N on a full pass
+                            // rather than N/all-rows (the skipped empties confused it).
+                            let total = records
+                                .iter()
+                                .filter(|r| r.transcript.as_ref().is_some_and(|t| !t.is_empty()))
+                                .count();
                             tracing::info!(
                                 "re-embedding {total} recordings in place with the current model"
                             );
@@ -2820,26 +2849,28 @@ async fn speaker_name_propagation(
                 .apply_propagation(named_voice_id, &targets)
                 .await
             {
-                Ok(n) => (n, false),
+                Ok(applied) => (applied, false),
                 Err(e) => {
                     tracing::warn!(voice = %named_voice_id, "propagation apply failed: {e}");
-                    (0, true)
+                    (Vec::new(), true)
                 }
             };
-            if applied > 0 {
-                // The back-filled recordings now show the new name — nudge clients
-                // to refresh those rows.
-                for c in &candidates {
-                    state.events.emit(DaemonEvent::SpeakerNameUpdated {
-                        id: c.recording_id.clone(),
-                    });
+            // Nudge clients to refresh ONLY the recordings actually back-filled —
+            // not every candidate (many are skipped: already named, no voiceprint).
+            let mut refreshed: std::collections::HashSet<phoneme_core::id::RecordingId> =
+                std::collections::HashSet::new();
+            for (rid, _label) in &applied {
+                if refreshed.insert(rid.clone()) {
+                    state
+                        .events
+                        .emit(DaemonEvent::SpeakerNameUpdated { id: rid.clone() });
                 }
             }
             // Flag the failure so an aborted back-fill isn't read as a clean
             // "applied 0" — the policy tag itself stays the real one.
             serde_json::json!({
                 "policy": format!("{:?}", diar.name_propagation).to_lowercase(),
-                "applied": applied,
+                "applied": applied.len(),
                 "candidates": [],
                 "error": apply_err,
             })

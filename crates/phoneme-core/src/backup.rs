@@ -227,6 +227,14 @@ pub async fn restore_from_zip(
 
         // Copy this recording's audio (if the backup carried it) to the target
         // audio dir, and capture where it landed so the row points at it.
+        //
+        // Ordering is deliberate: audio FIRST, then the row. Row + file can't share
+        // one transaction (SQLite vs filesystem), so a crash between them must fail
+        // safe. This order leaves at worst an orphan WAV with no row referencing it
+        // — invisible, and self-healing: a re-run finds the id absent (the insert
+        // never happened), re-extracts over the file, and inserts. The inverse
+        // (row first) would leave a VISIBLE row pointing at missing audio that a
+        // re-run skips (id now present) and never heals — strictly worse.
         let restored_audio_path = restore_audio_for(&mut archive, &rec.id, audio_dir)?;
 
         // Insert the row with the audio path rewritten to the restored location

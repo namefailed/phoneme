@@ -146,8 +146,8 @@ pub fn set_title(id: RecordingId, body: &TitleBody) -> Request {
 /// JSON body for `POST /api/recordings/:id/favorite`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct FavoriteBody {
-    /// `true` = starred.
-    #[serde(default)]
+    /// `true` = starred. Required: an omitted field is a 400, not a silent
+    /// un-star (a bare `{}` used to clear the flag, surprising API callers).
     pub favorite: bool,
 }
 

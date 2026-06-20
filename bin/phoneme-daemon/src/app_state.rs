@@ -32,7 +32,7 @@ use phoneme_core::{
     webhook::WebhookClient, Catalog, Config, InboxQueue, LlmPostProcessor, Transcriber,
 };
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
 
 /// Resolved paths derived from `Config`. Created once at startup.
@@ -242,6 +242,11 @@ pub struct AppState {
     /// the accurate final transcript, then clears it. Empty when no streaming-type
     /// dictation is in flight.
     pub stream_typed: Arc<tokio::sync::Mutex<String>>,
+    /// Set while a `ReembedAll` background pass is running, so a second request
+    /// is rejected instead of spawning a redundant concurrent re-embed of the
+    /// whole library (wasted compute; per-recording upserts are atomic so there's
+    /// no corruption, but two passes racing the same rows is pure waste).
+    pub reembed_in_flight: Arc<AtomicBool>,
 }
 
 /// Coordination cell between a model-override re-transcription (in the pipeline)
@@ -521,6 +526,7 @@ impl AppState {
             events: EventBus::new(),
             recorder: DaemonRecorder::default(),
             stream_typed: Arc::new(tokio::sync::Mutex::new(String::new())),
+            reembed_in_flight: Arc::new(AtomicBool::new(false)),
             shutdown: Arc::new(ShutdownCoordinator::new()),
             transcription,
             llm,

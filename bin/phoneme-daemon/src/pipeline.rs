@@ -1719,6 +1719,23 @@ pub(crate) async fn reflow_cleaned_timing(state: &AppState, id: &RecordingId, cl
     let Some(r) = phoneme_core::realign::realign_transcript(cleaned_text, &raw_words) else {
         return;
     };
+    // Guard a TOCTOU: `rerun_cleanup` runs this off the inbox queue, so a
+    // concurrent retranscribe (queue worker) can commit fresh raw words between
+    // our read above and the writes below. Re-read and bail if they shifted — the
+    // writer that changed them re-derives the cleaned variant itself, so writing
+    // our now-stale alignment would clobber the correct one. (Best-effort: closes
+    // the wide LLM-call window down to these two adjacent awaits.)
+    match state.catalog.words_for(id).await {
+        Ok(current) if current == raw_words => {}
+        Ok(_) => {
+            tracing::debug!(id = %id.as_str(), "cleaned re-flow: raw words changed under us; skipping stale write");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(id = %id.as_str(), error = %e, "cleaned re-flow: re-read failed; skipping");
+            return;
+        }
+    }
     if let Err(e) = state
         .catalog
         .replace_words_variant(id, "cleaned", &r.words)
