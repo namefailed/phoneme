@@ -81,6 +81,7 @@
 pub mod catalog;
 pub mod chunk;
 pub mod config;
+pub mod der;
 pub mod diarization;
 pub mod dictation;
 pub mod doctor;

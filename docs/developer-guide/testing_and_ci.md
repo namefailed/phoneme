@@ -140,6 +140,32 @@ that buries real changes in noise.
 
 Pre-release: [smoke-test.md](../smoke-test.md) (~10 minutes on a clean VM).
 
+## Diarization Error Rate (DER) harness
+
+`phoneme_core::der` is a pure, unit-tested **collar-0 DER** metric for measuring
+how well the local diarizer labels who-spoke-when:
+`der = (missed + false_alarm + confusion) / total_reference_speech`. Hypothesis
+speakers are mapped onto the reference by overlap first, so labels (`SPEAKER_00`
+vs `A`) don't matter — only the grouping. `parse_rttm` reads a reference RTTM and
+`DerSegment::from_spans` turns the diarizer's output into a hypothesis, so scoring
+a recording is `compute_der(&parse_rttm(reference), &DerSegment::from_spans(&diar.spans))`.
+
+The metric ships with the code; running it needs a **fixture set** (an audio file
+plus a hand-checked reference RTTM — not in the repo, since real labelled audio is
+the scarce part). The runnable harness lives behind that fixture set as an
+`#[ignore]`d test ([`tests/der_harness.rs`](../../crates/phoneme-core/tests/der_harness.rs)),
+so it can be a manual check or an optional nightly gate (never a PR blocker):
+
+```text
+PHONEME_DER_AUDIO=fixtures/meeting.wav \
+PHONEME_DER_RTTM=fixtures/meeting.rttm \
+PHONEME_DER_MAX=0.4 \
+  cargo test -p phoneme-core --test der_harness -- --ignored --nocapture
+```
+
+It prints the full missed / false-alarm / confusion breakdown and fails when the
+DER exceeds `PHONEME_DER_MAX` (default 0.5).
+
 ## Git hooks
 
 ```powershell

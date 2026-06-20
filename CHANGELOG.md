@@ -53,6 +53,12 @@ trust boundary. Verified against current code.*
   On-demand, so a voice named *after* a recording was transcribed is still suggested
   on it. `[diarization].recognize_speakers` toggles it; `voiceprint_match_threshold`
   tunes the cosine bar. Local diarization only.
+- [x] **DER eval harness (dev)** — a pure, unit-tested collar-0 Diarization Error
+  Rate metric (`phoneme_core::der`: `parse_rttm`, `compute_der`, missed /
+  false-alarm / confusion with overlap-based speaker mapping), plus an `#[ignore]`d
+  harness that runs the local diarizer on an audio fixture and scores it against a
+  reference RTTM — for measuring diarizer quality / catching regressions (an
+  optional nightly check, never a PR gate).
 - [x] **Custom local diarization models** — `[diarization].models_dir` points the local
   diarizer at a folder holding your own speakrs bundle (segmentation + embedding ONNX),
   loaded via `OwnedDiarizationPipeline::from_dir` instead of the pretrained download;
