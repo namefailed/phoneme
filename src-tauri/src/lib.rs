@@ -485,6 +485,8 @@ pub fn run() {
             commands::list_meeting,
             commands::get_segments,
             commands::get_words,
+            commands::list_transcript_versions,
+            commands::revert_to_version,
             commands::delete_recording,
             commands::delete_session,
             commands::record_start,

@@ -78,12 +78,12 @@ pub fn get_recording(id: RecordingId) -> Request {
 
 /// `GET /api/recordings/:id/segments` → [`Request::GetSegments`].
 pub fn get_segments(id: RecordingId) -> Request {
-    Request::GetSegments { id }
+    Request::GetSegments { id, variant: None }
 }
 
 /// `GET /api/recordings/:id/words` → [`Request::GetWords`].
 pub fn get_words(id: RecordingId) -> Request {
-    Request::GetWords { id }
+    Request::GetWords { id, variant: None }
 }
 
 /// `GET /api/search` → [`Request::SemanticSearch`].
@@ -305,7 +305,7 @@ mod tests {
             other => panic!("expected GetRecording, got {other:?}"),
         }
         match get_segments(id.clone()) {
-            Request::GetSegments { id: got } => assert_eq!(got, id),
+            Request::GetSegments { id: got, .. } => assert_eq!(got, id),
             other => panic!("expected GetSegments, got {other:?}"),
         }
     }
@@ -358,7 +358,7 @@ mod tests {
     fn get_words_carries_the_id() {
         let id = parse_id("20260519T143500042").unwrap();
         match get_words(id.clone()) {
-            Request::GetWords { id: got } => assert_eq!(got, id),
+            Request::GetWords { id: got, .. } => assert_eq!(got, id),
             other => panic!("expected GetWords, got {other:?}"),
         }
     }

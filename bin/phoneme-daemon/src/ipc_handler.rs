@@ -309,17 +309,24 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         // An unknown id yields an empty list, not NotFound — "no segments" is
         // a normal state (pre-capture recordings, providers without timing)
         // and callers treat the two identically.
-        Request::GetSegments { id } => match state.catalog.segments_for(&id).await {
-            Ok(segments) => serialize_response(segments),
-            Err(e) => err_response(&e),
-        },
+        Request::GetSegments { id, variant } => {
+            let v = variant.as_deref().unwrap_or("raw");
+            match state.catalog.segments_for_variant(&id, v).await {
+                Ok(segments) => serialize_response(segments),
+                Err(e) => err_response(&e),
+            }
+        }
         // Like GetSegments, an unknown id yields an empty list (not NotFound):
         // "no words" is a normal state (pre-capture recordings, providers
         // without per-word timing). Each object carries an explicit 0-based
         // `idx` (the array order) so the frontend can rely on it without
         // re-deriving it from position — `TranscriptWord` itself stores no idx,
         // so we attach it here via enumerate.
-        Request::GetWords { id } => match state.catalog.words_for(&id).await {
+        Request::GetWords { id, variant } => match state
+            .catalog
+            .words_for_variant(&id, variant.as_deref().unwrap_or("raw"))
+            .await
+        {
             Ok(words) => {
                 let with_idx: Vec<serde_json::Value> = words
                     .into_iter()
@@ -343,6 +350,36 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
             Err(e) => err_response(&e),
         },
+        // Compounding chain (PB-COMPOUND): list / fetch / revert transcript versions.
+        Request::ListTranscriptVersions { id } => {
+            match state.catalog.transcript_versions_for(&id).await {
+                Ok(versions) => serialize_response(versions),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::GetTranscriptVersion { id, idx } => {
+            match state.catalog.transcript_version(&id, idx).await {
+                Ok(v) => serialize_response(v),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::RevertToVersion { id, idx } => {
+            match state.catalog.transcript_version(&id, idx).await {
+                Ok(Some(v)) => match state.catalog.update_user_transcript(&id, &v.text).await {
+                    Ok(()) => {
+                        // Same path a manual edit takes: re-flow timing + re-embed.
+                        reflow_and_reembed_after_edit(state, &id, &v.text).await;
+                        ok_null()
+                    }
+                    Err(e) => err_response(&e),
+                },
+                Ok(None) => not_found(format!(
+                    "no transcript version {idx} for recording {}",
+                    id.as_str()
+                )),
+                Err(e) => err_response(&e),
+            }
+        }
         Request::SemanticSearch {
             query,
             limit,

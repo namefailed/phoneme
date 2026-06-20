@@ -42,7 +42,10 @@ pub async fn run(args: ShowArgs, cfg: &Config, json: bool) -> ExitCode {
     };
 
     if args.segments {
-        let value = match client.send(Request::GetSegments { id }).await {
+        let value = match client
+            .send(Request::GetSegments { id, variant: None })
+            .await
+        {
             Ok(v) => v,
             Err(code) => return code,
         };

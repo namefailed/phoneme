@@ -80,9 +80,13 @@ pub async fn list_meeting(bridge: Br<'_>, meeting_id: String) -> Result<Value, C
 /// empty list is normal — older recordings predate segment capture and some
 /// providers return no timing data. Powers the timeline views.
 #[tauri::command]
-pub async fn get_segments(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+pub async fn get_segments(
+    bridge: Br<'_>,
+    id: String,
+    variant: Option<String>,
+) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::GetSegments { id }).await
+    forward(&bridge, Request::GetSegments { id, variant }).await
 }
 
 /// Fetch one recording's machine transcript words in timeline order — the
@@ -93,9 +97,34 @@ pub async fn get_segments(bridge: Br<'_>, id: String) -> Result<Value, CommandEr
 /// per-word data). Fetched lazily by the word-level features (word seek,
 /// confidence highlighting).
 #[tauri::command]
-pub async fn get_words(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+pub async fn get_words(
+    bridge: Br<'_>,
+    id: String,
+    variant: Option<String>,
+) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::GetWords { id }).await
+    forward(&bridge, Request::GetWords { id, variant }).await
+}
+
+/// List a recording's transcript versions — the compounding chain (PB-COMPOUND):
+/// `idx` 0 = raw ASR, then each Transform step's output. Empty for a recording
+/// that ran no Transform. Powers the Compare-versions step chain.
+#[tauri::command]
+pub async fn list_transcript_versions(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::ListTranscriptVersions { id }).await
+}
+
+/// Revert the live transcript to a recorded version (by step `idx`), through the
+/// same path as a manual edit (re-flows the timing variants + re-embeds).
+#[tauri::command]
+pub async fn revert_to_version(
+    bridge: Br<'_>,
+    id: String,
+    idx: i64,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::RevertToVersion { id, idx }).await
 }
 
 /// Drop every pending tag suggestion across the whole library. Returns
@@ -578,7 +607,7 @@ pub async fn export_captions(
         }
     };
 
-    let value = forward(&bridge, Request::GetSegments { id }).await?;
+    let value = forward(&bridge, Request::GetSegments { id, variant: None }).await?;
     let segments: Vec<TranscriptSegment> = serde_json::from_value(value)
         .map_err(|e| CommandError::new("internal", format!("parsing segments: {e}")))?;
 
@@ -733,9 +762,15 @@ pub fn save_text_export(dest: String, contents: String) -> Result<(), CommandErr
 pub async fn export_recording_json(bridge: Br<'_>, id: String) -> Result<String, CommandError> {
     let rid = parse_id(&id)?;
     let recording = forward(&bridge, Request::GetRecording { id: rid.clone() }).await?;
-    let segments = forward(&bridge, Request::GetSegments { id: rid })
-        .await
-        .unwrap_or_else(|_| serde_json::json!([]));
+    let segments = forward(
+        &bridge,
+        Request::GetSegments {
+            id: rid,
+            variant: None,
+        },
+    )
+    .await
+    .unwrap_or_else(|_| serde_json::json!([]));
     let bundle = serde_json::json!({
         "version": 1,
         "recording": recording,

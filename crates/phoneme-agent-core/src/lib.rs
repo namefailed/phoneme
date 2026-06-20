@@ -669,7 +669,7 @@ impl Tool for GetWords {
     }
     fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
         let id = require_recording_id(args, "get_words")?;
-        Ok(Request::GetWords { id })
+        Ok(Request::GetWords { id, variant: None })
     }
 }
 
@@ -696,7 +696,7 @@ impl Tool for GetSegments {
     }
     fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
         let id = require_recording_id(args, "get_segments")?;
-        Ok(Request::GetSegments { id })
+        Ok(Request::GetSegments { id, variant: None })
     }
 }
 
@@ -1567,7 +1567,7 @@ mod tests {
         assert_eq!(
             r.to_request("get_words", &json!({ "id": id.as_str() }))
                 .unwrap(),
-            Request::GetWords { id }
+            Request::GetWords { id, variant: None }
         );
         // Invalid id → BadArgs (covers the new id-taking tools' shared path).
         assert!(matches!(
@@ -1630,7 +1630,7 @@ mod tests {
         assert_eq!(
             r.to_request("get_segments", &json!({ "id": id.as_str() }))
                 .unwrap(),
-            Request::GetSegments { id }
+            Request::GetSegments { id, variant: None }
         );
         assert!(matches!(
             r.to_request("get_segments", &json!({ "id": "nope" })),

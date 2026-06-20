@@ -740,7 +740,7 @@ mod tests {
         let id = RecordingId::new();
         assert_eq!(
             build_request("get_words", &json!({"id": id.as_str()})).unwrap(),
-            Request::GetWords { id }
+            Request::GetWords { id, variant: None }
         );
         // Invalid id → tool error (covers the shared id-parse path; not a panic).
         assert!(build_request("get_words", &json!({"id": "nope"})).is_err());
@@ -863,7 +863,7 @@ mod tests {
         let id = RecordingId::new();
         assert_eq!(
             build_request("get_segments", &json!({"id": id.as_str()})).unwrap(),
-            Request::GetSegments { id }
+            Request::GetSegments { id, variant: None }
         );
         assert!(build_request("get_segments", &json!({"id": "nope"})).is_err());
         assert!(build_request("get_segments", &json!({})).is_err());

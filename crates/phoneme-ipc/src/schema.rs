@@ -256,6 +256,11 @@ pub enum Request {
     GetSegments {
         /// The recording whose segments to fetch.
         id: RecordingId,
+        /// Timing variant: `None`/`"raw"` = the machine-truth timeline; `"cleaned"`
+        /// = the timeline re-aligned to the post-cleanup transcript (TL-CONSISTENCY).
+        /// An absent cleaned variant returns empty — the view falls back to raw.
+        #[serde(default)]
+        variant: Option<String>,
     },
     /// Fetch one recording's machine transcript words in timeline order — the
     /// finer per-word layer beneath `GetSegments`. Ok = JSON array (possibly
@@ -272,6 +277,36 @@ pub enum Request {
     GetWords {
         /// The recording whose words to fetch.
         id: RecordingId,
+        /// Timing variant: `None`/`"raw"` = machine-truth, `"cleaned"` = re-aligned
+        /// to the post-cleanup transcript (TL-CONSISTENCY). Mirrors `GetSegments`.
+        #[serde(default)]
+        variant: Option<String>,
+    },
+    /// List a recording's transcript versions — the compounding chain (PB-COMPOUND):
+    /// raw ASR at `idx` 0, then each Transform step's output. Ok = JSON array of
+    /// `{ idx, step_id, label, model, text }` in `idx` order, empty for a recording
+    /// that ran no Transform. Powers the Compare-versions step chain.
+    ListTranscriptVersions {
+        /// The recording whose version chain to list.
+        id: RecordingId,
+    },
+    /// Fetch one transcript version by step `idx`. Ok = the version object or
+    /// `null` when absent.
+    GetTranscriptVersion {
+        /// The recording.
+        id: RecordingId,
+        /// Step index (`0` = raw ASR).
+        idx: i64,
+    },
+    /// Revert the live transcript to a recorded version's text (by step `idx`),
+    /// through the same path as a manual edit (re-flows the timing variants +
+    /// re-embeds). Ok `null`; emits [`DaemonEvent::TranscriptUpdated`]. NotFound
+    /// when the recording or that version is missing.
+    RevertToVersion {
+        /// The recording.
+        id: RecordingId,
+        /// Step index to revert to.
+        idx: i64,
     },
     /// Delete a recording. The catalog row goes first (an error there leaves
     /// the audio untouched); the WAV is then unlinked unless `keep_audio` —

@@ -281,8 +281,11 @@ export type TranscriptSegment = {
  *  is a normal state (older recordings predate segment capture; some providers
  *  return no timing data), so callers should fall back to the plain transcript
  *  rather than treating it as an error. */
-export async function getSegments(id: string): Promise<TranscriptSegment[]> {
-  return await tauriInvoke<TranscriptSegment[]>("get_segments", { id });
+export async function getSegments(
+  id: string,
+  variant?: "raw" | "cleaned",
+): Promise<TranscriptSegment[]> {
+  return await tauriInvoke<TranscriptSegment[]>("get_segments", { id, variant });
 }
 
 /** One machine transcript word with its audio-relative timing.
@@ -311,8 +314,35 @@ export type TranscriptWord = {
  *  empty list is a normal state — older recordings predate word capture, and
  *  several providers return no per-word timing — so the synced-transcript view
  *  treats it as "no word timings" rather than an error. */
-export async function getWords(id: string): Promise<TranscriptWord[]> {
-  return await tauriInvoke<TranscriptWord[]>("get_words", { id });
+export async function getWords(
+  id: string,
+  variant?: "raw" | "cleaned",
+): Promise<TranscriptWord[]> {
+  return await tauriInvoke<TranscriptWord[]>("get_words", { id, variant });
+}
+
+/** One step's transcript in the compounding chain (PB-COMPOUND): `idx` 0 = the
+ *  raw ASR, then each Transform step's output (the last being the live
+ *  transcript). Powers the Compare-versions step chain + revert. */
+export type TranscriptVersion = {
+  idx: number;
+  step_id?: string | null;
+  label?: string | null;
+  model?: string | null;
+  text: string;
+};
+
+/** A recording's compounding chain in step order. Empty for a plain transcribe
+ *  (no Transform step ran) — callers treat that as "no chain", not an error. */
+export async function listTranscriptVersions(id: string): Promise<TranscriptVersion[]> {
+  return await tauriInvoke<TranscriptVersion[]>("list_transcript_versions", { id });
+}
+
+/** Revert the live transcript to a recorded version (by step `idx`). Routes
+ *  through the same path as a manual edit (re-flows timing + re-embeds); the
+ *  daemon emits `transcript-updated`. */
+export async function revertToVersion(id: string, idx: number): Promise<void> {
+  await tauriInvoke("revert_to_version", { id, idx });
 }
 
 /** One semantic-search hit: the recording plus its similarity score

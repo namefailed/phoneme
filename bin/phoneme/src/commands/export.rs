@@ -66,7 +66,10 @@ async fn run_captions(
         Err(e) => return e,
     };
 
-    let value = match conn.send(phoneme_ipc::Request::GetSegments { id }).await {
+    let value = match conn
+        .send(phoneme_ipc::Request::GetSegments { id, variant: None })
+        .await
+    {
         Ok(v) => v,
         Err(e) => return e,
     };

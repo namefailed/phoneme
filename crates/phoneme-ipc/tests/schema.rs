@@ -161,6 +161,18 @@ fn find_replace_defaults_case_sensitive_to_false() {
 fn get_segments_request_roundtrips() {
     roundtrip(&Request::GetSegments {
         id: RecordingId::new(),
+        variant: None,
+    });
+    roundtrip(&Request::GetSegments {
+        id: RecordingId::new(),
+        variant: Some("cleaned".into()),
+    });
+    roundtrip(&Request::ListTranscriptVersions {
+        id: RecordingId::new(),
+    });
+    roundtrip(&Request::RevertToVersion {
+        id: RecordingId::new(),
+        idx: 2,
     });
 }
 
