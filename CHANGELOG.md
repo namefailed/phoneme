@@ -646,6 +646,13 @@ trust boundary.*
   test asserts `phoneme-mcp`'s exposed names equal the registry's so the two can
   never drift again.
 
+- [x] **`recorder.rs` split into a directory module** — the 3.3k-line daemon
+  recorder is now `recorder/{mod,preview,meeting}.rs`: `preview.rs` owns the live
+  caption/waveform loops and their pure stitching helpers, `meeting.rs` owns Meeting
+  Mode, and `mod.rs` keeps the single-recording lifecycle and shared
+  `DaemonRecorder` state. Pure refactor — `DaemonRecorder`'s public API is byte-
+  identical and the daemon test suite is unchanged.
+
 ### Performance
 
 - [x] Semantic search holds the deserialized embedding corpus in memory, so
