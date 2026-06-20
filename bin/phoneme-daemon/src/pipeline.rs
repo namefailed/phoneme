@@ -1585,9 +1585,20 @@ async fn run_transform_steps(
     steps: &[ResolvedStep],
     transcript: String,
     step_failure: &mut Option<(RecordingStatus, String)>,
-) -> std::result::Result<(String, Option<String>), Canceled> {
+) -> std::result::Result<
+    (
+        String,
+        Option<String>,
+        Vec<phoneme_core::catalog::TranscriptVersion>,
+    ),
+    Canceled,
+> {
+    use phoneme_core::catalog::TranscriptVersion;
     let mut transcript = transcript;
     let mut cleanup_model: Option<String> = None;
+    // Record each step's output (PB-COMPOUND). The caller prepends the raw ASR as
+    // idx 0, so these are the post-step versions (idx 1, 2, …) of the chain.
+    let mut versions: Vec<TranscriptVersion> = Vec::new();
     for step in steps {
         // Deterministic filler removal: a pure, instant text rewrite — no
         // provider, no network, never fails. It rewrites the running transcript
@@ -1595,6 +1606,13 @@ async fn run_transform_steps(
         // cleanup either way. It doesn't set `cleanup_model` (no model ran).
         if let ResolvedStep::FillerRemoval { cfg } = step {
             transcript = phoneme_core::filler::strip_fillers(&transcript, cfg);
+            versions.push(TranscriptVersion {
+                idx: versions.len() as i64 + 1,
+                step_id: Some("filler".to_string()),
+                label: Some("Filler removal".to_string()),
+                model: None,
+                text: transcript.clone(),
+            });
             continue;
         }
         let ResolvedStep::Transform { llm_cfg, prompt } = step else {
@@ -1629,6 +1647,13 @@ async fn run_transform_steps(
                 tracing::info!("LLM post-processing succeeded");
                 transcript = processed;
                 cleanup_model = Some(llm_cfg.model.clone());
+                versions.push(TranscriptVersion {
+                    idx: versions.len() as i64 + 1,
+                    step_id: Some("transform".to_string()),
+                    label: Some(format!("Cleanup ({})", llm_cfg.model)),
+                    model: Some(llm_cfg.model.clone()),
+                    text: transcript.clone(),
+                });
             }
             Err(e) => {
                 tracing::error!(error = %e, "LLM post-processing failed, falling back to raw transcript");
@@ -1646,7 +1671,7 @@ async fn run_transform_steps(
             }
         }
     }
-    Ok((transcript, cleanup_model))
+    Ok((transcript, cleanup_model, versions))
 }
 
 /// Marker that a step was canceled mid-flight; the caller returns `Ok(())` from
@@ -2172,7 +2197,7 @@ pub async fn run(
     // happen BEFORE the transcript-commit writes below. Non-fatal: on any
     // failure the raw transcript is kept. Cancellation inside a Transform has
     // already finalized the recording, so we return `Ok(())` here.
-    let (transcript, cleanup_model) = match run_transform_steps(
+    let (transcript, cleanup_model, step_versions) = match run_transform_steps(
         state,
         &id,
         &cancel,
@@ -2222,6 +2247,29 @@ pub async fn run(
         .catalog
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
+
+    // Record the compounding chain (PB-COMPOUND): raw ASR as idx 0, then each
+    // Transform step's output. Only when at least one Transform ran, so a plain
+    // transcribe leaves no versions (the Compare-versions UI treats "none" as the
+    // normal single-output case). Best-effort: a failure costs only the chain view.
+    if !step_versions.is_empty() {
+        let mut versions = Vec::with_capacity(step_versions.len() + 1);
+        versions.push(phoneme_core::catalog::TranscriptVersion {
+            idx: 0,
+            step_id: None,
+            label: Some("Original (raw)".to_string()),
+            model: None,
+            text: raw_transcript.clone(),
+        });
+        versions.extend(step_versions);
+        if let Err(e) = state
+            .catalog
+            .replace_transcript_versions(&id, &versions)
+            .await
+        {
+            tracing::warn!(id = %id.as_str(), "failed to persist transcript versions: {e}");
+        }
+    }
 
     // Persist the provider's segment timeline (replacing any previous one —
     // a retranscribe describes a new machine output). Best-effort: a failure
