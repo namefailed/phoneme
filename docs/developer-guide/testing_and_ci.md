@@ -166,6 +166,33 @@ PHONEME_DER_MAX=0.4 \
 It prints the full missed / false-alarm / confusion breakdown and fails when the
 DER exceeds `PHONEME_DER_MAX` (default 0.5).
 
+## Voiceprint EER calibration harness
+
+`phoneme_core::voiceprint_eval` is a pure, unit-tested companion to `der` for the
+*other* speaker metric: how well named-speaker recognition tells voices apart.
+Given labelled voiceprints (speaker id → one or more embeddings), it forms
+**genuine** (same-speaker) and **impostor** (different-speaker) pairs, scores each
+with the recognizer's own `voiceprint::cosine_similarity`, and sweeps a threshold
+to get the **FAR** (impostors wrongly accepted) and **FRR** (genuine wrongly
+rejected) at every operating point. The **equal error rate** (FAR ≈ FRR) and its
+threshold — interpolated between the two bracketing sweep samples — are the
+headline output: a measured basis for `[diarization].voiceprint_match_threshold`,
+which shipped at an eyeballed ~0.5.
+
+```rust
+let report = voiceprint_eval::calibrate(&[
+    ("alex".into(), vec![alex_centroid_a, alex_centroid_b]),
+    ("blair".into(), vec![blair_centroid]),
+]);
+// report.eer, report.eer_threshold (None when undefined — see below), report.curve
+```
+
+Like the DER metric it's the reusable core; collecting a labelled voiceprint set
+(real enrolled voices) is the scarce part and lives outside the repo. With no
+genuine or no impostor trials the EER is undefined (`eer` / `eer_threshold` are
+`None`) rather than a panic, so a single-speaker or one-vector-per-speaker set is
+a clean no-op.
+
 ## Git hooks
 
 ```powershell
