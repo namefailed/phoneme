@@ -394,8 +394,19 @@ local_model_path = ""
 recognize_speakers = true
 # Cosine-similarity bar (0–1) a voiceprint must clear to be suggested as a known
 # speaker. Higher = stricter (fewer false matches, more misses). Default 0.5 —
-# tune to your own recordings.
+# tune to your own recordings. Used when voiceprint_score_norm = "off".
 voiceprint_match_threshold = 0.5
+# Score normalization for speaker matching (V2). "off" (default) = raw cosine vs
+# voiceprint_match_threshold — unchanged behavior. "s_norm"/"as_norm" z-score each
+# comparison against the OTHER enrolled voices (the cohort) so one threshold holds
+# across speakers and sessions. "s_norm" normalizes the probe side; "as_norm" is
+# symmetric (probe- and target-side). When on, the bar is voiceprint_score_norm_-
+# threshold (a z-score). Cohort of one degrades to the raw score. Local diar only.
+voiceprint_score_norm = "off"
+# Z-score bar a normalized match must clear when voiceprint_score_norm is on. In
+# std-devs above the probe's cohort mean — a different scale than the cosine bar,
+# so typical values ~1.5–3.0 (not 0–1). Ignored when norm is "off". Default 2.0.
+voiceprint_score_norm_threshold = 2.0
 
 
 # -----------------------------------------------------------------------------

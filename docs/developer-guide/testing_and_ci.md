@@ -193,6 +193,21 @@ genuine or no impostor trials the EER is undefined (`eer` / `eer_threshold` are
 `None`) rather than a panic, so a single-speaker or one-vector-per-speaker set is
 a clean no-op.
 
+### Score normalization (S-norm / AS-norm)
+
+The harness also backs the V2 cohort score normalization (see
+`[diarization].voiceprint_score_norm`). `voiceprint::normalized_score` z-scores a
+raw cosine against the probe's distribution over the *other* candidates — the
+cohort is the candidate set itself, no external impostor pool. S-norm:
+`(cos − μ_probe) / σ_probe`; AS-norm averages that with the symmetric target-side
+z-score. Default `Off` delegates to `best_match` unchanged. The
+`voiceprint::tests::snorm_separates_better_than_raw_with_uneven_spreads` test
+constructs three clusters with deliberately uneven intra-speaker spread, builds
+both raw and normalized genuine/impostor lists, and asserts
+`compute_eer(norm).eer < compute_eer(raw).eer` — i.e. one threshold separates
+genuine from impostor better once per-speaker scale is normalized away. A cohort
+of one (or zero-spread) falls back to the raw score, so the on-path never NaNs.
+
 ## Git hooks
 
 ```powershell

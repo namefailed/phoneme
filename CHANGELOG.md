@@ -69,6 +69,21 @@ trust boundary.*
   threshold sweep gives FAR/FRR at each point and the interpolated **equal error
   rate** + its threshold. Gives `voiceprint_match_threshold` (~0.5, eyeballed) a
   measured basis. Not wired into the pipeline — an eval harness like the DER one.
+- [x] **Cohort score normalization for speaker matching (S-norm / AS-norm)** —
+  raw cosine sits on a different scale per voice (some speakers are "closer" to
+  the whole cohort than others), so one global threshold over-accepts central
+  voices and over-rejects outliers. `voiceprint::best_match_normalized` /
+  `normalized_score` z-score each comparison against the *other* enrolled voices
+  (the cohort is the candidate set itself): `s_norm` normalizes the probe side,
+  `as_norm` is symmetric (probe- and target-side averaged). Opt-in behind
+  `[diarization].voiceprint_score_norm` (`off` \| `s_norm` \| `as_norm`, default
+  **off** = byte-for-byte the old raw path), with its own z-score bar
+  `voiceprint_score_norm_threshold` (default 2.0). `recognize_speakers_for`
+  routes on the flag; a cohort of one degrades gracefully to the raw score (no
+  NaN/divide-by-zero). On a constructed uneven-spread case the normalized EER
+  (via the harness above) is strictly below the raw EER. Local diarization only;
+  config-only for now (no Settings toggle yet) and per-speaker thresholds left as
+  a follow-up (S-norm already re-centers per probe).
 - [x] **Custom local diarization models** — `[diarization].models_dir` points the local
   diarizer at a folder holding your own speakrs bundle (segmentation + embedding ONNX),
   loaded via `OwnedDiarizationPipeline::from_dir` instead of the pretrained download;

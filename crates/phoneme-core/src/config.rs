@@ -307,9 +307,55 @@ pub struct DiarizationConfig {
     pub recognize_speakers: bool,
     /// Cosine-similarity bar a voiceprint must clear to be suggested as a known
     /// speaker, in [0, 1]. Higher = stricter (fewer false matches, more misses);
-    /// lower = looser. Default 0.5 — tune against your own recordings.
+    /// lower = looser. Default 0.5 — tune against your own recordings. Used when
+    /// [`voiceprint_score_norm`](Self::voiceprint_score_norm) is `off`.
     #[serde(default = "default_voiceprint_threshold")]
     pub voiceprint_match_threshold: f64,
+    /// Score normalization for speaker matching (V2). `off` (default) compares the
+    /// raw cosine against [`voiceprint_match_threshold`](Self::voiceprint_match_threshold)
+    /// — byte-for-byte the previous behavior. `s_norm`/`as_norm` z-score each
+    /// comparison against the other enrolled voices (the cohort), so one threshold
+    /// holds across speakers/sessions instead of drifting with how "central" a
+    /// voice is. When on, the threshold used is
+    /// [`voiceprint_score_norm_threshold`](Self::voiceprint_score_norm_threshold)
+    /// (a z-score, not a cosine).
+    #[serde(default)]
+    pub voiceprint_score_norm: VoiceprintScoreNorm,
+    /// Z-score bar a normalized voiceprint match must clear when
+    /// [`voiceprint_score_norm`](Self::voiceprint_score_norm) is `s_norm`/`as_norm`.
+    /// Ignored when norm is `off` (then [`voiceprint_match_threshold`](Self::voiceprint_match_threshold)
+    /// applies). This is in standard-deviations above the probe's cohort mean, so
+    /// it lives on a different scale than the cosine bar — typical values ~1.5–3.0.
+    /// Default 2.0. Tune with the EER harness on your own enrolled voices.
+    #[serde(default = "default_voiceprint_score_norm_threshold")]
+    pub voiceprint_score_norm_threshold: f64,
+}
+
+/// Score-normalization mode for speaker matching (config mirror of
+/// [`crate::voiceprint::ScoreNorm`], serialized as lowercase strings).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum VoiceprintScoreNorm {
+    /// No normalization — raw cosine vs `voiceprint_match_threshold` (default,
+    /// unchanged behavior).
+    #[default]
+    #[serde(rename = "off")]
+    Off,
+    /// S-norm: z-score against the probe's distribution over the cohort.
+    #[serde(rename = "s_norm")]
+    SNorm,
+    /// AS-norm: symmetric — average the probe-side and target-side z-scores.
+    #[serde(rename = "as_norm")]
+    ASNorm,
+}
+
+impl From<VoiceprintScoreNorm> for crate::voiceprint::ScoreNorm {
+    fn from(v: VoiceprintScoreNorm) -> Self {
+        match v {
+            VoiceprintScoreNorm::Off => crate::voiceprint::ScoreNorm::Off,
+            VoiceprintScoreNorm::SNorm => crate::voiceprint::ScoreNorm::SNorm,
+            VoiceprintScoreNorm::ASNorm => crate::voiceprint::ScoreNorm::ASNorm,
+        }
+    }
 }
 
 fn default_recognize_speakers() -> bool {
@@ -317,6 +363,9 @@ fn default_recognize_speakers() -> bool {
 }
 fn default_voiceprint_threshold() -> f64 {
     0.5
+}
+fn default_voiceprint_score_norm_threshold() -> f64 {
+    2.0
 }
 fn default_merge_gap_secs() -> f64 {
     0.25
@@ -345,6 +394,8 @@ impl Default for DiarizationConfig {
             preload_at_startup: false,
             recognize_speakers: default_recognize_speakers(),
             voiceprint_match_threshold: default_voiceprint_threshold(),
+            voiceprint_score_norm: VoiceprintScoreNorm::default(),
+            voiceprint_score_norm_threshold: default_voiceprint_score_norm_threshold(),
         }
     }
 }
@@ -3807,6 +3858,58 @@ mod tests {
         let parsed: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(parsed.recording.pre_roll_ms, 1500);
         assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn voiceprint_score_norm_defaults_to_off() {
+        // V2: the feature is opt-in, so a fresh config must default to Off,
+        // preserving the raw-cosine matching behavior.
+        assert_eq!(
+            Config::default().diarization.voiceprint_score_norm,
+            VoiceprintScoreNorm::Off
+        );
+        assert_eq!(
+            Config::default().diarization.voiceprint_score_norm_threshold,
+            2.0
+        );
+    }
+
+    #[test]
+    fn voiceprint_score_norm_absent_in_legacy_toml_defaults_to_off() {
+        // A config written before V2 (no voiceprint_score_norm key) must still
+        // load and default to Off — zero behavior change for existing users.
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(diar) = toml_val.get_mut("diarization").and_then(|v| v.as_table_mut()) {
+            diar.remove("voiceprint_score_norm");
+            diar.remove("voiceprint_score_norm_threshold");
+        }
+        let text = toml::to_string(&toml_val).unwrap();
+        let parsed: Config = toml::from_str(&text).unwrap();
+        assert_eq!(
+            parsed.diarization.voiceprint_score_norm,
+            VoiceprintScoreNorm::Off
+        );
+        assert_eq!(parsed.diarization.voiceprint_score_norm_threshold, 2.0);
+    }
+
+    #[test]
+    fn voiceprint_score_norm_round_trips_lowercase_strings() {
+        for (mode, token) in [
+            (VoiceprintScoreNorm::SNorm, "s_norm"),
+            (VoiceprintScoreNorm::ASNorm, "as_norm"),
+            (VoiceprintScoreNorm::Off, "off"),
+        ] {
+            let mut cfg = Config::default();
+            cfg.diarization.voiceprint_score_norm = mode;
+            let serialized = toml::to_string(&cfg).unwrap();
+            assert!(
+                serialized.contains(&format!("voiceprint_score_norm = \"{token}\"")),
+                "expected lowercase token {token} in:\n{serialized}"
+            );
+            let parsed: Config = toml::from_str(&serialized).unwrap();
+            assert_eq!(parsed.diarization.voiceprint_score_norm, mode);
+        }
     }
 
     #[test]
