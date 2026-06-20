@@ -84,6 +84,16 @@ trust boundary.*
   (via the harness above) is strictly below the raw EER. Local diarization only;
   config-only for now (no Settings toggle yet) and per-speaker thresholds left as
   a follow-up (S-norm already re-centers per probe).
+- [x] **Duration-weighted named-voice centroid** — a named voice's cached centroid
+  now weights each enrolled capture by how long that speaker actually spoke, so a
+  long, clean sample outvotes a brief one-word blip instead of counting the same
+  (`voiceprint::weighted_mean_centroid`). Weighting is applied *after* the existing
+  outlier rejection, on the survivors only — length can't buy a wrong-speaker
+  capture into the template. Each capture stores a `duration_ms` (migration
+  `20260620000000`; summed from that speaker's segment spans at transcribe time);
+  legacy captures default to `0`, which falls back to equal weighting, so a library
+  built before this recomputes to the identical centroid until new captures arrive.
+  Local diarization only.
 - [x] **Custom local diarization models** — `[diarization].models_dir` points the local
   diarizer at a folder holding your own speakrs bundle (segmentation + embedding ONNX),
   loaded via `OwnedDiarizationPipeline::from_dir` instead of the pretrained download;

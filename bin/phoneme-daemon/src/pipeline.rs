@@ -2219,10 +2219,25 @@ pub async fn run(
     // a speaker can enroll it into the cross-recording library and later
     // recordings can be matched against it (#9). A re-transcribe refreshes the
     // sample without un-enrolling. Best-effort: a failure costs only recognition.
+    //
+    // Each capture carries that speaker's total speaking duration (sum of their
+    // segment spans, in ms) as the V4 duration-weight: a long, clean sample
+    // outvotes a brief one when the named voice's centroid is recomputed. The
+    // segment `speaker` field is the decimal label that matches `vp.label`
+    // (`[Speaker N]`); segments with no/other label contribute 0. A speaker with
+    // no matching segment falls back to 0, which the weighted mean treats as
+    // equal weight.
+    let mut speaking_ms: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for seg in &segments {
+        if let Some(label) = &seg.speaker {
+            *speaking_ms.entry(label.clone()).or_insert(0) += (seg.end_ms - seg.start_ms).max(0);
+        }
+    }
     for vp in &speaker_voiceprints {
+        let duration_ms = speaking_ms.get(&vp.label.to_string()).copied().unwrap_or(0);
         if let Err(e) = state
             .catalog
-            .save_speaker_voiceprint(id.as_str(), vp.label as i64, &vp.centroid)
+            .save_speaker_voiceprint(id.as_str(), vp.label as i64, &vp.centroid, duration_ms)
             .await
         {
             tracing::warn!(id = %id.as_str(), label = vp.label, "failed to persist voiceprint: {e}");
