@@ -537,10 +537,13 @@ trust boundary.*
   `hooks_migrated` migration folds your existing `[hook]` `commands` /
   `keyword_rules` / `webhook_url` into Hook entries on the `default` recipe and
   clears the `[hook]` table — your hooks keep firing, now editable in the Playbook
-  and runnable per-hotkey via that recipe. The legacy in-pipeline `[hook]`
-  execution is gone; `run_on_transcribe` still gates whether a pass fires its
+  and runnable per-hotkey via that recipe. The legacy in-pipeline `[hook]` loops
+  still exist but iterate the now-empty table, so a hook fires **exactly once** per
+  transcribe (the migration moves it into a recipe Hook step and clears the legacy
+  field — never both); `run_on_transcribe` still gates whether a pass fires its
   hooks, and the global `[webhook]` SSRF/HMAC policy still guards outbound POSTs.
   The detail-pane Pipeline popover now shows the real Playbook-hook provenance.
+  *(Regression-locked: `configured_hook_fires_exactly_once_per_transcribe`.)*
 - [x] **The Playbook is now the source of truth for the LLM-over-transcript
   pipeline** — every recording's cleanup, title, summary, and tag suggestions are
   driven by the built-in Playbook entries and the `default` recipe, not the old

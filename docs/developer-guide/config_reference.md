@@ -333,7 +333,7 @@ Named, ordered chains of `[[playbook]]` entry ids — what the default recording
 | Key | Default | Description |
 |-----|---------|-------------|
 | `playbook_migrated` | `false` | One-time migration latch (top-level bool). On first load Phoneme copies a user's LIVE `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` values into the matching built-in `[[playbook]]` entries and rebuilds the `default` recipe from the legacy enable flags, then sets this to `true` so the reconcile never runs again. Idempotent — leave it alone. |
-| `hooks_migrated` | `false` | One-time hooks-cutover latch (top-level bool). On first load Phoneme folds the legacy `[hook]` `commands` / `keyword_rules` / `webhook_url` into Hook `[[playbook]]` entries appended to the `default` recipe, clears the `[hook]` fields, and sets this `true`. Idempotent — leave it alone. |
+| `hooks_migrated` | `false` | One-time hooks-cutover latch (top-level bool). On first load Phoneme folds the legacy `[hook]` `commands` / `keyword_rules` / `webhook_url` into Hook `[[playbook]]` entries appended to the `default` recipe, clears the `[hook]` fields, and sets this `true`. The daemon's legacy in-pipeline hook loops still exist but iterate the now-empty `[hook]` table, so a hook fires **exactly once** per transcribe (via its recipe Hook step) — never twice. Idempotent — leave it alone. |
 
 ---
 
