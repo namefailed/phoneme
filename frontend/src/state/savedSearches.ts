@@ -75,9 +75,13 @@ function readLegacy(): SavedSearch[] {
 function parseRow(r: { id: string; name: string; filter_json: string }): SavedSearch | null {
   try {
     const filter = JSON.parse(r.filter_json) as UiFilter;
-    if (!filter || typeof filter !== "object") return null;
+    if (!filter || typeof filter !== "object") {
+      console.warn(`Dropping saved search "${r.id}" — filter is not an object.`);
+      return null;
+    }
     return { id: r.id, name: r.name, filter };
   } catch {
+    console.warn(`Dropping saved search "${r.id}" — filter JSON won't parse.`);
     return null;
   }
 }
@@ -116,7 +120,14 @@ export function initSavedSearches(): Promise<void> {
           rows = Array.isArray(reread) ? reread : [];
         }
       }
-      cache = rows.map(parseRow).filter((s): s is SavedSearch => s !== null);
+      const fresh = rows.map(parseRow).filter((s): s is SavedSearch => s !== null);
+      // Preserve any entry added to the cache DURING this load: a save issued
+      // before the catalog read returned would otherwise be clobbered here and
+      // vanish from the menu until the next reload (its write does survive in the
+      // catalog). Merge by id — fresh (catalog truth) plus cache-only pending.
+      const freshIds = new Set(fresh.map((s) => s.id));
+      const pending = cache.filter((s) => !freshIds.has(s.id));
+      cache = [...fresh, ...pending];
     } catch (e) {
       console.error("Failed to load saved searches:", e);
       cache = [];
@@ -179,7 +190,9 @@ export function addSavedSearch(name: string, filter: UiFilter): SavedSearch[] {
 
 /** Delete a saved search by id (unknown ids are a no-op). Returns the new list. */
 export function removeSavedSearch(id: string): SavedSearch[] {
+  const before = cache.length;
   cache = cache.filter((s) => s.id !== id);
+  if (cache.length === before) return cache; // unknown id — no IPC, no re-render
   ipcDelete(id).catch((e) => console.error("Failed to delete saved search:", e));
   notify();
   return cache;

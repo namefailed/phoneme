@@ -268,6 +268,12 @@ impl WebhookClient {
     /// [`Error::HookTimeout`] on a slow response, and [`Error::HookFailed`]
     /// (carrying the status and body) on a non-2xx answer — a 3xx included,
     /// since redirects are deliberately not followed.
+    ///
+    /// **Delivery is at-least-once.** A transient retry (timeout / connection /
+    /// 429 / 5xx) re-sends the identical body, so a receiver that committed the
+    /// request but whose response was lost (or that 5xx'd after committing) can
+    /// see the same event twice — a non-idempotent receiver (e.g. an "append to
+    /// note" webhook) should dedupe on the payload's recording id.
     pub async fn post(
         &self,
         url: &str,

@@ -154,9 +154,13 @@ export class MergedConversationDetail extends LitElement {
    *  (the daemon already skips named/dismissed labels, and returns nothing when
    *  recognition is off or a track was cloud-diarized). */
   private async loadSuggestions() {
+    // Capture the meeting this batch is for; a slower recognition batch from a
+    // PREVIOUS meeting must not paint its (wrong-track) suggestions onto the one
+    // now shown (audit — wrong-track naming). Bail before assigning if we've moved.
+    const mid = this.meetingId;
     const recs = this.recordings;
     if (recs.length === 0) {
-      this.suggestions = [];
+      if (this.meetingId === mid) this.suggestions = [];
       return;
     }
     try {
@@ -167,9 +171,10 @@ export class MergedConversationDetail extends LitElement {
             .catch(() => [] as (SpeakerSuggestion & { recordingId: string })[]),
         ),
       );
+      if (this.meetingId !== mid) return;
       this.suggestions = perTrack.flat();
     } catch {
-      this.suggestions = [];
+      if (this.meetingId === mid) this.suggestions = [];
     }
   }
 
@@ -384,7 +389,7 @@ export class MergedConversationDetail extends LitElement {
                 (s) => html`<span class="merged-suggest-chip">
                   Speaker ${s.speaker_label} sounds like
                   <b>${s.name}</b>
-                  <span class="merged-suggest-pct">${Math.round(s.score * 100)}%</span>
+                  <span class="merged-suggest-pct">${Math.round((s.score ?? 0) * 100)}%</span>
                   <button
                     class="merged-suggest-yes"
                     title="Use this name"

@@ -1331,6 +1331,20 @@ pub fn run_local_diarization(
                 }
             }
         }
+        // Remap hard_clusters through canon too. `speaker_voiceprints` computes a
+        // persisted voiceprint via `cluster_centroids`, which buckets embeddings by
+        // hard_clusters id — without this remap a merged speaker's centroid would
+        // aggregate only its canonical column's ORIGINAL fragment, dropping the
+        // merged-in clusters' embeddings and weakening cross-recording matching
+        // (audit M1). `-1` (unassigned) cells are left as-is.
+        for v in result.hard_clusters.0.iter_mut() {
+            if *v >= 0 {
+                let c = *v as usize;
+                if c < num_cols {
+                    *v = canon[c] as i32;
+                }
+            }
+        }
         tracing::info!(
             from = num_cols,
             to = (0..num_cols).filter(|&c| canon[c] == c).count(),

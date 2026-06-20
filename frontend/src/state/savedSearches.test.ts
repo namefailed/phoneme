@@ -17,8 +17,11 @@ import {
   renameSavedSearch,
   updateSavedSearchFilter,
   __resetSavedSearchesForTest,
+  SAVED_SEARCHES_CHANGED,
+  type SavedSearch,
 } from "./savedSearches";
 import * as ipc from "../services/ipc";
+import type { SavedSearchRow } from "../services/ipc";
 import type { UiFilter } from "./filter";
 
 const LEGACY_KEY = "phoneme.savedSearches";
@@ -158,5 +161,36 @@ describe("migration", () => {
     expect(loadSavedSearches().map((s) => s.name)).toEqual(["Already there"]);
     // The legacy key is left intact (we never touched it).
     expect(localStorage.getItem(LEGACY_KEY)).not.toBeNull();
+  });
+});
+
+describe("concurrency + events", () => {
+  it("preserves a save issued BEFORE the initial load resolves (audit fix)", async () => {
+    __resetSavedSearchesForTest();
+    // Hold the catalog read open so we can mutate while it's in flight.
+    let resolveList!: (rows: SavedSearchRow[]) => void;
+    vi.mocked(ipc.listSavedSearches).mockImplementationOnce(
+      () => new Promise<SavedSearchRow[]>((res) => (resolveList = res)),
+    );
+    const loading = initSavedSearches();
+
+    // Save while the load is pending — the catalog read hasn't returned yet.
+    addSavedSearch("Mid-load save", filter("x"));
+
+    // The read now returns WITHOUT that entry (its upsert hasn't landed).
+    resolveList([]);
+    await loading;
+
+    // The merge-by-id must keep the cache-only entry instead of clobbering it.
+    expect(loadSavedSearches().map((s: SavedSearch) => s.name)).toContain("Mid-load save");
+  });
+
+  it("dispatches SAVED_SEARCHES_CHANGED on a mutation", () => {
+    let fired = 0;
+    const handler = () => (fired += 1);
+    window.addEventListener(SAVED_SEARCHES_CHANGED, handler);
+    addSavedSearch("Notify", filter());
+    window.removeEventListener(SAVED_SEARCHES_CHANGED, handler);
+    expect(fired).toBeGreaterThan(0);
   });
 });

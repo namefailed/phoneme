@@ -372,25 +372,18 @@ async fn transcribe_polish_type(
     // map this is always the global mode — today's behavior unchanged.
     let type_mode = cfg.in_place.resolve_type_mode(focused_app.as_deref());
 
-    if polished.trim().is_empty() {
-        tracing::info!(id = %id.as_str(), "in-place dictation: nothing to type (empty transcript)");
-    } else if type_mode == "off" {
-        // The user asked dictation NOT to auto-deliver for this app — the
-        // transcript still persists (fast lane) or rides the pipeline into the
-        // library, it just doesn't land at the cursor.
-        tracing::info!(
-            id = %id.as_str(),
-            "in-place dictation: per-app override is \"off\" for the focused app; not typing"
-        );
-    } else if cfg.in_place.stream_type && type_mode == "type" {
-        // Streaming-type: the preview loop already typed the rolling-preview text
-        // live as it finalized. Reconcile that to the accurate final `polished`
-        // with the smallest end-edit (backspace the divergent tail, retype it —
-        // for clean dictation usually just appending the last words + terminal
-        // punctuation). Reading clears the rolling state for the next dictation.
-        // An empty streamed string (preview never ticked, e.g. a very short clip)
-        // degrades to typing the whole `polished` (`backspaces == 0`).
-        let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
+    // Did streaming-type type live this dictation? The rolling state is reset at
+    // every record start, so a non-empty value means THIS recording streamed —
+    // a signal independent of the current config, robust even if stream_type was
+    // toggled mid-recording (audit M3). Taken (cleared) here regardless.
+    let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
+
+    if !streamed.is_empty() && type_mode == "type" {
+        // Streaming-type already typed the rolling-preview text live as it
+        // finalized. Reconcile that to the accurate final `polished` with the
+        // smallest end-edit (backspace the divergent tail, retype it — usually
+        // just appending the last words + terminal punctuation). An empty
+        // `polished` correctly backspaces the streamed text away.
         let (backspaces, insert) =
             phoneme_core::dictation::reconcile_edit(&streamed, &polished);
         if let Err(e) = reconcile_at_cursor(backspaces, &insert).await {
@@ -400,6 +393,16 @@ async fn transcribe_polish_type(
                 error: format!("dictation transcribed but couldn't reconcile the streamed text: {e}"),
             });
         }
+    } else if polished.trim().is_empty() {
+        tracing::info!(id = %id.as_str(), "in-place dictation: nothing to type (empty transcript)");
+    } else if type_mode == "off" {
+        // The user asked dictation NOT to auto-deliver for this app — the
+        // transcript still persists (fast lane) or rides the pipeline into the
+        // library, it just doesn't land at the cursor.
+        tracing::info!(
+            id = %id.as_str(),
+            "in-place dictation: per-app override is \"off\" for the focused app; not typing"
+        );
     } else if let Err(e) = type_at_cursor(&polished, type_mode).await {
         // Typing failing must not lose the words — the transcript still
         // persists (fast lane) or rides the queued pipeline into the library

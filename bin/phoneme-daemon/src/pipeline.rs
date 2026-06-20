@@ -2278,7 +2278,21 @@ pub async fn run(
             // `focused_app` is the side-channel value claimed early above; `None`
             // (no stash, or a daemon-restart drop) degrades to the global mode.
             let type_mode = cfg.in_place.resolve_type_mode(focused_app.as_deref());
-            if type_mode == "off" {
+            // Did streaming-type type live this dictation? Reset at every record
+            // start, so non-empty = THIS recording streamed — independent of the
+            // current config (audit M3). Taken (cleared) here regardless.
+            let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
+            if !streamed.is_empty() && type_mode == "type" {
+                // Streaming-type already typed the rolling preview live while
+                // recording; reconcile it up to this pipeline result with a minimal
+                // backspace + retype instead of typing the whole thing on top.
+                tracing::info!(id = %id.as_str(), "in-place dictation: reconciling streamed text to pipeline result");
+                let (backspaces, insert) =
+                    phoneme_core::dictation::reconcile_edit(&streamed, &transcript);
+                if let Err(e) = crate::in_place::reconcile_at_cursor(backspaces, &insert).await {
+                    tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to reconcile streamed text");
+                }
+            } else if type_mode == "off" {
                 // The user asked dictation NOT to auto-deliver for this app — the
                 // transcript still rides the pipeline into the library, it just
                 // doesn't land at the cursor. Same skip the fast lane does.
@@ -2286,19 +2300,6 @@ pub async fn run(
                     id = %id.as_str(),
                     "in-place dictation: per-app override is \"off\" for the focused app; not typing"
                 );
-            } else if cfg.in_place.stream_type && type_mode == "type" {
-                // Streaming-type already typed the rolling preview live while
-                // recording; reconcile it up to this pipeline result with a minimal
-                // backspace + retype instead of typing the whole thing on top of
-                // it. An empty rolling state (type-first already consumed it, or the
-                // preview never ticked) degrades to typing the whole result.
-                tracing::info!(id = %id.as_str(), "in-place dictation: reconciling streamed text to pipeline result");
-                let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
-                let (backspaces, insert) =
-                    phoneme_core::dictation::reconcile_edit(&streamed, &transcript);
-                if let Err(e) = crate::in_place::reconcile_at_cursor(backspaces, &insert).await {
-                    tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to reconcile streamed text");
-                }
             } else {
                 tracing::info!(id = %id.as_str(), "in-place dictation: typing transcript at cursor");
                 // This is the FULL-PIPELINE dictation path: either [in_place].

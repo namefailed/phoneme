@@ -1681,13 +1681,28 @@ impl Catalog {
     /// segments, speaker names, and embeddings with it; the caller removes the
     /// audio file from disk separately.
     pub async fn delete(&self, id: &RecordingId) -> Result<()> {
+        // Named voices that will lose a sample when the cascade removes this
+        // recording's voiceprints — captured BEFORE the delete so we can recompute
+        // their cached centroids afterward (audit H1). NULL links are skipped.
+        let affected: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
+             WHERE recording_id = ? AND named_voice_id IS NOT NULL",
+        )
+        .bind(id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
         sqlx::query("DELETE FROM recordings WHERE id = ?")
             .bind(id.as_str())
             .execute(&self.pool)
             .await?;
-        // The cascade took this recording's embeddings with it — drop the
-        // snapshot so a deleted recording can't keep surfacing in search.
+        // The cascade took this recording's embeddings, voiceprints, and dismissed
+        // suggestions with it — drop the search snapshot, then recompute any named
+        // voice that just lost a sample so its centroid + count stay accurate.
         self.invalidate_embedding_cache();
+        for nid in affected {
+            self.recompute_named_centroid(&nid).await?;
+        }
         Ok(())
     }
 
@@ -2290,6 +2305,10 @@ impl Catalog {
         {
             return Ok(None);
         }
+        // What this capture was enrolled under before (if anything), so a re-name
+        // (e.g. correcting a wrong suggestion) recomputes the OLD voice too — else
+        // it keeps the moved sample's stale centroid / inflated count (audit H2).
+        let previous = self.named_voice_for(recording_id, speaker_label).await?;
         let id = self.find_or_create_named_voice(name).await?;
         sqlx::query(
             "UPDATE speaker_voiceprints SET named_voice_id = ? \
@@ -2301,6 +2320,11 @@ impl Catalog {
         .execute(&self.pool)
         .await?;
         self.recompute_named_centroid(&id).await?;
+        if let Some(prev) = previous {
+            if prev != id {
+                self.recompute_named_centroid(&prev).await?;
+            }
+        }
         Ok(Some(id))
     }
 
@@ -2324,25 +2348,28 @@ impl Catalog {
     /// Find a named voice by case-insensitive name, creating an empty one (no
     /// samples yet) if none matches. Returns its id.
     async fn find_or_create_named_voice(&self, name: &str) -> Result<String> {
-        let existing: Option<String> =
-            sqlx::query("SELECT id FROM named_voiceprints WHERE name = ? COLLATE NOCASE LIMIT 1")
-                .bind(name)
-                .fetch_optional(&self.pool)
-                .await?
-                .map(|r| r.try_get::<String, _>("id"))
-                .transpose()?;
-        if let Some(id) = existing {
-            return Ok(id);
-        }
+        // Atomic find-or-create: the INSERT is a single (serialized) write that
+        // fires only when no case-insensitive match exists, so two enrollments
+        // racing under the same name can't create duplicate library entries
+        // (audit M4). Then read back the existing-or-just-created id.
         let id = format!("nv_{}", RecordingId::new().as_str());
         sqlx::query(
-            "INSERT INTO named_voiceprints (id, name, centroid, samples) VALUES (?, ?, '[]', 0)",
+            "INSERT INTO named_voiceprints (id, name, centroid, samples) \
+             SELECT ?, ?, '[]', 0 \
+             WHERE NOT EXISTS (SELECT 1 FROM named_voiceprints WHERE name = ? COLLATE NOCASE)",
         )
         .bind(&id)
         .bind(name)
+        .bind(name)
         .execute(&self.pool)
         .await?;
-        Ok(id)
+        let resolved: String = sqlx::query_scalar(
+            "SELECT id FROM named_voiceprints WHERE name = ? COLLATE NOCASE LIMIT 1",
+        )
+        .bind(name)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(resolved)
     }
 
     /// Recompute a named voice's cached centroid + sample count from its linked

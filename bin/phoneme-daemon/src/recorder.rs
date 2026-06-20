@@ -1207,12 +1207,14 @@ impl DaemonRecorder {
         // preview down WITHOUT awaiting (see `stop`), so a preview tick can
         // never delay the paste ("constantly listening, never pastes").
         // Streaming-type (`stream_type`, computed above before `focused_app`
-        // moved into the active slot): force the preview loop on and reset the
-        // rolling typed state for this dictation. The loop then types committed
-        // words live; the stop reconcile patches them to the final transcript.
-        if stream_type {
-            *state.stream_typed.lock().await = String::new();
-        }
+        // moved into the active slot): force the preview loop on; it then types
+        // committed words live and the stop reconcile patches them to the final.
+        // ALWAYS reset the rolling typed state at the start of EVERY recording
+        // (not just streaming ones), so the stop path can use "is it non-empty?"
+        // as the did-we-stream signal — robust even if the user toggles
+        // stream_type mid-recording (audit M3) and clearing any leaked write from
+        // a prior dictation (audit M2).
+        *state.stream_typed.lock().await = String::new();
         self.start_preview(state, id.clone(), preview_snapshot, false, stream_type)
             .await;
         // The live audio-level waveform runs for every capture (including

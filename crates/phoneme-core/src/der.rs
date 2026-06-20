@@ -111,7 +111,16 @@ pub fn compute_der(reference: &[DerSegment], hypothesis: &[DerSegment]) -> DerRe
         .flat_map(|s| [s.start, s.end])
         .collect();
     bounds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    bounds.dedup();
+    // Merge near-equal boundaries (float accumulation from RTTM start+dur can make
+    // 2.0+3.0 differ from a reference 5.0 by an epsilon) so a tiny spurious
+    // sub-interval isn't scored as missed/false-alarm (audit L3).
+    let mut deduped: Vec<f64> = Vec::with_capacity(bounds.len());
+    for b in bounds {
+        if deduped.last().is_none_or(|&last| (b - last).abs() > 1e-6) {
+            deduped.push(b);
+        }
+    }
+    let bounds = deduped;
 
     // Pass 1 — overlap matrix (ref speaker, hyp speaker) → co-active seconds.
     let mut overlap: std::collections::HashMap<(&str, &str), f64> =
