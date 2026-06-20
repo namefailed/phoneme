@@ -7,7 +7,7 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 ## 🚧 v1.8.x — Recall, Meetings & Hardening (in development)
 
 *Workspace version `1.8.1`. Closing promise-vs-reality gaps and hardening the
-trust boundary. Verified against current code.*
+trust boundary.*
 
 ### Recall
 
@@ -38,8 +38,10 @@ trust boundary. Verified against current code.*
 - [x] **Merged meeting view** — selecting a meeting's group header opens a single,
   read-only reading of every track, labelled 🎤 Microphone / 🔊 System audio with the
   diarizer's `[Speaker N]` turns surfaced, plus Copy / Export
-  (`MergedConversationDetail.ts`, `mergeMeeting.ts`). Coarse/source-sectioned — not
-  yet chronologically interleaved.
+  (`MergedConversationDetail.ts`, `mergeMeeting.ts`). Now a **chronologically
+  interleaved** chat timeline (`mergeChronological()`, ordered by per-track segment
+  offsets), falling back to the coarse source-sectioned merge only when segment
+  timings are absent.
 - [x] **Speaker-diarization provider picker** — Settings → Transcription now exposes a
   Speaker Diarization section to choose who-spoke-when: off, **Local** (speakrs ONNX),
   **Deepgram**, or **AssemblyAI** (`SectionDiarization.ts`). Cloud diarization rides the
@@ -378,14 +380,12 @@ trust boundary. Verified against current code.*
   cleanup provider (prefer a local LLM) and is never logged or stored. An
   `in_place.app_context_denylist` excludes named apps (e.g. a password manager)
   even while it's on.
-- [x] **Streaming-type spike — assessed, not shipped.** Typing words as they're
-  recognized was evaluated against the dictation fast lane, which transcribes the
-  whole clip after stop and types once — there is no committed-word stream to
-  drive safe incremental typing without risking text corruption when Whisper
-  revises earlier words, focus changes mid-type, or the user types too. An
-  off-by-default `in_place.stream_type` flag is reserved as a no-op stub; the
-  hazards and a recommended design are written up in
-  `archive_internal/plans/dictation-streaming-type-spike.md`.
+- [x] **Streaming-type dictation** — type words as they finalize instead of all at
+  once on stop. Only clean forward extensions of the streaming preview's committed
+  words are typed mid-stream (never a mid-stream backspace, so the cursor doesn't
+  churn); on stop a minimal backspace+retype reconciles to the accurate final
+  transcript (`dictation::reconcile_edit`). Off by default under
+  `[in_place].stream_type`; honored with `type_mode = "type"`.
 
 ### Playbook & Custom Hotkeys
 
