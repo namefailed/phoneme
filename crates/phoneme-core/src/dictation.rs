@@ -306,6 +306,93 @@ fn finish_sentence(text: &str) -> String {
     out
 }
 
+/// A minimal-churn cursor edit that preserves BOTH the common prefix and the
+/// common suffix (P3 spike). Counts are UTF-16 code units, matching how the OS
+/// arrow/backspace keys move and delete (see `reconcile_edit`'s note).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WordReconcile {
+    /// Move the caret left this many units, back over the unchanged suffix.
+    pub left: usize,
+    /// Then delete this many units (the diverging middle's old text).
+    pub backspaces: usize,
+    /// Then type this (the diverging middle's new text).
+    pub insert: String,
+    /// Then move the caret right this many units, restoring it to the end.
+    pub right: usize,
+}
+
+/// **EXPERIMENTAL (P3 spike — NOT yet wired into the live dictation path.)**
+///
+/// Word-level reconcile from already-typed `streamed` to `final_text`. Unlike
+/// [`reconcile_edit`] (prefix-only: it backspaces the entire divergent tail from
+/// the end, so a corrected *early* word retypes everything after it), this also
+/// keeps the longest common SUFFIX, so only the genuinely-changed middle is
+/// rewritten. That needs the caret moved left over the suffix, the middle
+/// patched, then the caret moved back — hence the `left`/`right` cursor steps.
+///
+/// Both the prefix and suffix split points are snapped to whitespace boundaries
+/// so the rewrite always covers WHOLE words (no mid-word caret edits, which look
+/// jarring live and confuse IMEs). When the common suffix is empty this reduces
+/// exactly to [`reconcile_edit`] (`left == right == 0`).
+///
+/// Not wired up because the left/right caret moves rely on synthetic Arrow keys,
+/// which are far less reliable across apps than end-anchored backspacing; this
+/// proves the algorithm so the OS-layer cutover can be evaluated separately.
+pub fn reconcile_edit_words(streamed: &str, final_text: &str) -> WordReconcile {
+    let s: Vec<char> = streamed.chars().collect();
+    let f: Vec<char> = final_text.chars().collect();
+
+    // Longest common prefix, then snapped back to the start of the word it lands
+    // in (the position after the previous whitespace) so the rewrite is whole-word.
+    let raw_prefix = s.iter().zip(f.iter()).take_while(|(a, b)| a == b).count();
+    let prefix = snap_prefix_to_word(&s, raw_prefix);
+
+    // Longest common suffix, capped so it never overlaps the prefix on either
+    // side, then snapped FORWARD to a word boundary (the suffix begins right
+    // after a whitespace) for the same whole-word reason.
+    let max_suffix = (s.len().min(f.len())).saturating_sub(prefix);
+    let raw_suffix = s
+        .iter()
+        .rev()
+        .zip(f.iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count()
+        .min(max_suffix);
+    let suffix = snap_suffix_to_word(&s, raw_suffix);
+
+    let s_mid = &s[prefix..s.len() - suffix];
+    let f_mid = &f[prefix..f.len() - suffix];
+    let suffix_units: usize = s[s.len() - suffix..].iter().map(|c| c.len_utf16()).sum();
+
+    WordReconcile {
+        left: suffix_units,
+        backspaces: s_mid.iter().map(|c| c.len_utf16()).sum(),
+        insert: f_mid.iter().collect(),
+        right: suffix_units,
+    }
+}
+
+/// Reduce a common-prefix length so it ends on a word boundary: the largest
+/// `p <= prefix` with `p == 0` or the char before `p` being whitespace.
+fn snap_prefix_to_word(s: &[char], prefix: usize) -> usize {
+    let mut p = prefix;
+    while p > 0 && !s[p - 1].is_whitespace() {
+        p -= 1;
+    }
+    p
+}
+
+/// Reduce a common-suffix length so the suffix begins on a word boundary: the
+/// largest `c <= suffix` with `c == 0` or the char before the suffix start
+/// (`s[len-c-1]`) being whitespace.
+fn snap_suffix_to_word(s: &[char], suffix: usize) -> usize {
+    let mut c = suffix;
+    while c > 0 && !s[s.len() - c - 1].is_whitespace() {
+        c -= 1;
+    }
+    c
+}
+
 /// The minimal end-edit to turn already-typed `streamed` text into `final_text`:
 /// `(backspaces, insert)` — delete that many trailing characters, then type
 /// `insert`. Shares the longest common prefix, so only the divergent tail is
@@ -369,6 +456,79 @@ mod tests {
         // Replacing the emoji keeps the "hi " prefix and deletes only the emoji
         // (2 units), then types the replacement.
         assert_eq!(reconcile_edit("hi 😀", "hi !"), (2, "!".into()));
+    }
+
+    /// Simulate applying a [`WordReconcile`] to `streamed` the way the OS would:
+    /// move the caret left, delete, insert, (move right — caret-only). Works in
+    /// UTF-16 units, matching the struct's counts. Returns the resulting text.
+    fn apply_word_reconcile(streamed: &str, r: &WordReconcile) -> String {
+        let mut units: Vec<u16> = streamed.encode_utf16().collect();
+        let caret = units.len() - r.left; // move left over the suffix
+        let del_start = caret - r.backspaces;
+        units.drain(del_start..caret); // delete the old middle
+        let ins: Vec<u16> = r.insert.encode_utf16().collect();
+        units.splice(del_start..del_start, ins); // type the new middle
+        String::from_utf16(&units).unwrap()
+    }
+
+    #[test]
+    fn word_reconcile_round_trips_to_final() {
+        // The core invariant: applying the reconcile to `streamed` yields `final`.
+        for (s, f) in [
+            ("hello there world", "hello big world"), // mid change, suffix kept
+            ("the cat sat on the mat", "the dog sat on the mat"), // early change
+            ("one two three", "one two three"),       // identical
+            ("the meeting went", "the meeting went well."), // pure append
+            ("", "typed in"),                         // from empty
+            ("backspace all", ""),                    // to empty
+            ("alpha beta gamma", "alpha BETA gamma"), // single middle word
+            ("hi 😀 there", "hi 🎉 there"),           // astral middle word
+        ] {
+            let r = reconcile_edit_words(s, f);
+            assert_eq!(
+                apply_word_reconcile(s, &r),
+                f,
+                "round-trip failed for {s:?}->{f:?}"
+            );
+            // The caret always returns to the end: it moves left over the suffix
+            // and right by the same amount.
+            assert_eq!(r.left, r.right, "left/right must match for {s:?}->{f:?}");
+        }
+    }
+
+    #[test]
+    fn word_reconcile_preserves_the_common_suffix() {
+        // An EARLY change must NOT retype the trailing words — that is the whole
+        // point over the prefix-only reconcile. "world" is untouched (left>0), and
+        // far fewer characters are typed than the prefix-only path would.
+        let r = reconcile_edit_words("hello there world", "hello big world");
+        assert!(
+            r.left > 0,
+            "the common suffix should be preserved via a left move"
+        );
+        assert!(
+            !r.insert.contains("world"),
+            "the suffix must not be retyped"
+        );
+        // Prefix-only would have to retype everything after "hello ".
+        let (_, prefix_only) = reconcile_edit("hello there world", "hello big world");
+        assert!(
+            r.insert.len() < prefix_only.len(),
+            "word-level should type less than prefix-only"
+        );
+    }
+
+    #[test]
+    fn word_reconcile_no_caret_move_without_a_common_suffix() {
+        // "wrld"/"world" share no whole-word suffix, so there's nothing to move
+        // the caret back over — it stays an end-anchored backspace+type like
+        // reconcile_edit. (It retypes the WHOLE word, not the char-level tail,
+        // because the prefix is snapped to the word boundary — that's intended.)
+        let r = reconcile_edit_words("hello wrld", "hello world");
+        assert_eq!(r.left, 0);
+        assert_eq!(r.right, 0);
+        assert_eq!(apply_word_reconcile("hello wrld", &r), "hello world");
+        assert_eq!(r.insert, "world", "snaps to the whole word");
     }
 
     #[test]
