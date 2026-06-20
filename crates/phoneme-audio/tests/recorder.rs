@@ -316,6 +316,195 @@ async fn prepend_samples_lead_the_recording() {
 }
 
 #[tokio::test]
+async fn duration_counts_fresh_capture_excluding_preroll() {
+    // A3: a `Duration { secs }` take must yield `secs` seconds of NEW audio with
+    // the pre-roll added ON TOP — not counted inside the requested duration.
+    // With 0.5s of pre-roll and Duration { secs: 1 }, the result is ~1.5s:
+    // 1.0s of fresh capture beyond the 0.5s lead-in.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("dur_preroll.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Duration { secs: 1 },
+        max_duration_ms: 30_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 5000,
+    };
+    // 0.5s of pre-roll (8000 samples at 16 kHz), distinct marker value.
+    let preroll: Vec<i16> = vec![123; 8000];
+    let recorder = Recorder::start_with_prepend(Box::new(source), cfg, None, preroll.clone())
+        .await
+        .unwrap();
+
+    // Feed plenty of loud samples; the recorder must auto-stop after 1.0s of
+    // FRESH capture (not 0.5s, which is what the pre-roll would force if counted).
+    let pump = tokio::spawn({
+        let sink = sink.clone();
+        async move {
+            for _ in 0..30 {
+                if sink.push(loud_block(1600)).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+    });
+
+    let finalize = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    pump.abort();
+    sink.close();
+
+    // Pre-roll (0.5s) + fresh (1.0s) ≈ 1.5s.
+    assert!(
+        (finalize.duration_ms - 1500).abs() < 200,
+        "duration was {}ms (expected ~1500: 0.5s pre-roll + 1.0s fresh)",
+        finalize.duration_ms
+    );
+
+    let (samples, _) = wav::read_wav(&wav_path).unwrap();
+    // The fresh portion (everything after the pre-roll marker) must be ~1.0s.
+    let fresh = samples.len() - preroll.len();
+    assert!(
+        (fresh as i64 - 16_000).abs() < 3_200,
+        "fresh capture was {fresh} samples (expected ~16000 = 1.0s)"
+    );
+    // Pre-roll still leads the recording, unchanged.
+    assert_eq!(&samples[..8000], &preroll[..]);
+}
+
+#[tokio::test]
+async fn duration_with_no_preroll_unchanged() {
+    // Back-compat: with NO pre-roll, Duration { secs: 1 } is exactly 1s — the A3
+    // accounting offset is zero and behaves identically to before.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("dur_noprl.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Duration { secs: 1 },
+        max_duration_ms: 30_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 5000,
+    };
+    // Empty prepend == plain start; proves the no-pre-roll path is untouched.
+    let recorder = Recorder::start_with_prepend(Box::new(source), cfg, None, Vec::new())
+        .await
+        .unwrap();
+
+    let pump = tokio::spawn({
+        let sink = sink.clone();
+        async move {
+            for _ in 0..20 {
+                if sink.push(loud_block(1600)).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+    });
+
+    let finalize = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    pump.abort();
+    sink.close();
+
+    assert!(
+        (finalize.duration_ms - 1000).abs() < 200,
+        "no-preroll duration was {}ms (expected ~1000)",
+        finalize.duration_ms
+    );
+}
+
+#[tokio::test]
+async fn max_duration_bounds_fresh_portion_not_preroll() {
+    // A3: the max_duration_ms ceiling bounds the FRESH portion; the prepended
+    // pre-roll does not trip it early. With a 0.5s cap and 0.5s of pre-roll, the
+    // result is ~1.0s (0.5s pre-roll + 0.5s fresh), never ~0.5s.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("max_preroll.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 500, // 0.5s cap on FRESH capture
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 5000,
+    };
+    // 0.5s of pre-roll (8000 samples).
+    let preroll: Vec<i16> = vec![123; 8000];
+    let recorder = Recorder::start_with_prepend(Box::new(source), cfg, None, preroll.clone())
+        .await
+        .unwrap();
+
+    let pump = tokio::spawn({
+        let sink = sink.clone();
+        async move {
+            for _ in 0..20 {
+                if sink.push(loud_block(1600)).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+    });
+
+    let finalize = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    pump.abort();
+    sink.close();
+
+    // Pre-roll (0.5s) + capped fresh (0.5s) ≈ 1.0s, well above the 0.5s cap that
+    // would result if pre-roll counted against it.
+    assert!(
+        (finalize.duration_ms - 1000).abs() < 200,
+        "duration was {}ms (expected ~1000: 0.5s pre-roll + 0.5s capped fresh)",
+        finalize.duration_ms
+    );
+    let (samples, _) = wav::read_wav(&wav_path).unwrap();
+    let fresh = samples.len() - preroll.len();
+    assert!(
+        (fresh as i64 - 8_000).abs() < 2_000,
+        "fresh portion was {fresh} samples (expected ~8000 = 0.5s cap)"
+    );
+}
+
+#[tokio::test]
+async fn max_duration_with_no_preroll_unchanged() {
+    // Back-compat: with NO pre-roll the cap is unchanged from before A3 — a
+    // runaway Hold recording is truncated at the 0.5s ceiling.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("max_noprl.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 500,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 5000,
+    };
+    let recorder = Recorder::start_with_prepend(Box::new(source), cfg, None, Vec::new())
+        .await
+        .unwrap();
+
+    let pump = tokio::spawn({
+        let sink = sink.clone();
+        async move {
+            for _ in 0..10 {
+                if sink.push(loud_block(1600)).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+    });
+
+    let finalize = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    pump.abort();
+    sink.close();
+
+    assert!(
+        finalize.duration_ms <= 600,
+        "no-preroll cap should hold at ~0.5s, got {}ms",
+        finalize.duration_ms
+    );
+}
+
+#[tokio::test]
 async fn empty_prepend_matches_plain_start() {
     let dir = TempDir::new().unwrap();
     let wav_path = dir.path().join("empty_prepend.wav");

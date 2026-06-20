@@ -53,9 +53,12 @@ pub struct RecorderConfig {
     /// How the recording decides to stop (hold until told, stop on silence, or
     /// stop after a fixed duration). See [`RecordingMode`].
     pub mode: RecordingMode,
-    /// Hard ceiling on captured length, in milliseconds. The recording always
-    /// stops here even in Hold mode, and the buffer is truncated to exactly this
-    /// many samples so the cap is never overshot.
+    /// Hard ceiling on *freshly captured* length, in milliseconds. The recording
+    /// always stops here even in Hold mode, and the buffer is truncated so the cap
+    /// is never overshot. Prepended pre-roll (see [`Recorder::start_with_prepend`])
+    /// does NOT count toward this ceiling — it sits on top of the captured budget
+    /// (audit A3), so the cap always bounds the same amount of live audio whether
+    /// or not pre-roll is enabled.
     pub max_duration_ms: u64,
     /// Silence gate for Oneshot auto-stop, in full-scale decibels (negative;
     /// quieter = more negative). Ignored in other modes. See [`SilenceDetector`].
@@ -192,6 +195,12 @@ impl Recorder {
     /// captured audio — they are not fed to the silence detector (they're
     /// historical, not "now") but do count toward the max-duration cap.
     ///
+    /// The prepended samples are NOT counted toward the `Duration { secs }`
+    /// auto-stop or the `max_duration_ms` ceiling (audit A3): a `Duration { secs }`
+    /// take yields `prepend.len() + secs * sample_rate` samples — i.e. `secs`
+    /// seconds of *fresh* capture with the pre-roll added on top — and `max_ms`
+    /// bounds only the fresh portion. A take with empty `prepend` is unaffected.
+    ///
     /// `prepend` must already be in the source's canonical format (16 kHz mono
     /// i16). An empty `prepend` is identical to [`Recorder::start`].
     pub async fn start_with_prepend(
@@ -209,11 +218,20 @@ impl Recorder {
             } else {
                 prepend
             };
+            // Length of the prepended pre-roll. Excluded from the Duration
+            // auto-stop and the max_duration_ms ceiling (audit A3) so those limits
+            // measure freshly captured audio only — the pre-roll rides on top. The
+            // thresholds below are offset by this so a take with no pre-roll
+            // behaves exactly as before.
+            let preroll_len = samples.len();
             let mut detector = SilenceDetector::new(
                 cfg.silence_threshold_dbfs,
                 cfg.silence_window_ms,
                 audio_cfg.sample_rate.as_u32(),
             );
+            // max_samples and duration_samples are budgets for FRESH capture; the
+            // checks compare `samples.len() - preroll_len` (the live portion)
+            // against them, so the prepended pre-roll never trips a limit early.
             let max_samples =
                 (cfg.max_duration_ms * audio_cfg.sample_rate.as_u32() as u64 / 1000) as usize;
             let duration_samples = match cfg.mode {
@@ -293,14 +311,19 @@ impl Recorder {
                                     if cfg.mode == RecordingMode::Oneshot && detector.is_silent() {
                                         break;
                                     }
+                                    // Measure the FRESH portion (excluding the
+                                    // prepended pre-roll) against the budgets so the
+                                    // pre-roll rides on top of the requested length
+                                    // rather than eating into it (audit A3).
+                                    let fresh = (samples.len() - preroll_len) as u64;
                                     if let Some(target) = duration_samples {
-                                        if samples.len() as u64 >= target {
-                                            samples.truncate(target as usize);
+                                        if fresh >= target {
+                                            samples.truncate(preroll_len + target as usize);
                                             break;
                                         }
                                     }
-                                    if samples.len() >= max_samples {
-                                        samples.truncate(max_samples);
+                                    if fresh >= max_samples as u64 {
+                                        samples.truncate(preroll_len + max_samples);
                                         break;
                                     }
                                 }
@@ -333,10 +356,11 @@ impl Recorder {
                         samples.extend_from_slice(&b);
                     }
                 }
-                // Cap at max_samples: a large OS buffer or long tail_grace period
-                // can push the drain past the configured maximum. Consistent with
-                // how the mid-loop max-duration path truncates (lines above).
-                samples.truncate(max_samples);
+                // Cap the FRESH portion at max_samples: a large OS buffer or long
+                // tail_grace period can push the drain past the configured maximum.
+                // The prepended pre-roll is excluded from the cap (audit A3),
+                // consistent with the mid-loop truncation above.
+                samples.truncate(preroll_len + max_samples);
             }
 
             let duration_ms =

@@ -163,6 +163,11 @@ trust boundary.*
 
 ### Recording
 
+- [x] **Pre-roll no longer eats into the requested length** — a fixed-duration take
+  of N seconds now captures a full N seconds of *fresh* audio, with the pre-roll
+  lead-in added on top, instead of counting the prepended pre-roll inside the N. The
+  `Duration` auto-stop and the `max_duration_secs` ceiling now measure live capture
+  only; pre-roll rides above the budget. A take with pre-roll disabled is unchanged.
 - [x] **Lost-microphone warning** — if the input device fails mid-recording (mic
   unplugged, driver drop), Phoneme now tells you instead of stopping silently. The
   audio captured before the drop is still saved and transcribed exactly as before;
