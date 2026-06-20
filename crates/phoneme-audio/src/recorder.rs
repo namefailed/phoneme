@@ -85,6 +85,13 @@ pub struct RecordingResult {
     /// Number of `i16` samples written to the file (mono, so this equals the
     /// frame count).
     pub samples_written: usize,
+    /// `true` when capture ended because the input device failed mid-recording
+    /// (e.g. the mic was unplugged) rather than a clean stop / auto-stop. The
+    /// audio captured up to the drop is still written to the WAV exactly as a
+    /// normal recording — this flag only lets the daemon surface WHY capture
+    /// ended (A1) so the user isn't left guessing. Always `false` for a normal
+    /// user stop, an Oneshot/Duration auto-stop, or a clean end-of-stream.
+    pub device_lost: bool,
 }
 
 /// Public recorder handle. Owns the background capture task.
@@ -124,6 +131,12 @@ struct TaskOutput {
     cancelled: bool,
     /// Wall-clock instant when the first non-silent block was captured.
     first_non_silent_at: Option<Instant>,
+    /// `true` when the capture loop ended because `next_block` reported a
+    /// device failure (the source's error callback flagged a disconnect), as
+    /// opposed to a `Stop`/`Cancel` command or a clean end-of-stream. Threaded
+    /// up so the daemon can tell the user the mic dropped (A1). See
+    /// [`RecordingResult::device_lost`].
+    device_lost: bool,
 }
 
 /// A cheap, cloneable, read-only handle for snapshotting a live recorder's
@@ -213,6 +226,11 @@ impl Recorder {
             let mut cancelled = false;
             let mut is_paused = false;
             let mut should_drain = false;
+            // Set only on the `next_block` Err arm — a device failure
+            // (disconnect) — never on a Stop/Cancel command or a clean
+            // end-of-stream. Carried into `TaskOutput` so the daemon can tell
+            // the partial recording apart from a normal stop (A1).
+            let mut device_lost = false;
             let mut first_non_silent_at: Option<Instant> = None;
             // Set in the Pause/Resume arms; forwarded to the source after the
             // select! (can't borrow `source` mutably inside it — it's already
@@ -257,6 +275,7 @@ impl Recorder {
                             Ok(b) => b,
                             Err(e) => {
                                 tracing::warn!(error = %e, "audio source failed mid-capture; finalizing the partial recording");
+                                device_lost = true;
                                 break;
                             }
                         };
@@ -332,6 +351,7 @@ impl Recorder {
                 duration_ms,
                 cancelled,
                 first_non_silent_at,
+                device_lost,
             })
         });
 
@@ -394,6 +414,7 @@ impl Recorder {
         Ok(RecordingResult {
             duration_ms: out.duration_ms,
             samples_written: samples.len(),
+            device_lost: out.device_lost,
         })
     }
 
@@ -479,6 +500,7 @@ impl Recorder {
         Ok(RecordingResult {
             duration_ms: out.duration_ms,
             samples_written: samples.len(),
+            device_lost: out.device_lost,
         })
     }
 }

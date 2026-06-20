@@ -1,10 +1,55 @@
 use phoneme_audio::format::{AudioConfig, SampleRate};
 use phoneme_audio::recorder::{RecorderConfig, RecordingMode};
-use phoneme_audio::source::{SyntheticSink, SyntheticSource};
+use phoneme_audio::source::{SampleBlock, Source, SyntheticSink, SyntheticSource};
 use phoneme_audio::wav;
 use phoneme_audio::Recorder;
+use phoneme_core::error::{Error, Result};
 use std::time::Duration;
 use tempfile::TempDir;
+
+/// A source that yields a fixed number of blocks and then reports a capture
+/// failure — the exact shape `CpalSource::next_block` takes when the device's
+/// error callback flags a disconnect (it drains the buffered audio as
+/// `Ok(Some(_))` first, then yields `Err`). Models a mic unplugged mid-recording
+/// so the device-lost path can be exercised without real hardware.
+struct FailingSource {
+    cfg: AudioConfig,
+    blocks: std::collections::VecDeque<SampleBlock>,
+}
+
+impl FailingSource {
+    fn new(blocks: Vec<SampleBlock>) -> Self {
+        Self {
+            cfg: AudioConfig::phoneme_default(),
+            blocks: blocks.into(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Source for FailingSource {
+    fn config(&self) -> AudioConfig {
+        self.cfg
+    }
+
+    async fn next_block(&mut self) -> Result<Option<SampleBlock>> {
+        match self.blocks.pop_front() {
+            Some(b) => Ok(Some(b)),
+            // Buffered audio drained — now surface the device failure, exactly
+            // as `CpalSource` does once the error callback fired.
+            None => Err(Error::Internal(
+                "audio capture device failed mid-recording (e.g. disconnected)".into(),
+            )),
+        }
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        // A device-lost teardown never reaches stop() in the loop, but a Stop
+        // command would: drop any remaining blocks so the drain ends promptly.
+        self.blocks.clear();
+        Ok(())
+    }
+}
 
 fn loud_block(samples: usize) -> Vec<i16> {
     (0..samples)
@@ -424,6 +469,90 @@ async fn normalize_boosts_quiet_recording_on_finalize() {
     assert!(
         (25_000..=29_205).contains(&peak),
         "quiet recording should be normalized up to just under -1 dBFS, got peak {peak}"
+    );
+}
+
+#[tokio::test]
+async fn device_loss_finalizes_partial_and_flags_device_lost() {
+    // A1: when the source fails mid-capture (mic unplugged), the recorder still
+    // writes the audio captured up to the drop AND the result is flagged
+    // `device_lost` so the daemon can tell the user why capture ended.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("dropped.wav");
+    // 1.0s of buffered audio, then the source errors.
+    let source = FailingSource::new(vec![loud_block(8000), loud_block(8000)]);
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 30_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 10_000,
+    };
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
+
+    // The loop breaks on the Err on its own; `wait_for_finalize` awaits that
+    // natural completion (no Stop command involved).
+    let result = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    assert!(
+        result.device_lost,
+        "a mid-capture device failure must set device_lost"
+    );
+    // The partial take is still saved exactly as a normal recording.
+    assert!(wav_path.exists(), "the partial recording must still be written");
+    let (samples, _) = wav::read_wav(&wav_path).unwrap();
+    assert!(
+        samples.len() >= 16_000 - 200,
+        "the ~1s captured before the drop must survive, got {}",
+        samples.len()
+    );
+}
+
+#[tokio::test]
+async fn normal_stop_does_not_flag_device_lost() {
+    // The inverse contract: a clean user stop must NEVER look like a disconnect,
+    // or the UI would toast "microphone disconnected" on every ordinary stop.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("clean.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 30_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 10_000,
+    };
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
+
+    sink.push(loud_block(8000)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // An explicit stop — the user-initiated path.
+    let result = recorder.stop_and_finalize(&wav_path).await.unwrap();
+    sink.close();
+    assert!(
+        !result.device_lost,
+        "a normal user stop must not be reported as a device loss"
+    );
+    assert!(wav_path.exists());
+}
+
+#[tokio::test]
+async fn clean_end_of_stream_does_not_flag_device_lost() {
+    // The source closing cleanly (Ok(None)) — e.g. an auto-stop or the synthetic
+    // sink being dropped — is also not a device loss.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("eos.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 30_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 10_000,
+    };
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
+    sink.push(loud_block(8000)).await.unwrap();
+    sink.close(); // clean end-of-stream → Ok(None)
+    let result = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    assert!(
+        !result.device_lost,
+        "a clean end-of-stream must not be reported as a device loss"
     );
 }
 

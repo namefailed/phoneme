@@ -56,6 +56,10 @@ export function stageLabel(stage: PipelineStage): string {
 export type DaemonEvent =
   | { event: "recording_started"; id: string; started_at: string; meeting_id?: string | null; track?: string | null }
   | { event: "recording_stopped"; id: string; duration_ms: number; audio_path: string; meeting_id?: string | null }
+  // The capture device failed mid-recording (mic unplugged): capture ended
+  // early but the audio captured before the drop was saved + transcribed like a
+  // normal take. Surfaced as a warning toast linking to the saved partial.
+  | { event: "device_lost"; id: string; captured_ms: number }
   | { event: "transcription_started"; id: string }
   // `committed_len`: char length of the stable prefix of `text`; words past it
   // are this tick's freshly-appended, least-settled tail (the overlay dims them).

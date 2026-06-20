@@ -92,6 +92,29 @@ badge's red. Cancelled recordings stay in the library (find them with the
 status filter's **Cancelled** entry) and can be re-run any time via
 **Re-run**.
 
+## 🎤 Microphone disconnected mid-recording
+
+If the input device goes away while you're recording — you unplug a USB mic, a
+Bluetooth headset drops, a driver hiccups — Phoneme stops capturing and tells
+you with a warning toast:
+
+> ⚠ Microphone disconnected — saved the 12.4s captured so far.
+
+This is **not** a failure. The audio captured up to the moment the device
+dropped is written to disk and transcribed exactly like a normal recording —
+you'll find the partial take in the library with whatever was said before the
+disconnect. The warning only exists so capture never stops silently and you know
+why it ended early.
+
+> [!TIP]
+> Reconnect (or re-select) the microphone and start a new recording as usual.
+> If a particular device keeps dropping, check its cable / USB port and confirm
+> it's the device Windows lists as your input. Per-recording detail lives in
+> `%LOCALAPPDATA%\phoneme\logs\daemon.log` ("capture device lost").
+
+A recording you stop yourself never triggers this — the warning is only for an
+unexpected device loss.
+
 ## 🔌 Something else is using port 5809
 
 You don't have to free the port. `whisper.bundled_server_port` (and the

@@ -163,6 +163,12 @@ trust boundary.*
 
 ### Recording
 
+- [x] **Lost-microphone warning** — if the input device fails mid-recording (mic
+  unplugged, driver drop), Phoneme now tells you instead of stopping silently. The
+  audio captured before the drop is still saved and transcribed exactly as before;
+  on top of that the daemon emits a `DeviceLost` event and the app raises a warning
+  toast — "Microphone disconnected — saved the 12.4s captured so far." — so you know
+  what happened and that nothing was lost. A normal stop never triggers it.
 - [x] **Source column reflects the real capture source** — every recording now
   stores which source it actually used (microphone vs system audio) on its `track`,
   so the list's **Source** column and its hover icon are accurate instead of always

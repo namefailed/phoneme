@@ -163,6 +163,10 @@ fn all_daemon_events_roundtrip() {
             audio_path: "C:/tmp/x.wav".into(),
             meeting_id: Some("meeting-abc".into()),
         },
+        DaemonEvent::DeviceLost {
+            id: id.clone(),
+            captured_ms: 4200,
+        },
         DaemonEvent::TranscriptionStarted { id: id.clone() },
         DaemonEvent::TranscriptionPartial {
             id: id.clone(),
@@ -221,6 +225,18 @@ fn all_error_kinds_have_distinct_serialized_form() {
         let s = serde_json::to_string(&k).unwrap();
         assert!(seen.insert(s.clone()), "duplicate serialization: {s}");
     }
+}
+
+#[test]
+fn device_lost_event_roundtrips_with_tag_and_fields() {
+    let ev = DaemonEvent::DeviceLost {
+        id: RecordingId::new(),
+        captured_ms: 4200,
+    };
+    roundtrip(&ev);
+    let json = serde_json::to_string(&ev).unwrap();
+    assert!(json.contains("\"event\":\"device_lost\""), "{json}");
+    assert!(json.contains("\"captured_ms\":4200"), "{json}");
 }
 
 #[test]
