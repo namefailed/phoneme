@@ -1288,7 +1288,7 @@ mark.search-hit {
      motion too, matching the shared modal family's escape hatch. */
   .speakers-modal-overlay,
   .tdiff-modal-overlay,
-  .bulk-actions-bar { animation: none; }
+  .bulk-bar { animation: none; }
 }
 /* Smooth pane show/hide (sidebar · detail pane · focus mode). The class is
    added only for the duration of a TOGGLE — never while dragging the splitter

@@ -72,6 +72,31 @@ fn category_for(ok: bool, severity_if_failed: CheckCategory) -> CheckCategory {
     }
 }
 
+/// Whether yt-dlp can be invoked — a binary on PATH, or the pip-installed module
+/// via `python -m yt_dlp` (mirroring the CLI's `yt_dlp_command` resolution, so a
+/// module install whose Scripts dir isn't on PATH isn't a false "not installed").
+/// The `python -m yt_dlp --version` probe runs ONLY when no binary is on PATH.
+fn ytdlp_available() -> bool {
+    if which::which("yt-dlp").is_ok() {
+        return true;
+    }
+    for py in ["python", "python3"] {
+        if which::which(py).is_ok() {
+            let ok = std::process::Command::new(py)
+                .args(["-m", "yt_dlp", "--version"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if ok {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Result for a single Doctor check item. `fix_action` is an opaque string the
 /// GUI switches on to dispatch the right remediation UI (e.g. launching the
 /// daemon or opening a file); the CLI renders only the human fields.
@@ -500,12 +525,15 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
     // yt-dlp for URL imports (`phoneme import <url>`). Purely optional — local
     // file imports never touch it — so it's Info either way and never dings the
     // health summary; it just tells you whether URL import is available.
-    let ytdlp_found = which::which("yt-dlp").is_ok();
+    // Mirror the CLI's resolution (`yt_dlp_command`): a binary on PATH OR a
+    // pip-installed module reachable via `python -m yt_dlp`, so a working module
+    // install whose Scripts dir isn't on PATH isn't reported as missing.
+    let ytdlp_found = ytdlp_available();
     out.push(CheckResult {
         name: "yt-dlp (URL import)".into(),
         ok: ytdlp_found,
         detail: if ytdlp_found {
-            "found on PATH".into()
+            "available (on PATH or via `python -m yt_dlp`)".into()
         } else {
             "not installed (optional — only `phoneme import <url>` needs it)".into()
         },
