@@ -141,7 +141,7 @@ fn tidy(text: &str) -> String {
     // A stripped leading filler can strand the separator it carried at the very
     // front (", yeah" / ". so"); drop any leading punctuation + the space after.
     let trimmed = out
-        .trim_start_matches(|c: char| matches!(c, ',' | '.' | '!' | '?' | ';' | ':' | ' '))
+        .trim_start_matches([',', '.', '!', '?', ';', ':', ' '])
         .trim_end();
     trimmed.to_string()
 }
@@ -218,14 +218,23 @@ mod tests {
     fn collapses_double_spaces_and_space_before_punctuation() {
         let cfg = FillerConfig::default();
         // Removing the interior "um" must not leave "report  is" or "report ,".
-        assert_eq!(strip_fillers("the report um is done", &cfg), "the report is done");
-        assert_eq!(strip_fillers("the report um , done", &cfg), "the report, done");
+        assert_eq!(
+            strip_fillers("the report um is done", &cfg),
+            "the report is done"
+        );
+        assert_eq!(
+            strip_fillers("the report um , done", &cfg),
+            "the report, done"
+        );
     }
 
     #[test]
     fn drops_leading_and_trailing_filler() {
         let cfg = FillerConfig::default();
-        assert_eq!(strip_fillers("um the plan works uh", &cfg), "the plan works");
+        assert_eq!(
+            strip_fillers("um the plan works uh", &cfg),
+            "the plan works"
+        );
         // A leading filler that carried a comma must not leave ", the".
         assert_eq!(strip_fillers("um, the plan works", &cfg), "the plan works");
     }

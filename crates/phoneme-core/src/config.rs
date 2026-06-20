@@ -1840,13 +1840,13 @@ fn default_filler_phrases() -> Vec<String> {
 pub struct FillerConfig {
     /// Single filler words removed at word boundaries, case-insensitively
     /// (matched against each token's alphanumeric core, so "umbrella" survives).
-    /// Defaults to the conservative set ([`default_filler_words`]); replace it to
+    /// Defaults to the conservative set (`default_filler_words`); replace it to
     /// customize. An empty list removes no single words.
     #[serde(default = "default_filler_words")]
     pub words: Vec<String>,
     /// Multi-word filler phrases, removed as whole-word units — but ONLY when
     /// [`aggressive`](Self::aggressive) is on, because the built-ins ("kind of",
-    /// "like", …) are real words elsewhere. Defaults to [`default_filler_phrases`].
+    /// "like", …) are real words elsewhere. Defaults to `default_filler_phrases`.
     #[serde(default = "default_filler_phrases")]
     pub phrases: Vec<String>,
     /// Off by default (the safe path: only [`words`](Self::words) are stripped).
