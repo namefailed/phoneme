@@ -9,6 +9,7 @@ name = "phoneme-mcp"
 path = "src/main.rs"
 
 [dependencies]
+phoneme-agent-core = { path = "../../crates/phoneme-agent-core" }
 phoneme-core = { path = "../../crates/phoneme-core" }
 phoneme-ipc = { path = "../../crates/phoneme-ipc" }
 anyhow.workspace = true

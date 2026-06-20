@@ -19,12 +19,20 @@ let req = reg.to_request("search_recordings", &json!({"query": "standup"}))?;
 // hand `req` to your Transport to execute.
 ```
 
-Today it mirrors the five tools `phoneme-mcp` exposes externally
-(`list_recent`, `search_recordings`, `get_transcript`, `start_recording`,
-`stop_recording`) — "same registry, opposite direction": the in-app agent drives
-*this*, external agents reach the same capabilities via `phoneme-mcp`. Richer
-actions (tag, title, summarize, export, favorite) slot in here as their
-`Request`s land. See `docs/design/phoneme-agent-harness.md`.
+This crate is the **single source of truth** for the tool catalog. `phoneme-mcp`
+depends on it: it builds its MCP `tools/list` from `specs()` and dispatches every
+`tools/call` through `to_request(name, args)`, then executes the `Request` over
+its own IPC transport. The in-app agent drives *this* registry directly — "same
+registry, opposite direction": external agents reach the same capabilities via
+`phoneme-mcp`, both off the one catalog, so the two surfaces can't drift.
 
-**Status:** bones — the tool registry + the five Phoneme tools + tests. The agent
-loop and the Lit chat panel build on top of this.
+It registers the canonical Phoneme toolset (in `phoneme-mcp`'s `tools/list`
+order): the read-only core (`start_recording`, `stop_recording`,
+`get_transcript`, `search_recordings`, `list_recent`), the "act on it" tools
+(`set_title`, `set_favorite`, `suggest_tags`, `list_tags`, `summarize`,
+`rerun_cleanup`, `retranscribe`, `more_like_this`, `get_words`), and the
+destructive prune tools (`delete_recording`, `delete_tag`). See
+`docs/design/phoneme-agent-harness.md`.
+
+**Status:** the tool registry + the Phoneme tools + tests, consumed by
+`phoneme-mcp`. The in-app agent loop and the Lit chat panel build on top of this.

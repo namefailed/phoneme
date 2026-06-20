@@ -8,15 +8,17 @@
 //! tool list in lockstep with the wire contract *at compile time* (a renamed or
 //! removed `Request` variant breaks the build here, not at runtime).
 //!
-//! The future in-app agent panel drives this registry directly; the standalone
-//! opencode-based agent reaches the same capabilities from outside via the
-//! `phoneme-mcp` server — "same registry, opposite direction" (see
-//! `docs/design/phoneme-agent-harness.md`). The registry stays in lockstep with
-//! `phoneme-mcp`'s external surface: the same tool names, mapped to the same
-//! `Request`s. Beyond the original five read-only tools (list/search/get/start/
-//! stop) it now exposes "act on it" capabilities — set title/favorite, suggest &
-//! list tags, summarize, re-run cleanup, retranscribe, more-like-this, per-word
-//! timings, and the destructive prune tools (delete a recording / delete a tag).
+//! This crate is the **single source of truth** for the tool catalog. The future
+//! in-app agent panel drives this registry directly; the standalone opencode-based
+//! agent reaches the same capabilities from outside via the `phoneme-mcp` server,
+//! which builds its `tools/list` and dispatches `tools/call` *from this registry*
+//! — "same registry, opposite direction" (see
+//! `docs/design/phoneme-agent-harness.md`). There is no second hand-maintained
+//! tool list: the same tool names map to the same `Request`s in both directions.
+//! Beyond the original five read-only tools (list/search/get/start/stop) it
+//! exposes "act on it" capabilities — set title/favorite, suggest & list tags,
+//! summarize, re-run cleanup, retranscribe, more-like-this, per-word timings, and
+//! the destructive prune tools (delete a recording / delete a tag).
 
 use phoneme_core::{ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::Request;
@@ -61,18 +63,18 @@ impl ToolRegistry {
         Self { tools: Vec::new() }
     }
 
-    /// The canonical Phoneme toolset — the same capabilities `phoneme-mcp`
+    /// The canonical Phoneme toolset — the one source of truth `phoneme-mcp`
     /// exposes externally, in the same order. The read-only core (list / search /
     /// get / start / stop) plus the "act on it" tools (set title/favorite,
     /// suggest & list tags, summarize, re-run cleanup, retranscribe, more-like-
     /// this, words) and the destructive prune tools (delete recording / tag).
     pub fn with_phoneme_tools() -> Self {
         let mut r = Self::new();
-        r.register(Box::new(ListRecent));
-        r.register(Box::new(SearchRecordings));
-        r.register(Box::new(GetTranscript));
         r.register(Box::new(StartRecording));
         r.register(Box::new(StopRecording));
+        r.register(Box::new(GetTranscript));
+        r.register(Box::new(SearchRecordings));
+        r.register(Box::new(ListRecent));
         r.register(Box::new(SetTitle));
         r.register(Box::new(SetFavorite));
         r.register(Box::new(SuggestTags));
@@ -113,7 +115,7 @@ impl Default for ToolRegistry {
     }
 }
 
-/// Default result cap for the list/search tools (matches `phoneme-mcp`).
+/// Default result cap for the list/search tools when the caller omits `limit`.
 const DEFAULT_LIMIT: u32 = 10;
 
 fn require_str(args: &Value, key: &str, tool: &str) -> Result<String, ToolError> {
@@ -127,11 +129,26 @@ fn require_str(args: &Value, key: &str, tool: &str) -> Result<String, ToolError>
         })
 }
 
-fn opt_u32(args: &Value, key: &str, default: u32) -> u32 {
-    args.get(key)
-        .and_then(|v| v.as_u64())
-        .map(|n| n as u32)
-        .unwrap_or(default)
+/// Read an optional `limit` argument (positive integer), defaulting to
+/// [`DEFAULT_LIMIT`]. Rejects zero / negative / non-integer values with a clear
+/// `BadArgs` message rather than silently coercing them.
+fn opt_limit(args: &Value, tool: &str) -> Result<u32, ToolError> {
+    match args.get("limit") {
+        None | Some(Value::Null) => Ok(DEFAULT_LIMIT),
+        Some(v) => {
+            let n = v.as_u64().ok_or_else(|| ToolError::BadArgs {
+                tool: tool.to_string(),
+                reason: "`limit` must be a positive integer".to_string(),
+            })?;
+            if n == 0 {
+                return Err(ToolError::BadArgs {
+                    tool: tool.to_string(),
+                    reason: "`limit` must be at least 1".to_string(),
+                });
+            }
+            Ok(n as u32)
+        }
+    }
 }
 
 /// Pull the required `id` argument and parse it into a [`RecordingId`] — the
@@ -164,80 +181,26 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-struct ListRecent;
-impl Tool for ListRecent {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "list_recent",
-            description: "List the most recent recordings, newest first.",
-            input_schema: json!({
-                "type": "object",
-                "properties": { "limit": { "type": "integer", "minimum": 1, "description": "Max rows (default 10)." } }
-            }),
-        }
-    }
-    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
-        let limit = opt_u32(args, "limit", DEFAULT_LIMIT);
-        Ok(Request::ListRecordings {
-            filter: ListFilter {
-                limit: Some(limit),
-                ..Default::default()
-            },
-        })
-    }
-}
-
-struct SearchRecordings;
-impl Tool for SearchRecordings {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "search_recordings",
-            description: "Semantic + lexical search over the recording library.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "Natural-language query." },
-                    "limit": { "type": "integer", "minimum": 1, "description": "Max hits (default 10)." }
-                },
-                "required": ["query"]
-            }),
-        }
-    }
-    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
-        let query = require_str(args, "query", "search_recordings")?;
-        let limit = opt_u32(args, "limit", DEFAULT_LIMIT) as usize;
-        Ok(Request::SemanticSearch { query, limit })
-    }
-}
-
-struct GetTranscript;
-impl Tool for GetTranscript {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "get_transcript",
-            description: "Fetch a recording's transcript by id.",
-            input_schema: json!({
-                "type": "object",
-                "properties": { "id": { "type": "string", "description": "Recording id from list/search." } },
-                "required": ["id"]
-            }),
-        }
-    }
-    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
-        let id = require_recording_id(args, "get_transcript")?;
-        Ok(Request::GetRecording { id })
-    }
-}
-
 struct StartRecording;
 impl Tool for StartRecording {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "start_recording",
-            description: "Start a recording. mode: oneshot (auto-stop on silence) or hold (until stop_recording).",
+            description: "Start a new audio recording on the Phoneme daemon. \
+                Returns the new recording id. Fails if a recording or meeting \
+                is already active.",
             input_schema: json!({
                 "type": "object",
-                "properties": { "mode": { "type": "string", "enum": ["oneshot", "hold"], "description": "Default oneshot." } }
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["oneshot", "hold"],
+                        "description": "Stop condition. 'oneshot' (default) \
+                            auto-stops on silence; 'hold' records until \
+                            stop_recording is called."
+                    }
+                },
+                "additionalProperties": false
             }),
         }
     }
@@ -248,7 +211,7 @@ impl Tool for StartRecording {
             Some(other) => {
                 return Err(ToolError::BadArgs {
                     tool: "start_recording".to_string(),
-                    reason: format!("unknown mode `{other}` (use \"oneshot\" or \"hold\")"),
+                    reason: format!("invalid mode '{other}': expected 'oneshot' or 'hold'"),
                 })
             }
         };
@@ -267,12 +230,109 @@ impl Tool for StopRecording {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "stop_recording",
-            description: "Stop the active recording.",
-            input_schema: json!({ "type": "object", "properties": {} }),
+            description: "Stop and finalize the active recording. The audio is \
+                saved and queued for transcription. Fails if nothing is recording.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
         }
     }
     fn to_request(&self, _args: &Value) -> Result<Request, ToolError> {
         Ok(Request::RecordStop)
+    }
+}
+
+struct GetTranscript;
+impl Tool for GetTranscript {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "get_transcript",
+            description: "Fetch the transcript text for a recording by id. \
+                Returns the transcript, or a note that it is not ready yet.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id (e.g. from list_recent \
+                            or search_recordings)."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "get_transcript")?;
+        Ok(Request::GetRecording { id })
+    }
+}
+
+struct SearchRecordings;
+impl Tool for SearchRecordings {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "search_recordings",
+            description: "Semantic + lexical search over the recording library. \
+                Returns matching recordings with id, title, relevance score, and \
+                a transcript snippet.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural-language search query."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Max results to return (default 10)."
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let query = require_str(args, "query", "search_recordings")?;
+        let limit = opt_limit(args, "search_recordings")? as usize;
+        Ok(Request::SemanticSearch { query, limit })
+    }
+}
+
+struct ListRecent;
+impl Tool for ListRecent {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "list_recent",
+            description: "List the most recent recordings (newest first) with \
+                id, title, status, and a transcript snippet.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Max recordings to return (default 10)."
+                    }
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let limit = opt_limit(args, "list_recent")?;
+        Ok(Request::ListRecordings {
+            filter: ListFilter {
+                limit: Some(limit),
+                sort_desc: Some(true),
+                ..Default::default()
+            },
+        })
     }
 }
 
@@ -281,19 +341,32 @@ impl Tool for SetTitle {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "set_title",
-            description: "Set or clear a recording's display title. Omit (or blank) the title to revert to the auto-generated one.",
+            description: "Set or clear a recording's display title. Provide \
+                'title' to set it; omit or leave it blank to revert to the \
+                auto-generated title.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "description": "Recording id from list/search." },
-                    "title": { "type": "string", "description": "New title; omit or leave blank to return to auto-generation." }
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id (e.g. from list_recent \
+                            or search_recordings)."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "The new title. Omit or leave blank to \
+                            return to auto-generation."
+                    }
                 },
-                "required": ["id"]
+                "required": ["id"],
+                "additionalProperties": false
             }),
         }
     }
     fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
         let id = require_recording_id(args, "set_title")?;
+        // Some(non-empty) sets a user title; None (omitted or blank) reverts to
+        // auto-generation.
         let title = opt_str(args, "title");
         Ok(Request::SetRecordingTitle { id, title })
     }
@@ -308,10 +381,17 @@ impl Tool for SetFavorite {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "description": "Recording id from list/search." },
-                    "favorite": { "type": "boolean", "description": "true = starred, false = un-starred." }
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id."
+                    },
+                    "favorite": {
+                        "type": "boolean",
+                        "description": "true = starred, false = un-starred."
+                    }
                 },
-                "required": ["id", "favorite"]
+                "required": ["id", "favorite"],
+                "additionalProperties": false
             }),
         }
     }
@@ -333,11 +413,19 @@ impl Tool for SuggestTags {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "suggest_tags",
-            description: "Run LLM tag suggestion for a recording (awaits the model). Suggestions land on the recording for approval.",
+            description: "Run the LLM tag-suggestion step for a recording on \
+                demand (awaits the model). Suggestions land on the recording \
+                for the user to approve.",
             input_schema: json!({
                 "type": "object",
-                "properties": { "id": { "type": "string", "description": "Recording id from list/search." } },
-                "required": ["id"]
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
             }),
         }
     }
@@ -352,8 +440,13 @@ impl Tool for ListTags {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "list_tags",
-            description: "List every tag in the library, including unused ones.",
-            input_schema: json!({ "type": "object", "properties": {} }),
+            description: "List every tag in the library (including tags not \
+                attached to any recording).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
         }
     }
     fn to_request(&self, _args: &Value) -> Result<Request, ToolError> {
@@ -366,11 +459,18 @@ impl Tool for Summarize {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "summarize",
-            description: "Generate (or regenerate) and store an LLM summary of a recording's current transcript.",
+            description: "Generate (or regenerate) and store an LLM summary of \
+                a recording's current transcript.",
             input_schema: json!({
                 "type": "object",
-                "properties": { "id": { "type": "string", "description": "Recording id from list/search." } },
-                "required": ["id"]
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
             }),
         }
     }
@@ -389,11 +489,19 @@ impl Tool for RerunCleanup {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "rerun_cleanup",
-            description: "Re-run the LLM cleanup step on a recording's preserved original transcript (does not re-transcribe the audio).",
+            description: "Re-run the LLM cleanup step on a recording's \
+                preserved original transcript. Does not re-transcribe the \
+                audio.",
             input_schema: json!({
                 "type": "object",
-                "properties": { "id": { "type": "string", "description": "Recording id from list/search." } },
-                "required": ["id"]
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
             }),
         }
     }
@@ -415,14 +523,25 @@ impl Tool for Retranscribe {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "retranscribe",
-            description: "Re-transcribe a saved recording through the full pipeline (heavy: re-runs transcription + post-processing). Optional model override for this run only.",
+            description: "Re-transcribe a saved recording through the full \
+                pipeline. Heavy: this re-runs transcription and post-processing. \
+                Optionally override the transcription 'model' for this run only.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "description": "Recording id from list/search." },
-                    "model": { "type": "string", "description": "One-time transcription model override (model file path for local, model id for cloud)." }
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id."
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "One-time transcription model override (a \
+                            model file path for the local backend, a model id \
+                            for cloud backends). Omit to use the configured model."
+                    }
                 },
-                "required": ["id"]
+                "required": ["id"],
+                "additionalProperties": false
             }),
         }
     }
@@ -445,20 +564,31 @@ impl Tool for MoreLikeThis {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "more_like_this",
-            description: "Find recordings semantically similar to a stored one (uses its existing vectors; no fresh query embedding).",
+            description: "Find recordings semantically similar to a stored one, \
+                using its existing vectors (no fresh query embedding). Returns \
+                ranked hits with id, title, score, and a snippet.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "description": "Recording id whose stored vectors are the query." },
-                    "limit": { "type": "integer", "minimum": 1, "description": "Max hits (default 10)." }
+                    "id": {
+                        "type": "string",
+                        "description": "The recording whose stored vectors are \
+                            the query."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Max results to return (default 10)."
+                    }
                 },
-                "required": ["id"]
+                "required": ["id"],
+                "additionalProperties": false
             }),
         }
     }
     fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
         let id = require_recording_id(args, "more_like_this")?;
-        let limit = opt_u32(args, "limit", DEFAULT_LIMIT) as usize;
+        let limit = opt_limit(args, "more_like_this")? as usize;
         Ok(Request::MoreLikeThis { id, limit })
     }
 }
@@ -468,11 +598,18 @@ impl Tool for GetWords {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "get_words",
-            description: "Fetch a recording's word-level timings (e.g. for caption/SRT export).",
+            description: "Fetch a recording's word-level timings (start/end \
+                offsets per word) — e.g. for caption/SRT export.",
             input_schema: json!({
                 "type": "object",
-                "properties": { "id": { "type": "string", "description": "Recording id from list/search." } },
-                "required": ["id"]
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
             }),
         }
     }
@@ -487,14 +624,23 @@ impl Tool for DeleteRecordingTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "delete_recording",
-            description: "Permanently delete a recording (and, by default, its audio file). Irreversible — confirm with the user before calling.",
+            description: "Permanently delete a recording (and, by default, its \
+                audio file). Irreversible — confirm with the user before calling.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "description": "Recording id from list/search." },
-                    "keep_audio": { "type": "boolean", "description": "true = remove only the catalog row and leave the WAV on disk (default false)." }
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id."
+                    },
+                    "keep_audio": {
+                        "type": "boolean",
+                        "description": "true = remove only the catalog row and \
+                            leave the WAV on disk (default false)."
+                    }
                 },
-                "required": ["id"]
+                "required": ["id"],
+                "additionalProperties": false
             }),
         }
     }
@@ -513,13 +659,18 @@ impl Tool for DeleteTagTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "delete_tag",
-            description: "Delete a tag everywhere, detaching it from every recording. Irreversible — confirm with the user before calling.",
+            description: "Delete a tag everywhere, detaching it from every \
+                recording. Irreversible — confirm with the user before calling.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "integer", "description": "The tag's id (from list_tags)." }
+                    "id": {
+                        "type": "integer",
+                        "description": "The tag's id (from list_tags)."
+                    }
                 },
-                "required": ["id"]
+                "required": ["id"],
+                "additionalProperties": false
             }),
         }
     }
@@ -540,11 +691,11 @@ mod tests {
         assert_eq!(
             names,
             [
-                "list_recent",
-                "search_recordings",
-                "get_transcript",
                 "start_recording",
                 "stop_recording",
+                "get_transcript",
+                "search_recordings",
+                "list_recent",
                 "set_title",
                 "set_favorite",
                 "suggest_tags",
@@ -558,18 +709,23 @@ mod tests {
                 "delete_tag",
             ]
         );
-        // Every spec carries an object schema.
+        // Every spec carries an object schema with a properties object.
         assert!(r.specs().iter().all(|s| s.input_schema["type"] == "object"));
+        assert!(r
+            .specs()
+            .iter()
+            .all(|s| s.input_schema["properties"].is_object()));
     }
 
     #[test]
-    fn list_recent_defaults_to_ten_and_honors_limit() {
+    fn list_recent_defaults_to_ten_and_sorts_newest_first() {
         let r = ToolRegistry::with_phoneme_tools();
         assert_eq!(
             r.to_request("list_recent", &json!({})).unwrap(),
             Request::ListRecordings {
                 filter: ListFilter {
                     limit: Some(10),
+                    sort_desc: Some(true),
                     ..Default::default()
                 }
             }
@@ -579,6 +735,7 @@ mod tests {
             Request::ListRecordings {
                 filter: ListFilter {
                     limit: Some(3),
+                    sort_desc: Some(true),
                     ..Default::default()
                 }
             }
@@ -600,6 +757,23 @@ mod tests {
                 limit: 10
             }
         );
+    }
+
+    #[test]
+    fn limit_zero_and_non_integer_are_rejected() {
+        let r = ToolRegistry::with_phoneme_tools();
+        assert!(matches!(
+            r.to_request("list_recent", &json!({ "limit": 0 })),
+            Err(ToolError::BadArgs { .. })
+        ));
+        assert!(matches!(
+            r.to_request("search_recordings", &json!({ "query": "x", "limit": 0 })),
+            Err(ToolError::BadArgs { .. })
+        ));
+        assert!(matches!(
+            r.to_request("list_recent", &json!({ "limit": "lots" })),
+            Err(ToolError::BadArgs { .. })
+        ));
     }
 
     #[test]

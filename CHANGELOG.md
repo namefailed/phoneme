@@ -546,6 +546,15 @@ trust boundary.*
 - [x] A fully-commented `config.example.toml` and `.env.example` at the repo
   root document every config key (with defaults) and every runtime env var.
 
+- [x] **One tool catalog for the agent + MCP** — `phoneme-mcp` no longer keeps a
+  second, hand-maintained copy of the tool list. It now depends on
+  `crates/phoneme-agent-core` and builds its MCP `tools/list` and `tools/call`
+  dispatch *from* that registry (`tools.rs` is a thin adapter that re-shapes the
+  registry into the MCP wire format and renders results). The registry is the
+  single source of truth for names, schemas, and the arg→`Request` mapping, and a
+  test asserts `phoneme-mcp`'s exposed names equal the registry's so the two can
+  never drift again.
+
 ### Performance
 
 - [x] Semantic search holds the deserialized embedding corpus in memory, so

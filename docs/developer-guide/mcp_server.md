@@ -168,10 +168,13 @@ You should see two JSON-RPC response lines: the `initialize` result (with
 
 ## 🪞 The other direction: `phoneme-agent-core`
 
-`phoneme-mcp` lets an **external** agent reach into Phoneme. Its mirror image —
-`crates/phoneme-agent-core` — is the in-tree **tool seam** for a future
-**embedded** agent (an in-app chat panel calling *out* to the same daemon).
-Same tool registry, opposite direction.
+`phoneme-mcp` lets an **external** agent reach into Phoneme. Its source —
+`crates/phoneme-agent-core` — is the in-tree **tool seam** that is also the
+foundation for a future **embedded** agent (an in-app chat panel calling *out* to
+the same daemon). Same tool registry, opposite direction — and now literally the
+same code: `phoneme-mcp` depends on `phoneme-agent-core` and builds its
+`tools/list` + `tools/call` dispatch *from* that registry, so there is no second
+hand-maintained tool list to drift.
 
 It is a small, dependency-light crate (`phoneme-core`, `phoneme-ipc`,
 `serde_json`, `thiserror` — no async, no transport, no LLM) that holds exactly
@@ -187,12 +190,13 @@ enum:
 
 `ToolRegistry::with_phoneme_tools()` (also `Default`) registers the **canonical
 Phoneme toolset in the same order** `phoneme-mcp` exposes it: the read-only core
-(`list_recent`, `search_recordings`, `get_transcript`, `start_recording`,
-`stop_recording`), the "act on it" tools (`set_title`, `set_favorite`,
+(`start_recording`, `stop_recording`, `get_transcript`, `search_recordings`,
+`list_recent`), the "act on it" tools (`set_title`, `set_favorite`,
 `suggest_tags`, `list_tags`, `summarize`, `rerun_cleanup`, `retranscribe`,
 `more_like_this`, `get_words`), and the destructive prune tools
-(`delete_recording`, `delete_tag`). A test asserts that exact name list, so the
-two surfaces can't silently drift.
+(`delete_recording`, `delete_tag`). Because `phoneme-mcp` builds its surface by
+iterating this registry, the two can't drift — and a `phoneme-mcp` test asserts
+its exposed names equal the registry's, byte-for-byte.
 
 ```rust
 use phoneme_agent_core::ToolRegistry;
@@ -212,12 +216,13 @@ and rendering the `Response` is the caller's job. That keeps the layer pure and
 trivially unit-testable, and — because every tool maps to a real `Request`
 variant — a renamed or removed variant breaks the build *here*, not at runtime.
 
-> **Status — bones, not wired yet.** As of this writing the crate ships the
-> registry, the tool set, and its tests, but **no binary depends on it** (only
-> `phoneme-mcp`'s source comments reference it, for the lockstep contract). The
-> agent loop and the in-app chat panel that would drive it are still on the
-> roadmap. The harness decision — opencode for the standalone agent, a separate
-> embedded harness for the panel, both reaching the same tool surface — lives in
+> **Status — the single source of truth, consumed by `phoneme-mcp`.** The crate
+> ships the registry, the tool set, and its tests, and `phoneme-mcp` now depends
+> on it (its `tools.rs` is a thin adapter that re-shapes the registry into the MCP
+> wire format and renders results). The in-app agent loop and chat panel that
+> would also drive it are still on the roadmap. The harness decision — opencode
+> for the standalone agent, a separate embedded harness for the panel, both
+> reaching the same tool surface — lives in
 > [`../design/phoneme-agent-harness.md`](../design/phoneme-agent-harness.md).
 
 ## 🗺️ Relationship to the rest of Phoneme
