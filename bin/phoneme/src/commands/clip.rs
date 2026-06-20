@@ -41,6 +41,15 @@ pub async fn run(args: ClipArgs, cfg: &Config, json: bool) -> ExitCode {
 
     let start_ms = (args.start * 1000.0).round() as i64;
     let end_ms = (args.end * 1000.0).round() as i64;
+    // Two distinct seconds can round to the same millisecond (e.g. 0.9995 and
+    // 1.0004 both -> 1000). Catch it locally with an accurate message rather than
+    // letting the daemon reject it with a misleading "start must be before end".
+    if start_ms >= end_ms {
+        eprintln!(
+            "error: start and end round to the same millisecond ({start_ms}ms); use a wider range"
+        );
+        return ExitCode::FAILURE;
+    }
 
     let mut client = match Client::connect(cfg).await {
         Ok(c) => c,

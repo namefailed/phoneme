@@ -102,8 +102,28 @@ fn remove_phrase(text: &str, phrase: &str) -> String {
     if phrase.is_empty() {
         return text.to_string();
     }
-    let lower_text = text.to_lowercase();
-    let lower_phrase = phrase.to_lowercase();
+    // `to_lowercase()` can change a string's byte length (e.g. 'İ' U+0130 -> 'i' +
+    // combining dot, 2 bytes -> 3), so byte offsets found in a lowercased copy are
+    // NOT valid indices into the original `text` and slicing it with them panics.
+    // Build the lowercase form char-by-char and, in lockstep, a map from each
+    // lower-text byte offset back to the original-text byte offset it came from
+    // (plus a final sentinel mapping lower_text.len() -> text.len()). Building the
+    // lowercase side ourselves keeps the two perfectly aligned regardless of any
+    // length-changing or context-sensitive folding.
+    let mut lower_text = String::with_capacity(text.len());
+    let mut lower_to_orig: Vec<usize> = Vec::with_capacity(text.len() + 1);
+    for (ob, c) in text.char_indices() {
+        for lc in c.to_lowercase() {
+            let mut buf = [0u8; 4];
+            let s = lc.encode_utf8(&mut buf);
+            for _ in 0..s.len() {
+                lower_to_orig.push(ob);
+            }
+            lower_text.push_str(s);
+        }
+    }
+    lower_to_orig.push(text.len());
+    let lower_phrase: String = phrase.chars().flat_map(char::to_lowercase).collect();
     let plen = lower_phrase.len();
 
     let mut out = String::with_capacity(text.len());
@@ -125,9 +145,11 @@ fn remove_phrase(text: &str, phrase: &str) -> String {
                 .next()
                 .is_some_and(|c| c.is_alphanumeric());
         if before_ok && after_ok {
-            out.push_str(&text[cursor..start]);
+            // `start`/`end` are lower-text offsets; map them back to original-text
+            // byte offsets before slicing `text` (see lower_to_orig above).
+            out.push_str(&text[cursor..lower_to_orig[start]]);
             out.push(' '); // placeholder; tidy() squeezes it out
-            cursor = end;
+            cursor = lower_to_orig[end];
         }
         search = end;
     }
@@ -237,6 +259,22 @@ mod tests {
             strip_fillers("mankind official stuff", &cfg),
             "mankind official stuff"
         );
+    }
+
+    #[test]
+    fn remove_phrase_handles_length_changing_lowercase() {
+        // 'İ' (U+0130, 2 bytes) lowercases to "i̇" (3 bytes), so phrase-match byte
+        // offsets in the lowercased copy exceed the original's — slicing the
+        // original with them used to panic on a non-char boundary. (regression)
+        let cfg = FillerConfig {
+            aggressive: true,
+            ..FillerConfig::default()
+        };
+        assert_eq!(strip_fillers("İ sort of done", &cfg), "İ done");
+        // Direct: phrase removed, non-ASCII prefix preserved, no panic.
+        let out = remove_phrase("İ kind of nice", "kind of");
+        assert!(!out.to_lowercase().contains("kind of"));
+        assert!(out.contains('İ'));
     }
 
     #[test]

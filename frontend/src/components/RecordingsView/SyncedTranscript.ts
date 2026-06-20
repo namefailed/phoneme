@@ -101,24 +101,37 @@ export class SyncedTranscript {
   private async load() {
     try {
       this.words = await getWords(this.recordingId, this.variant);
-      if (!this.probedCleaned) {
-        this.probedCleaned = true;
-        this.hasCleaned =
-          this.variant === "cleaned"
-            ? this.words.length > 0
-            : (await getWords(this.recordingId, "cleaned")).length > 0;
-      }
     } catch (e) {
       if (!this.disposed) {
         this.container.innerHTML = `<div class="st-empty">Couldn't load the transcript: ${escapeHtml(errText(e))}</div>`;
       }
       return;
     }
+    // Probe once for a cleaned timing variant (drives the toggle). This is a
+    // separate fetch with its OWN catch: a probe failure must never blow away the
+    // primary view that just loaded fine — degrade to "no cleaned variant".
+    if (!this.probedCleaned) {
+      this.probedCleaned = true;
+      this.hasCleaned =
+        this.variant === "cleaned"
+          ? this.words.length > 0
+          : await getWords(this.recordingId, "cleaned")
+              .then((w) => w.length > 0)
+              .catch(() => false);
+    }
     if (this.disposed) return;
     this.render();
   }
 
   private render() {
+    // Cleaned came back empty (e.g. cleared between probe and toggle-click) —
+    // fall back to raw rather than showing an empty state with no toggle to
+    // switch back (the toggle only renders when a non-empty cleaned set exists).
+    if (this.words.length === 0 && this.variant === "cleaned") {
+      this.variant = "raw";
+      void this.load();
+      return;
+    }
     if (this.words.length === 0) {
       // Matches the captions-export behavior: word timings are captured at
       // transcription time, so older recordings have none — point the user at a

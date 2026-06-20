@@ -332,7 +332,17 @@ export class TranscriptDiff {
     });
     this.container.querySelector<HTMLButtonElement>(".tdiff-revert")?.addEventListener("click", () => {
       const idx = this.revertTarget();
-      if (idx != null) this.onRevert?.(idx);
+      if (idx == null) return;
+      // Revert OVERWRITES the live (possibly hand-edited) transcript, and the
+      // default target on first open is the raw machine version — confirm first.
+      const label = this.labels[`step:${idx}`] ?? "this version";
+      if (
+        !window.confirm(
+          `Replace the current transcript with "${label}"?\n\nThis overwrites the live transcript (timing re-flows and it re-embeds) and can't be undone.`,
+        )
+      )
+        return;
+      this.onRevert?.(idx);
     });
     this.container.querySelector<HTMLButtonElement>(".tdiff-swap")?.addEventListener("click", () => {
       [this.left, this.right] = [this.right, this.left];

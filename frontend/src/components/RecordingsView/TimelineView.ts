@@ -173,27 +173,38 @@ export class TimelineView {
   private async load() {
     try {
       this.segments = await getSegments(this.recordingId, this.variant);
-      // Probe once whether a cleaned timeline exists, so the toggle only shows
-      // when there's something to switch to (a plain transcribe has none).
-      if (!this.probedCleaned) {
-        this.probedCleaned = true;
-        this.hasCleaned =
-          this.variant === "cleaned"
-            ? this.segments.length > 0
-            : (await getSegments(this.recordingId, "cleaned")).length > 0;
-      }
-      this.groups = groupSegments(this.segments);
     } catch (e) {
       if (!this.disposed) {
         this.container.innerHTML = `<div class="tl-empty">Couldn't load the timeline: ${escapeHtml(errText(e))}</div>`;
       }
       return;
     }
+    // Probe once for a cleaned timeline (so the toggle only shows when there's
+    // something to switch to). Separate fetch with its OWN catch: a probe failure
+    // must never blow away the primary timeline that just loaded fine.
+    if (!this.probedCleaned) {
+      this.probedCleaned = true;
+      this.hasCleaned =
+        this.variant === "cleaned"
+          ? this.segments.length > 0
+          : await getSegments(this.recordingId, "cleaned")
+              .then((s) => s.length > 0)
+              .catch(() => false);
+    }
+    this.groups = groupSegments(this.segments);
     if (this.disposed) return;
     this.render();
   }
 
   private render() {
+    // Cleaned came back empty (e.g. cleared between probe and toggle-click) —
+    // fall back to raw rather than stranding the user in an empty state with no
+    // toggle to switch back (the toggle only renders when cleaned is non-empty).
+    if (this.segments.length === 0 && this.variant === "cleaned") {
+      this.variant = "raw";
+      void this.load();
+      return;
+    }
     if (this.segments.length === 0) {
       this.container.innerHTML = `
         <div class="tl-empty">

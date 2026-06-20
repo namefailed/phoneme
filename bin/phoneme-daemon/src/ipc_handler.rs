@@ -2066,6 +2066,36 @@ async fn rerun_cleanup(
                 // the panel. Raw timing is untouched. Best-effort + gated inside.
                 crate::pipeline::reflow_cleaned_timing(&task_state, &id, &cleaned).await;
 
+                // PB-COMPOUND: the live transcript is now this cleanup's output, so
+                // the version chain must reflect it — otherwise Compare-versions /
+                // Revert keep showing the PRIOR run's cleanup text. Rebuild it as
+                // raw (idx 0) + this cleanup (idx 1); a manual re-clean collapses
+                // any earlier multi-step chain since the live text is now solely
+                // this cleanup output. Best-effort.
+                let versions = vec![
+                    phoneme_core::catalog::TranscriptVersion {
+                        idx: 0,
+                        step_id: None,
+                        label: Some("Original (raw)".to_string()),
+                        model: None,
+                        text: source.clone(),
+                    },
+                    phoneme_core::catalog::TranscriptVersion {
+                        idx: 1,
+                        step_id: Some("cleanup".to_string()),
+                        label: Some(format!("Cleanup ({})", llm_cfg.model)),
+                        model: Some(llm_cfg.model.clone()),
+                        text: cleaned.clone(),
+                    },
+                ];
+                if let Err(e) = task_state
+                    .catalog
+                    .replace_transcript_versions(&id, &versions)
+                    .await
+                {
+                    tracing::warn!(error = %e, "rerun_cleanup: failed to refresh transcript versions");
+                }
+
                 // Re-embed the new text so semantic search stays consistent,
                 // mirroring the pipeline and UpdateTranscript paths.
                 let embedder = task_state.embedder.read().await.as_ref().cloned();
@@ -2475,6 +2505,24 @@ async fn export_clip(
         }
     };
 
+    // Never write the clip over the recording's own source audio: clip_wav reads
+    // the whole source into memory then atomically replaces `dest`, so dest==src
+    // would truncate the original to the slice while the catalog row still points
+    // here — irreversible data loss. Compare by resolved location so `./x.wav` vs
+    // the absolute path (and Windows separator/case differences) all match.
+    let src_resolved = src.canonicalize().unwrap_or_else(|_| src.clone());
+    let dest_resolved = dest
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
+        .or_else(|| std::env::current_dir().ok())
+        .and_then(|dir| dest.file_name().map(|f| dir.join(f)));
+    if dest == src || dest_resolved.as_deref() == Some(src_resolved.as_path()) {
+        return err_response(&phoneme_core::Error::InvalidConfig(
+            "clip output path must differ from the recording's own audio file".into(),
+        ));
+    }
+
     // Read + slice + write is blocking — keep it off the async runtime so the
     // IPC connection (and the single-connection tray bridge) stays responsive.
     let dest_for_task = dest.clone();
@@ -2834,6 +2882,25 @@ async fn reflow_and_reembed_after_edit(
             Err(e) => {
                 tracing::warn!(id = %id, error = %e, "re-align: could not load words; leaving timing layers untouched");
             }
+        }
+        // Any "cleaned" timing layer (TL-CONSISTENCY) was aligned to the
+        // pre-edit text; the raw layer above is now re-flowed onto `new_text`, so
+        // a separate cleaned layer would be redundant at best and stale at worst
+        // (manual edit / find-replace / revert-to-version all land here). Drop it
+        // so the Synced/Timeline views fall back to the freshly re-flowed raw.
+        if let Err(e) = state
+            .catalog
+            .replace_words_variant(id, "cleaned", &[])
+            .await
+        {
+            tracing::warn!(id = %id, error = %e, "re-align: failed to clear cleaned words");
+        }
+        if let Err(e) = state
+            .catalog
+            .replace_segments_variant(id, "cleaned", &[])
+            .await
+        {
+            tracing::warn!(id = %id, error = %e, "re-align: failed to clear cleaned segments");
         }
     }
 

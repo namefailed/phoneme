@@ -904,7 +904,10 @@ export class RecordingDetail {
             void revertToVersion(r.id, idx)
               .then(() => {
                 showToast("Transcript reverted to the selected version.", "success");
-                this.activeModalClose?.();
+                // Close THIS modal via its own handle — not the shared
+                // activeModalClose slot, which a later-opened modal may have
+                // overwritten by the time the IPC resolves.
+                close();
               })
               .catch((e) => showToast(`Revert failed: ${errText(e)}`, "error"));
           },
