@@ -33,7 +33,25 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Standing rule: CI must NEVER inject keystrokes/clipboard. The daemon
+      # E2E tests spawn a real `phoneme-daemon` binary (not `cfg!(test)`), so
+      # this env var is its only inject-guard — it inherits it from the runner
+      # and `input_injection_disabled()` no-ops every type/paste/reconcile path.
+      - name: Assert the inject-guard still gates the typing paths
+        shell: bash
+        run: |
+          guard='bin/phoneme-daemon/src/in_place.rs'
+          for fn in type_blocking reconcile_blocking paste_blocking; do
+            if ! grep -A2 "fn ${fn}" "$guard" | grep -q 'input_injection_disabled()'; then
+              echo "::error file=${guard}::${fn} no longer guards on input_injection_disabled() — real keystroke injection could leak"
+              exit 1
+            fi
+          done
+          echo "inject-guard intact: type/paste/reconcile all gated"
+
       - name: Test
+        env:
+          PHONEME_DISABLE_INPUT_INJECTION: "1"
         run: cargo test --workspace -- --test-threads=1
 
   docs:

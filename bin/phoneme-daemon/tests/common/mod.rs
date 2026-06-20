@@ -64,12 +64,17 @@ impl DaemonHarness {
         let cfg_path = temp.path().join("config.toml");
         std::fs::write(&cfg_path, toml::to_string(&cfg).unwrap()).unwrap();
 
-        // Spawn the daemon binary.
+        // Spawn the daemon binary. The spawned daemon is a normal binary, NOT
+        // `cfg!(test)`, so its only inject-guard is the env var: set it so the
+        // type/paste paths no-op even if a future test drives an in-place
+        // recording (the standing rule — tests must never type into a real
+        // window). See `in_place::input_injection_disabled`.
         let binary = env!("CARGO_BIN_EXE_phoneme-daemon");
         let daemon = Command::new(binary)
             .arg("--foreground")
             .env("PHONEME_CONFIG", &cfg_path)
             .env("PHONEME_DATA_LOCAL", temp.path().join("data"))
+            .env("PHONEME_DISABLE_INPUT_INJECTION", "1")
             .spawn()
             .unwrap();
 
