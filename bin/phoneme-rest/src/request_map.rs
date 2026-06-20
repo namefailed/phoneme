@@ -146,8 +146,13 @@ pub fn set_title(id: RecordingId, body: &TitleBody) -> Request {
 /// JSON body for `POST /api/recordings/:id/favorite`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct FavoriteBody {
-    /// `true` = starred. Required: an omitted field is a 400, not a silent
-    /// un-star (a bare `{}` used to clear the flag, surprising API callers).
+    /// `true` = starred. Deliberately lenient (`#[serde(default)]`): an omitted
+    /// field decodes to `false` rather than erroring. Making it required was tried
+    /// and reverted — a missing field then produced an axum `JsonRejection` (422,
+    /// plain-text) that bypasses the uniform `{"error":…}` envelope every other
+    /// endpoint returns, a worse inconsistency than the minor "`{}` unstars". The
+    /// frontend always sends the field, so the lenient default is never hit there.
+    #[serde(default)]
     pub favorite: bool,
 }
 

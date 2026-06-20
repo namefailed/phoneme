@@ -3130,11 +3130,14 @@ impl Catalog {
         // no display name (`speaker_names`) — a speaker can carry a display name
         // without being enrolled (e.g. the pipeline's "You" default, or a name set
         // on a cloud-diarized recording with no voiceprint), and propagation must
-        // never overwrite such a name. The "already under this voice" guard is
-        // scoped to the SPEAKER, not the whole recording: a recording can hold a
-        // speaker enrolled as this voice AND a *second*, still-unnamed speaker of
-        // the same voice that we DO want to back-fill — a recording-wide exclusion
-        // wrongly dropped that second speaker.
+        // never overwrite such a name. The `IS NULL` filter is PER-SPEAKER (the PK
+        // is `(recording_id, speaker_label)`), so a speaker already enrolled under
+        // this — or any — voice is excluded by it directly, while a *second*,
+        // still-unnamed speaker of the same voice in the same recording is still
+        // admitted. We use NO recording-wide exclusion (that was the over-exclude
+        // bug — it dropped that second speaker) and NO per-speaker enrolled-guard
+        // (it would self-join the PK against an `IS NULL` row, always vacuously
+        // true — a no-op that only misleads).
         let rows = sqlx::query(
             "SELECT sv.recording_id AS recording_id, sv.speaker_label AS speaker_label, \
                     sv.centroid AS centroid \
@@ -3142,13 +3145,8 @@ impl Catalog {
              WHERE sv.named_voice_id IS NULL \
                AND NOT EXISTS (SELECT 1 FROM speaker_names sn \
                      WHERE sn.recording_id = sv.recording_id \
-                       AND sn.speaker_label = sv.speaker_label) \
-               AND NOT EXISTS (SELECT 1 FROM speaker_voiceprints sv2 \
-                     WHERE sv2.recording_id = sv.recording_id \
-                       AND sv2.speaker_label = sv.speaker_label \
-                       AND sv2.named_voice_id = ?)",
+                       AND sn.speaker_label = sv.speaker_label)",
         )
-        .bind(named_voice_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -7056,6 +7054,52 @@ mod tests {
         assert_eq!(cands.len(), 2);
         // Ordered by score, highest first.
         assert!(cands[0].score >= cands[1].score);
+    }
+
+    #[tokio::test]
+    async fn propagation_admits_a_second_unnamed_speaker_in_an_enrolled_recording() {
+        // Regression guard for the over-exclude fix: a single recording can hold
+        // speaker 1 ENROLLED as Ada AND a second, still-unnamed speaker of the
+        // same voice. The old recording-wide exclusion dropped the whole recording
+        // (so speaker 2 was never offered); per-speaker `IS NULL` scoping must
+        // still surface speaker 2. This test FAILS under the old SQL and passes
+        // under the new.
+        let (db, ada, _rec_match, _rec_named, _far) = propagation_fixture().await;
+
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        // Speaker 1: enrolled into the SAME Ada voice (find_or_create dedups by
+        // name), so this recording has a speaker already under `ada`.
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
+            .await
+            .unwrap();
+        let same = db
+            .enroll_speaker(rec.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(same, ada, "enrolling 'Ada' again must reuse the voice");
+        // Speaker 2: an unnamed Ada-match that should still be a candidate.
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.99, 0.01, 0.0], 0)
+            .await
+            .unwrap();
+
+        let cands = db
+            .propagation_candidates(&ada, 0.5, crate::voiceprint::ScoreNorm::Off)
+            .await
+            .unwrap();
+        let pairs: std::collections::HashSet<(String, i64)> = cands
+            .iter()
+            .map(|c| (c.recording_id.as_str().to_string(), c.speaker_label))
+            .collect();
+        assert!(
+            pairs.contains(&(rec.id.as_str().to_string(), 2)),
+            "the second, still-unnamed same-voice speaker must be a candidate"
+        );
+        assert!(
+            !pairs.contains(&(rec.id.as_str().to_string(), 1)),
+            "the already-enrolled speaker 1 is excluded by IS NULL"
+        );
     }
 
     #[tokio::test]
