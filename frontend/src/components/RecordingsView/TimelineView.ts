@@ -119,6 +119,11 @@ export class TimelineView {
   private groups: TlGroup[] = [];
   private activeIdx = -1;
   private disposed = false;
+  /** Timing source shown: "raw" machine truth, or "cleaned" (re-aligned to the
+   *  post-cleanup transcript). Toggle only appears when a cleaned timeline exists. */
+  private variant: "raw" | "cleaned" = "raw";
+  private hasCleaned = false;
+  private probedCleaned = false;
   /** Suppresses the scroll broadcast while WE are scrolling programmatically
    *  (mirroring the peer or following playback) — otherwise the two panes
    *  ping-pong scroll events forever. */
@@ -167,7 +172,16 @@ export class TimelineView {
 
   private async load() {
     try {
-      this.segments = await getSegments(this.recordingId);
+      this.segments = await getSegments(this.recordingId, this.variant);
+      // Probe once whether a cleaned timeline exists, so the toggle only shows
+      // when there's something to switch to (a plain transcribe has none).
+      if (!this.probedCleaned) {
+        this.probedCleaned = true;
+        this.hasCleaned =
+          this.variant === "cleaned"
+            ? this.segments.length > 0
+            : (await getSegments(this.recordingId, "cleaned")).length > 0;
+      }
       this.groups = groupSegments(this.segments);
     } catch (e) {
       if (!this.disposed) {
@@ -207,7 +221,25 @@ export class TimelineView {
           </button>`;
       })
       .join("");
-    this.container.innerHTML = `<div class="tl-list" role="list">${rows}</div>`;
+    // Raw ⇄ Cleaned timing toggle — only when a cleaned timeline exists
+    // (TL-CONSISTENCY). "Cleaned" re-aligns the timeline to the post-cleanup text
+    // so it matches the transcript panel; "Raw" is the original machine timing.
+    const toggle = this.hasCleaned
+      ? `<div class="tl-variant" role="group" aria-label="Timeline timing source">
+           <button type="button" class="tl-variant-btn${this.variant === "raw" ? " on" : ""}" data-variant="raw" title="Original transcription timing (machine truth)">Raw</button>
+           <button type="button" class="tl-variant-btn${this.variant === "cleaned" ? " on" : ""}" data-variant="cleaned" title="Aligned to the cleaned-up transcript">Cleaned</button>
+         </div>`
+      : "";
+    this.container.innerHTML = `${toggle}<div class="tl-list" role="list">${rows}</div>`;
+
+    this.container.querySelector(".tl-variant")?.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>(".tl-variant-btn");
+      const v = btn?.dataset.variant;
+      if ((v === "raw" || v === "cleaned") && v !== this.variant) {
+        this.variant = v;
+        void this.load();
+      }
+    });
 
     const list = this.container.querySelector<HTMLElement>(".tl-list");
     list?.addEventListener("click", (e) => {

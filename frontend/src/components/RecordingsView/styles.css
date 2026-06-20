@@ -3085,6 +3085,32 @@ ph-sidebar .queue-item-main.kbd-cursor {
 /* ── Timeline peek (clickable, time-coded segment list) ─────────────────────
    Hosted in the detail pane's transcript box; in the dual-timeline split two
    of these mirror each other (shared playhead + scroll sync). */
+/* Raw ⇄ Cleaned timeline-timing toggle (TL-CONSISTENCY); shown only when a
+   cleaned timeline exists. */
+.tl-variant {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0 0 6px 8px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+.tl-variant-btn {
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 2px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.tl-variant-btn.on {
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+}
+
 .tl-list {
   display: flex;
   flex-direction: column;
