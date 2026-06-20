@@ -54,13 +54,28 @@ pub fn strip_fillers(text: &str, cfg: &FillerConfig) -> String {
         }
     }
 
-    // Single words: rebuild the text keeping only non-filler tokens. Splitting on
-    // whitespace means a filler is only ever matched as a standalone word, so
-    // "umbrella" / "there" are never touched. The punctuation a dropped filler
-    // carried (a trailing comma/terminator) is handled by tidy() below.
-    let kept: Vec<&str> = working
+    // Single words: keep non-filler tokens; for a removed filler keep only any
+    // trailing punctuation it carried ("uh," -> ",") so the surrounding comma or
+    // terminator survives — tidy() then reattaches it to the previous word and
+    // collapses any doubling. Splitting on whitespace means a filler is only ever
+    // matched standalone, so "umbrella" / "there" are never touched.
+    let kept: Vec<String> = working
         .split_whitespace()
-        .filter(|word| !is_filler_word(word, &cfg.words))
+        .filter_map(|word| {
+            if is_filler_word(word, &cfg.words) {
+                let trailing: String = word
+                    .chars()
+                    .rev()
+                    .take_while(|c| !c.is_alphanumeric())
+                    .collect::<Vec<char>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                (!trailing.is_empty()).then_some(trailing)
+            } else {
+                Some(word.to_string())
+            }
+        })
         .collect();
 
     tidy(&kept.join(" "))
@@ -126,24 +141,34 @@ fn remove_phrase(text: &str, phrase: &str) -> String {
 /// and the result trimmed. Mirrors `dictation::normalize_spacing`'s intent so
 /// the output never reads as " , word" or "word  word".
 fn tidy(text: &str) -> String {
-    // One pass over whitespace-joined tokens drops space-before-punctuation and
-    // squeezes the placeholder/doubled spaces in one go.
+    const PUNCT: [char; 6] = [',', '.', '!', '?', ';', ':'];
+    // One pass over whitespace-joined tokens: drop a space before punctuation, and
+    // collapse a run of punctuation (possibly space-separated) down to the first
+    // mark — so a filler removed between commas ("it was, , done") and a reattached
+    // separator ("so , yeah") both read cleanly.
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = String::with_capacity(collapsed.len());
-    let mut prev_space = false;
+    let mut last_nonspace: Option<char> = None;
     for c in collapsed.chars() {
-        if matches!(c, ',' | '.' | '!' | '?' | ';' | ':') && prev_space {
-            out.pop();
+        if PUNCT.contains(&c) {
+            if out.ends_with(' ') {
+                out.pop();
+            }
+            // Already sitting on a punctuation mark → this one is redundant.
+            if last_nonspace.is_some_and(|p| PUNCT.contains(&p)) {
+                continue;
+            }
         }
         out.push(c);
-        prev_space = c == ' ';
+        if c != ' ' {
+            last_nonspace = Some(c);
+        }
     }
     // A stripped leading filler can strand the separator it carried at the very
     // front (", yeah" / ". so"); drop any leading punctuation + the space after.
-    let trimmed = out
-        .trim_start_matches([',', '.', '!', '?', ';', ':', ' '])
-        .trim_end();
-    trimmed.to_string()
+    out.trim_start_matches([',', '.', '!', '?', ';', ':', ' '])
+        .trim_end()
+        .to_string()
 }
 
 #[cfg(test)]
