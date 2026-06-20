@@ -2471,6 +2471,18 @@ pub async fn run(
     let mut total_duration = 0;
     let mut last_cmd = String::new();
 
+    // Single-fire invariant (F2): a hook fires EXACTLY once per transcribe, never
+    // twice — even though the legacy [hook] loops below AND the recipe Hook executor
+    // (`run_hook_steps`) both live on this path. The H3 cutover's `migrate_hooks`
+    // (run by `load_config` before any pipeline run) MOVES the legacy
+    // commands/keyword_rules/webhook into recipe Hook entries and then CLEARS the
+    // legacy fields, so post-migration these loops iterate an empty list and the
+    // migrated entries fire only via `run_hook_steps`. Pre-migration the default
+    // recipe has no Hook step, so only these loops fire. The two paths never both
+    // fire the same hook. Kept (not deleted) so a config that somehow reaches the
+    // pipeline un-migrated still runs its legacy hooks. Locked by
+    // `configured_hook_fires_exactly_once_per_transcribe`.
+    //
     // Expand env vars / `~` in the legacy [hook].commands. If expansion fails we
     // fall back to the unexpanded config, but LOG it first: a silent fallback
     // leaves literal `%APPDATA%` / `~/` tokens in the command, so every hook then

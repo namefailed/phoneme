@@ -2650,3 +2650,138 @@ async fn skip_only_fires_for_the_active_processing_item() {
 
     pulse.abort();
 }
+
+/// Regression (F2): a configured hook fires EXACTLY once per normal transcribe —
+/// never twice. The pipeline still carries both firing paths (the legacy
+/// `[hook].commands`/`keyword_rules`/`webhook_url` loops AND the recipe Hook
+/// executor `run_hook_steps`), so the guarantee that they don't BOTH fire rests
+/// on `migrate_hooks` moving the legacy fields into recipe Hook entries and then
+/// CLEARING the legacy fields. This test mirrors the daemon's startup
+/// (`load_config` runs both migrations before any pipeline run): it seeds a
+/// legacy `[hook]` command + webhook, migrates, then runs the full pipeline and
+/// asserts the shell hook ran once (append-and-count, so a second fire would be
+/// visible) and the webhook POSTed once. If the legacy loops ever stop clearing
+/// — or a second path re-fires the migrated entries — the counts double and this
+/// fails.
+#[tokio::test]
+async fn configured_hook_fires_exactly_once_per_transcribe() {
+    // Whisper returns a raw transcript; no LLM stages are exercised here (the
+    // default recipe's cleanup needs a provider, which isn't configured, so it
+    // self-skips — this test is only about the hook firing count).
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "hook fire count check",
+        })))
+        .mount(&server)
+        .await;
+
+    // The webhook listener — read back to count POSTs.
+    let webhook_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/webhook"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&webhook_server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    // The marker is APPENDED to (`>>`), not overwritten, so a double-fire would
+    // leave two lines — `>` would hide it.
+    let marker = tmp.path().join("hook-fires.txt");
+
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+
+    // A legacy `[hook]` setup exactly as a pre-cutover config carries it: one
+    // always-on command + an outbound webhook, both firing on transcribe.
+    cfg.hook.run_on_transcribe = true;
+    cfg.hook.timeout_secs = 30;
+    cfg.hook.commands = vec![format!(
+        "cmd /c echo fired>> \"{}\"",
+        marker.to_string_lossy()
+    )];
+    cfg.hook.keyword_rules.clear();
+    cfg.hook.webhook_url = Some(format!("{}/webhook", webhook_server.uri()));
+
+    // Mirror the daemon startup: `load_config` runs BOTH migrations before any
+    // pipeline run. `migrate_hooks` is what moves the legacy fields into recipe
+    // Hook entries and clears them, so only ONE path fires post-migration.
+    // (`test_state` runs `migrate_playbook` again; it's idempotent.)
+    cfg.migrate_playbook();
+    cfg.migrate_hooks();
+    assert!(
+        cfg.hook.commands.is_empty() && cfg.hook.webhook_url.is_none(),
+        "migrate_hooks must clear the legacy fields so the old loops fire nothing"
+    );
+
+    let state = test_state(tmp.path(), cfg).await;
+
+    let audio_path = tmp.path().join("clip.wav");
+    std::fs::write(&audio_path, b"RIFF....not-real-audio").unwrap();
+    let id = RecordingId::new();
+    let started_at = chrono::Local::now();
+    let row = Recording {
+        id: id.clone(),
+        started_at,
+        duration_ms: 1000,
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        transcript: None,
+        model: None,
+        status: RecordingStatus::Transcribing,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: None,
+        meeting_name: None,
+        track: None,
+        in_place: false,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        title: None,
+        title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
+        tags: vec![],
+        speaker_names: vec![],
+    };
+    state.catalog.insert(&row).await.unwrap();
+    seed_processing_inbox(&state, &id, &audio_path, started_at).await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: started_at,
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("pipeline run should succeed");
+
+    // The shell hook ran EXACTLY once: one appended line, not two.
+    let fires = std::fs::read_to_string(&marker).expect("the migrated hook wrote its marker");
+    let lines = fires.lines().filter(|l| !l.trim().is_empty()).count();
+    assert_eq!(lines, 1, "the configured hook fired exactly once, got: {fires:?}");
+
+    // The webhook POSTed EXACTLY once.
+    let received = webhook_server.received_requests().await.unwrap();
+    assert_eq!(received.len(), 1, "the configured webhook fired exactly once");
+}
