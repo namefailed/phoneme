@@ -183,6 +183,15 @@ trust boundary.*
   appended — with a phase-aware fallback that never blindly re-appends a
   re-transcribed tail (the old duplicated-runs bug). It also advances ~2× more
   smoothly (0.5s min-new gate); weak machines still self-throttle.
+- [x] **Tentative tail in the live-preview overlay** — the overlay now dims the
+  words it just appended this tick (the freshest, least-settled part of the
+  caption, which may still revise) while the stable prefix shown earlier stays
+  solid, so you can see which trailing words aren't final yet. The daemon tags
+  each `transcription_partial` with `committed_len` (char length of the committed
+  prefix) — the boundary it already computes when stitching — and the overlay
+  splits the rendered caption there. Both meeting tracks get it in "both" mode.
+  Backward compatible: a partial without the field renders all-solid as before.
+  Overlay-only; the in-app caption and the final transcript are unchanged.
 - [x] **Live preview auto-picks the smallest local model** — when `[preview_whisper]`
   is unset and your final `[whisper]` is a local bundled model, the daemon now runs
   the preview on the **smallest local Whisper model it finds beside the final one**

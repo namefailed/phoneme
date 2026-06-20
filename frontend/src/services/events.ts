@@ -57,7 +57,10 @@ export type DaemonEvent =
   | { event: "recording_started"; id: string; started_at: string; meeting_id?: string | null; track?: string | null }
   | { event: "recording_stopped"; id: string; duration_ms: number; audio_path: string; meeting_id?: string | null }
   | { event: "transcription_started"; id: string }
-  | { event: "transcription_partial"; id: string; text: string }
+  // `committed_len`: char length of the stable prefix of `text`; words past it
+  // are this tick's freshly-appended, least-settled tail (the overlay dims them).
+  // Optional — an older daemon omits it and the caption renders all-solid.
+  | { event: "transcription_partial"; id: string; text: string; committed_len?: number }
   | { event: "audio_level_sample"; id: string; level: number }
   | { event: "transcription_done"; id: string; transcript: string }
   | { event: "transcription_failed"; id: string; error: string }

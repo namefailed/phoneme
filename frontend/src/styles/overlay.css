@@ -152,6 +152,14 @@ body.ov-live .ov-wave {
   width: 0;
   height: 0;
 }
+/* Tentative tail (P2): the trailing words the daemon just appended this preview
+   tick — the least-settled part of the caption, which may still revise as more
+   audio arrives. Dimmed so the committed (stable) prefix reads as solid and the
+   eye can tell which words aren't final yet. Opacity only (GPU-composited, no
+   layout) so it never costs a reflow on the per-tick re-render. */
+.ov-text .tentative {
+  opacity: 0.45;
+}
 
 /* The caption area: a single .ov-text block on the row (single recordings /
    meeting "toggle"), or (meetings in "both" mode) two stacked .ov-row lines.
