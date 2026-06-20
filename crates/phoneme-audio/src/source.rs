@@ -9,6 +9,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat as CpalSampleFormat, StreamConfig};
 use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -70,12 +71,23 @@ where
 /// (the audio clock the gap filler trusts — see [`gap_fill_len`]), convert each
 /// to `f32` (one linear map per sample), and hand the block to the worker
 /// without ever blocking the audio thread.
+///
+/// `device_lost` / `stop_signal` give the (real-time) error callback a way out:
+/// when CPAL reports a stream error — a mic unplugged mid-recording is the
+/// motivating case — it flags `device_lost` so the source can surface the
+/// failure, and pokes `stop_signal` so the stream-owning thread unblocks from
+/// `stop_rx.recv()` and drops the stream. Without that, the error callback only
+/// logged: the stream thread blocked forever, `raw_tx` never dropped, the
+/// worker's `raw_rx.recv()` never returned `None`, and capture hung silently
+/// until the recorder's max-duration cap fired.
 fn build_input_stream_as_f32<T>(
     device: &cpal::Device,
     stream_cfg: &StreamConfig,
     pool_rx: std::sync::mpsc::Receiver<Vec<f32>>,
     raw_tx: mpsc::Sender<Vec<f32>>,
     delivered: Arc<std::sync::atomic::AtomicUsize>,
+    device_lost: Arc<AtomicBool>,
+    stop_signal: std::sync::mpsc::Sender<()>,
 ) -> std::result::Result<cpal::Stream, cpal::BuildStreamError>
 where
     T: cpal::SizedSample,
@@ -95,7 +107,15 @@ where
             buf.extend(data.iter().map(|&s| sample_to_f32(s)));
             let _ = raw_tx.try_send(buf);
         },
-        |err| tracing::warn!("cpal stream error: {err}"),
+        move |err| {
+            tracing::warn!("cpal stream error: {err}");
+            // Surface the failure and tear the stream down. A device error
+            // (e.g. the mic was unplugged) won't recover on its own; flag it so
+            // the source can report it, and signal the stream thread to drop the
+            // stream so the capture pipeline drains and `next_block` returns.
+            device_lost.store(true, Ordering::Relaxed);
+            let _ = stop_signal.send(());
+        },
         None,
     )
 }
@@ -267,6 +287,10 @@ pub struct CpalSource {
     /// doesn't back-fill a paused span as silence. Only meaningful when the
     /// source was opened with gap filling (loopback).
     rebaseline_fill_clock: Arc<std::sync::atomic::AtomicBool>,
+    /// Flipped true by the CPAL error callback when the device fails mid-capture
+    /// (e.g. the mic is unplugged). Checked once the stream drains so the drop
+    /// is reported as an error rather than a clean end-of-stream.
+    device_lost: Arc<AtomicBool>,
 }
 
 impl CpalSource {
@@ -392,6 +416,14 @@ impl CpalSource {
         let delivered_raw = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let delivered_cb = delivered_raw.clone();
 
+        // Set by the CPAL error callback when the device drops mid-capture; lets
+        // the source report the failure once the pipeline drains. The callback
+        // also pokes a `stop_tx` clone so the stream thread unblocks and tears
+        // the stream down (see `build_input_stream_as_f32`).
+        let device_lost = Arc::new(AtomicBool::new(false));
+        let device_lost_cb = device_lost.clone();
+        let stop_tx_cb = stop_tx.clone();
+
         // The cpal::Stream is `!Send` on Windows (COM thread affinity), so
         // it lives entirely on a dedicated OS thread.
         let stream_thread = std::thread::Builder::new()
@@ -409,6 +441,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     CpalSampleFormat::F64 => build_input_stream_as_f32::<f64>(
                         &device,
@@ -416,6 +450,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     CpalSampleFormat::I8 => build_input_stream_as_f32::<i8>(
                         &device,
@@ -423,6 +459,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     CpalSampleFormat::I16 => build_input_stream_as_f32::<i16>(
                         &device,
@@ -430,6 +468,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     CpalSampleFormat::I32 => build_input_stream_as_f32::<i32>(
                         &device,
@@ -437,6 +477,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     CpalSampleFormat::I64 => build_input_stream_as_f32::<i64>(
                         &device,
@@ -444,6 +486,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     CpalSampleFormat::U8 => build_input_stream_as_f32::<u8>(
                         &device,
@@ -451,6 +495,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     CpalSampleFormat::U16 => build_input_stream_as_f32::<u16>(
                         &device,
@@ -458,6 +504,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     CpalSampleFormat::U32 => build_input_stream_as_f32::<u32>(
                         &device,
@@ -465,6 +513,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     CpalSampleFormat::U64 => build_input_stream_as_f32::<u64>(
                         &device,
@@ -472,6 +522,8 @@ impl CpalSource {
                         pool_rx,
                         raw_tx.clone(),
                         delivered_cb,
+                        device_lost_cb,
+                        stop_tx_cb,
                     ),
                     other => {
                         let device_name =
@@ -685,6 +737,7 @@ impl CpalSource {
             _stream_thread: Some(stream_thread),
             _worker: worker,
             rebaseline_fill_clock,
+            device_lost,
         })
     }
 }
@@ -696,7 +749,17 @@ impl Source for CpalSource {
     }
 
     async fn next_block(&mut self) -> Result<Option<SampleBlock>> {
-        Ok(self.out_rx.recv().await)
+        match self.out_rx.recv().await {
+            Some(block) => Ok(Some(block)),
+            // Channel drained. If the device failed mid-capture (the error
+            // callback flagged it), surface that as an error so the recorder
+            // doesn't mistake a hardware disconnect for a clean stop. Otherwise
+            // it's a normal end-of-stream.
+            None if self.device_lost.load(Ordering::Relaxed) => Err(Error::Internal(
+                "audio capture device failed mid-recording (e.g. disconnected)".into(),
+            )),
+            None => Ok(None),
+        }
     }
 
     async fn stop(&mut self) -> Result<()> {

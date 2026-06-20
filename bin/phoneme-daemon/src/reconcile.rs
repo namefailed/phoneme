@@ -9,7 +9,7 @@
 //!    daemon died) moves back to `pending/`, so the recording transcribes on
 //!    this run instead of being lost.
 //! 3. Catalog sweep: rows stuck in an in-progress status (`recording`,
-//!    `paused`, `transcribing`, `hook_running`) with NO matching inbox entry can
+//!    `paused`, `queued`, `transcribing`, `hook_running`) with NO matching inbox entry can
 //!    never finish — mark them `transcribe_failed` so the UI shows a re-runnable
 //!    failure rather than a forever-spinner. `paused` is swept too: a daemon that
 //!    crashed while a recording was paused leaves no live recorder and no inbox

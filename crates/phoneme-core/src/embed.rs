@@ -80,6 +80,45 @@ pub(crate) fn pool(
     pooled
 }
 
+/// Reduce a model's raw ONNX output to one L2-normalized sentence vector,
+/// dispatching on the output rank (its `shape`):
+///
+/// - rank 2 `[1, hidden]` — an already-pooled sentence vector; take it directly.
+/// - rank 3 `[1, seq, hidden]` — per-token hidden states; pool per `pooling`.
+/// - any other rank — a model whose output we can't interpret (a user can point
+///   `[semantic_search].model_dir` at an arbitrary export). Return an error
+///   rather than indexing `shape[2]` unconditionally, which would panic and
+///   unwind the live `SemanticSearch` task.
+///
+/// Pure (no ONNX/tokenizer) so the rank dispatch is unit-testable.
+pub(crate) fn pool_model_output(
+    shape: &[i64],
+    data: &[f32],
+    seq_len: usize,
+    attention_mask: &[i64],
+    pooling: EmbeddingPooling,
+) -> Result<Vec<f32>> {
+    match shape.len() {
+        2 => {
+            let hidden = shape[1] as usize;
+            let mut v = data
+                .get(..hidden)
+                .map(<[f32]>::to_vec)
+                .unwrap_or_else(|| vec![0.0; hidden]);
+            l2_normalize(&mut v);
+            Ok(v)
+        }
+        3 => {
+            let hidden_size = shape[2] as usize;
+            Ok(pool(data, hidden_size, seq_len, attention_mask, pooling))
+        }
+        rank => Err(Error::Internal(format!(
+            "embedding model output has unexpected rank {rank} (shape {shape:?}); \
+             expected [1, hidden] (pre-pooled) or [1, seq, hidden]"
+        ))),
+    }
+}
+
 /// L2-normalize in place (a zero vector is left unchanged).
 pub(crate) fn l2_normalize(v: &mut [f32]) {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -242,23 +281,7 @@ impl Embedder {
             .try_extract_tensor::<f32>()
             .map_err(|e| Error::Internal(format!("Extract tensor error: {}", e)))?;
 
-        // Most exports emit `last_hidden_state` [1, seq, hidden] and expect us to
-        // pool; some emit an already-pooled sentence vector [1, hidden] — handle
-        // both so swapping models "just works".
-        let pooled = if shape.len() == 2 {
-            let hidden = shape[1] as usize;
-            let mut v = data
-                .get(..hidden)
-                .map(<[f32]>::to_vec)
-                .unwrap_or_else(|| vec![0.0; hidden]);
-            l2_normalize(&mut v);
-            v
-        } else {
-            let hidden_size = shape[2] as usize;
-            pool(data, hidden_size, seq_len, &attention_mask, self.pooling)
-        };
-
-        Ok(pooled)
+        pool_model_output(shape, data, seq_len, &attention_mask, self.pooling)
     }
 
     /// Embed a transcript as a set of sentence-aware, overlapping chunks.
@@ -324,6 +347,37 @@ mod tests {
         let out = pool(&data, 2, 2, &[1, 1], EmbeddingPooling::Cls);
         assert!((out[0] - 0.6).abs() < 1e-6, "got {out:?}");
         assert!((out[1] - 0.8).abs() < 1e-6, "got {out:?}");
+    }
+
+    #[test]
+    fn pool_output_takes_prepooled_rank2_directly() {
+        // A `[1, hidden]` export is already a sentence vector: take it and
+        // normalize. [3,4] → [0.6, 0.8].
+        let out = pool_model_output(&[1, 2], &[3.0, 4.0], 1, &[1], EmbeddingPooling::Mean).unwrap();
+        assert!((out[0] - 0.6).abs() < 1e-6, "got {out:?}");
+        assert!((out[1] - 0.8).abs() < 1e-6, "got {out:?}");
+    }
+
+    #[test]
+    fn pool_output_pools_rank3_token_states() {
+        // A `[1, seq, hidden]` export is per-token hidden states: mean-pool the
+        // two real tokens (mask drops the pad) → [2,0] → [1,0].
+        let data = [1.0, 0.0, 3.0, 0.0, 99.0, 99.0];
+        let out =
+            pool_model_output(&[1, 3, 2], &data, 3, &[1, 1, 0], EmbeddingPooling::Mean).unwrap();
+        assert!((out[0] - 1.0).abs() < 1e-6, "got {out:?}");
+        assert!(out[1].abs() < 1e-6, "got {out:?}");
+    }
+
+    #[test]
+    fn pool_output_errors_on_unexpected_rank() {
+        // A user-supplied model whose output is rank 1 (or 0, or 4) must error,
+        // not index `shape[2]` and panic-unwind the SemanticSearch task.
+        for shape in [&[384i64][..], &[][..], &[1, 8, 8, 8][..]] {
+            let err = pool_model_output(shape, &[0.0; 8], 1, &[1], EmbeddingPooling::Mean)
+                .expect_err("non 2/3 rank should error");
+            assert!(format!("{err}").contains("unexpected rank"), "got {err}");
+        }
     }
 
     #[test]

@@ -4,8 +4,9 @@
 //! DER (collar-0, NIST-style) =
 //! `(missed + false_alarm + confusion) / total_reference_speech`, all in seconds.
 //! Before scoring, the hypothesis speakers are mapped onto the reference speakers
-//! by total overlap (greedily), so the *labels* don't matter — `[Speaker 1]` vs
-//! `A` — only who is grouped with whom. Lower is better; 0.0 is a perfect match.
+//! by the *optimal* (max-total-overlap) one-to-one assignment, so the *labels*
+//! don't matter — `[Speaker 1]` vs `A` — only who is grouped with whom. Lower is
+//! better; 0.0 is a perfect match.
 //!
 //! This module is the pure metric (parse + score), unit-tested without any audio.
 //! A harness that runs the real diarizer on an audio fixture and scores it against
@@ -98,8 +99,9 @@ fn active(segs: &[DerSegment], a: f64, b: f64) -> HashSet<&str> {
 ///
 /// The timeline is split at every segment boundary from both sides; each
 /// elementary interval is then scored against the speaker mapping that maximizes
-/// total ref↔hyp overlap (chosen greedily, which is exact for well-separated
-/// speakers and a slight over-estimate of confusion only in pathological ties).
+/// total ref↔hyp overlap. That mapping is the *optimal* one-to-one assignment
+/// (max-weight bipartite matching, see [`max_overlap_assignment`]) — strict
+/// NIST DER, not a greedy approximation that can strand a speaker into confusion.
 /// Overlapping speech is handled NIST-style: per interval the error is
 /// `max(n_ref, n_hyp) - n_correct`. With no reference speech, `der` is 0.0 (any
 /// hypothesis speech is still reported under `false_alarm`).
@@ -140,18 +142,8 @@ pub fn compute_der(reference: &[DerSegment], hypothesis: &[DerSegment]) -> DerRe
         }
     }
 
-    // Greedy max-overlap mapping hyp → ref (each used at most once).
-    let mut pairs: Vec<(&str, &str, f64)> =
-        overlap.iter().map(|(&(r, h), &o)| (r, h, o)).collect();
-    pairs.sort_by(|x, y| y.2.partial_cmp(&x.2).unwrap_or(std::cmp::Ordering::Equal));
-    let mut map: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
-    let mut used_ref: HashSet<&str> = HashSet::new();
-    for (r, h, _) in pairs {
-        if !map.contains_key(h) && !used_ref.contains(r) {
-            map.insert(h, r);
-            used_ref.insert(r);
-        }
-    }
+    // Optimal max-overlap one-to-one mapping hyp → ref (each used at most once).
+    let map = max_overlap_assignment(&overlap);
 
     // Pass 2 — score each interval under the mapping.
     let (mut missed, mut false_alarm, mut confusion, mut total_reference) = (0.0, 0.0, 0.0, 0.0);
@@ -187,6 +179,126 @@ pub fn compute_der(reference: &[DerSegment], hypothesis: &[DerSegment]) -> DerRe
         confusion,
         total_reference,
     }
+}
+
+/// The optimal one-to-one mapping `hyp → ref` that maximizes total ref↔hyp
+/// overlap, given a sparse overlap matrix keyed by `(ref, hyp)` → co-active
+/// seconds.
+///
+/// This is the assignment NIST DER's confusion term depends on: each hypothesis
+/// speaker is paired with at most one reference speaker (and vice versa) so that
+/// the summed overlap of the chosen pairs is maximal. A greedy "take the biggest
+/// overlap first" pass is *not* optimal — it can lock a reference speaker to a
+/// hypothesis that another hypothesis needed more, stranding a speaker into
+/// confusion and inflating DER. We solve it exactly with the Hungarian
+/// (Kuhn–Munkres) algorithm on the small `ref × hyp` matrix; the speaker counts
+/// are tiny, so the `O(n^3)` cost is irrelevant.
+///
+/// Only pairs with strictly positive overlap are kept in the result — a forced
+/// assignment onto a zero-overlap reference is meaningless and must not be
+/// treated as "correct".
+fn max_overlap_assignment<'a>(
+    overlap: &std::collections::HashMap<(&'a str, &'a str), f64>,
+) -> std::collections::HashMap<&'a str, &'a str> {
+    // Collect the distinct speakers on each side and index them.
+    let mut refs: Vec<&str> = Vec::new();
+    let mut hyps: Vec<&str> = Vec::new();
+    let mut ref_idx: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut hyp_idx: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for &(r, h) in overlap.keys() {
+        if !ref_idx.contains_key(r) {
+            ref_idx.insert(r, refs.len());
+            refs.push(r);
+        }
+        if !hyp_idx.contains_key(h) {
+            hyp_idx.insert(h, hyps.len());
+            hyps.push(h);
+        }
+    }
+    let mut out: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    if refs.is_empty() || hyps.is_empty() {
+        return out;
+    }
+
+    // Hungarian algorithm (Kuhn–Munkres, O(n^3) potentials form). It minimizes a
+    // square cost matrix, so we make it square by padding the short side with
+    // dummy rows/columns of cost 0 and solve `cost = MAX - overlap` to turn the
+    // max-weight assignment into a min-cost one.
+    let n = refs.len().max(hyps.len());
+    let max_w = overlap.values().cloned().fold(0.0_f64, f64::max);
+    // cost[i][j] for ref i, hyp j; padded cells default to `max_w` (overlap 0).
+    let mut cost = vec![vec![max_w; n]; n];
+    for (&(r, h), &o) in overlap {
+        cost[ref_idx[r]][hyp_idx[h]] = max_w - o;
+    }
+
+    // Standard 1-indexed potential method. `p[j]` = which row is matched to
+    // column `j` (0 = none); `way` reconstructs the augmenting path.
+    let inf = f64::INFINITY;
+    let mut u = vec![0.0_f64; n + 1];
+    let mut v = vec![0.0_f64; n + 1];
+    let mut p = vec![0usize; n + 1];
+    let mut way = vec![0usize; n + 1];
+    for i in 1..=n {
+        p[0] = i;
+        let mut j0 = 0usize;
+        let mut minv = vec![inf; n + 1];
+        let mut used = vec![false; n + 1];
+        loop {
+            used[j0] = true;
+            let i0 = p[j0];
+            let mut delta = inf;
+            let mut j1 = 0usize;
+            for j in 1..=n {
+                if !used[j] {
+                    let cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
+                    if cur < minv[j] {
+                        minv[j] = cur;
+                        way[j] = j0;
+                    }
+                    if minv[j] < delta {
+                        delta = minv[j];
+                        j1 = j;
+                    }
+                }
+            }
+            for j in 0..=n {
+                if used[j] {
+                    u[p[j]] += delta;
+                    v[j] -= delta;
+                } else {
+                    minv[j] -= delta;
+                }
+            }
+            j0 = j1;
+            if p[j0] == 0 {
+                break;
+            }
+        }
+        // Augment along the path back to the free column.
+        loop {
+            let j1 = way[j0];
+            p[j0] = p[j1];
+            j0 = j1;
+            if j0 == 0 {
+                break;
+            }
+        }
+    }
+
+    // `p[j]` is the ref row matched to hyp column `j`. Keep only real pairs with
+    // positive overlap (drop the padded dummies and zero-overlap forced matches).
+    for j in 1..=n {
+        let i = p[j];
+        if i == 0 || i > refs.len() || j > hyps.len() {
+            continue;
+        }
+        let (r, h) = (refs[i - 1], hyps[j - 1]);
+        if overlap.get(&(r, h)).is_some_and(|&o| o > 0.0) {
+            out.insert(h, r);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -269,6 +381,47 @@ SPEAKER meeting 1 bad dur <NA> <NA> C <NA> <NA>";
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0], seg(0.0, 5.0, "A"));
         assert_eq!(segs[1], seg(5.0, 10.0, "B"));
+    }
+
+    #[test]
+    fn optimal_mapping_beats_greedy_when_greedy_strands_a_speaker() {
+        // Three reference speakers, each alone on a 10s slice (total 30s). The
+        // hypothesis also has three speakers and exactly one is active per
+        // sub-interval, so there is no missed/false-alarm speech — the DER is
+        // pure confusion driven entirely by the ref↔hyp mapping.
+        //
+        // Overlap matrix (seconds):
+        //         X    Y    Z
+        //   A     1    9    .
+        //   B     2    .    8
+        //   C     .    3    7
+        //
+        // A greedy "take the biggest free overlap first" pass grabs (A,Y)=9 then
+        // (B,Z)=8, which strands X entirely: nothing free is left for it, so all
+        // of X's reference time falls into confusion. Greedy captures 9+8 = 17s,
+        // leaving 13s confusion → DER 13/30 ≈ 0.4333.
+        //
+        // The optimal one-to-one assignment is X→B, Y→A, Z→C, capturing
+        // 2+9+7 = 18s, so only 12s is confusion → DER 12/30 = 0.4 — strictly
+        // lower, and the correct (NIST) answer.
+        let reference = vec![seg(0.0, 10.0, "A"), seg(10.0, 20.0, "B"), seg(20.0, 30.0, "C")];
+        let hypothesis = vec![
+            seg(0.0, 1.0, "X"),  // A∩X = 1
+            seg(1.0, 10.0, "Y"), // A∩Y = 9
+            seg(10.0, 12.0, "X"), // B∩X = 2
+            seg(12.0, 20.0, "Z"), // B∩Z = 8
+            seg(20.0, 23.0, "Y"), // C∩Y = 3
+            seg(23.0, 30.0, "Z"), // C∩Z = 7
+        ];
+        let r = compute_der(&reference, &hypothesis);
+        assert!(approx(r.missed, 0.0), "{r:?}");
+        assert!(approx(r.false_alarm, 0.0), "{r:?}");
+        // Optimal confusion is 12s, not the greedy 13s.
+        assert!(approx(r.confusion, 12.0), "{r:?}");
+        assert!(approx(r.total_reference, 30.0), "{r:?}");
+        assert!(approx(r.der, 12.0 / 30.0), "{r:?}");
+        // And strictly below what the old greedy mapping would have scored.
+        assert!(r.der < 13.0 / 30.0, "{r:?}");
     }
 
     #[test]

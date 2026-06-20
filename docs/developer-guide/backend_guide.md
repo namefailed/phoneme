@@ -123,8 +123,11 @@ it (and a second, thread-capped preview server when configured) alive:
   effective value, so a model-override re-transcription is exactly one
   restart-to-override plus one restore — never a config-mutation thrash.
 - **Job membership & sweeps** — every child joins the kill-on-close job;
-  `sweep_stray_servers` additionally kills every whisper-server on the box to
-  free squatted ports and hung orphans before a respawn.
+  `sweep_stray_servers` also kills the whisper-server processes it can identify
+  by their transcription command line (every server Phoneme spawns carries the
+  `/v1/audio/transcriptions` marker) to free squatted ports and hung orphans
+  before a respawn — an unrelated `whisper.cpp` launched for something else is
+  left alone.
 - **No pipe wedging** — the child's stdout/stderr are discarded; a piped-but-
   undrained child blocks once the OS buffer fills and silently hangs
   transcription.

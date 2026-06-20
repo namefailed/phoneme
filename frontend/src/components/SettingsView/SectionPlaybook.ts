@@ -497,7 +497,7 @@ export class SectionPlaybook {
             <div style="margin-top: 10px; display: flex; gap: 6px; align-items: center;">
               <select class="pb-add-step">
                 <option value="">+ Add step…</option>
-                ${this.entries.map((e) => `<option value="${e.id}">${escapeHtml(e.name)} · ${e.kind}</option>`).join("")}
+                ${this.entries.map((e) => `<option value="${escapeAttr(e.id)}">${escapeHtml(e.name)} · ${e.kind}</option>`).join("")}
               </select>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getContrastColor } from "./TagChips";
+import { getContrastColor, safeTagColor } from "./TagChips";
 
 describe("getContrastColor", () => {
   it("returns dark text color (#11111b) for light background colors", () => {
@@ -25,5 +25,36 @@ describe("getContrastColor", () => {
     expect(getContrastColor("#gghhjj")).toBe(""); // non-hex characters
     expect(getContrastColor("123456")).toBe(""); // missing hash symbol
     expect(getContrastColor("#12")).toBe(""); // too short
+  });
+});
+
+describe("safeTagColor", () => {
+  it("passes valid hex colors through unchanged", () => {
+    expect(safeTagColor("#fff")).toBe("#fff"); // #rgb
+    expect(safeTagColor("#cba6f7")).toBe("#cba6f7"); // #rrggbb
+    expect(safeTagColor("#cba6f7ff")).toBe("#cba6f7ff"); // #rrggbbaa
+    expect(safeTagColor("#ABC")).toBe("#ABC"); // uppercase ok
+  });
+
+  it("falls back to the accent var for missing or non-hex input", () => {
+    expect(safeTagColor(null)).toBe("var(--accent)");
+    expect(safeTagColor(undefined)).toBe("var(--accent)");
+    expect(safeTagColor("")).toBe("var(--accent)");
+    expect(safeTagColor("red")).toBe("var(--accent)"); // named, not hex
+    expect(safeTagColor("123456")).toBe("var(--accent)"); // missing hash
+    expect(safeTagColor("#12")).toBe("var(--accent)"); // too short
+    expect(safeTagColor("#1234567890")).toBe("var(--accent)"); // too long
+  });
+
+  it("rejects CSS-injection attempts that would break out of the style value", () => {
+    // The whole point: a malicious tag color must not splice extra declarations.
+    expect(safeTagColor("red; background:url(x)")).toBe("var(--accent)");
+    expect(safeTagColor("#fff; position:fixed")).toBe("var(--accent)");
+    expect(safeTagColor("#gghhjj")).toBe("var(--accent)"); // non-hex chars
+  });
+
+  it("honors a caller-supplied fallback", () => {
+    expect(safeTagColor("bad", "#000")).toBe("#000");
+    expect(safeTagColor("#abc", "#000")).toBe("#abc");
   });
 });

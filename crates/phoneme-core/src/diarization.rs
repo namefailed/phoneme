@@ -484,6 +484,9 @@ pub(crate) const WORD_MIN_TURN_SECS: f64 = 0.6;
 /// (~10 tokens ≈ ~5 spoken words). It only ever applies to runs bracketed by the
 /// SAME speaker (one voice either side), where even a longish island is almost
 /// always that voice continuing, not a real interjection.
+// TODO(audit): smooth on spoken-word UNITS rather than this subword-token count
+// (coalesce tokens into whole words first, then size islands in words), so the
+// bound stops being a fuzzy "~2x" estimate. Deferred — out of this lane.
 const MAX_ISLAND_WORDS: usize = 10;
 
 /// The larger ceiling for a same-speaker-bracketed island that is also strictly
@@ -1179,11 +1182,21 @@ fn cluster_centroids(
         .collect()
 }
 
-/// Map each speaker column to its canonical (merged) column via single-linkage
+/// Map each speaker column to its canonical (merged) column via complete-linkage
 /// agglomerative merging on centroid cosine ≥ `threshold` (see
 /// [`SPEAKER_MERGE_COSINE`]). The smallest column index in a merged group is the
 /// canonical one (so first-appearance numbering stays sensible). Columns with no
 /// centroid never merge. A no-op (identity map) when nothing is similar enough.
+///
+/// Complete-linkage (not single-linkage) is the point: two groups merge only when
+/// EVERY cross-pair of their members clears `threshold`. Single-linkage would
+/// chain A~B~C into one speaker off two borderline pairs even when A~C are clearly
+/// distinct voices — under-clustering, the worst diarization failure for a user.
+/// Requiring all cross-pairs to clear keeps that transitive collapse from
+/// happening: a borderline-similar pair only merges its own two fragments.
+// TODO(audit): an expected-speakers prior (clamp/seed the merged count toward a
+// caller-supplied target speaker count) would go here, gating or guiding which
+// groups merge. Deferred — out of this lane.
 fn merge_similar_clusters(
     embeddings: &Array3<f32>,
     hard_clusters: &Array2<i32>,
@@ -1191,36 +1204,54 @@ fn merge_similar_clusters(
     threshold: f32,
 ) -> Vec<usize> {
     let centroids = cluster_centroids(embeddings, hard_clusters, num_cols);
-    let mut parent: Vec<usize> = (0..num_cols).collect();
-    fn find(parent: &mut [usize], x: usize) -> usize {
-        let mut root = x;
-        while parent[root] != root {
-            root = parent[root];
+
+    // Precompute pairwise cosines once; `None` for any pair where either column
+    // lacks a centroid (those never merge).
+    let cos = |i: usize, j: usize| -> Option<f32> {
+        match (&centroids[i], &centroids[j]) {
+            (Some(ci), Some(cj)) => Some(ci.iter().zip(cj).map(|(a, b)| a * b).sum()),
+            _ => None,
         }
-        let mut cur = x;
-        while parent[cur] != root {
-            let next = parent[cur];
-            parent[cur] = root;
-            cur = next;
-        }
-        root
-    }
-    for i in 0..num_cols {
-        for j in (i + 1)..num_cols {
-            if let (Some(ci), Some(cj)) = (&centroids[i], &centroids[j]) {
-                let cos: f32 = ci.iter().zip(cj).map(|(a, b)| a * b).sum();
-                if cos >= threshold {
-                    let ri = find(&mut parent, i);
-                    let rj = find(&mut parent, j);
-                    if ri != rj {
-                        let (keep, drop) = if ri < rj { (ri, rj) } else { (rj, ri) };
-                        parent[drop] = keep;
-                    }
+    };
+
+    // Groups of column indices, each kept sorted; the group's canonical column is
+    // its smallest index. Start fully split, then greedily merge.
+    let mut groups: Vec<Vec<usize>> = (0..num_cols).map(|c| vec![c]).collect();
+
+    // Complete-linkage: a group pair is mergeable only when every cross-pair of
+    // members clears `threshold`. Repeat until a full pass merges nothing — one
+    // merge can unblock or block later ones, so we don't stop after a single pass.
+    loop {
+        let mut merged_any = false;
+        'outer: for a in 0..groups.len() {
+            for b in (a + 1)..groups.len() {
+                let all_clear = groups[a]
+                    .iter()
+                    .all(|&i| groups[b].iter().all(|&j| cos(i, j).is_some_and(|v| v >= threshold)));
+                if all_clear {
+                    let moved = std::mem::take(&mut groups[b]);
+                    groups[a].extend(moved);
+                    groups[a].sort_unstable();
+                    groups.remove(b);
+                    merged_any = true;
+                    // Indices shifted by the `remove`; restart the scan.
+                    break 'outer;
                 }
             }
         }
+        if !merged_any {
+            break;
+        }
     }
-    (0..num_cols).map(|c| find(&mut parent, c)).collect()
+
+    let mut canon: Vec<usize> = (0..num_cols).collect();
+    for group in &groups {
+        let root = *group.iter().min().expect("group is never empty");
+        for &c in group {
+            canon[c] = root;
+        }
+    }
+    canon
 }
 
 /// Parse a `SPEAKER_{k:02}` label back to its column index `k`.
@@ -2220,6 +2251,51 @@ mod tests {
         let hard = ndarray::Array2::from_shape_vec((2, 1), vec![0, 1]).unwrap();
         let canon = merge_similar_clusters(&embeddings, &hard, 2, 0.5);
         assert_eq!(canon, vec![0, 1], "two distinct voices stay separate");
+    }
+
+    /// Complete-linkage guard: a borderline chain A~B~C must NOT collapse all
+    /// three into one speaker. cos(A,B)=cos(B,C)≈0.55 (over threshold) but
+    /// cos(A,C)≈0.30 (well under) — A and C are clearly two voices, so the only
+    /// merge complete-linkage allows is the closest pair. Single-linkage would
+    /// wrongly chain them via B (under-clustering); this asserts it doesn't.
+    #[test]
+    fn voiceprint_merge_does_not_chain_distinct_voices() {
+        // Pick unit centroids on the circle so the pairwise cosines are exactly
+        // the angle cosines: A at 0 rad, B at θ, C at 2θ with cos θ = 0.55. Then
+        // cos(A,B)=cos(B,C)=0.55 and cos(A,C)=cos(2θ)=2*0.55^2-1=-0.395 (< 0.5).
+        let t = 0.55_f32.acos();
+        let centroid = |ang: f32| -> Vec<f32> { vec![ang.cos(), ang.sin()] };
+        let a = centroid(0.0);
+        let b = centroid(t);
+        let c = centroid(2.0 * t);
+        let flat: Vec<f32> = [a, b, c].concat();
+        let embeddings = ndarray::Array3::from_shape_vec((3, 1, 2), flat).unwrap();
+        let hard = ndarray::Array2::from_shape_vec((3, 1), vec![0, 1, 2]).unwrap();
+        let canon = merge_similar_clusters(&embeddings, &hard, 3, 0.5);
+        // No chain-collapse: A,B,C are not all one column. C in particular stays
+        // its own canonical column — it is a genuinely distinct voice from A.
+        assert_eq!(canon[2], 2, "C (cos≈0.30 vs A) keeps its own column, no chaining");
+        assert!(
+            canon[0] != canon[2],
+            "A and C never share a speaker via the B bridge: {canon:?}"
+        );
+    }
+
+    /// A genuine same-voice over-split pair (A~B well over threshold, no third
+    /// voice in the way) still merges under complete-linkage — the conservative
+    /// linkage doesn't break the legitimate merge case.
+    #[test]
+    fn voiceprint_merge_still_merges_a_true_over_split_pair() {
+        // A=[1,0], B=[0.9,~0.436] → cos(A,B)=0.9 ≥ 0.5.
+        let b1 = 0.9_f32;
+        let embeddings = ndarray::Array3::from_shape_vec(
+            (2, 1, 2),
+            vec![1.0, 0.0, b1, (1.0 - b1 * b1).sqrt()],
+        )
+        .unwrap();
+        let hard = ndarray::Array2::from_shape_vec((2, 1), vec![0, 1]).unwrap();
+        let canon = merge_similar_clusters(&embeddings, &hard, 2, 0.5);
+        assert_eq!(canon, vec![0, 0], "a true over-split pair still folds into one");
     }
 
     /// Diagnostic (ignored): for each WAV in CAL_WAV1/CAL_WAV2, print speakrs'

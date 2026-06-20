@@ -113,11 +113,11 @@ Consult [docs/smoke-test.md](docs/smoke-test.md) for a full end-to-end verificat
 4. **Commit messages**: We prefer imperative commit messages (e.g., "Add feature X", not "Added feature X"). If your change is significant, please explain the *why* in the commit body.
 5. **No AI-tool attribution**: Do not add `Co-authored-by`, `Made-with`, or similar lines naming Cursor or other coding assistants. Commits and PRs should read as human-authored project work. Run `./scripts/install-git-hooks.ps1` once per clone to enforce this locally.
 
-### Local agent scratch space
+### Scratch space
 
-Assistant plans, handoffs, and one-off scripts belong in **`archive_internal/`**
-(gitignored) or **`scratch/`** (gitignored) — never in tracked paths. The
-public repo uses `docs/` and this file for contributor-facing documentation.
+Personal scratch notes, drafts, and one-off scripts belong in **`archive_internal/`**
+(gitignored) or **`scratch/`** (gitignored) — never in tracked paths. Contributor-facing
+documentation lives in `docs/` and this file.
 
 ## Code of Conduct
 

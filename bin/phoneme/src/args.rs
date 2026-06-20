@@ -397,6 +397,12 @@ pub struct DoctorArgs {
 pub struct ConfigArgs {
     #[command(subcommand)]
     pub action: Option<ConfigAction>,
+
+    /// Print real secret values instead of `<redacted>` when dumping the config
+    /// (no subcommand). Off by default so a plain `phoneme config` is safe to
+    /// paste or pipe; pass this only when you deliberately need the keys.
+    #[arg(long)]
+    pub show_secrets: bool,
 }
 
 #[derive(Debug, Subcommand)]

@@ -141,9 +141,10 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    // No TEST_LOCK or atomic reset needed any more: `from_datetime` now
-    // serializes all callers through the module-global Mutex, so tests can
-    // run in parallel and still get distinct ids.
+    // No TEST_LOCK or atomic reset needed any more: `from_datetime` bumps a
+    // lock-free `AtomicU64` (relaxed fetch_add) for the disambiguating suffix,
+    // so concurrent callers always get distinct ids and tests can run in
+    // parallel.
 
     #[test]
     fn id_has_expected_shape() {

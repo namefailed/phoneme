@@ -11,8 +11,9 @@
 //! `done/`/`failed/`. That gives crash recovery for free ([`recover_orphans`]
 //! re-queues anything stuck in `processing/`, and is idempotent across the
 //! finish-then-crash window). Two dot-files control ordering and pausing without
-//! showing up as payloads: `.queue-order` (the user's custom claim order) and
-//! `.queue-paused` (a sentinel the worker checks before each claim). The badge
+//! showing up as payloads: `pending/.queue-order` (the user's custom claim order)
+//! and `.queue-paused` in the inbox root (a sentinel the worker checks before each
+//! claim). The badge
 //! counts in the GUI come from [`InboxQueue::counts`].
 //!
 //! [`recover_orphans`]: InboxQueue::recover_orphans

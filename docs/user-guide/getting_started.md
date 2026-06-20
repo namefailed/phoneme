@@ -155,7 +155,7 @@ covers both modes in detail.
 
 ## ⏭️ Next Steps
 
-Now that you've mastered the basics, explore Phoneme's power-user features:
+Explore Phoneme's power-user features:
 - **[👥 Meeting Mode (Dual-Track)](meeting_mode.md)**: Record both sides of a conversation and let AI separate the speakers.
 - **[✨ Smart Cleanup (LLM Post-Processing)](smart_cleanup.md)**: Automatically remove stutters, format notes, or translate your voice.
 - **[⌨️ Transcribe-in-Place](transcribe_in_place.md)**: Dictate directly into any application on your computer.

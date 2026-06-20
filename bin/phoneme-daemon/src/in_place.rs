@@ -378,20 +378,62 @@ async fn transcribe_polish_type(
     // toggled mid-recording (audit M3). Taken (cleared) here regardless.
     let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
 
-    if !streamed.is_empty() && type_mode == "type" {
-        // Streaming-type already typed the rolling-preview text live as it
-        // finalized. Reconcile that to the accurate final `polished` with the
-        // smallest end-edit (backspace the divergent tail, retype it — usually
-        // just appending the last words + terminal punctuation). An empty
-        // `polished` correctly backspaces the streamed text away.
+    if !streamed.is_empty() {
+        // This recording streamed text live, so there is ALREADY live-typed text
+        // at the cursor — branch on that FIRST, before the resolved `type_mode`
+        // (audit LOW / mode-flip). If a mid-recording config change flipped the
+        // app to paste/off, the old code fell through and pasted `polished` ON
+        // TOP of the orphaned live text. Instead, always reconcile the streamed
+        // text: type-mode patches it to the final, paste/off first backspaces it
+        // away (then paste re-delivers `polished` via the clipboard).
+        //
+        // For "type" we patch streamed → polished; for paste/off the streamed
+        // live text must be removed (target = ""), since the live typing should
+        // only ever have landed in "type" mode.
+        let target = if type_mode == "type" { polished.as_str() } else { "" };
         let (backspaces, insert) =
-            phoneme_core::dictation::reconcile_edit(&streamed, &polished);
-        if let Err(e) = reconcile_at_cursor(backspaces, &insert).await {
+            phoneme_core::dictation::reconcile_edit(&streamed, target);
+        // SAFETY GUARD (audit H1/M14): those backspaces only land safely while
+        // the SAME window the text streamed into still owns the caret. If the
+        // user alt-tabbed (or moved the caret) between live streaming and stop,
+        // backspacing here would destroy unrelated content in the wrong window.
+        // Re-check the foreground against the capture-time app before deleting
+        // anything; on a mismatch skip the destructive reconcile entirely. For
+        // "type" we still append the divergent insert at the current caret; for
+        // paste/off there is nothing safe to do but leave the orphan and flag it.
+        let focus_lost = backspaces > 0 && !foreground_still_matches(focused_app.as_deref());
+        if focus_lost {
+            tracing::warn!(
+                id = %id.as_str(),
+                "in-place dictation: foreground changed since streaming; skipping {backspaces} backspaces to avoid destroying other content"
+            );
+            if type_mode == "type" && !insert.is_empty() {
+                if let Err(e) = type_at_cursor(&insert, "type").await {
+                    tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to type appended insert after focus change");
+                }
+            }
+            state.events.emit(DaemonEvent::TranscriptionFailed {
+                id: id.clone(),
+                error: "dictation finished, but focus moved away from where you were typing — the live text wasn't corrected to the final transcript (left as-is to avoid deleting other content). The full transcript is in the library.".to_string(),
+            });
+        } else if let Err(e) = reconcile_at_cursor(backspaces, &insert).await {
             tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to reconcile streamed text");
             state.events.emit(DaemonEvent::TranscriptionFailed {
                 id: id.clone(),
                 error: format!("dictation transcribed but couldn't reconcile the streamed text: {e}"),
             });
+        }
+        // After the live text is cleared (and focus held), a paste-mode flip
+        // still owes the user the final text via the clipboard. Skip on focus
+        // loss (we didn't clear the orphan) or an empty transcript.
+        if type_mode == "paste" && !focus_lost && !polished.trim().is_empty() {
+            if let Err(e) = type_at_cursor(&polished, "paste").await {
+                tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to paste after streamed reconcile");
+                state.events.emit(DaemonEvent::TranscriptionFailed {
+                    id: id.clone(),
+                    error: format!("dictation transcribed but couldn't paste at the cursor: {e}"),
+                });
+            }
         }
     } else if polished.trim().is_empty() {
         tracing::info!(id = %id.as_str(), "in-place dictation: nothing to type (empty transcript)");
@@ -440,6 +482,33 @@ fn type_blocking(text: &str) -> Result<(), String> {
     let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
         .map_err(|e| format!("input simulator init failed: {e}"))?;
     enigo.text(text).map_err(|e| format!("typing failed: {e}"))
+}
+
+/// Is it still SAFE to backspace away the live-streamed tail at the cursor?
+///
+/// The stop reconcile presses raw Backspaces assuming the caret sits right after
+/// the text streaming-type typed live. That holds only while the SAME window the
+/// dictation streamed into still owns the foreground — if the user alt-tabbed or
+/// the caret moved, those backspaces would chew through unrelated content in the
+/// wrong window (audit H1 / M14). So before any destructive reconcile we
+/// re-snapshot the foreground app and compare its process stem to the one
+/// captured at record start (`captured_app`, the lowercased exe stem).
+///
+/// Returns `true` only when the current foreground app matches the capture-time
+/// one. A `None` capture (foreground undetectable at start) or a `None` current
+/// snapshot is treated as "can't confirm the same window" → `false`, so we never
+/// backspace on an unverifiable match. The comparison is read-only (it calls the
+/// foreground accessor and reads nothing else); on non-Windows the accessor
+/// always yields `None`, so streamed dictation there falls back to appending
+/// rather than backspacing — the conservative, non-destructive choice.
+pub(crate) fn foreground_still_matches(captured_app: Option<&str>) -> bool {
+    let Some(captured) = captured_app else {
+        return false;
+    };
+    match phoneme_core::foreground::foreground_app() {
+        Some(now) => now.exe_name == captured,
+        None => false,
+    }
 }
 
 /// Patch already-typed text toward a target: press Backspace `backspaces` times,

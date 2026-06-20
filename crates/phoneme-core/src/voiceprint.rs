@@ -57,23 +57,28 @@ pub fn mean_centroid(centroids: &[Vec<f32>]) -> Option<Vec<f32>> {
     if dim == 0 || centroids.iter().any(|c| c.len() != dim) {
         return None;
     }
-    let mut sum = vec![0.0f32; dim];
+    // Accumulate the per-component sum in f64 (then cast to f32 at the end) to
+    // match `diarization::cluster_centroids`, which aggregates the identical mean
+    // in f64 — keeping the two paths bit-for-bit consistent and avoiding f32
+    // rounding drift over many samples.
+    let mut sum = vec![0.0f64; dim];
     let mut counts = vec![0u32; dim];
     for c in centroids {
         for (i, &x) in c.iter().enumerate() {
             if x.is_finite() {
-                sum[i] += x;
+                sum[i] += x as f64;
                 counts[i] += 1;
             }
         }
     }
-    for (s, &n) in sum.iter_mut().zip(counts.iter()) {
+    let mut mean = vec![0.0f32; dim];
+    for ((m, &s), &n) in mean.iter_mut().zip(sum.iter()).zip(counts.iter()) {
         if n > 0 {
-            *s /= n as f32;
+            *m = (s / n as f64) as f32;
         }
     }
-    l2_normalize(&mut sum);
-    Some(sum)
+    l2_normalize(&mut mean);
+    Some(mean)
 }
 
 /// The best candidate for `probe` at or above `threshold`, as `(index, score)`.

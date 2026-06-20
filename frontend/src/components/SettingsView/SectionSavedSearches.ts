@@ -53,7 +53,7 @@ export class SectionSavedSearches {
       .map((s) => {
         const renaming = this.renamingId === s.id;
         return `
-          <div class="ssm-row" data-id="${s.id}">
+          <div class="ssm-row" data-id="${escapeAttr(s.id)}">
             <div class="ssm-main">
               ${renaming
                 ? `<input type="text" class="ssm-rename-input" value="${escapeAttr(s.name)}" />`
@@ -143,7 +143,12 @@ export class SectionSavedSearches {
       row.querySelector<HTMLButtonElement>(".ssm-rename")?.addEventListener("click", () => {
         this.renamingId = id;
         this.render();
-        const input = this.container.querySelector<HTMLInputElement>(`.ssm-row[data-id="${id}"] .ssm-rename-input`);
+        // Re-query by the SAME data-id (this `row` is detached after render), but
+        // pin the selector to this id via dataset rather than splicing the raw id
+        // into the selector string — a stray quote in the id can't break out.
+        const input = [...this.container.querySelectorAll<HTMLElement>(".ssm-row")]
+          .find((r) => r.dataset.id === id)
+          ?.querySelector<HTMLInputElement>(".ssm-rename-input");
         input?.focus();
         input?.select();
       });

@@ -53,7 +53,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
-/// How often the streaming-preview loop transcribes the in-progress recording.
+/// Base cadence for the streaming-preview loop on a CLOUD transcription provider,
+/// where each tick pays HTTP + file-write overhead and we don't want to hammer the
+/// API. This is NOT the universal cadence: a native (in-process) provider drops the
+/// base to 1000 ms inside `start_preview` for smoother real-time captions, since it
+/// has no network round-trip. The adaptive throttle (`preview_adaptive`) can stretch
+/// either base up to `PREVIEW_INTERVAL_CEIL` when a tick overruns.
 const PREVIEW_INTERVAL: Duration = Duration::from_millis(2000);
 
 /// How long to keep a recording's capture stream alive after a stop is
@@ -255,6 +260,29 @@ fn stitch_preview(committed: &str, window: &str) -> Option<String> {
     // the phase-aware fallback rather than blindly appending (which would
     // duplicate a re-transcribed tail).
     None
+}
+
+/// Fold a fresh window transcription into the committed caption for one preview
+/// tick: stitch when an anchor is found, otherwise pick the phase-aware fallback
+/// `stitch_preview` defers to the caller. `window_slid` is whether the rolling
+/// audio window has started sliding (the take no longer fits a single window).
+///
+/// On a no-overlap, no-containment `None`:
+/// - **slid** → the window is a post-silence tail, so append it.
+/// - **not slid** → the take still fits the window, so a `None` means whisper
+///   re-transcribed the whole (still-short) take differently. KEEP `committed`
+///   untouched and let the next tick re-anchor, rather than replacing it wholesale
+///   and reshuffling every already-shown word. This upholds the subsystem's
+///   "committed never rewrites" invariant. Pulled out as a pure function so the
+///   fallback branches are unit-testable without an audio/whisper round trip.
+fn merge_preview_tick(committed: &str, window: &str, window_slid: bool) -> String {
+    stitch_preview(committed, window).unwrap_or_else(|| {
+        if window_slid {
+            format!("{committed} {window}")
+        } else {
+            committed.to_string()
+        }
+    })
 }
 
 /// Open a [`Source`] for the current recording: returns a real CPAL source in
@@ -709,6 +737,14 @@ impl DaemonRecorder {
                     _ = tokio::time::sleep(current_wait) => {}
                 }
 
+                // Start the cadence clock here so the adaptive throttle measures the
+                // TRUE per-tick wall cost it is meant to self-throttle on — snapshot +
+                // WAV encode + write + transcribe — not the transcribe call alone. A
+                // tick that skips (not enough new audio, or no free whisper permit)
+                // `continue`s before reaching `next_preview_interval`, so it never
+                // feeds this clock; only a tick that actually does the work does.
+                let tick_start = std::time::Instant::now();
+
                 // Snapshot only the trailing window of audio captured so far (the
                 // recorder also tells us the full captured length so we can still
                 // throttle on newly-accumulated audio). If the recorder is gone
@@ -761,7 +797,6 @@ impl DaemonRecorder {
 
                 // Use the cached provider to avoid re-resolving on every tick.
                 // Config changes during recording will take effect on the next recording.
-                let tick_start = std::time::Instant::now();
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
                         let text = text.trim();
@@ -770,18 +805,17 @@ impl DaemonRecorder {
                             // rewritten mid-caption — the old early-phase wholesale
                             // replace was exactly what made the preview visibly
                             // reshuffle words as whisper revised the growing take.
-                            // On a no-overlap stitch, fall back by phase: while the
-                            // take still fits the window the fresh transcription is
-                            // the authoritative whole caption (replace); once it has
-                            // slid, the window is a post-silence tail (append).
+                            // On a no-overlap stitch, fall back by phase: once the
+                            // window has slid it is a post-silence tail, so append;
+                            // while the take still fits the window a no-overlap result
+                            // means whisper re-transcribed the whole (still-short) take
+                            // differently — KEEP committed untouched this tick and let
+                            // the next tick re-anchor, rather than replacing it
+                            // wholesale and reshuffling every shown word (the
+                            // "committed never rewrites" invariant the subsystem is
+                            // built on).
                             let window_slid = total_len > PREVIEW_WINDOW_SAMPLES;
-                            committed = stitch_preview(&committed, text).unwrap_or_else(|| {
-                                if window_slid {
-                                    format!("{committed} {text}")
-                                } else {
-                                    text.to_string()
-                                }
-                            });
+                            committed = merge_preview_tick(&committed, text, window_slid);
                             state.events.emit(DaemonEvent::TranscriptionPartial {
                                 id: id.clone(),
                                 text: committed.clone(),
@@ -1150,6 +1184,16 @@ impl DaemonRecorder {
             // `RecorderConfig::mode` is `phoneme_core::RecordMode` (re-exported
             // by phoneme-audio as `RecordingMode`), so no conversion is needed.
             mode,
+            // The auto-stop budget is measured against the recorder's TOTAL sample
+            // count, which `start_with_prepend` has already seeded with the
+            // pre-rolled `prepend` audio (up to `pre_roll_ms`). So when pre-roll is
+            // on, a `max_duration_secs` of N yields N seconds of audio INCLUDING the
+            // prepended lead-in — i.e. slightly fewer than N seconds of freshly
+            // captured speech. This is the intended trade: pre-roll exists to keep
+            // the very start of the utterance, and counting it keeps the finalized
+            // WAV's length matching the configured cap exactly. Separating the
+            // fresh-capture length would mean threading a new field through the
+            // phoneme-audio `Recorder`, which is out of scope here.
             max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
             silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
             silence_window_ms: state.config.load().recording.silence_window_ms,
@@ -1466,6 +1510,17 @@ impl DaemonRecorder {
                 // Stop the preview loop before tearing down the recorder. No-op
                 // when off.
                 self.stop_preview(false).await;
+                // Clear the rolling streaming-type state so a cancelled
+                // streaming-type dictation can't leak its live-typed words into a
+                // later recording's reconcile (the stop path keys "did we stream?"
+                // off this being non-empty). We deliberately do NOT auto-backspace
+                // the already-typed text on cancel: the focus may have moved since
+                // the words were typed, so a blind backspace could delete from the
+                // wrong window (the same wrong-window risk the stop reconcile guards
+                // against, and the focus guard lives in another lane). Any live text
+                // the user already saw typed is intentionally left in place; only the
+                // rolling state is reset here.
+                *state.stream_typed.lock().await = String::new();
                 if let Some(recorder) = recorder {
                     if let Err(e) = recorder.cancel().await {
                         tracing::warn!("failed to cancel recorder: {e}");
@@ -2227,6 +2282,33 @@ mod tests {
     use phoneme_audio::source::{GeneratorSource, SyntheticSource};
     use phoneme_core::{Config, ListFilter};
 
+    /// RAII guard that sets an env var for a test and restores its prior value (or
+    /// removes it) on drop — even if the test panics. Honors the repo's
+    /// no-bare-`set_var` convention: a forgotten/early-aborted `remove_var` can't
+    /// leak a global into a sibling test. Hold it in a `let _guard = …;` binding for
+    /// the duration of the test.
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     // ── meeting pause → active-clock folding ──────────────────────────────
 
     #[test]
@@ -2434,6 +2516,57 @@ mod tests {
             1,
             "duplicated in {out:?}"
         );
+    }
+
+    #[test]
+    fn merge_preview_tick_non_slid_none_keeps_committed() {
+        // The bug this guards: on a no-overlap `None` while the take still FITS the
+        // window (window_slid == false), the old fallback replaced the caption with
+        // the bare `window`, throwing away everything shown and reshuffling every
+        // word. With the fix, committed is kept verbatim this tick (the next tick
+        // re-anchors) — committed is never wholesale-replaced.
+        let committed = "the quick brown fox jumps";
+        // A wholly different transcription with no overlapping run → `stitch_preview`
+        // returns None.
+        let window = "completely unrelated words here";
+        assert!(
+            stitch_preview(committed, window).is_none(),
+            "test needs a genuinely-disjoint window to drive the None branch"
+        );
+        let out = merge_preview_tick(committed, window, /* window_slid */ false);
+        assert_eq!(
+            out, committed,
+            "a non-slid no-overlap tick must keep committed, not replace it with the window"
+        );
+    }
+
+    #[test]
+    fn merge_preview_tick_slid_none_appends() {
+        // The slid fallback must NOT regress: once the window has slid a no-overlap
+        // result is a post-silence tail and is appended after committed.
+        let committed = "the quick brown fox jumps";
+        let window = "over the lazy dog";
+        assert!(
+            stitch_preview(committed, window).is_none(),
+            "test needs a disjoint window to reach the fallback"
+        );
+        let out = merge_preview_tick(committed, window, /* window_slid */ true);
+        assert_eq!(out, "the quick brown fox jumps over the lazy dog");
+    }
+
+    #[test]
+    fn merge_preview_tick_overlap_stitches_regardless_of_phase() {
+        // When an anchor IS found, the stitch result wins in either phase — the
+        // window_slid flag only governs the no-overlap fallback.
+        let committed = "the quick brown fox";
+        let window = "brown fox jumps over";
+        for slid in [false, true] {
+            assert_eq!(
+                merge_preview_tick(committed, window, slid),
+                "the quick brown fox jumps over",
+                "slid={slid}"
+            );
+        }
     }
 
     /// Build an `AppState` whose catalog/inbox/audio all live under a temp dir,
@@ -2939,7 +3072,7 @@ mod tests {
         // preview teardown — a slow in-flight preview tick (here a stand-in
         // task that takes 1.5 s to wind down) used to block every status and
         // control IPC for its whole duration.
-        std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+        let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(tmp.path()).await;
 
@@ -2977,7 +3110,6 @@ mod tests {
 
         let stopped = stop_task.await.expect("join stop task");
         assert!(stopped.is_ok(), "stop must still succeed: {stopped:?}");
-        std::env::remove_var("PHONEME_AUDIO_BACKEND");
     }
 
     /// The fast-lane routing rule (custom-hotkey FIX 1): a NON-EMPTY recipe on an
@@ -3033,7 +3165,7 @@ mod tests {
     /// the spawn.
     #[tokio::test]
     async fn fast_lane_in_place_leaves_no_pending_ledger_entry() {
-        std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+        let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(tmp.path()).await;
 
@@ -3066,7 +3198,6 @@ mod tests {
             state.pending_recipe.lock().unwrap().get(&id).is_none(),
             "a fast-lane in-place recording must not leave a pending recipe entry"
         );
-        std::env::remove_var("PHONEME_AUDIO_BACKEND");
     }
 
     /// LEDGER LEAK (custom-hotkey FIX, cancel path): a custom-hotkey recording
@@ -3077,7 +3208,7 @@ mod tests {
     /// `fast_lane_in_place_leaves_no_pending_ledger_entry` for the cancel arm.
     #[tokio::test]
     async fn cancel_leaves_no_pending_ledger_entry() {
-        std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+        let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(tmp.path()).await;
 
@@ -3112,6 +3243,5 @@ mod tests {
             state.pending_recipe.lock().unwrap().get(&id).is_none(),
             "a canceled recording must not leave a pending recipe entry"
         );
-        std::env::remove_var("PHONEME_AUDIO_BACKEND");
     }
 }

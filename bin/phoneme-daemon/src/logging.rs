@@ -1,6 +1,8 @@
 //! Tracing/logging configuration for the daemon.
 //!
-//! Called once from `main`, right after `AppState` resolves the log dir.
+//! Called once from `main`, before `AppState::new`, so startup warnings
+//! (job-object creation, embedder load, the first config-apply) are captured.
+//! The log dir/level are resolved straight from the freshly-loaded config.
 //! The daemon normally runs detached with no console, so the log file is
 //! the only window into it (`%LOCALAPPDATA%\phoneme\logs\` — the path the
 //! tray's error messages point users at).

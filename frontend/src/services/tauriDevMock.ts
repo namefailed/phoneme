@@ -19,6 +19,7 @@
  * are accepted (so `listen()` resolves) but never emitted.
  */
 import { mockIPC } from "@tauri-apps/api/mocks";
+import { MASKED_SECRET } from "./llmModels";
 
 /** A catalog tag (mirrors ipc.ts `Tag`); `color` is `#rrggbb` or null (accent). */
 type Tag = { id: number; name: string; color: string | null };
@@ -463,11 +464,42 @@ function emitDaemon(evt: Record<string, unknown>): void {
   });
 }
 
+/** Replace a non-empty `api_key`/secret string on `obj` with the mask placeholder. */
+function maskKey(obj: unknown, field: string): void {
+  if (obj && typeof obj === "object") {
+    const rec = obj as Record<string, unknown>;
+    if (typeof rec[field] === "string" && rec[field] !== "") rec[field] = MASKED_SECRET;
+  }
+}
+
+/** Deep-clone `config` with every secret masked, mirroring the backend's
+ *  `mask_config_secrets` (src-tauri/src/commands/mod.rs) so the dev preview's
+ *  `read_config` never hands the renderer a real key — same sections, same
+ *  placeholder. The stored config keeps its real values (like the on-disk file),
+ *  so `write_config` can round-trip an unchanged, still-masked key. */
+function maskedConfig(): Record<string, unknown> {
+  const cfg = structuredClone(config) as Record<string, unknown>;
+  for (const section of ["whisper", "llm_post_process", "summary", "auto_tag", "title", "preview_whisper"]) {
+    maskKey(cfg[section], "api_key");
+  }
+  // The dictation STT key lives one level deeper (`in_place.stt.api_key`).
+  maskKey((cfg.in_place as Record<string, unknown> | undefined)?.stt, "api_key");
+  // The webhook HMAC signing key is a secret too (`webhook.hmac_secret`).
+  maskKey(cfg.webhook, "hmac_secret");
+  // Playbook entries each carry their own LLM key (`playbook[].llm.api_key`).
+  if (Array.isArray(cfg.playbook)) {
+    for (const entry of cfg.playbook as Array<Record<string, unknown>>) maskKey(entry.llm, "api_key");
+  }
+  return cfg;
+}
+
 function handle(cmd: string, args: Record<string, unknown>): unknown {
   const id = args.id as string | undefined;
   switch (cmd) {
     case "config_exists": return true;
-    case "read_config": return config;
+    // Mask secrets exactly as the backend's read_config does, so the preview's
+    // Settings sees the placeholder (not a real key) like the native app.
+    case "read_config": return maskedConfig();
     // Persist edits in-memory so Settings round-trips: Save writes the whole
     // config back, and the next read_config (and the config:saved event the view
     // dispatches itself) reflects it — theme / cursor / nav changes apply live.
@@ -724,6 +756,14 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       ];
     case "merge_named_voices": return { merged: true };
     case "forget_named_voice": return { removed: true };
+    // Commands the real backend serves but the mock used to drop to `default`,
+    // leaving the preview unable to populate a device picker, the wizard's
+    // "Test connection" button, the overlay source toggle, or window-state saves.
+    // Stub them to the backend's return shapes so those surfaces behave natively.
+    case "list_input_devices": return ["default", "Microphone (mock)", "Headset (mock)"];
+    case "wizard_test_whisper": return { ok: true, message: "HTTP 200" };
+    case "set_preview_source": // overlay source toggle: a no-op in the browser.
+    case "save_window_state": return undefined; // no native windows to persist.
     default: return null;
   }
 }

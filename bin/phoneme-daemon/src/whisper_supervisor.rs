@@ -33,9 +33,15 @@
 //!   instead of a config-mutation thrash.
 //! - **Job membership** — every spawned child is assigned to the daemon's
 //!   kill-on-close job object, so the kernel reaps it even when the daemon
-//!   dies uncleanly; [`sweep_stray_servers`] additionally kills every
-//!   whisper-server on the box (ours by definition) to free squatted ports
-//!   and hung orphans before a respawn.
+//!   dies uncleanly. That job is the ONLY automatic orphan-cleanup at startup;
+//!   there is no startup sweep. [`sweep_stray_servers`] is a heavier, manual
+//!   net that kills the whisper-servers Phoneme launched (matched by command
+//!   line, not image name) — but it runs ONLY from the Doctor's "Fix" (the
+//!   `RestartWhisper` IPC), never at startup. So on a normal
+//!   boot the supervisors do not assume the port is clear: a still-running
+//!   orphan (e.g. one a job didn't reap because the daemon was force-killed
+//!   before assigning it) is routed around by the effective-port fallback
+//!   below, not killed.
 //! - **No pipe wedging** — the child's stdout/stderr are discarded; a
 //!   piped-but-undrained child blocks once the OS buffer fills and silently
 //!   hangs transcription.
@@ -131,9 +137,12 @@ fn port_is_free(port: u16) -> bool {
 
 /// Pre-flight port choice for a bundled whisper-server: the preferred
 /// (configured) port when it is free, otherwise a free OS-assigned fallback.
-/// The startup sweep has already killed every whisper-server on the box, so
-/// anything still holding the preferred port is a foreign app we must route
-/// around, not ours to fight.
+/// We do NOT assume the box was swept first (there is no startup sweep — the
+/// kill-on-close job is the only automatic orphan cleanup, and the manual
+/// `sweep_stray_servers` only runs on the Doctor's "Fix"). So a process holding
+/// the preferred port could be a foreign app OR a whisper-server orphan a job
+/// failed to reap; either way the safe move is identical — route around it onto
+/// a free OS-assigned port rather than fight for the preferred one.
 ///
 /// `exclude` lists ports the caller must never pick even when they probe free:
 /// the sibling server's published/configured port, which can be momentarily
@@ -1008,24 +1017,53 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
     }
 }
 
-/// Best-effort kill of EVERY whisper-server process on the machine — including
-/// orphans from a previous daemon still holding our port (the classic "Whisper
-/// unreachable after an unclean shutdown") and hung children. Safe because
-/// every whisper-server on the box belongs to Phoneme; the supervisors respawn
-/// the main/preview servers from the current config within seconds.
+/// The command-line marker every whisper-server WE spawn carries (see the
+/// `--inference-path` arg every supervisor passes). The sweep matches on this so
+/// it kills Phoneme's servers and orphans from a previous Phoneme daemon, but
+/// leaves an unrelated whisper.cpp instance a user launched by hand — which a
+/// kill-by-image-name (`/IM whisper-server.exe`) would have taken down too.
+const SWEEP_CMDLINE_MARKER: &str = "/v1/audio/transcriptions";
+
+/// Best-effort kill of the whisper-servers Phoneme launched — including orphans
+/// from a previous daemon still holding our port (the classic "Whisper
+/// unreachable after an unclean shutdown") and hung children — so the
+/// supervisors can respawn the main/preview servers cleanly from the current
+/// config within seconds. Invoked ONLY from the Doctor's "Fix" (`RestartWhisper`
+/// IPC), never at startup.
+///
+/// Narrowed by command line ([`SWEEP_CMDLINE_MARKER`]) rather than image name so
+/// it doesn't reap a bystander whisper.cpp the user started with a different
+/// inference path. Residual: a hand-launched whisper.cpp that happens to serve
+/// the SAME `/v1/audio/transcriptions` path is indistinguishable from ours and
+/// would still be killed — acceptable for an explicit, user-pressed "Fix", and
+/// far narrower than the previous kill-every-`whisper-server.exe` behavior. If
+/// the filtered query fails to run at all (PowerShell/pgrep missing), nothing is
+/// killed and the user can retry — we deliberately do NOT fall back to the broad
+/// image-name kill.
 pub fn sweep_stray_servers() {
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "whisper-server.exe"])
+        // PowerShell over taskkill: taskkill cannot filter by command line, so
+        // it can only match the image name (too broad). CIM exposes CommandLine,
+        // letting us kill only processes spawned with our inference path.
+        let script = format!(
+            "Get-CimInstance Win32_Process -Filter \"Name='whisper-server.exe'\" | \
+             Where-Object {{ $_.CommandLine -like '*{SWEEP_CMDLINE_MARKER}*' }} | \
+             ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}"
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
     }
     #[cfg(not(windows))]
     {
+        // `pgrep -f` matches against the full command line, so the marker
+        // narrows the kill to our servers — `pkill -x whisper-server` would have
+        // matched by name only.
         let _ = std::process::Command::new("pkill")
-            .args(["-x", "whisper-server"])
+            .args(["-f", &format!("whisper-server.*{SWEEP_CMDLINE_MARKER}")])
             .status();
     }
 }
@@ -1140,9 +1178,10 @@ mod tests {
 
     #[test]
     fn port_probe_falls_back_when_preferred_is_taken() {
-        // Squat a port exactly the way a foreign app would (the startup sweep
-        // killed every whisper-server, so a held port is never ours) and keep
-        // holding it through the probe.
+        // Squat a port the way any squatter would — foreign app or an
+        // unreaped whisper-server orphan; the supervisor routes around either
+        // identically (there is no startup sweep). Keep holding it through the
+        // probe.
         let squatter = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind squatter");
         let taken = squatter.local_addr().expect("local_addr").port();
         assert!(!port_is_free(taken), "squatted port must probe as taken");

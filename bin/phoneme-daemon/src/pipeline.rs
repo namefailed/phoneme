@@ -2282,15 +2282,57 @@ pub async fn run(
             // start, so non-empty = THIS recording streamed — independent of the
             // current config (audit M3). Taken (cleared) here regardless.
             let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
-            if !streamed.is_empty() && type_mode == "type" {
-                // Streaming-type already typed the rolling preview live while
-                // recording; reconcile it up to this pipeline result with a minimal
-                // backspace + retype instead of typing the whole thing on top.
+            if !streamed.is_empty() {
+                // This recording streamed text live, so there is ALREADY
+                // live-typed text at the cursor — branch on that FIRST, before
+                // the resolved `type_mode` (audit LOW / mode-flip). If a
+                // mid-recording config change flipped the app to paste/off, the
+                // old code fell through and typed the transcript ON TOP of the
+                // orphaned live text. Instead always reconcile the streamed text:
+                // type-mode patches it to the pipeline result, paste/off first
+                // backspaces it away (then paste re-delivers via the clipboard).
                 tracing::info!(id = %id.as_str(), "in-place dictation: reconciling streamed text to pipeline result");
+                let target = if type_mode == "type" {
+                    transcript.as_str()
+                } else {
+                    ""
+                };
                 let (backspaces, insert) =
-                    phoneme_core::dictation::reconcile_edit(&streamed, &transcript);
-                if let Err(e) = crate::in_place::reconcile_at_cursor(backspaces, &insert).await {
+                    phoneme_core::dictation::reconcile_edit(&streamed, target);
+                // SAFETY GUARD (audit H1/M14): only backspace while the SAME
+                // window the text streamed into still owns the caret. If focus
+                // moved between live streaming and this end-of-run reconcile,
+                // those backspaces would chew through unrelated content in the
+                // wrong window. On a mismatch skip the destructive part; for
+                // "type" still append the divergent insert at the current caret.
+                let focus_lost = backspaces > 0
+                    && !crate::in_place::foreground_still_matches(focused_app.as_deref());
+                if focus_lost {
+                    tracing::warn!(
+                        id = %id.as_str(),
+                        "in-place dictation: foreground changed since streaming; skipping {backspaces} backspaces to avoid destroying other content"
+                    );
+                    if type_mode == "type" && !insert.is_empty() {
+                        if let Err(e) = crate::in_place::type_at_cursor(&insert, "type").await {
+                            tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to type appended insert after focus change");
+                        }
+                    }
+                    state.events.emit(DaemonEvent::TranscriptionFailed {
+                        id: id.clone(),
+                        error: "dictation finished, but focus moved away from where you were typing — the live text wasn't corrected to the final transcript (left as-is to avoid deleting other content). The full transcript is in the library.".to_string(),
+                    });
+                } else if let Err(e) =
+                    crate::in_place::reconcile_at_cursor(backspaces, &insert).await
+                {
                     tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to reconcile streamed text");
+                }
+                // A paste-mode flip still owes the user the final text via the
+                // clipboard once the orphaned live text is cleared. Skip on focus
+                // loss (orphan not cleared) or an empty transcript.
+                if type_mode == "paste" && !focus_lost && !transcript.trim().is_empty() {
+                    if let Err(e) = crate::in_place::type_at_cursor(&transcript, "paste").await {
+                        tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to paste after streamed reconcile");
+                    }
                 }
             } else if type_mode == "off" {
                 // The user asked dictation NOT to auto-deliver for this app — the

@@ -728,12 +728,19 @@ pub enum Request {
     /// Liveness + identity probe. Ok `{"running":true,"pid":n,"version":"…",
     /// "whisper_preferred_port":n,"whisper_effective_port":n|null,
     /// "preview_whisper_preferred_port":n|null,
-    /// "preview_whisper_effective_port":n|null}`. The `preferred` ports are
-    /// the configured values; the `effective` ports are what the supervisors
-    /// actually bound (they fall back to a free port when a foreign app holds
-    /// the preferred one) and are `null` while that server isn't running —
-    /// clients probing the local server must dial the effective port when
-    /// present. `version` drives the tray/CLI stale-daemon handshake.
+    /// "preview_whisper_effective_port":n|null,
+    /// "dictation_whisper_preferred_port":n|null,
+    /// "dictation_whisper_effective_port":n|null}`. There are three port pairs:
+    /// the main whisper-server, the optional `[preview_whisper]` server, and the
+    /// optional dedicated `[in_place.stt]` dictation server. The `preferred`
+    /// ports are the configured values (`null` when that server isn't
+    /// configured); the `effective` ports are what the supervisors actually
+    /// bound (they fall back to a free port when a foreign app holds the
+    /// preferred one) and are `null` while that server isn't running — clients
+    /// probing the local server must dial the effective port when present (the
+    /// tray Doctor and the CLI `phoneme doctor` both read
+    /// `dictation_whisper_effective_port`). `version` drives the tray/CLI
+    /// stale-daemon handshake.
     /// `phoneme daemon status`, the GUI daemon panel.
     DaemonStatus,
     /// Ask the daemon to exit. Replies Ok `null` FIRST — the actual trigger

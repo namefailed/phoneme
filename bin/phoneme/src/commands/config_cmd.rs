@@ -1,8 +1,12 @@
 //! `phoneme config` — inspect and edit the shared config.toml.
 //!
-//! With no subcommand, prints the full resolved config as TOML. `path`
-//! prints the config file location; both are purely local. `reload` sends
-//! `ReloadConfig` (spawning path) so a daemon re-reads the file.
+//! With no subcommand, prints the full resolved config as TOML with secret
+//! values (API keys, the webhook HMAC secret) masked, so the dump is safe to
+//! paste or pipe even off Windows where secrets aren't DPAPI-encrypted at rest.
+//! Pass `--show-secrets` to print the real values when you deliberately need
+//! them.
+//! `path` prints the config file location; both are purely local. `reload`
+//! sends `ReloadConfig` (spawning path) so a daemon re-reads the file.
 //!
 //! `set <key> <value>` edits the file directly — no daemon involved (run
 //! `config reload` after, or let the queue worker's mtime check pick it
@@ -52,7 +56,7 @@ pub async fn run(args: ConfigArgs, cfg: &Config) -> ExitCode {
                 ExitCode::from(exit::INVALID_CONFIG)
             }
         },
-        None => match toml::to_string_pretty(cfg) {
+        None => match render_config(cfg, args.show_secrets) {
             Ok(s) => {
                 print!("{s}");
                 ExitCode::SUCCESS
@@ -62,6 +66,82 @@ pub async fn run(args: ConfigArgs, cfg: &Config) -> ExitCode {
                 ExitCode::from(exit::GENERIC_FAIL)
             }
         },
+    }
+}
+
+/// The placeholder shown in `phoneme config` for a non-empty secret value.
+const REDACTED_SECRET: &str = "<redacted>";
+
+/// Serialize `cfg` to TOML for display, masking every secret value unless
+/// `show_secrets` is set.
+///
+/// `Config` serializes secrets through the DPAPI protector — on Windows they
+/// already land as opaque `dpapi:v1:…` ciphertext, but off Windows `protect()`
+/// is a passthrough, so a plain `phoneme config` would print API keys and the
+/// webhook HMAC secret in cleartext to the terminal (and into any shell history
+/// or piped log). Mask them in the rendered TOML regardless of platform so the
+/// dump is safe to share by default; `--show-secrets` opts back into the real
+/// values for the rare case the user deliberately needs them. The on-disk file
+/// is untouched; `config set` still writes real values. The same field set as
+/// the GUI's `mask_config_secrets`.
+fn render_config(cfg: &Config, show_secrets: bool) -> Result<String, String> {
+    let serialized =
+        toml::to_string_pretty(cfg).map_err(|e| format!("failed to serialize config: {e}"))?;
+    let mut doc = serialized
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| format!("failed to parse config for display: {e}"))?;
+    if !show_secrets {
+        redact_secrets_for_display(&mut doc);
+    }
+    Ok(doc.to_string())
+}
+
+/// Mask every secret value in `doc` in place with [`REDACTED_SECRET`], leaving
+/// empty values alone (an unset key is not a secret and the blank reads clearer).
+fn redact_secrets_for_display(doc: &mut toml_edit::DocumentMut) {
+    // Top-level provider tables that each carry an `api_key`.
+    for section in [
+        "whisper",
+        "preview_whisper",
+        "llm_post_process",
+        "summary",
+        "auto_tag",
+        "title",
+    ] {
+        if let Some(table) = doc.get_mut(section).and_then(|s| s.as_table_like_mut()) {
+            mask_field(table, "api_key");
+        }
+    }
+    // The dictation STT key lives one level deeper (`in_place.stt.api_key`).
+    if let Some(stt) = doc
+        .get_mut("in_place")
+        .and_then(|s| s.as_table_like_mut())
+        .and_then(|t| t.get_mut("stt"))
+        .and_then(|s| s.as_table_like_mut())
+    {
+        mask_field(stt, "api_key");
+    }
+    // The webhook HMAC signing key.
+    if let Some(webhook) = doc.get_mut("webhook").and_then(|s| s.as_table_like_mut()) {
+        mask_field(webhook, "hmac_secret");
+    }
+    // Each playbook entry carries its own LLM key (`playbook[].llm.api_key`).
+    if let Some(arr) = doc.get_mut("playbook").and_then(|p| p.as_array_of_tables_mut()) {
+        for entry in arr.iter_mut() {
+            if let Some(llm) = entry.get_mut("llm").and_then(|l| l.as_table_like_mut()) {
+                mask_field(llm, "api_key");
+            }
+        }
+    }
+}
+
+/// Replace a non-empty string `field` in `table` with the redaction marker.
+fn mask_field(table: &mut dyn toml_edit::TableLike, field: &str) {
+    if let Some(item) = table.get_mut(field) {
+        let is_nonempty_secret = item.as_str().is_some_and(|s| !s.is_empty());
+        if is_nonempty_secret {
+            *item = toml_edit::value(REDACTED_SECRET);
+        }
     }
 }
 
@@ -308,5 +388,60 @@ mod tests {
         );
         let written = std::fs::read_to_string(&override_path).unwrap();
         assert!(written.contains("log_level = \"debug\""));
+    }
+
+    #[test]
+    fn render_config_redacts_secret_values() {
+        // The cross-platform fix: `phoneme config` must not print API keys in
+        // cleartext. Off Windows `protect()` is a passthrough, so without this the
+        // raw key would land in the terminal/scrollback. A masked dump is safe.
+        let mut cfg = Config::default();
+        let secret = "sk-live-super-secret-123";
+        cfg.whisper.set_api_key(secret.to_owned());
+
+        let rendered = render_config(&cfg, false).expect("render succeeds");
+
+        assert!(
+            !rendered.contains(secret),
+            "the raw secret must not appear in the dump:\n{rendered}"
+        );
+        assert!(
+            rendered.contains(REDACTED_SECRET),
+            "the redaction marker should replace the secret:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn render_config_leaves_empty_secrets_and_normal_values_alone() {
+        // An unset key isn't a secret — masking a blank only obscures that it's
+        // empty. Non-secret values must round-trip untouched.
+        let cfg = Config::default();
+        let rendered = render_config(&cfg, false).expect("render succeeds");
+
+        // The default whisper.api_key is empty, so no marker is forced in.
+        assert!(
+            !rendered.contains(REDACTED_SECRET),
+            "a config with no secrets set should carry no redaction marker:\n{rendered}"
+        );
+        // And it still parses back to a valid Config (we only edited string
+        // values, never the structure).
+        let _: Config = toml::from_str(&rendered).expect("rendered TOML round-trips");
+    }
+
+    #[test]
+    fn render_config_show_secrets_does_not_redact() {
+        // The `--show-secrets` opt-out: the dump must NOT carry the redaction
+        // marker, so the real value (cleartext off Windows, DPAPI ciphertext on
+        // it) is shown verbatim. Asserting the absence of the marker keeps this
+        // platform-independent.
+        let mut cfg = Config::default();
+        cfg.whisper.set_api_key("sk-live-super-secret-123".to_owned());
+
+        let rendered = render_config(&cfg, true).expect("render succeeds");
+
+        assert!(
+            !rendered.contains(REDACTED_SECRET),
+            "--show-secrets must not redact:\n{rendered}"
+        );
     }
 }

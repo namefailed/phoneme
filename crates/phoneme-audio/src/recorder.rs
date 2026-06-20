@@ -246,7 +246,21 @@ impl Recorder {
                         }
                     }
                     block = source.next_block() => {
-                        match block? {
+                        // A capture-device failure (e.g. the mic was unplugged)
+                        // now surfaces as `Err` from `next_block` instead of
+                        // hanging. The source drains its buffered audio into
+                        // `samples` as `Ok(Some(_))` first and only then yields
+                        // the error, so DON'T propagate it — that would discard
+                        // the whole take. Log it and break, letting the loop fall
+                        // through and finalize the audio captured up to the drop.
+                        let block = match block {
+                            Ok(b) => b,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "audio source failed mid-capture; finalizing the partial recording");
+                                break;
+                            }
+                        };
+                        match block {
                             Some(b) => {
                                 if !is_paused {
                                     if first_non_silent_at.is_none() && block_has_content(&b) {

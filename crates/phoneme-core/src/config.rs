@@ -65,6 +65,60 @@ where
     Ok(SecretString::from(crate::secret_crypto::unprotect(&stored)))
 }
 
+/// Deserialize a string-keyed map, lowercasing every key so a hand-edited cased
+/// entry (e.g. `Code`) canonicalizes to the lowercased form the foreground
+/// detector produces (`code`). Used for `app_overrides`, whose lookup is keyed
+/// by the lowercased process stem. On a collision (two keys differing only in
+/// case) the last one wins — last-write matches `BTreeMap::insert`.
+fn deserialize_lowercase_keys<'de, D>(
+    deserializer: D,
+) -> std::result::Result<std::collections::BTreeMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = std::collections::BTreeMap::<String, String>::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .map(|(k, v)| (k.to_lowercase(), v))
+        .collect())
+}
+
+/// Serialize a header map with each VALUE encrypted at rest (DPAPI on Windows),
+/// keys left plaintext. Header values are frequently secrets — the docs steer
+/// users to put `Authorization: Bearer …` here — so they get the same on-disk
+/// protection as [`serialize_secret_string`]. An empty value stays empty.
+fn serialize_protected_headers<S>(
+    headers: &std::collections::BTreeMap<String, String>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeMap;
+    let mut map = serializer.serialize_map(Some(headers.len()))?;
+    for (k, v) in headers {
+        map.serialize_entry(k, &crate::secret_crypto::protect(v))?;
+    }
+    map.end()
+}
+
+/// Read a header map, decrypting each at-rest value and passing a legacy
+/// plaintext value through unchanged — mirrors [`deserialize_secret_string`], so
+/// configs written before header encryption keep loading and get re-encrypted on
+/// the next save. Keys are read verbatim.
+fn deserialize_protected_headers<'de, D>(
+    deserializer: D,
+) -> std::result::Result<std::collections::BTreeMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = std::collections::BTreeMap::<String, String>::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .map(|(k, v)| (k, crate::secret_crypto::unprotect(&v)))
+        .collect())
+}
+
 /// The root configuration object for Phoneme.
 /// This configuration encapsulates the entire system state, including settings for
 /// transcription (Whisper), audio recording parameters, post-processing hooks,
@@ -1190,7 +1244,11 @@ pub struct InPlaceConfig {
     /// for that app). The app focused when you stop speaking is matched here
     /// first; an unlisted app falls back to `type_mode`. **Default empty** — no
     /// overrides, so every app uses `type_mode` exactly as before.
-    #[serde(default)]
+    ///
+    /// Keys are lowercased on load (see [`deserialize_lowercase_keys`]) so a
+    /// hand-edited cased entry like `Code` still matches the lowercased
+    /// foreground stem instead of silently no-opping to `type_mode`.
+    #[serde(default, deserialize_with = "deserialize_lowercase_keys")]
     pub app_overrides: std::collections::BTreeMap<String, String>,
     /// Opt-in (**default false**): include the focused window's title in the
     /// LLM cleanup prompt so dictation can adapt to what you're working in
@@ -1205,12 +1263,13 @@ pub struct InPlaceConfig {
     /// manager or a banking app. **Default empty.**
     #[serde(default)]
     pub app_context_denylist: Vec<String>,
-    /// Streaming-type spike (**default false**, off): type words incrementally
-    /// as they're recognized instead of all at once when you stop. The current
-    /// dictation fast lane transcribes the whole clip after stop and types once,
-    /// so there is no committed-word stream to drive incremental typing safely
-    /// yet — this flag is a stub that does nothing until that groundwork lands.
-    /// See `archive_internal/plans/dictation-streaming-type-spike.md`.
+    /// Streaming-type (**default false**, off): type words live as you speak —
+    /// each word lands at the cursor as the live preview finalizes it, instead
+    /// of the whole transcript arriving at once when you stop. On stop the typed
+    /// run is reconciled to the authoritative final transcript (the accurate
+    /// post-stop pass), correcting any words the live stream got wrong. Requires
+    /// the live streaming preview to be on, since that is what produces the
+    /// committed-word stream this types from.
     #[serde(default)]
     pub stream_type: bool,
 }
@@ -1245,10 +1304,21 @@ impl InPlaceConfig {
     ///
     /// With the default (empty) `app_overrides`, this always returns
     /// `type_mode` — byte-for-byte today's behavior.
+    ///
+    /// Matching is case-insensitive on BOTH sides: keys loaded from disk are
+    /// already lowercased (see [`deserialize_lowercase_keys`]) and the foreground
+    /// stem is lowercased, but a key added in memory (the Settings form, a test)
+    /// may carry mixed case — so an override matches regardless of either side's
+    /// case rather than silently no-opping to `type_mode`. `app_overrides` holds
+    /// a handful of entries, so the linear scan is cheaper than normalizing.
     pub fn resolve_type_mode(&self, app: Option<&str>) -> &str {
-        app.and_then(|name| self.app_overrides.get(name))
-            .map(String::as_str)
-            .unwrap_or(self.type_mode.as_str())
+        app.and_then(|name| {
+            self.app_overrides
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, mode)| mode.as_str())
+        })
+        .unwrap_or(self.type_mode.as_str())
     }
 
     /// Whether the focused window's title may be read for app-aware cleanup
@@ -1260,7 +1330,14 @@ impl InPlaceConfig {
             return false;
         }
         match app {
-            Some(name) => !self.app_context_denylist.iter().any(|d| d == name),
+            // Compare case-insensitively: `name` is a lowercased stem but a
+            // hand-edited config.toml / CLI entry may be cased (e.g.
+            // `"1Password"`), and a denylist that silently no-ops would leak the
+            // title it was meant to withhold.
+            Some(name) => !self
+                .app_context_denylist
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case(name)),
             // No detectable app: nothing to deny against, so context is allowed
             // (the title — if any — still only flows into the cleanup prompt).
             None => true,
@@ -1373,7 +1450,17 @@ pub struct WebhookConfig {
     /// sets itself (`Content-Type`, the signature header) is ignored — Phoneme's
     /// own value wins — so a custom header can't break the JSON content type or
     /// forge the signature.
-    #[serde(default)]
+    ///
+    /// Like [`hmac_secret`](Self::hmac_secret), header VALUES are encrypted at
+    /// rest (DPAPI on Windows) — they routinely carry secrets such as an
+    /// `Authorization: Bearer …` token — and never written to `config.toml` in
+    /// plaintext. Keys stay plaintext. A legacy config with plaintext values
+    /// still loads and is re-encrypted on the next save.
+    #[serde(
+        default,
+        serialize_with = "serialize_protected_headers",
+        deserialize_with = "deserialize_protected_headers"
+    )]
     pub custom_headers: std::collections::BTreeMap<String, String>,
     /// How many times to RETRY a failed webhook POST (after the first attempt),
     /// with exponential backoff (~250 ms, 500 ms, 1 s, capped at 2 s). Retries
@@ -3796,20 +3883,44 @@ mod tests {
 
     #[test]
     fn in_place_app_override_resolution() {
-        // A per-app override wins over the global type_mode; case-insensitivity
-        // is handled by the caller lowercasing the stem, so keys are matched as
-        // stored. An unlisted app falls back to the global mode.
+        // A per-app override wins over the global type_mode; the lookup
+        // lowercases the stem so a cased in-memory key still matches. An unlisted
+        // app falls back to the global mode.
         let mut ip = InPlaceConfig {
             type_mode: "type".into(),
             ..Default::default()
         };
         ip.app_overrides.insert("code".into(), "paste".into());
         ip.app_overrides.insert("banking".into(), "off".into());
+        // A cased in-memory key (e.g. straight from the Settings form) must still
+        // resolve against the lowercased foreground stem, not silently no-op.
+        ip.app_overrides.insert("Slack".into(), "off".into());
 
         assert_eq!(ip.resolve_type_mode(Some("code")), "paste"); // override hit
         assert_eq!(ip.resolve_type_mode(Some("banking")), "off"); // off override
+        assert_eq!(ip.resolve_type_mode(Some("slack")), "off"); // cased key matches
         assert_eq!(ip.resolve_type_mode(Some("notepad")), "type"); // global fallback
         assert_eq!(ip.resolve_type_mode(None), "type"); // no app → global
+    }
+
+    #[test]
+    fn in_place_app_overrides_lowercase_cased_keys_on_load() {
+        // A hand-edited config.toml with a cased key must canonicalize to the
+        // lowercased form so it matches the lowercased foreground stem.
+        // InPlaceConfig is `#[serde(default)]`, so the app_overrides table alone
+        // is a valid section.
+        let toml = r#"
+            type_mode = "type"
+
+            [app_overrides]
+            Code = "paste"
+        "#;
+        let parsed: InPlaceConfig = toml::from_str(toml).unwrap();
+        assert!(
+            parsed.app_overrides.contains_key("code"),
+            "cased key `Code` should load lowercased as `code`"
+        );
+        assert_eq!(parsed.resolve_type_mode(Some("code")), "paste");
     }
 
     #[test]
@@ -3820,9 +3931,12 @@ mod tests {
 
         // Opt in: titles may be read except for denylisted apps.
         ip.app_context = true;
-        ip.app_context_denylist.push("1password".into());
+        // A cased denylist entry (e.g. hand-edited or from the CLI) must still
+        // match the lowercased foreground stem — otherwise the title it was meant
+        // to withhold would leak to the cleanup LLM.
+        ip.app_context_denylist.push("1Password".into());
         assert!(ip.may_read_window_title(Some("code")));
-        assert!(!ip.may_read_window_title(Some("1password"))); // denied
+        assert!(!ip.may_read_window_title(Some("1password"))); // denied, case-insensitive
         assert!(ip.may_read_window_title(None)); // no app to deny against
     }
 
@@ -3838,6 +3952,51 @@ mod tests {
         let serialized = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn webhook_custom_headers_round_trip_through_toml() {
+        // Header VALUES are encrypted at rest like hmac_secret; a full
+        // serialize → deserialize cycle must return the original map (DPAPI
+        // round-trips on Windows, passthrough off it). Keys stay verbatim.
+        let mut cfg = Config::default();
+        cfg.webhook.custom_headers.insert(
+            "Authorization".into(),
+            "Bearer super-secret-token".into(),
+        );
+        cfg.webhook
+            .custom_headers
+            .insert("X-Webhook-Source".into(), "phoneme".into());
+        let serialized = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(parsed.webhook.custom_headers, cfg.webhook.custom_headers);
+        // On Windows the token must NOT appear in plaintext on disk; off Windows
+        // protect() is a passthrough, so only assert the encrypted property there.
+        #[cfg(windows)]
+        assert!(
+            !serialized.contains("super-secret-token"),
+            "header value leaked in plaintext to config.toml: {serialized}"
+        );
+    }
+
+    #[test]
+    fn webhook_custom_headers_accept_legacy_plaintext() {
+        // Back-compat: a config written before header encryption stores plaintext
+        // values; deserialize must read them back verbatim (unprotect passes a
+        // non-`dpapi:` value through unchanged). WebhookConfig's fields all carry
+        // serde defaults, so a bare custom_headers table parses.
+        let toml = r#"
+            [custom_headers]
+            Authorization = "Bearer legacy-plaintext"
+        "#;
+        let webhook: WebhookConfig = toml::from_str(toml).unwrap();
+        assert_eq!(
+            webhook
+                .custom_headers
+                .get("Authorization")
+                .map(String::as_str),
+            Some("Bearer legacy-plaintext"),
+        );
     }
 
     #[test]

@@ -5,10 +5,12 @@
 //! calls it once per recording (and on a "re-fire hook" action). The webhook
 //! sibling ([`crate::webhook`]) does the HTTP equivalent.
 //!
-//! The non-obvious parts are all about not hanging or leaking: stdout/stderr are
-//! drained concurrently with the wait so a chatty hook can't deadlock on a full
-//! pipe buffer, and a timed-out child is explicitly killed (Tokio's `Drop` does
-//! not terminate the process on Windows). [`redact_secrets`] is a separate
+//! The non-obvious parts are all about not hanging or leaking: the stdin write,
+//! the stdout drain, and the stderr drain all run concurrently with the wait
+//! UNDER the timeout, so a chatty hook that ignores a >64 KiB payload can't
+//! deadlock the pipe in either direction, and a timed-out child is explicitly
+//! killed (Tokio's `Drop` does not terminate the process on Windows).
+//! [`redact_secrets`] is a separate
 //! concern — it scrubs credential-shaped text out of subprocess output before it
 //! crosses the IPC trust boundary back to the GUI (the hook-test feature).
 
@@ -81,10 +83,18 @@ impl HookRunner {
 
         let started = Instant::now();
         let mut child = cmd.spawn()?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(&json).await?;
-            drop(stdin);
-        }
+
+        // Feed stdin INSIDE the timed, concurrently-drained future — never as a
+        // standalone `write_all().await` before the drain starts. The payload
+        // embeds the full transcript, which can be far larger than the OS pipe
+        // buffer (~64 KB); a hook that ignores stdin and instead chats on
+        // stdout/stderr then deadlocks both ways — we block writing stdin while
+        // the child blocks writing its undrained output — with no timeout to
+        // break it, stalling the serial queue worker that awaits this call.
+        // Racing the write against the drain under the same `timeout` keeps the
+        // pipes flowing and guarantees an escape. Dropped on completion so the
+        // child sees EOF on stdin.
+        let mut stdin = child.stdin.take();
 
         // Drain stdout/stderr concurrently with the wait. A hook that writes
         // more than the OS pipe buffer (~64 KB) would otherwise deadlock. The
@@ -96,6 +106,18 @@ impl HookRunner {
         let mut stderr = child.stderr.take();
         let mut stderr_buf = Vec::new();
         let wait_and_drain = async {
+            let feed_in = async {
+                if let Some(mut si) = stdin.take() {
+                    if let Err(e) = si.write_all(&json).await {
+                        // A hook that closes stdin early (it doesn't read the
+                        // payload) makes the write fail with a broken pipe —
+                        // that's fine, the script just chose not to read; let
+                        // the run continue and be judged on its exit code.
+                        tracing::debug!("failed to write hook stdin: {e}");
+                    }
+                    // Drop closes the pipe so the child sees EOF on stdin.
+                }
+            };
             let drain_out = async {
                 if let Some(so) = stdout.as_mut() {
                     let mut sink = Vec::new();
@@ -111,7 +133,7 @@ impl HookRunner {
                     }
                 }
             };
-            let (status, _, _) = tokio::join!(child.wait(), drain_out, drain_err);
+            let (status, _, _, _) = tokio::join!(child.wait(), feed_in, drain_out, drain_err);
             status
         };
 
@@ -259,6 +281,54 @@ mod tests {
         let (p, a) = split_command("powershell -File \"C:/Program Files/x.ps1\"");
         assert_eq!(p, "powershell");
         assert_eq!(a, vec!["-File", "C:/Program Files/x.ps1"]);
+    }
+
+    /// A hook that NEVER reads stdin while flooding stdout, handed a payload far
+    /// larger than the OS pipe buffer, must still finish under the timeout — the
+    /// stdin write races the drain rather than blocking ahead of it. Before the
+    /// fix this deadlocked: we blocked writing the >64 KiB transcript while the
+    /// child blocked writing its undrained stdout, with no timeout escape, and
+    /// the serial queue worker awaiting the call stalled with it.
+    #[tokio::test]
+    async fn run_does_not_deadlock_on_large_payload_with_chatty_hook() {
+        // A shell one-liner that ignores stdin entirely and prints ~200 KiB to
+        // stdout — comfortably past the ~64 KiB pipe buffer in BOTH directions.
+        #[cfg(windows)]
+        let command = "cmd /c \"for /L %i in (1,1,4000) do @echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"".to_string();
+        #[cfg(not(windows))]
+        let command =
+            "sh -c 'i=0; while [ $i -lt 4000 ]; do echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; i=$((i+1)); done'"
+                .to_string();
+
+        let runner = HookRunner::new(command, Duration::from_secs(30));
+        let mut payload = sample_payload();
+        // ~256 KiB transcript: bigger than the stdin pipe buffer, so a naive
+        // pre-drain `write_all` would block before the child's output is read.
+        payload.transcript = "x".repeat(256 * 1024);
+
+        let started = Instant::now();
+        let result = runner.run(&payload).await;
+        // The hook exits 0, so this is Ok — the load-bearing assertion is that
+        // it RETURNED well under the timeout instead of hanging.
+        assert!(result.is_ok(), "chatty hook should succeed: {result:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "hook deadlocked instead of streaming the pipes: {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// Build a minimal payload for the subprocess tests.
+    fn sample_payload() -> HookPayload {
+        HookPayload {
+            id: crate::id::RecordingId::new(),
+            timestamp: chrono::Local::now(),
+            transcript: String::new(),
+            audio_path: "test.wav".into(),
+            duration_ms: 1000,
+            model: "test".into(),
+            metadata: crate::types::HookMetadata::current(),
+        }
     }
 
     #[test]

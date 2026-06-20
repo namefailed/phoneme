@@ -1775,6 +1775,7 @@ export class RecordingsView {
     if (this.vimHandler) window.removeEventListener("phoneme:vim", this.vimHandler);
     if (this.deleteReqHandler) window.removeEventListener("phoneme:request-delete", this.deleteReqHandler);
     if (this.closeDetailHandler) window.removeEventListener("phoneme:close-detail", this.closeDetailHandler);
+    if (this.openSplitHandler) window.removeEventListener("phoneme:open-split", this.openSplitHandler);
     if (this.configSavedHandler) window.removeEventListener("config:saved", this.configSavedHandler);
     // The pane-click follower is on this.container (reused by App across views),
     // so it must be detached explicitly or it would leak onto the next view.

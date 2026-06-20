@@ -1712,10 +1712,24 @@ impl Catalog {
     /// Returns the number of rows removed. The caller leaves the WAV files on
     /// disk (the rebuild re-links them).
     pub async fn clear_all_recordings(&self) -> Result<u64> {
+        // Named voices that will lose samples when the cascade removes every
+        // recording's voiceprints — captured BEFORE the delete so their cached
+        // centroids + counts can be recomputed afterward, mirroring
+        // [`Self::delete`] (audit M1). NULL links are skipped.
+        let affected: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
+             WHERE named_voice_id IS NOT NULL",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
         let res = sqlx::query("DELETE FROM recordings")
             .execute(&self.pool)
             .await?;
         self.invalidate_embedding_cache();
+        for nid in affected {
+            self.recompute_named_centroid(&nid).await?;
+        }
         Ok(res.rows_affected())
     }
 
@@ -1968,6 +1982,12 @@ impl Catalog {
         // delete cascade-drops that recording's embeddings, so the warm cache
         // must be dropped or deleted vectors keep surfacing in search.
         let mut hard_deleted = false;
+        // Named voices that lose a sample to a hard delete — collected as we go
+        // (BEFORE each delete cascades the voiceprint away) so their centroids +
+        // counts can be recomputed once at the end, mirroring [`Self::delete`]
+        // (audit M1). A `HashSet` dedupes voices touched by several recordings.
+        let mut affected_voices: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         // `delete_audio = true` is the disk-saver mode: the catalog row stays
         // (transcript searchable forever), only the WAV goes. The row's
@@ -2004,6 +2024,16 @@ impl Catalog {
                     .execute(&self.pool)
                     .await?;
                 } else {
+                    // Capture the named voices losing a sample BEFORE the cascade
+                    // removes this recording's voiceprints (audit M1).
+                    let voices: Vec<String> = sqlx::query_scalar(
+                        "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
+                         WHERE recording_id = ? AND named_voice_id IS NOT NULL",
+                    )
+                    .bind(&id)
+                    .fetch_all(&self.pool)
+                    .await?;
+                    affected_voices.extend(voices);
                     sqlx::query("DELETE FROM recordings WHERE id = ?")
                         .bind(&id)
                         .execute(&self.pool)
@@ -2045,6 +2075,16 @@ impl Catalog {
                     .execute(&self.pool)
                     .await?;
                 } else {
+                    // Capture the named voices losing a sample BEFORE the cascade
+                    // removes this recording's voiceprints (audit M1).
+                    let voices: Vec<String> = sqlx::query_scalar(
+                        "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
+                         WHERE recording_id = ? AND named_voice_id IS NOT NULL",
+                    )
+                    .bind(&id)
+                    .fetch_all(&self.pool)
+                    .await?;
+                    affected_voices.extend(voices);
                     sqlx::query("DELETE FROM recordings WHERE id = ?")
                         .bind(&id)
                         .execute(&self.pool)
@@ -2060,6 +2100,11 @@ impl Catalog {
         // audio-only path keeps the rows + embeddings, so it needs no drop.)
         if hard_deleted {
             self.invalidate_embedding_cache();
+        }
+        // ...and recompute any named voice that just lost a sample so the Speaker
+        // Library's cached centroids + counts stay accurate (audit M1).
+        for nid in affected_voices {
+            self.recompute_named_centroid(&nid).await?;
         }
 
         Ok(deleted_paths)
@@ -2319,6 +2364,19 @@ impl Catalog {
         .bind(speaker_label)
         .execute(&self.pool)
         .await?;
+        // Dismissals are name-agnostic: a speaker dismissed before the right
+        // voice existed in the library left a row that would suppress every
+        // future suggestion for this (recording, label). Naming it is an
+        // explicit identification, so clear that row — once a matching voice
+        // exists the speaker can be recognized/renamed again (audit M9).
+        sqlx::query(
+            "DELETE FROM dismissed_speaker_suggestions \
+             WHERE recording_id = ? AND speaker_label = ?",
+        )
+        .bind(recording_id)
+        .bind(speaker_label)
+        .execute(&self.pool)
+        .await?;
         self.recompute_named_centroid(&id).await?;
         if let Some(prev) = previous {
             if prev != id {
@@ -2372,10 +2430,56 @@ impl Catalog {
         Ok(resolved)
     }
 
+    /// Drop clear outliers from a named voice's linked captures before averaging.
+    ///
+    /// With `< 4` samples there's too little signal to judge, so the input is
+    /// returned unchanged (the unweighted mean of everything). At `>= 4`, a
+    /// provisional mean is taken, then any capture whose cosine to that mean is
+    /// below either a hard floor (`0.2` — almost certainly a different speaker)
+    /// or `mean - 2*stddev` (a statistical outlier) is removed. If pruning would
+    /// drop *everything* (a degenerate cutoff, or a provisional mean that can't
+    /// be computed — e.g. mixed dimensions), the originals are kept so the voice
+    /// never silently empties.
+    fn drop_centroid_outliers(samples: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
+        const MIN_SAMPLES_TO_PRUNE: usize = 4;
+        const HARD_FLOOR: f32 = 0.2;
+
+        if samples.len() < MIN_SAMPLES_TO_PRUNE {
+            return samples;
+        }
+        let provisional = match crate::voiceprint::mean_centroid(&samples) {
+            Some(m) => m,
+            None => return samples, // mixed dims etc. — can't judge, keep all
+        };
+        let sims: Vec<f32> = samples
+            .iter()
+            .map(|s| crate::voiceprint::cosine_similarity(s, &provisional))
+            .collect();
+        let n = sims.len() as f32;
+        let mean: f32 = sims.iter().sum::<f32>() / n;
+        let var: f32 = sims.iter().map(|s| (s - mean) * (s - mean)).sum::<f32>() / n;
+        let cutoff = (mean - 2.0 * var.sqrt()).max(HARD_FLOOR);
+
+        let kept: Vec<Vec<f32>> = samples
+            .iter()
+            .zip(sims.iter())
+            .filter(|(_, &sim)| sim >= cutoff)
+            .map(|(s, _)| s.clone())
+            .collect();
+        // A degenerate cutoff (every sample identical → var 0, and float jitter
+        // drops the whole set) must not empty the voice — fall back to the full
+        // sample set in that case.
+        if kept.is_empty() {
+            return samples;
+        }
+        kept
+    }
+
     /// Recompute a named voice's cached centroid + sample count from its linked
-    /// captures (the L2-normalized mean). A voice with no remaining captures gets
-    /// an empty centroid and zero samples (it never matches, but the entry stays
-    /// until explicitly forgotten).
+    /// captures (the L2-normalized mean, after [`Self::drop_centroid_outliers`]
+    /// prunes clear outliers). A voice with no remaining captures gets an empty
+    /// centroid and zero samples (it never matches, but the entry stays until
+    /// explicitly forgotten).
     async fn recompute_named_centroid(&self, named_voice_id: &str) -> Result<()> {
         let rows = sqlx::query("SELECT centroid FROM speaker_voiceprints WHERE named_voice_id = ?")
             .bind(named_voice_id)
@@ -2387,14 +2491,19 @@ impl Catalog {
                 &r.try_get::<String, _>("centroid")?,
             )?);
         }
-        let mean = crate::voiceprint::mean_centroid(&samples).unwrap_or_default();
+        // With enough captures, prune clear outliers before the final mean so one
+        // mis-assigned sample (a wrong-speaker capture named into this voice)
+        // can't drag the template off the real speaker (audit M7). Below the
+        // threshold every sample counts — too few to tell signal from noise.
+        let kept = Self::drop_centroid_outliers(samples);
+        let mean = crate::voiceprint::mean_centroid(&kept).unwrap_or_default();
         let json = serde_json::to_string(&mean)?;
         sqlx::query(
             "UPDATE named_voiceprints SET centroid = ?, samples = ?, updated_at = datetime('now') \
              WHERE id = ?",
         )
         .bind(&json)
-        .bind(samples.len() as i64)
+        .bind(kept.len() as i64)
         .bind(named_voice_id)
         .execute(&self.pool)
         .await?;
@@ -2439,14 +2548,28 @@ impl Catalog {
             if samples <= 0 {
                 continue;
             }
+            let id: String = r.try_get("id")?;
+            let centroid =
+                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            // A centroid whose dimension differs from the probe came from a
+            // different embedding model — cosine would silently return 0.0, so
+            // such a library would go quietly unmatched. Skip it with a signal
+            // instead (audit L).
+            if centroid.len() != probe.len() {
+                tracing::warn!(
+                    id = %id,
+                    dim = centroid.len(),
+                    probe_dim = probe.len(),
+                    "skipping named voice: centroid dimension mismatch (cross-model library)"
+                );
+                continue;
+            }
             voices.push(NamedVoice {
-                id: r.try_get("id")?,
+                id,
                 name: r.try_get("name")?,
                 samples: samples as u32,
             });
-            centroids.push(serde_json::from_str::<Vec<f32>>(
-                &r.try_get::<String, _>("centroid")?,
-            )?);
+            centroids.push(centroid);
         }
         Ok(crate::voiceprint::best_match(probe, &centroids, threshold)
             .map(|(i, score)| (voices[i].clone(), score)))
@@ -2566,11 +2689,47 @@ impl Catalog {
         Ok(set)
     }
 
-    /// On-demand named-speaker recognition for a recording (#9): for each captured
-    /// speaker that has NO name yet and hasn't been dismissed, match its voiceprint
-    /// against the named-voice library and return the suggestions clearing
-    /// `threshold`. Reflects the live library, so a voice named *after* this
-    /// recording was transcribed is still suggested here.
+    /// The named-voice library as `(NamedVoice, centroid)` pairs, skipping
+    /// empty entries (no samples). Used by recognition to score every captured
+    /// speaker against the whole library at once.
+    async fn named_voice_centroids(&self) -> Result<Vec<(NamedVoice, Vec<f32>)>> {
+        let rows = sqlx::query("SELECT id, name, samples, centroid FROM named_voiceprints")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for r in rows {
+            let samples: i64 = r.try_get("samples")?;
+            if samples <= 0 {
+                continue;
+            }
+            let centroid =
+                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            out.push((
+                NamedVoice {
+                    id: r.try_get("id")?,
+                    name: r.try_get("name")?,
+                    samples: samples as u32,
+                },
+                centroid,
+            ));
+        }
+        Ok(out)
+    }
+
+    /// On-demand named-speaker recognition for a recording (#9): each captured
+    /// speaker that has NO name yet and hasn't been dismissed is matched against
+    /// the named-voice library, and the surviving suggestions are returned.
+    /// Reflects the live library, so a voice named *after* this recording was
+    /// transcribed is still suggested here.
+    ///
+    /// Assignment is **one-to-one**: the full captured-speaker × named-voice
+    /// cosine matrix is scored once, then the best pairs are taken in descending
+    /// score so no two speakers in the same recording can be handed the same
+    /// name (audit H2). A pair is only emitted when it clears `threshold` AND
+    /// beats that speaker's own second-best candidate by [`Self::MARGIN`] — an
+    /// ambiguous speaker (two library voices nearly tied) is left unknown rather
+    /// than guessed. The result holds at most one suggestion per captured speaker
+    /// and per name, ordered by `speaker_label`.
     pub async fn recognize_speakers_for(
         &self,
         recording_id: &str,
@@ -2592,21 +2751,115 @@ impl Catalog {
                 recording_id,
             )
             .await?;
-        let mut out = Vec::new();
-        for (label, centroid) in captured {
-            if named.contains(&label) || dismissed.contains(&label) {
-                continue;
+        // Only speakers still eligible for a suggestion (un-named, un-dismissed).
+        let probes: Vec<(i64, Vec<f32>)> = captured
+            .into_iter()
+            .filter(|(label, _)| !named.contains(label) && !dismissed.contains(label))
+            .collect();
+        if probes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let library = self.named_voice_centroids().await?;
+        Ok(Self::assign_speakers(&probes, &library, threshold))
+    }
+
+    /// Margin a winning match must beat the speaker's second-best by — below
+    /// this gap the two candidates are too close to call, so no name is offered.
+    const MARGIN: f32 = 0.05;
+
+    /// One-to-one greedy assignment of captured speakers to named voices.
+    ///
+    /// Builds the cosine matrix, then repeatedly takes the highest remaining
+    /// `(speaker, voice)` cell whose speaker and voice are both still free, the
+    /// score clears `threshold`, and the score beats that speaker's *second-best
+    /// over the whole library* by [`Self::MARGIN`]. Each speaker and each named
+    /// voice is used at most once. Output is sorted by `speaker_label` for a
+    /// stable suggestion order.
+    fn assign_speakers(
+        probes: &[(i64, Vec<f32>)],
+        library: &[(NamedVoice, Vec<f32>)],
+        threshold: f32,
+    ) -> Vec<SpeakerSuggestion> {
+        if library.is_empty() {
+            return Vec::new();
+        }
+        // Per-speaker scores against every library voice. A dimension mismatch
+        // yields cosine 0.0 (treated as no signal), matching `recognize_voice`'s
+        // skip; the margin test below keeps such a row from ever winning.
+        let scores: Vec<Vec<f32>> = probes
+            .iter()
+            .map(|(_, probe)| {
+                library
+                    .iter()
+                    .map(|(_, c)| crate::voiceprint::cosine_similarity(probe, c))
+                    .collect()
+            })
+            .collect();
+
+        // Each speaker's second-best score across the whole library, used for the
+        // ambiguity margin even after a voice is claimed by another speaker.
+        let second_best: Vec<f32> = scores
+            .iter()
+            .map(|row| {
+                let mut top2 = [f32::NEG_INFINITY, f32::NEG_INFINITY];
+                for &s in row {
+                    if s > top2[0] {
+                        top2[1] = top2[0];
+                        top2[0] = s;
+                    } else if s > top2[1] {
+                        top2[1] = s;
+                    }
+                }
+                if top2[1].is_finite() {
+                    top2[1]
+                } else {
+                    f32::NEG_INFINITY // only one candidate → no rival to clear
+                }
+            })
+            .collect();
+
+        let mut speaker_taken = vec![false; probes.len()];
+        let mut voice_taken = vec![false; library.len()];
+        let mut out: Vec<SpeakerSuggestion> = Vec::new();
+
+        // Greedy: pick the globally-highest free cell each round until none qualify.
+        loop {
+            let mut best: Option<(usize, usize, f32)> = None;
+            for (si, row) in scores.iter().enumerate() {
+                if speaker_taken[si] {
+                    continue;
+                }
+                for (vi, &score) in row.iter().enumerate() {
+                    if voice_taken[vi] || score < threshold {
+                        continue;
+                    }
+                    // Clear the speaker's own runner-up by a margin, else it's
+                    // ambiguous — leave this speaker unknown.
+                    let runner_up = second_best[si];
+                    if runner_up.is_finite() && score < runner_up + Self::MARGIN {
+                        continue;
+                    }
+                    if best.is_none_or(|(_, _, b)| score > b) {
+                        best = Some((si, vi, score));
+                    }
+                }
             }
-            if let Some((voice, score)) = self.recognize_voice(&centroid, threshold).await? {
-                out.push(SpeakerSuggestion {
-                    speaker_label: label,
-                    name: voice.name,
-                    named_voice_id: voice.id,
-                    score,
-                });
+            match best {
+                Some((si, vi, score)) => {
+                    speaker_taken[si] = true;
+                    voice_taken[vi] = true;
+                    out.push(SpeakerSuggestion {
+                        speaker_label: probes[si].0,
+                        name: library[vi].0.name.clone(),
+                        named_voice_id: library[vi].0.id.clone(),
+                        score,
+                    });
+                }
+                None => break,
             }
         }
-        Ok(out)
+        out.sort_by_key(|s| s.speaker_label);
+        out
     }
 
     /// Replace a recording's machine transcript segments with a fresh set.
@@ -4663,6 +4916,281 @@ mod tests {
         assert!(
             db.words_for(&r.id).await.unwrap().is_empty(),
             "words must be cascade-deleted with their recording"
+        );
+    }
+
+    /// One recording's sample count for a named voice, read straight from the
+    /// library row (the cached count `recompute_named_centroid` maintains).
+    async fn named_voice_samples(db: &Catalog, id: &str) -> i64 {
+        sqlx::query_scalar("SELECT samples FROM named_voiceprints WHERE id = ?")
+            .bind(id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn recognize_speakers_one_to_one_never_doubles_a_name() {
+        // Audit H2: two captured speakers in ONE recording both nearest the same
+        // library voice must NOT both be suggested that name — at most one gets
+        // it, the other is left unknown.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+        // Enroll one library voice "Ada" from a source recording.
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        let ada = db
+            .enroll_speaker(src.id.as_str(), 1, "Ada")
+            .await
+            .unwrap()
+            .unwrap();
+
+        // A second recording with two captured speakers, both closest to Ada
+        // (one a near-perfect match, the other a clear runner-up).
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.95, 0.31, 0.0])
+            .await
+            .unwrap();
+
+        let sugg = db.recognize_speakers_for(rec.id.as_str(), 0.5).await.unwrap();
+        let to_ada: Vec<_> = sugg.iter().filter(|s| s.named_voice_id == ada).collect();
+        assert_eq!(
+            to_ada.len(),
+            1,
+            "a name can be suggested to at most one speaker per recording"
+        );
+        assert_eq!(
+            to_ada[0].speaker_label, 1,
+            "the closest speaker wins the name"
+        );
+        assert!(
+            sugg.len() <= 1,
+            "only one library voice exists, so at most one suggestion"
+        );
+    }
+
+    #[tokio::test]
+    async fn recognize_speakers_assigns_distinct_voices_one_each() {
+        // Two library voices, two speakers each clearly nearest a different one:
+        // both get their own name, no crossover.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0, 0.0])
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        let bob = db.enroll_speaker(src.id.as_str(), 2, "Bob").await.unwrap().unwrap();
+
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.0, 1.0, 0.0])
+            .await
+            .unwrap();
+
+        let sugg = db.recognize_speakers_for(rec.id.as_str(), 0.5).await.unwrap();
+        assert_eq!(sugg.len(), 2, "both speakers recognized");
+        assert_eq!(sugg[0].speaker_label, 1, "sorted by speaker_label");
+        assert_eq!(sugg[0].named_voice_id, ada);
+        assert_eq!(sugg[1].named_voice_id, bob);
+    }
+
+    #[tokio::test]
+    async fn recognize_speakers_skips_ambiguous_speaker() {
+        // A speaker nearly equidistant from two library voices (within MARGIN)
+        // is too ambiguous to name — no suggestion is emitted for it.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let src = embedded_recording(None);
+        db.insert(&src).await.unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 1, &[1.0, 0.0])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(src.id.as_str(), 2, &[0.0, 1.0])
+            .await
+            .unwrap();
+        db.enroll_speaker(src.id.as_str(), 1, "Ada").await.unwrap();
+        db.enroll_speaker(src.id.as_str(), 2, "Bob").await.unwrap();
+
+        // Probe at 45°: cosine ~0.707 to both voices — tie inside MARGIN.
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 1.0])
+            .await
+            .unwrap();
+        let sugg = db.recognize_speakers_for(rec.id.as_str(), 0.5).await.unwrap();
+        assert!(sugg.is_empty(), "an ambiguous speaker is left unknown");
+    }
+
+    #[tokio::test]
+    async fn enroll_speaker_clears_a_prior_dismissal() {
+        // Audit M9: a speaker dismissed before the right voice existed must be
+        // recognizable once it's named — naming clears the dismissal row.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        db.dismiss_speaker_suggestion(rec.id.as_str(), 1)
+            .await
+            .unwrap();
+
+        // Naming the speaker is an explicit ID — the dismissal must be gone.
+        db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap();
+        let still_dismissed: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM dismissed_speaker_suggestions \
+             WHERE recording_id = ? AND speaker_label = ?",
+        )
+        .bind(rec.id.as_str())
+        .bind(1i64)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(still_dismissed, 0, "enrolling clears the dismissal");
+    }
+
+    #[tokio::test]
+    async fn recompute_named_centroid_drops_an_outlier_capture() {
+        // Audit M7: with >= 4 captures, a clear wrong-speaker outlier is pruned
+        // before the mean, so the cached sample count drops and the centroid
+        // stays close to the genuine cluster.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        // Three tightly-clustered captures plus one clear (opposite-direction)
+        // outlier — a wrong-speaker capture mistakenly named into this voice.
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.99, 0.10, 0.0])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 3, &[0.98, 0.0, 0.10])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 4, &[-1.0, 0.0, 0.0]) // outlier
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        for label in [2i64, 3, 4] {
+            db.enroll_speaker(rec.id.as_str(), label, "Ada").await.unwrap();
+        }
+
+        // Four captures linked, but the outlier is pruned → 3 effective samples.
+        assert_eq!(
+            named_voice_samples(&db, &ada).await,
+            3,
+            "the orthogonal outlier is dropped from the template"
+        );
+        // The surviving centroid still points at the cluster (cosine ~1 to it).
+        let probe = vec![1.0f32, 0.0, 0.0];
+        let (_, score) = db.recognize_voice(&probe, 0.5).await.unwrap().unwrap();
+        assert!(score > 0.95, "centroid stays on the genuine cluster: {score}");
+    }
+
+    #[tokio::test]
+    async fn recompute_named_centroid_keeps_all_below_four_samples() {
+        // Below 4 captures every sample counts — even a far one is kept (too few
+        // to tell signal from noise).
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0])
+            .await
+            .unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 2, &[0.0, 1.0])
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        db.enroll_speaker(rec.id.as_str(), 2, "Ada").await.unwrap();
+        assert_eq!(
+            named_voice_samples(&db, &ada).await,
+            2,
+            "under the threshold no pruning happens"
+        );
+    }
+
+    #[tokio::test]
+    async fn recognize_voice_skips_dimension_mismatched_library() {
+        // Audit L: a library centroid of a different dimension than the probe is
+        // skipped (it came from another embedding model) — not silently scored 0.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        // Library voice has a 3-dim centroid.
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap();
+
+        // Probe a 2-dim vector: dimension mismatch → skipped → no match.
+        let got = db.recognize_voice(&[1.0, 0.0], 0.5).await.unwrap();
+        assert!(got.is_none(), "a cross-model library entry is skipped, not matched at 0.0");
+    }
+
+    #[tokio::test]
+    async fn clear_all_recordings_recomputes_emptied_named_voices() {
+        // Audit M1: wiping every recording cascades the voiceprints away, so the
+        // named voice must drop to zero samples (not keep a stale count).
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let rec = embedded_recording(None);
+        db.insert(&rec).await.unwrap();
+        db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(rec.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        assert_eq!(named_voice_samples(&db, &ada).await, 1);
+
+        db.clear_all_recordings().await.unwrap();
+        assert_eq!(
+            named_voice_samples(&db, &ada).await,
+            0,
+            "the library entry's count must follow its lost captures"
+        );
+    }
+
+    #[tokio::test]
+    async fn retention_hard_delete_recomputes_named_voices() {
+        // Audit M1: a hard-delete retention sweep cascades the deleted recording's
+        // voiceprints away, so its named voice's cached count must be recomputed.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        // Old recording (eligible) enrolled into "Ada".
+        let old = {
+            let mut r = embedded_recording(None);
+            r.started_at = Local::now() - chrono::Duration::days(90);
+            r
+        };
+        db.insert(&old).await.unwrap();
+        db.save_speaker_voiceprint(old.id.as_str(), 1, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        let ada = db.enroll_speaker(old.id.as_str(), 1, "Ada").await.unwrap().unwrap();
+        assert_eq!(named_voice_samples(&db, &ada).await, 1);
+
+        let cfg = crate::config::RetentionConfig {
+            max_age_days: Some(30),
+            max_count: None,
+            delete_audio: false,
+        };
+        db.apply_retention(&cfg).await.unwrap();
+        assert!(db.get(&old.id).await.unwrap().is_none(), "old row swept");
+        assert_eq!(
+            named_voice_samples(&db, &ada).await,
+            0,
+            "the swept recording's named voice must lose its sample"
         );
     }
 }

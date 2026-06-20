@@ -93,10 +93,11 @@ Response bodies are the daemon's JSON values passed straight through (see the
 per-`Request` documentation in `crates/phoneme-ipc/src/schema.rs` for each
 shape). Errors are returned as `{"error":"<message>"}` with the status below.
 
-> **Note:** there is intentionally no `GET /api/recordings/{id}/words` endpoint —
-> the daemon has no word-level request today. Word-level data is a future roadmap
-> item (confidence highlighting); add the endpoint here once the daemon exposes
-> the corresponding `Request`.
+> **Note:** there is intentionally no `GET /api/recordings/{id}/words` endpoint
+> yet. The daemon *does* have a word-level request — `Request::GetWords` (handled
+> in the IPC bridge and exposed over MCP) returns the per-word layer beneath
+> `GetSegments` — the REST surface simply doesn't map it. Add the endpoint here
+> (forwarding to `GetWords`) when a REST consumer needs word-level data.
 
 ### Error → status mapping
 

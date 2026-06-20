@@ -39,7 +39,7 @@ The export archive is completely portable and contains:
    }
    ```
    Each recording row includes the current transcript and the preserved original (raw) transcript, timestamps and durations, and meeting IDs for Meeting Mode sessions.
-2. **`audio/`**: a folder containing all of your `.wav` files, named to match the IDs in `catalog.json`.
+2. **`audio/`**: your `.wav` files, organised into per-day subfolders (`audio/<YYYY-MM-DD>/<recording>.wav`) that match each recording's date prefix in `catalog.json`. (Backups made by older versions stored every file flat in `audio/`; both layouts restore correctly.)
 
 ## 🎬 Exporting Captions (SRT / WebVTT)
 

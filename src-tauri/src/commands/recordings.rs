@@ -644,6 +644,50 @@ fn reject_executable_dest(dest: &str) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// Reject an export destination that would land inside a sensitive directory —
+/// phoneme's own config dir or the Windows per-user auto-start (Startup) folder.
+///
+/// Defense-in-depth alongside [`reject_executable_dest`]: even a non-executable
+/// file can be dangerous in the wrong place (a dropped `config.toml` next to the
+/// daemon's, a `.url`/`.scr`-adjacent payload in Startup). The save dialog the
+/// user drove is the real boundary, but a compromised WebView could try to push
+/// a path here directly. We canonicalize the dest's PARENT (the dest itself
+/// doesn't exist yet) and deny if it sits in a guarded root. Roots that can't be
+/// resolved are simply skipped — this only ever tightens, never blocks a write to
+/// a legitimate location.
+fn reject_sensitive_dir_dest(dest: &str) -> Result<(), CommandError> {
+    let parent = match std::path::Path::new(dest).parent() {
+        // A bare filename (no parent) writes to the cwd — never a guarded root.
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => return Ok(()),
+    };
+
+    let mut guarded: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(dirs) = directories::ProjectDirs::from("", "", "phoneme") {
+        guarded.push(dirs.config_dir().to_path_buf());
+    }
+    // The Windows Startup folder: anything dropped here auto-runs at login.
+    #[cfg(target_os = "windows")]
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        guarded.push(
+            std::path::Path::new(&appdata)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs")
+                .join("Startup"),
+        );
+    }
+
+    if guarded.iter().any(|root| super::path_within(&parent, root)) {
+        return Err(CommandError::new(
+            "invalid_config",
+            "refusing to export into a protected directory (config / auto-start)",
+        ));
+    }
+    Ok(())
+}
+
 /// Write `contents` to `dest` (a path the WebView picked via the save dialog).
 ///
 /// The single write path behind every per-recording export — transcript text,
@@ -652,11 +696,12 @@ fn reject_executable_dest(dest: &str) -> Result<(), CommandError> {
 /// daemon-side bridge process owns the actual file write, exactly like
 /// [`export_library_zip`]. That means the WebView never needs the `fs` plugin's
 /// write permission for an arbitrary save-dialog path (which `fs:default` denies).
-/// The dest is screened by [`reject_executable_dest`] so the write can't be
-/// abused to drop an auto-run payload.
+/// The dest is screened by [`reject_executable_dest`] (no auto-run payload) and
+/// [`reject_sensitive_dir_dest`] (no writing into the config / auto-start dirs).
 #[tauri::command]
 pub fn save_text_export(dest: String, contents: String) -> Result<(), CommandError> {
     reject_executable_dest(&dest)?;
+    reject_sensitive_dir_dest(&dest)?;
     std::fs::write(&dest, contents)
         .map_err(|e| CommandError::new("io", format!("writing {dest}: {e}")))
 }
@@ -679,6 +724,26 @@ pub async fn export_recording_json(bridge: Br<'_>, id: String) -> Result<String,
     });
     serde_json::to_string_pretty(&bundle)
         .map_err(|e| CommandError::new("internal", format!("serializing recording: {e}")))
+}
+
+/// Zip-entry name for one audio file under `audio_dir`, preserving its day
+/// folder. WAVs live at `<audio_dir>/<YYYY-MM-DD>/<HHmmssMMM>.wav` and the stem
+/// is time-of-day only, so two recordings at the same ms-of-day on different
+/// days share a stem. Naming the entry from the path RELATIVE to `audio_dir`
+/// (backslashes normalized to `/` for a portable archive) keeps the day folder,
+/// so the two never collide to one entry and clobber each other on restore.
+/// Falls back to the bare filename if the path isn't under `audio_dir`.
+fn audio_zip_entry_name(audio_dir: &std::path::Path, path: &std::path::Path) -> String {
+    match path.strip_prefix(audio_dir) {
+        Ok(rel) => format!("audio/{}", rel.to_string_lossy().replace('\\', "/")),
+        Err(_) => {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            format!("audio/{name}")
+        }
+    }
 }
 
 /// Write a portable backup of the whole library to `dest` (a `.zip` path the
@@ -740,7 +805,7 @@ pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, Com
 
         let mut packed: u64 = 0;
         if audio_dir.exists() {
-            let mut stack = vec![audio_dir];
+            let mut stack = vec![audio_dir.clone()];
             while let Some(dir) = stack.pop() {
                 let Ok(entries) = std::fs::read_dir(&dir) else {
                     continue;
@@ -757,7 +822,11 @@ pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, Com
                     if !name.ends_with(".wav") {
                         continue;
                     }
-                    if zip.start_file(format!("audio/{name}"), options).is_err() {
+                    // Entry name preserves the day folder so two same-ms-
+                    // different-day recordings don't collide — see
+                    // `audio_zip_entry_name`.
+                    let entry_name = audio_zip_entry_name(&audio_dir, &path);
+                    if zip.start_file(entry_name, options).is_err() {
                         continue;
                     }
                     if let Ok(mut f) = std::fs::File::open(&path) {
@@ -1002,5 +1071,75 @@ mod tests {
             "VTT starts with its header: {vtt:?}"
         );
         assert_ne!(srt, vtt);
+    }
+
+    // ── audio_zip_entry_name (H1 backup collision) ──────────────────────────
+
+    #[test]
+    fn zip_entry_keeps_the_day_folder() {
+        let dir = std::path::Path::new("/data/audio");
+        let path = std::path::Path::new("/data/audio/2026-05-19/143500042.wav");
+        assert_eq!(
+            audio_zip_entry_name(dir, path),
+            "audio/2026-05-19/143500042.wav"
+        );
+    }
+
+    #[test]
+    fn zip_entry_distinguishes_same_ms_different_day() {
+        // H1: two recordings at the same ms-of-day on different days share a
+        // `143500042.wav` stem. The flat-name entry collapsed them and one was
+        // lost on restore; preserving the day folder keeps both.
+        let dir = std::path::Path::new("/data/audio");
+        let a = audio_zip_entry_name(dir, std::path::Path::new("/data/audio/2026-05-19/143500042.wav"));
+        let b = audio_zip_entry_name(dir, std::path::Path::new("/data/audio/2026-05-20/143500042.wav"));
+        assert_ne!(a, b, "same-ms-different-day files must not collide");
+    }
+
+    #[test]
+    fn zip_entry_uses_forward_slashes() {
+        // Portable archives use `/` even when strip_prefix yields a Windows
+        // `2026-05-19\143500042.wav` relative path.
+        let dir = std::path::Path::new(r"C:\data\audio");
+        let path = std::path::Path::new(r"C:\data\audio\2026-05-19\143500042.wav");
+        let name = audio_zip_entry_name(dir, path);
+        assert!(!name.contains('\\'), "no backslashes: {name}");
+        assert_eq!(name, "audio/2026-05-19/143500042.wav");
+    }
+
+    // ── reject_sensitive_dir_dest (save_text_export defense-in-depth) ───────
+
+    #[test]
+    fn sensitive_dir_check_allows_an_ordinary_destination() {
+        // A normal save target (an existing temp dir) is fine — the guard only
+        // tightens, it must never block a legitimate export.
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("transcript.txt");
+        assert!(reject_sensitive_dir_dest(&dest.to_string_lossy()).is_ok());
+    }
+
+    #[test]
+    fn sensitive_dir_check_allows_a_bare_filename() {
+        // No parent component → writes to the cwd, which is never a guarded root.
+        assert!(reject_sensitive_dir_dest("transcript.txt").is_ok());
+    }
+
+    #[test]
+    fn sensitive_dir_check_rejects_the_config_dir() {
+        // A write whose parent canonicalizes inside phoneme's config dir is
+        // denied. Skip if the config dir doesn't exist on this box (canonicalize
+        // would fail-closed and the guard couldn't fire — nothing to assert).
+        let Some(dirs) = directories::ProjectDirs::from("", "", "phoneme") else {
+            return;
+        };
+        let cfg_dir = dirs.config_dir().to_path_buf();
+        if std::fs::create_dir_all(&cfg_dir).is_err() {
+            return;
+        }
+        let dest = cfg_dir.join("config.toml");
+        assert!(
+            reject_sensitive_dir_dest(&dest.to_string_lossy()).is_err(),
+            "a write into the config dir must be refused"
+        );
     }
 }

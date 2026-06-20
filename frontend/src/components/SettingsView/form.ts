@@ -65,9 +65,9 @@ export function renderField(field: Field, value: any): string {
         field.options
           ?.map(
             (o) =>
-              `<option value="${o.value}" ${
+              `<option value="${escapeAttr(String(o.value))}" ${
                 o.value === value ? "selected" : ""
-              }>${o.label}</option>`,
+              }>${escapeHtml(o.label)}</option>`,
           )
           .join("") ?? ""
       }</select>`;
