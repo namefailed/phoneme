@@ -627,6 +627,17 @@ trust boundary.*
   round-trip is bounded so a wedged daemon can't hang a request. Opt-in via
   `[rest_api] enabled = true` (`port` default 3737). See
   [REST API](docs/developer-guide/rest_api.md).
+- [x] **REST API breadth** — the bridge maps a much wider, high-value slice of
+  the IPC surface beyond the original list/get/segments/search/record set:
+  read routes for words (`GET /api/recordings/{id}/words`), more-like-this
+  (`/similar`), a recording's tags (`/tags`), the tag list (`GET /api/tags`),
+  and the pipeline queue (`GET /api/queue`); mutating routes to set/clear a
+  title (`POST /api/recordings/{id}/title`), star (`/favorite`), attach
+  (`POST .../tags`) and detach (`DELETE .../tags/{tag_id}`) a tag, re-run
+  cleanup/summary (`/cleanup`, `/summary`), and start/stop a meeting
+  (`POST /api/meeting/{start,stop}`). Each is the same thin one-HTTP-call →
+  one-`Request` mapping, reusing the existing id-validation (`400`), error→status,
+  and loopback/`Origin` (CSRF) guards. Unit + route tests cover every addition.
 - [x] **Webhook HMAC signing + custom headers** — when `[webhook] hmac_secret`
   is set, every outbound webhook POST carries an `X-Phoneme-Signature:
   sha256=<hex>` header (HMAC-SHA256 over the exact body bytes), so a receiver can

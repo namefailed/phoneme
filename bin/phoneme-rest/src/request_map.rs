@@ -81,12 +81,142 @@ pub fn get_segments(id: RecordingId) -> Request {
     Request::GetSegments { id }
 }
 
+/// `GET /api/recordings/:id/words` → [`Request::GetWords`].
+pub fn get_words(id: RecordingId) -> Request {
+    Request::GetWords { id }
+}
+
 /// `GET /api/search` → [`Request::SemanticSearch`].
 pub fn search(q: &SearchQuery) -> Request {
     Request::SemanticSearch {
         query: q.q.clone(),
         limit: q.limit.unwrap_or(DEFAULT_SEARCH_LIMIT),
     }
+}
+
+/// Query parameters for `GET /api/recordings/:id/similar` ("more like this").
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SimilarQuery {
+    /// Maximum number of results. Defaults to [`DEFAULT_SEARCH_LIMIT`].
+    pub limit: Option<usize>,
+}
+
+/// `GET /api/recordings/:id/similar` → [`Request::MoreLikeThis`].
+pub fn more_like_this(id: RecordingId, q: &SimilarQuery) -> Request {
+    Request::MoreLikeThis {
+        id,
+        limit: q.limit.unwrap_or(DEFAULT_SEARCH_LIMIT),
+    }
+}
+
+/// `GET /api/tags` → [`Request::ListTags`] (tags attached to ≥1 recording).
+pub fn list_tags() -> Request {
+    Request::ListTags
+}
+
+/// `GET /api/recordings/:id/tags` → [`Request::TagsFor`].
+pub fn tags_for(id: RecordingId) -> Request {
+    Request::TagsFor { recording_id: id }
+}
+
+/// `GET /api/queue` → [`Request::ListQueue`].
+pub fn list_queue() -> Request {
+    Request::ListQueue
+}
+
+/// JSON body for `POST /api/recordings/:id/title`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TitleBody {
+    /// The user's title, or `null`/absent to clear it back to auto-generation.
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// `POST /api/recordings/:id/title` → [`Request::SetRecordingTitle`].
+pub fn set_title(id: RecordingId, body: &TitleBody) -> Request {
+    Request::SetRecordingTitle {
+        id,
+        title: body.title.clone(),
+    }
+}
+
+/// JSON body for `POST /api/recordings/:id/favorite`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct FavoriteBody {
+    /// `true` = starred.
+    #[serde(default)]
+    pub favorite: bool,
+}
+
+/// `POST /api/recordings/:id/favorite` → [`Request::SetFavorite`].
+pub fn set_favorite(id: RecordingId, body: &FavoriteBody) -> Request {
+    Request::SetFavorite {
+        id,
+        favorite: body.favorite,
+    }
+}
+
+/// JSON body for `POST /api/recordings/:id/tags`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AttachTagBody {
+    /// The tag's id to attach.
+    pub tag_id: i64,
+}
+
+/// `POST /api/recordings/:id/tags` → [`Request::AttachTag`].
+pub fn attach_tag(id: RecordingId, body: &AttachTagBody) -> Request {
+    Request::AttachTag {
+        recording_id: id,
+        tag_id: body.tag_id,
+    }
+}
+
+/// `DELETE /api/recordings/:id/tags/:tag_id` → [`Request::DetachTag`].
+pub fn detach_tag(id: RecordingId, tag_id: i64) -> Request {
+    Request::DetachTag {
+        recording_id: id,
+        tag_id,
+    }
+}
+
+/// `POST /api/recordings/:id/cleanup` → [`Request::RerunCleanup`].
+///
+/// Re-runs only the LLM cleanup step against the stored original transcript,
+/// using the configured `[llm_post_process]` connection. The REST surface does
+/// not expose the per-run provider/model/prompt overrides — they all stay
+/// `None` (the configured values), keeping the endpoint a plain "re-clean this".
+pub fn rerun_cleanup(id: RecordingId) -> Request {
+    Request::RerunCleanup {
+        id,
+        model: None,
+        provider: None,
+        prompt: None,
+        api_url: None,
+        api_key: None,
+    }
+}
+
+/// `POST /api/recordings/:id/summary` → [`Request::RerunSummary`].
+///
+/// Generates (or regenerates) an LLM summary of the recording's current
+/// transcript using the configured summary model/prompt; the per-run overrides
+/// are not exposed over REST (both `None`).
+pub fn rerun_summary(id: RecordingId) -> Request {
+    Request::RerunSummary {
+        id,
+        model: None,
+        prompt: None,
+    }
+}
+
+/// `POST /api/meeting/start` → [`Request::StartMeeting`].
+pub fn meeting_start() -> Request {
+    Request::StartMeeting
+}
+
+/// `POST /api/meeting/stop` → [`Request::StopMeeting`].
+pub fn meeting_stop() -> Request {
+    Request::StopMeeting
 }
 
 /// `POST /api/record/start` → [`Request::RecordStart`].
@@ -219,5 +349,146 @@ mod tests {
     fn record_stop_and_status_map_to_their_variants() {
         assert_eq!(record_stop(), Request::RecordStop);
         assert_eq!(daemon_status(), Request::DaemonStatus);
+    }
+
+    #[test]
+    fn get_words_carries_the_id() {
+        let id = parse_id("20260519T143500042").unwrap();
+        match get_words(id.clone()) {
+            Request::GetWords { id: got } => assert_eq!(got, id),
+            other => panic!("expected GetWords, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn more_like_this_carries_id_and_limit() {
+        let id = parse_id("20260519T143500042").unwrap();
+        // Default limit when absent.
+        match more_like_this(id.clone(), &SimilarQuery::default()) {
+            Request::MoreLikeThis { id: got, limit } => {
+                assert_eq!(got, id);
+                assert_eq!(limit, DEFAULT_SEARCH_LIMIT);
+            }
+            other => panic!("expected MoreLikeThis, got {other:?}"),
+        }
+        // Explicit limit honored.
+        match more_like_this(id.clone(), &SimilarQuery { limit: Some(7) }) {
+            Request::MoreLikeThis { limit, .. } => assert_eq!(limit, 7),
+            other => panic!("expected MoreLikeThis, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tags_endpoints_map_to_their_variants() {
+        assert_eq!(list_tags(), Request::ListTags);
+        assert_eq!(list_queue(), Request::ListQueue);
+
+        let id = parse_id("20260519T143500042").unwrap();
+        match tags_for(id.clone()) {
+            Request::TagsFor { recording_id } => assert_eq!(recording_id, id),
+            other => panic!("expected TagsFor, got {other:?}"),
+        }
+        match attach_tag(id.clone(), &AttachTagBody { tag_id: 42 }) {
+            Request::AttachTag {
+                recording_id,
+                tag_id,
+            } => {
+                assert_eq!(recording_id, id);
+                assert_eq!(tag_id, 42);
+            }
+            other => panic!("expected AttachTag, got {other:?}"),
+        }
+        match detach_tag(id.clone(), 42) {
+            Request::DetachTag {
+                recording_id,
+                tag_id,
+            } => {
+                assert_eq!(recording_id, id);
+                assert_eq!(tag_id, 42);
+            }
+            other => panic!("expected DetachTag, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_title_passes_some_and_none() {
+        let id = parse_id("20260519T143500042").unwrap();
+        match set_title(
+            id.clone(),
+            &TitleBody {
+                title: Some("Quarterly review".into()),
+            },
+        ) {
+            Request::SetRecordingTitle { id: got, title } => {
+                assert_eq!(got, id);
+                assert_eq!(title.as_deref(), Some("Quarterly review"));
+            }
+            other => panic!("expected SetRecordingTitle, got {other:?}"),
+        }
+        // Absent title clears it (back to auto).
+        match set_title(id.clone(), &TitleBody::default()) {
+            Request::SetRecordingTitle { title, .. } => assert_eq!(title, None),
+            other => panic!("expected SetRecordingTitle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_favorite_carries_the_flag() {
+        let id = parse_id("20260519T143500042").unwrap();
+        match set_favorite(id.clone(), &FavoriteBody { favorite: true }) {
+            Request::SetFavorite { id: got, favorite } => {
+                assert_eq!(got, id);
+                assert!(favorite);
+            }
+            other => panic!("expected SetFavorite, got {other:?}"),
+        }
+        // Default body is unstarred.
+        match set_favorite(id.clone(), &FavoriteBody::default()) {
+            Request::SetFavorite { favorite, .. } => assert!(!favorite),
+            other => panic!("expected SetFavorite, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rerun_cleanup_and_summary_leave_overrides_unset() {
+        let id = parse_id("20260519T143500042").unwrap();
+        match rerun_cleanup(id.clone()) {
+            Request::RerunCleanup {
+                id: got,
+                model,
+                provider,
+                prompt,
+                api_url,
+                api_key,
+            } => {
+                assert_eq!(got, id);
+                assert!(
+                    model.is_none()
+                        && provider.is_none()
+                        && prompt.is_none()
+                        && api_url.is_none()
+                        && api_key.is_none(),
+                    "REST cleanup must not carry per-run overrides"
+                );
+            }
+            other => panic!("expected RerunCleanup, got {other:?}"),
+        }
+        match rerun_summary(id.clone()) {
+            Request::RerunSummary {
+                id: got,
+                model,
+                prompt,
+            } => {
+                assert_eq!(got, id);
+                assert!(model.is_none() && prompt.is_none());
+            }
+            other => panic!("expected RerunSummary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn meeting_start_stop_map_to_their_variants() {
+        assert_eq!(meeting_start(), Request::StartMeeting);
+        assert_eq!(meeting_stop(), Request::StopMeeting);
     }
 }

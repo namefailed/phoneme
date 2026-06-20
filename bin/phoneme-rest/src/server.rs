@@ -10,7 +10,7 @@ use axum::extract::Request;
 use axum::http::{header, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 
 use crate::{handlers, sse};
@@ -98,9 +98,22 @@ pub struct AppState {
 /// | GET    | `/api/recordings`             | `ListRecordings`  |
 /// | GET    | `/api/recordings/{id}`        | `GetRecording`    |
 /// | GET    | `/api/recordings/{id}/segments` | `GetSegments`   |
+/// | GET    | `/api/recordings/{id}/words`  | `GetWords`        |
+/// | GET    | `/api/recordings/{id}/similar` | `MoreLikeThis`   |
+/// | GET    | `/api/recordings/{id}/tags`   | `TagsFor`         |
+/// | POST   | `/api/recordings/{id}/tags`   | `AttachTag`       |
+/// | DELETE | `/api/recordings/{id}/tags/{tag_id}` | `DetachTag` |
+/// | POST   | `/api/recordings/{id}/title`  | `SetRecordingTitle` |
+/// | POST   | `/api/recordings/{id}/favorite` | `SetFavorite`   |
+/// | POST   | `/api/recordings/{id}/cleanup` | `RerunCleanup`   |
+/// | POST   | `/api/recordings/{id}/summary` | `RerunSummary`   |
+/// | GET    | `/api/tags`                   | `ListTags`        |
+/// | GET    | `/api/queue`                  | `ListQueue`       |
 /// | GET    | `/api/search`                 | `SemanticSearch`  |
 /// | POST   | `/api/record/start`           | `RecordStart`     |
 /// | POST   | `/api/record/stop`            | `RecordStop`      |
+/// | POST   | `/api/meeting/start`          | `StartMeeting`    |
+/// | POST   | `/api/meeting/stop`           | `StopMeeting`     |
 /// | GET    | `/api/events`                 | `SubscribeEvents` (SSE) |
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -109,9 +122,33 @@ pub fn router(state: AppState) -> Router {
         .route("/api/recordings", get(handlers::list_recordings))
         .route("/api/recordings/{id}", get(handlers::get_recording))
         .route("/api/recordings/{id}/segments", get(handlers::get_segments))
+        .route("/api/recordings/{id}/words", get(handlers::get_words))
+        .route(
+            "/api/recordings/{id}/similar",
+            get(handlers::more_like_this),
+        )
+        .route(
+            "/api/recordings/{id}/tags",
+            get(handlers::tags_for).post(handlers::attach_tag),
+        )
+        .route(
+            "/api/recordings/{id}/tags/{tag_id}",
+            delete(handlers::detach_tag),
+        )
+        .route("/api/recordings/{id}/title", post(handlers::set_title))
+        .route(
+            "/api/recordings/{id}/favorite",
+            post(handlers::set_favorite),
+        )
+        .route("/api/recordings/{id}/cleanup", post(handlers::rerun_cleanup))
+        .route("/api/recordings/{id}/summary", post(handlers::rerun_summary))
+        .route("/api/tags", get(handlers::list_tags))
+        .route("/api/queue", get(handlers::list_queue))
         .route("/api/search", get(handlers::search))
         .route("/api/record/start", post(handlers::record_start))
         .route("/api/record/stop", post(handlers::record_stop))
+        .route("/api/meeting/start", post(handlers::meeting_start))
+        .route("/api/meeting/stop", post(handlers::meeting_stop))
         .route("/api/events", get(sse::events))
         .layer(axum::middleware::from_fn(loopback_guard))
         .layer(tower_http::trace::TraceLayer::new_for_http())
@@ -481,6 +518,303 @@ mod tests {
             mock.received().is_empty(),
             "a cross-origin GET must be rejected before any IPC request is sent"
         );
+    }
+
+    /// `GET /api/tags` forwards `ListTags`; `GET /api/queue` forwards
+    /// `ListQueue`. Both pass the daemon's JSON through verbatim.
+    #[tokio::test]
+    async fn list_tags_and_queue_forward_their_requests() {
+        let mock = MockDaemon::spawn("tagsqueue", |req| match req {
+            IpcRequest::ListTags => Response::Ok(serde_json::json!([{ "id": 1, "name": "work" }])),
+            IpcRequest::ListQueue => Response::Ok(serde_json::json!([{ "id": "q1" }])),
+            _ => Response::Ok(serde_json::Value::Null),
+        });
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let tags = app
+            .clone()
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/api/tags")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(tags.status(), StatusCode::OK);
+        assert_eq!(
+            body_json(tags).await,
+            serde_json::json!([{ "id": 1, "name": "work" }])
+        );
+
+        let queue = app
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/api/queue")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(queue.status(), StatusCode::OK);
+
+        let got = mock.received();
+        assert!(matches!(got[0], IpcRequest::ListTags));
+        assert!(matches!(got[1], IpcRequest::ListQueue));
+    }
+
+    /// `GET /api/recordings/{id}/words` and `/similar` forward `GetWords` and
+    /// `MoreLikeThis` (the latter honoring `?limit=`).
+    #[tokio::test]
+    async fn words_and_similar_forward_with_id_and_limit() {
+        let mock = MockDaemon::spawn("wordsim", |req| match req {
+            IpcRequest::GetWords { .. } => Response::Ok(serde_json::json!([])),
+            IpcRequest::MoreLikeThis { .. } => Response::Ok(serde_json::json!([])),
+            _ => Response::Ok(serde_json::Value::Null),
+        });
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let words = app
+            .clone()
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/api/recordings/20260519T143500042/words")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(words.status(), StatusCode::OK);
+
+        let similar = app
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/api/recordings/20260519T143500042/similar?limit=4")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(similar.status(), StatusCode::OK);
+
+        let got = mock.received();
+        assert!(matches!(got[0], IpcRequest::GetWords { .. }));
+        match &got[1] {
+            IpcRequest::MoreLikeThis { limit, .. } => assert_eq!(*limit, 4),
+            other => panic!("expected MoreLikeThis, got {other:?}"),
+        }
+    }
+
+    /// `POST /api/recordings/{id}/title` with a JSON body forwards
+    /// `SetRecordingTitle` carrying that title.
+    #[tokio::test]
+    async fn set_title_forwards_json_body() {
+        let mock = MockDaemon::spawn("settitle", |_req| Response::Ok(serde_json::Value::Null));
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let resp = app
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/recordings/20260519T143500042/title")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Quarterly review"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        match &mock.received()[0] {
+            IpcRequest::SetRecordingTitle { title, .. } => {
+                assert_eq!(title.as_deref(), Some("Quarterly review"));
+            }
+            other => panic!("expected SetRecordingTitle, got {other:?}"),
+        }
+    }
+
+    /// `POST /api/recordings/{id}/favorite` forwards `SetFavorite` with the
+    /// flag; `POST .../cleanup` and `.../summary` forward their re-run variants.
+    #[tokio::test]
+    async fn favorite_and_reruns_forward_their_requests() {
+        let mock = MockDaemon::spawn("favrerun", |_req| Response::Ok(serde_json::Value::Null));
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let fav = app
+            .clone()
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/recordings/20260519T143500042/favorite")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"favorite":true}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fav.status(), StatusCode::OK);
+
+        for path in ["cleanup", "summary"] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    HttpRequest::builder()
+                        .method("POST")
+                        .uri(format!("/api/recordings/20260519T143500042/{path}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "POST .../{path} should be 200");
+        }
+
+        let got = mock.received();
+        match &got[0] {
+            IpcRequest::SetFavorite { favorite, .. } => assert!(*favorite),
+            other => panic!("expected SetFavorite, got {other:?}"),
+        }
+        assert!(matches!(got[1], IpcRequest::RerunCleanup { .. }));
+        assert!(matches!(got[2], IpcRequest::RerunSummary { .. }));
+    }
+
+    /// `POST /api/recordings/{id}/tags` attaches; `DELETE
+    /// /api/recordings/{id}/tags/{tag_id}` detaches.
+    #[tokio::test]
+    async fn attach_and_detach_tag_forward_their_requests() {
+        let mock = MockDaemon::spawn("attachtag", |_req| Response::Ok(serde_json::Value::Null));
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let attach = app
+            .clone()
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/recordings/20260519T143500042/tags")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"tag_id":7}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(attach.status(), StatusCode::OK);
+
+        let detach = app
+            .oneshot(
+                HttpRequest::builder()
+                    .method("DELETE")
+                    .uri("/api/recordings/20260519T143500042/tags/7")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(detach.status(), StatusCode::OK);
+
+        let got = mock.received();
+        match &got[0] {
+            IpcRequest::AttachTag { tag_id, .. } => assert_eq!(*tag_id, 7),
+            other => panic!("expected AttachTag, got {other:?}"),
+        }
+        match &got[1] {
+            IpcRequest::DetachTag { tag_id, .. } => assert_eq!(*tag_id, 7),
+            other => panic!("expected DetachTag, got {other:?}"),
+        }
+    }
+
+    /// `POST /api/meeting/start` and `/stop` forward the meeting variants.
+    #[tokio::test]
+    async fn meeting_start_and_stop_forward_their_requests() {
+        let mock = MockDaemon::spawn("meeting", |req| match req {
+            IpcRequest::StartMeeting => Response::Ok(serde_json::json!({ "meeting_id": "m1" })),
+            IpcRequest::StopMeeting => Response::Ok(serde_json::json!({ "meeting_id": "m1" })),
+            _ => Response::Ok(serde_json::Value::Null),
+        });
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        for path in ["start", "stop"] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    HttpRequest::builder()
+                        .method("POST")
+                        .uri(format!("/api/meeting/{path}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+
+        let got = mock.received();
+        assert!(matches!(got[0], IpcRequest::StartMeeting));
+        assert!(matches!(got[1], IpcRequest::StopMeeting));
+    }
+
+    /// A malformed `:id` on a new id-bearing route is `400` and never forwarded
+    /// — same guard as `/api/recordings/{id}`.
+    #[tokio::test]
+    async fn bad_id_on_new_routes_is_400_and_not_forwarded() {
+        let mock = MockDaemon::spawn("badidnew", |_req| Response::Ok(serde_json::Value::Null));
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let resp = app
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/recordings/not-a-real-id/summary")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            mock.received().is_empty(),
+            "a bad id must be rejected before any IPC request is sent"
+        );
+    }
+
+    /// The cross-origin POST guard also covers the new mutating routes (CSRF):
+    /// a foreign `Origin` on `POST .../favorite` is `403` and never forwarded.
+    #[tokio::test]
+    async fn cross_origin_post_on_new_route_is_403() {
+        let mock = MockDaemon::spawn("xorignew", |_req| Response::Ok(serde_json::Value::Null));
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let resp = app
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/recordings/20260519T143500042/favorite")
+                    .header("origin", "http://evil.example.com")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"favorite":true}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert!(mock.received().is_empty());
     }
 
     #[test]

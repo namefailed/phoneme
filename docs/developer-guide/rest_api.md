@@ -77,6 +77,12 @@ observe-only posture, matching the CLI's read-only commands.
 
 All endpoints live under `/api`. Each maps to one daemon `Request`:
 
+Each endpoint still maps one HTTP request to exactly one `phoneme-ipc`
+`Request`. Mutating endpoints carry a small JSON body where the underlying
+`Request` needs a value; everything else is path/query only.
+
+### Read
+
 | Method | Path | Daemon `Request` | Notes |
 |--------|------|------------------|-------|
 | `GET`  | `/api/health` | `DaemonStatus` | `200 {"status":"ok"}` when the daemon answered; `503` otherwise. |
@@ -84,20 +90,44 @@ All endpoints live under `/api`. Each maps to one daemon `Request`:
 | `GET`  | `/api/recordings` | `ListRecordings` | Query params: `limit` (u32), `offset` (u32), `kind` (`single`\|`meeting`; anything else = all). |
 | `GET`  | `/api/recordings/{id}` | `GetRecording` | `id` must be the canonical 18-char id; a malformed id is `400` and is never forwarded. |
 | `GET`  | `/api/recordings/{id}/segments` | `GetSegments` | Transcript segments in timeline order (may be an empty array — a normal state). |
+| `GET`  | `/api/recordings/{id}/words` | `GetWords` | The per-word layer beneath `segments` (word seek, confidence); may be empty. |
+| `GET`  | `/api/recordings/{id}/similar` | `MoreLikeThis` | "More like this" from the recording's stored vectors. Query param: `limit` (usize, default `20`). |
+| `GET`  | `/api/recordings/{id}/tags` | `TagsFor` | The tags attached to one recording. |
+| `GET`  | `/api/tags` | `ListTags` | Tags attached to at least one recording. |
+| `GET`  | `/api/queue` | `ListQueue` | The transcription pipeline queue (processing first, then pending). |
 | `GET`  | `/api/search` | `SemanticSearch` | Query params: `q` (string), `limit` (usize, default `20`). |
-| `POST` | `/api/record/start` | `RecordStart` | Starts a `hold`-mode recording (stop is explicit; dictation/in-place is not exposed). |
-| `POST` | `/api/record/stop` | `RecordStop` | Stops and finalizes the active recording. |
 | `GET`  | `/api/events` | `SubscribeEvents` | Server-Sent Events; see below. |
+
+### Mutate
+
+A state-changing `POST`/`DELETE` carrying a foreign `Origin` is refused with
+`403` (CSRF; see the security section). All id-bearing routes reject a malformed
+`{id}` with `400` before any IPC is sent.
+
+| Method | Path | Daemon `Request` | Body / notes |
+|--------|------|------------------|--------------|
+| `POST`   | `/api/record/start` | `RecordStart` | No body. Starts a `hold`-mode recording (stop is explicit; dictation/in-place is not exposed). |
+| `POST`   | `/api/record/stop` | `RecordStop` | No body. Stops and finalizes the active recording. |
+| `POST`   | `/api/meeting/start` | `StartMeeting` | No body. Starts a dual-track meeting recording. |
+| `POST`   | `/api/meeting/stop` | `StopMeeting` | No body. Stops and finalizes the active meeting. |
+| `POST`   | `/api/recordings/{id}/title` | `SetRecordingTitle` | `{"title":"…"}` to set; `{}` or `{"title":null}` to clear back to auto. |
+| `POST`   | `/api/recordings/{id}/favorite` | `SetFavorite` | `{"favorite":true|false}`. |
+| `POST`   | `/api/recordings/{id}/tags` | `AttachTag` | `{"tag_id":<id>}` — attach an existing tag. |
+| `DELETE` | `/api/recordings/{id}/tags/{tag_id}` | `DetachTag` | No body. Detach a tag from a recording. |
+| `POST`   | `/api/recordings/{id}/cleanup` | `RerunCleanup` | No body. Re-runs the LLM cleanup step against the stored original transcript (configured provider/model/prompt; the per-run overrides are not exposed over REST). |
+| `POST`   | `/api/recordings/{id}/summary` | `RerunSummary` | No body. Generates/regenerates the LLM summary of the current transcript. |
 
 Response bodies are the daemon's JSON values passed straight through (see the
 per-`Request` documentation in `crates/phoneme-ipc/src/schema.rs` for each
 shape). Errors are returned as `{"error":"<message>"}` with the status below.
 
-> **Note:** there is intentionally no `GET /api/recordings/{id}/words` endpoint
-> yet. The daemon *does* have a word-level request — `Request::GetWords` (handled
-> in the IPC bridge and exposed over MCP) returns the per-word layer beneath
-> `GetSegments` — the REST surface simply doesn't map it. Add the endpoint here
-> (forwarding to `GetWords`) when a REST consumer needs word-level data.
+> **Scope.** The REST surface maps a high-value subset of the daemon's IPC
+> `Request` enum — the read/query, tag, single edit, re-run, and recording/
+> meeting-control variants a local automation client needs. It deliberately does
+> **not** expose every variant (speaker-correction, named-voice management,
+> saved searches, queue reordering, doctor/rebuild, config reload, …). Add a
+> route here — mirroring the handler/error shape — when a REST consumer needs
+> one; the mapping is a thin translation in `bin/phoneme-rest/src/request_map.rs`.
 
 ### Error → status mapping
 
@@ -176,16 +206,42 @@ curl -s 'http://127.0.0.1:3737/api/recordings?limit=10'
 # Only meeting tracks, second page of 20
 curl -s 'http://127.0.0.1:3737/api/recordings?kind=meeting&limit=20&offset=20'
 
-# One recording, and its transcript segments
+# One recording, its transcript segments, and its per-word layer
 curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042
 curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/segments
+curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/words
 
-# Semantic search
+# Semantic search, and "more like this" from one recording
 curl -s 'http://127.0.0.1:3737/api/search?q=quarterly%20planning&limit=5'
+curl -s 'http://127.0.0.1:3737/api/recordings/20260519T143500042/similar?limit=5'
+
+# Tags: list all, list one recording's, attach, detach
+curl -s http://127.0.0.1:3737/api/tags
+curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/tags
+curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/tags \
+  -H 'content-type: application/json' -d '{"tag_id":7}'
+curl -s -X DELETE http://127.0.0.1:3737/api/recordings/20260519T143500042/tags/7
+
+# Set a title (or clear it), star it
+curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/title \
+  -H 'content-type: application/json' -d '{"title":"Quarterly review"}'
+curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/favorite \
+  -H 'content-type: application/json' -d '{"favorite":true}'
+
+# Re-run cleanup / summary on the stored transcript
+curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/cleanup
+curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/summary
+
+# Inspect the pipeline queue
+curl -s http://127.0.0.1:3737/api/queue
 
 # Start / stop a recording
 curl -s -X POST http://127.0.0.1:3737/api/record/start
 curl -s -X POST http://127.0.0.1:3737/api/record/stop
+
+# Start / stop a meeting (dual-track)
+curl -s -X POST http://127.0.0.1:3737/api/meeting/start
+curl -s -X POST http://127.0.0.1:3737/api/meeting/stop
 
 # Live event stream (Ctrl-C to stop)
 curl -N http://127.0.0.1:3737/api/events
