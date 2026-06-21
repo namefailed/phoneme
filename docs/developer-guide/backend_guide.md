@@ -140,6 +140,21 @@ A Phoneme-launched Ollama is supervised separately by
 ownership ledger described in
 [architecture.md](architecture.md#2-process-lifecycle--ownership).
 
+**Local-Ollama model management is a tray concern, not a daemon one.** Listing,
+pulling, and deleting models in the local Ollama (the in-app *Manage local
+models* surface) is implemented as Tauri commands in
+[`src-tauri/src/commands/wizard.rs`](../../src-tauri/src/commands/wizard.rs) —
+`ollama_list_installed` (`GET /api/tags`), `ollama_pull_model` (`POST /api/pull`,
+streaming progress to the WebView via the `ollama_pull_progress` event), and
+`ollama_delete_model` (`DELETE /api/delete`). They talk to the local Ollama HTTP
+API directly, the same plane the first-run wizard's `wizard_pull_ollama_model`
+already used (both pulls share one `pull_ollama_model_impl`). This deliberately
+**doesn't** route through the daemon IPC: model management is a purely-local
+Ollama operation with no catalog/queue state, so a daemon round-trip would only
+add latency and a new wire request for no benefit. The daemon's
+`[llm_post_process]` connection is what configures a *remote/custom* Ollama
+endpoint; these management affordances only ever target loopback Ollama.
+
 ---
 
 ## 5. Dual-track meeting alignment (`phoneme-audio`)

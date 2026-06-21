@@ -193,6 +193,26 @@ endpoints, and Ollama's `/api/tags`). Your current model is always shown even if
 it isn't in the fetched list, and you can type any model name as a free-text
 fallback.
 
+### Managing local Ollama models
+
+When your Cleanup provider is a **local Ollama**, a **Manage local models…**
+button appears — both on the **Models picker → Post-processing** tab and in
+**Settings → Post-Processing**. It opens a small manager where you can:
+
+- **See what's installed** — every model in your local Ollama with its on-disk
+  size, so you can tell at a glance what's taking up space.
+- **Pull a new model** — type a model name (e.g. `llama3.2:3b`; the box
+  suggests the curated ones) and watch a live download progress bar. This is the
+  same as running `ollama pull <model>` from a terminal, without leaving the app.
+- **Delete a model** — free its disk with one click (you confirm first). You can
+  always pull it again later.
+
+This is the in-app counterpart to the first-run wizard's model download, so you
+can grow or shrink your local model set at any time. It only manages your
+**local** Ollama (`http://127.0.0.1:11434`); cloud providers manage their own
+model catalogs. If the manager says *"Ollama isn't reachable"*, start Ollama
+(or enable **Start Ollama automatically** above) and reopen it.
+
 ---
 
 ## Where do API keys go?

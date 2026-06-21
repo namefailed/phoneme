@@ -430,6 +430,13 @@ export class ModelPickerElement extends LitElement {
     }
   }
 
+  /** Open the local-Ollama model manager (list / pull / delete). Lazily loaded
+   *  so the manager + its services aren't pulled into the picker's main bundle. */
+  private async manageLocalModels() {
+    const { openOllamaModelManager } = await import("./OllamaModelManager");
+    await openOllamaModelManager();
+  }
+
   private handleOverlayClick(e: MouseEvent) {
     if (e.target === e.currentTarget) {
       this.close(false);
@@ -658,6 +665,12 @@ export class ModelPickerElement extends LitElement {
 
             <label class="mp-label" style="display:${this.llmRealProvider === 'none' ? 'none' : ''}">Model</label>
             <div class="mp-model-host" id="mp-llm-model-host" style="display:${this.llmRealProvider === 'none' ? 'none' : ''}"></div>
+            ${this.llmRealProvider === 'ollama'
+              ? html`<div class="mp-row" style="margin-top:6px;">
+                  <button type="button" class="modal-btn" @click=${this.manageLocalModels}>⤓ Manage local models…</button>
+                  <p class="mp-hint">List, pull, or delete the models installed in your local Ollama.</p>
+                </div>`
+              : ''}
             <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Ollama</b> keeps everything offline.</p>
           </div>
 

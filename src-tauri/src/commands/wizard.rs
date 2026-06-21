@@ -587,15 +587,172 @@ pub struct OllamaPullProgress {
     pub total: Option<u64>,
 }
 
+/// Base URL of the local Ollama HTTP API. The wizard's detect/ping/pull helpers
+/// and the model-management commands all talk to the default loopback Ollama;
+/// the daemon's `[llm_post_process]` connection is what a custom remote endpoint
+/// configures, not these local-management affordances.
+const OLLAMA_LOCAL_BASE: &str = "http://127.0.0.1:11434";
+
+/// Reject a model name that can't be a legitimate Ollama tag before it reaches
+/// the HTTP API. Ollama names are `repo[:tag]` (optionally namespaced/host-
+/// prefixed), so they never contain whitespace or control characters; a blank or
+/// whitespace-bearing value is a UI mistake, not a real model. Keeping the guard
+/// here means the management commands can't be coaxed into firing a request with
+/// a junk body.
+fn valid_ollama_model_name(name: &str) -> bool {
+    let n = name.trim();
+    !n.is_empty() && n.chars().all(|c| !c.is_whitespace() && !c.is_control())
+}
+
+/// One installed Ollama model, as the management UI lists it: the `name` (the
+/// `repo:tag` the user pulls/deletes by) plus its on-disk `size` in bytes
+/// (`None` when Ollama omits it on an older build) and `modified_at` timestamp
+/// string (best-effort, `None` when absent), so the UI can show size + recency
+/// without a second round-trip.
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct OllamaInstalledModel {
+    pub name: String,
+    pub size: Option<u64>,
+    pub modified_at: Option<String>,
+}
+
+/// Parse Ollama's `GET /api/tags` JSON body into the installed-model list,
+/// sorted by name. Pulled out of the command so the (provider-quirk-prone) shape
+/// handling is unit-testable without a live Ollama: `tags` returns
+/// `{ "models": [{ "name", "size", "modified_at", ... }] }`, but a model with no
+/// `name` is skipped and a missing `size`/`modified_at` degrades to `None`
+/// rather than dropping the row.
+fn parse_installed_models(body: &serde_json::Value) -> Vec<OllamaInstalledModel> {
+    let mut models: Vec<OllamaInstalledModel> = body
+        .get("models")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    let name = m.get("name").and_then(|n| n.as_str())?.to_string();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    Some(OllamaInstalledModel {
+                        name,
+                        size: m.get("size").and_then(serde_json::Value::as_u64),
+                        modified_at: m
+                            .get("modified_at")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    models.sort_by(|a, b| a.name.cmp(&b.name));
+    models
+}
+
+/// List the models installed in the local Ollama (`GET /api/tags`). Powers the
+/// "Manage local models" surface (ModelPicker + Settings → Post-Processing). A
+/// read-only probe with a short timeout, so an Ollama that isn't running fails
+/// fast with a clear error the UI can render as "Ollama isn't reachable".
+#[tauri::command]
+pub async fn ollama_list_installed() -> Result<Vec<OllamaInstalledModel>, CommandError> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| CommandError::from(e.to_string()))?;
+    let response = client
+        .get(format!("{OLLAMA_LOCAL_BASE}/api/tags"))
+        .send()
+        .await
+        .map_err(|e| {
+            CommandError::new(
+                "ollama_unreachable",
+                format!("couldn't reach the local Ollama: {e}"),
+            )
+        })?;
+    if !response.status().is_success() {
+        return Err(format!("listing models failed with status: {}", response.status()).into());
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("decoding Ollama model list: {e}"))?;
+    Ok(parse_installed_models(&body))
+}
+
+/// Delete an installed model from the local Ollama (`DELETE /api/delete`),
+/// freeing its disk. Single-shot (no progress): the management UI confirms first
+/// and refreshes the list afterward. The name is validated here so a junk value
+/// can't reach the API.
+#[tauri::command]
+pub async fn ollama_delete_model(model: String) -> Result<(), CommandError> {
+    if !valid_ollama_model_name(&model) {
+        return Err(CommandError::from("Invalid model name"));
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| CommandError::from(e.to_string()))?;
+    // Ollama's delete takes the model name in the JSON body of a DELETE request.
+    let body = serde_json::json!({ "name": model.trim() });
+    let response = client
+        .delete(format!("{OLLAMA_LOCAL_BASE}/api/delete"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            CommandError::new(
+                "ollama_unreachable",
+                format!("couldn't reach the local Ollama: {e}"),
+            )
+        })?;
+    if !response.status().is_success() {
+        // A 404 here means "no such model" — surface that distinctly so the UI
+        // can say so rather than a generic failure.
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(CommandError::new(
+                "not_found",
+                format!("no installed model named {:?}", model.trim()),
+            ));
+        }
+        return Err(format!("delete failed with status: {status}: {detail}").into());
+    }
+    Ok(())
+}
+
+/// Stream a model pull from the local Ollama (`POST /api/pull`), forwarding each
+/// NDJSON progress object to the WebView as an `ollama_pull_progress` event. The
+/// streaming logic is shared with the first-run wizard's pull (see
+/// [`wizard_pull_ollama_model`]); this is the management-surface entry point with
+/// the same wire behavior, so the two never drift.
+#[tauri::command]
+pub async fn ollama_pull_model(window: tauri::Window, model: String) -> Result<(), CommandError> {
+    pull_ollama_model_impl(window, model).await
+}
+
+/// First-run wizard's model pull (kept as its own command name for the wizard's
+/// existing call site + tests). Delegates to the shared implementation so the
+/// wizard and the management surface pull identically.
 #[tauri::command]
 pub async fn wizard_pull_ollama_model(
     window: tauri::Window,
     model: String,
 ) -> Result<(), CommandError> {
+    pull_ollama_model_impl(window, model).await
+}
+
+/// The shared `POST /api/pull` streaming pull both pull commands use. Emits an
+/// `ollama_pull_progress` event per NDJSON status object so any caller's
+/// progress bar updates the same way.
+async fn pull_ollama_model_impl(window: tauri::Window, model: String) -> Result<(), CommandError> {
+    if !valid_ollama_model_name(&model) {
+        return Err(CommandError::from("Invalid model name"));
+    }
     let client = reqwest::Client::new();
-    let body = serde_json::json!({ "name": model });
+    let body = serde_json::json!({ "name": model.trim() });
     let response = client
-        .post("http://127.0.0.1:11434/api/pull")
+        .post(format!("{OLLAMA_LOCAL_BASE}/api/pull"))
         .json(&body)
         .send()
         .await
@@ -615,6 +772,13 @@ pub async fn wizard_pull_ollama_model(
                     continue;
                 }
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    // Ollama signals a pull failure with an `error` field in the
+                    // NDJSON stream (e.g. an unknown model) while still returning
+                    // 200; surface it as a command error instead of silently
+                    // ending an apparently-successful pull.
+                    if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+                        return Err(format!("pull failed: {err}").into());
+                    }
                     let status = v["status"].as_str().unwrap_or("").to_string();
                     let completed = v["completed"].as_u64();
                     let total = v["total"].as_u64();
@@ -913,5 +1077,81 @@ mod tests {
         // Garbage / unparseable.
         assert!(!is_allowed_download_url("not a url"));
         assert!(!is_allowed_download_url("https://"));
+    }
+
+    // ── Ollama model management ───────────────────────────────────────────
+    // The pull/delete commands hand a renderer-supplied model name straight to
+    // the Ollama HTTP API, so the name guard is the boundary that keeps a blank
+    // or whitespace-bearing value from firing a junk request. And `parse_tags`
+    // is the provider-quirk-prone shape handling, kept pure so it's testable
+    // without a live Ollama.
+
+    #[test]
+    fn valid_model_name_accepts_real_ollama_tags() {
+        for name in [
+            "llama3.2:3b",
+            "llama3.2",
+            "phi3:mini",
+            "qwen2.5-coder:7b",
+            "registry.example.com/library/llama3:latest",
+            "user/custom-model:q4_0",
+        ] {
+            assert!(valid_ollama_model_name(name), "should accept {name:?}");
+        }
+        // A leading/trailing space is tolerated (we trim before sending).
+        assert!(valid_ollama_model_name("  llama3.2:3b  "));
+    }
+
+    #[test]
+    fn valid_model_name_rejects_blank_and_inner_whitespace() {
+        assert!(!valid_ollama_model_name(""));
+        assert!(!valid_ollama_model_name("   "));
+        // Whitespace or control chars inside the name are never legitimate.
+        assert!(!valid_ollama_model_name("llama 3.2"));
+        assert!(!valid_ollama_model_name("llama3.2\n:3b"));
+        assert!(!valid_ollama_model_name("llama\t3"));
+    }
+
+    #[test]
+    fn parse_tags_extracts_name_size_and_sorts() {
+        let body = serde_json::json!({
+            "models": [
+                { "name": "phi3:mini", "size": 2_318_920_000u64, "modified_at": "2026-06-01T10:00:00Z" },
+                { "name": "llama3.2:3b", "size": 2_019_393_189u64, "modified_at": "2026-06-10T09:00:00Z" },
+            ]
+        });
+        let models = parse_installed_models(&body);
+        // Sorted by name: llama before phi.
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].name, "llama3.2:3b");
+        assert_eq!(models[0].size, Some(2_019_393_189));
+        assert_eq!(
+            models[0].modified_at.as_deref(),
+            Some("2026-06-10T09:00:00Z")
+        );
+        assert_eq!(models[1].name, "phi3:mini");
+        assert_eq!(models[1].size, Some(2_318_920_000));
+    }
+
+    #[test]
+    fn parse_tags_tolerates_missing_fields_and_empty() {
+        // An older Ollama (or a partial row) may omit size/modified_at — keep the
+        // row, degrade those to None. A nameless row is dropped, not surfaced.
+        let body = serde_json::json!({
+            "models": [
+                { "name": "bare:model" },
+                { "size": 123u64 },          // no name → skipped
+                { "name": "" },              // empty name → skipped
+            ]
+        });
+        let models = parse_installed_models(&body);
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "bare:model");
+        assert_eq!(models[0].size, None);
+        assert_eq!(models[0].modified_at, None);
+
+        // A body with no `models` key (or an empty list) yields an empty list.
+        assert!(parse_installed_models(&serde_json::json!({})).is_empty());
+        assert!(parse_installed_models(&serde_json::json!({ "models": [] })).is_empty());
     }
 }

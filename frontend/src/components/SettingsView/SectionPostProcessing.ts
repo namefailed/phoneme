@@ -100,6 +100,16 @@ export class SectionPostProcessing {
           </div>
         </div>
 
+        <div class="settings-field" id="pp-ollama-manage-field" style="display:none;">
+          <label>Local models</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <button type="button" class="inline-button" id="pp-ollama-manage">⤓ Manage local models…</button>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              List the models installed in your local Ollama, pull new ones, or delete ones you no longer use.
+            </span>
+          </div>
+        </div>
+
         <div class="settings-field" id="llm-timeout-field" style="display:none;">
           <label>Request timeout (seconds)</label>
           <div>${renderField({ key: "llm_post_process.timeout_secs", label: "", kind: "number" }, lp.timeout_secs ?? 30)}</div>
@@ -125,6 +135,11 @@ export class SectionPostProcessing {
     bindFieldEvents(container, config);
     this.wireConnection(cleanupEff);
     this.renderSteps();
+
+    container.querySelector<HTMLButtonElement>("#pp-ollama-manage")?.addEventListener("click", async () => {
+      const { openOllamaModelManager } = await import("../OllamaModelManager");
+      await openOllamaModelManager();
+    });
 
     container.querySelectorAll<HTMLAnchorElement>("#pp-open-playbook, #pp-open-playbook-2").forEach((a) =>
       a.addEventListener("click", (e) => {
@@ -284,6 +299,9 @@ export class SectionPostProcessing {
       if (timeoutEl) timeoutEl.style.display = off ? "none" : "";
       const cloudNote = container.querySelector<HTMLElement>("#llm-cloud-note");
       if (cloudNote) cloudNote.style.display = !off && (group === "cloud" || group === "advanced") ? "" : "none";
+      // "Manage local models" applies only to a local Ollama connection.
+      const manageEl = container.querySelector<HTMLElement>("#pp-ollama-manage-field");
+      if (manageEl) manageEl.style.display = provider === "ollama" ? "" : "none";
     };
 
     const cleanupConnHost = container.querySelector<HTMLElement>("#cleanup-conn-host");
