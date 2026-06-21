@@ -158,11 +158,21 @@ impl Catalog {
     /// like-mode) is ignored — executing a saved search runs the list query, not a
     /// similarity or semantic search.
     ///
+    /// The low-confidence toggle (when the saved filter carries it) maps to the
+    /// daemon's numeric `low_confidence_below` using `low_confidence_threshold` —
+    /// the live `[whisper].low_confidence_threshold` the daemon passes in, so a
+    /// saved search captured with the Low-confidence filter actually filters
+    /// server-side instead of running unfiltered.
+    ///
     /// Errors: [`crate::Error::NotFound`] for an unknown id, and
     /// [`crate::Error::InvalidConfig`] when the stored `filter_json` won't parse
     /// (a hand-edit, a stale shape) — surfaced to the client verbatim rather than
     /// silently running the whole library.
-    pub async fn run_saved_search(&self, id: &str) -> Result<Vec<Recording>> {
+    pub async fn run_saved_search(
+        &self,
+        id: &str,
+        low_confidence_threshold: f32,
+    ) -> Result<Vec<Recording>> {
         let row = sqlx::query("SELECT filter_json FROM saved_searches WHERE id = ?")
             .bind(id)
             .fetch_optional(&self.pool)
@@ -173,7 +183,8 @@ impl Catalog {
             });
         };
         let filter_json: String = row.try_get("filter_json")?;
-        let filter = crate::SavedSearchFilter::parse_to_list_filter(&filter_json)?;
+        let filter =
+            crate::SavedSearchFilter::parse_to_list_filter(&filter_json, low_confidence_threshold)?;
         self.list(&filter).await
     }
 }

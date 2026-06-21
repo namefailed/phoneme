@@ -53,6 +53,15 @@ trust boundary.*
 
 ### Reliability & foundation
 
+- [x] **Saved searches honor the Low-confidence filter** — a saved search captured
+  with the **Low confidence** filter on now actually filters server-side when run
+  (`phoneme list --saved` / the Saved-searches menu). The saved-filter mirror was
+  missing the toggle, so it previously ran unfiltered; it now maps to the
+  configured `[whisper].low_confidence_threshold` like the live sidebar filter.
+- [x] **Library find & replace reports failures** — `phoneme find-replace --library`
+  now warns when some recordings errored mid-sweep (a non-zero `failed` count in
+  the IPC reply) instead of quietly reporting a smaller success count. A recording
+  with no transcript is still a benign skip, not a failure.
 - [x] **Per-binding dictation/preview model overrides actually load** — a custom
   hotkey's one-job whisper model override used to be written only to the main
   server's override slot, which the dedicated live-preview and dictation servers

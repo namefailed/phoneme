@@ -1346,7 +1346,7 @@ async fn run_saved_search_executes_the_stored_filter() {
         .await
         .unwrap();
 
-    let rows = catalog.run_saved_search("ss_meet").await.unwrap();
+    let rows = catalog.run_saved_search("ss_meet", 0.6).await.unwrap();
     assert_eq!(rows.len(), 1, "only the meeting track should match");
     assert_eq!(rows[0].id, meeting.id);
 }
@@ -1367,7 +1367,7 @@ async fn run_saved_search_maps_favorite_and_tag_state() {
         .upsert_saved_search("ss_fav", "Starred", r#"{"kind":"favorite"}"#)
         .await
         .unwrap();
-    let rows = catalog.run_saved_search("ss_fav").await.unwrap();
+    let rows = catalog.run_saved_search("ss_fav", 0.6).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, starred.id);
 
@@ -1376,14 +1376,50 @@ async fn run_saved_search_maps_favorite_and_tag_state() {
         .upsert_saved_search("ss_untagged", "Untagged", r#"{"tag_state":"untagged"}"#)
         .await
         .unwrap();
-    let rows = catalog.run_saved_search("ss_untagged").await.unwrap();
+    let rows = catalog.run_saved_search("ss_untagged", 0.6).await.unwrap();
     assert_eq!(rows.len(), 2, "both recordings are untagged");
+}
+
+#[tokio::test]
+async fn run_saved_search_low_confidence_uses_the_threshold() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // One below-threshold recording (0.4), one above (0.9), one with no aggregate.
+    let low = sample_recording(RecordingId::new());
+    let high = sample_recording(RecordingId::new());
+    let unknown = sample_recording(RecordingId::new());
+    catalog.insert(&low).await.unwrap();
+    catalog.insert(&high).await.unwrap();
+    catalog.insert(&unknown).await.unwrap();
+    catalog.update_confidence(&low.id, Some(0.4)).await.unwrap();
+    catalog
+        .update_confidence(&high.id, Some(0.9))
+        .await
+        .unwrap();
+    // `unknown` keeps a NULL aggregate.
+
+    // A saved search captured with the Low-confidence filter (the UiFilter boolean).
+    catalog
+        .upsert_saved_search("ss_lowconf", "Needs review", r#"{"low_confidence":true}"#)
+        .await
+        .unwrap();
+
+    // Threshold 0.6 (the live config value the daemon threads in): only the
+    // below-threshold recording matches — NULL and high are excluded.
+    let rows = catalog.run_saved_search("ss_lowconf", 0.6).await.unwrap();
+    assert_eq!(rows.len(), 1, "only the below-threshold recording matches");
+    assert_eq!(rows[0].id, low.id);
+
+    // The threshold is honored: at 0.3 nothing is below it, so the saved search
+    // filters server-side rather than running unfiltered.
+    let none = catalog.run_saved_search("ss_lowconf", 0.3).await.unwrap();
+    assert!(none.is_empty(), "no recording is below the 0.3 threshold");
 }
 
 #[tokio::test]
 async fn run_saved_search_unknown_id_is_not_found() {
     let (_dir, catalog) = fresh_catalog().await;
-    let err = catalog.run_saved_search("nope").await.unwrap_err();
+    let err = catalog.run_saved_search("nope", 0.6).await.unwrap_err();
     assert!(
         matches!(err, phoneme_core::Error::NotFound { .. }),
         "unknown saved-search id must be NotFound, got {err:?}"
@@ -1398,7 +1434,7 @@ async fn run_saved_search_malformed_filter_is_invalid_config() {
         .upsert_saved_search("ss_bad", "Bad", r#"{"kind":"bogus"}"#)
         .await
         .unwrap();
-    let err = catalog.run_saved_search("ss_bad").await.unwrap_err();
+    let err = catalog.run_saved_search("ss_bad", 0.6).await.unwrap_err();
     assert!(
         matches!(err, phoneme_core::Error::InvalidConfig(_)),
         "malformed filter_json must be InvalidConfig, got {err:?}"
@@ -1408,7 +1444,10 @@ async fn run_saved_search_malformed_filter_is_invalid_config() {
         .upsert_saved_search("ss_garbage", "Garbage", "not json at all")
         .await
         .unwrap();
-    let err = catalog.run_saved_search("ss_garbage").await.unwrap_err();
+    let err = catalog
+        .run_saved_search("ss_garbage", 0.6)
+        .await
+        .unwrap_err();
     assert!(matches!(err, phoneme_core::Error::InvalidConfig(_)));
 }
 
@@ -1531,6 +1570,131 @@ async fn find_replace_errors_when_no_transcript() {
         .await
         .unwrap_err();
     assert!(matches!(err, phoneme_core::Error::NotFound { .. }));
+}
+
+// ── S6: find & replace across the whole library ───────────────────────────────
+
+#[tokio::test]
+async fn find_replace_library_changes_only_matching_recordings() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // Two recordings match, one doesn't, one has no transcript at all.
+    let a = sample_recording(RecordingId::new());
+    let b = sample_recording(RecordingId::new());
+    let no_match = sample_recording(RecordingId::new());
+    let no_transcript = sample_recording(RecordingId::new());
+    for r in [&a, &b, &no_match, &no_transcript] {
+        catalog.insert(r).await.unwrap();
+    }
+    catalog
+        .update_transcript(&a.id, "the cat and the dog", "raw", "m")
+        .await
+        .unwrap();
+    catalog
+        .update_transcript(&b.id, "the end", "raw", "m")
+        .await
+        .unwrap();
+    catalog
+        .update_transcript(&no_match.id, "nothing here", "raw", "m")
+        .await
+        .unwrap();
+    // `no_transcript` is left with transcript = None.
+
+    let out = catalog
+        .find_replace_transcript_library("the", "a", false)
+        .await
+        .unwrap();
+
+    // Two recordings rewritten, three total replacements (2 in `a`, 1 in `b`).
+    assert_eq!(out.recordings_changed, 2);
+    assert_eq!(out.total_replacements, 3);
+    assert_eq!(out.failed, 0, "no errors on the happy path");
+
+    // The `changed` list holds only the matched ids (the no-match and the
+    // no-transcript recordings are skipped, not present).
+    let changed_ids: std::collections::HashSet<_> =
+        out.changed.iter().map(|(id, _)| id.clone()).collect();
+    assert_eq!(changed_ids.len(), 2);
+    assert!(changed_ids.contains(&a.id));
+    assert!(changed_ids.contains(&b.id));
+    assert!(!changed_ids.contains(&no_match.id));
+    assert!(!changed_ids.contains(&no_transcript.id));
+
+    // The matched transcripts are actually persisted; the no-match one is untouched.
+    assert_eq!(
+        catalog
+            .get(&a.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .transcript
+            .as_deref(),
+        Some("a cat and a dog")
+    );
+    assert_eq!(
+        catalog
+            .get(&b.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .transcript
+            .as_deref(),
+        Some("a end")
+    );
+    let nm = catalog.get(&no_match.id).await.unwrap().unwrap();
+    assert_eq!(nm.transcript.as_deref(), Some("nothing here"));
+    assert!(!nm.user_edited, "a no-match recording stays un-edited");
+}
+
+#[tokio::test]
+async fn find_replace_library_empty_find_is_a_noop() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .update_transcript(&rec.id, "leave me alone", "raw", "m")
+        .await
+        .unwrap();
+
+    let out = catalog
+        .find_replace_transcript_library("", "X", false)
+        .await
+        .unwrap();
+    assert_eq!(out.recordings_changed, 0);
+    assert_eq!(out.total_replacements, 0);
+    assert_eq!(out.failed, 0);
+    assert!(out.changed.is_empty());
+    // Nothing was rewritten.
+    let got = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(got.transcript.as_deref(), Some("leave me alone"));
+    assert!(!got.user_edited);
+}
+
+#[tokio::test]
+async fn find_replace_library_skips_recordings_with_no_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // One recording that matches, one with no transcript yet.
+    let with = sample_recording(RecordingId::new());
+    let without = sample_recording(RecordingId::new());
+    catalog.insert(&with).await.unwrap();
+    catalog.insert(&without).await.unwrap();
+    catalog
+        .update_transcript(&with.id, "find me", "raw", "m")
+        .await
+        .unwrap();
+
+    let out = catalog
+        .find_replace_transcript_library("find", "got", false)
+        .await
+        .unwrap();
+
+    // The no-transcript recording is a benign skip — not an error, not a change.
+    assert_eq!(out.recordings_changed, 1);
+    assert_eq!(out.total_replacements, 1);
+    assert_eq!(out.failed, 0, "no-transcript is a skip, never a failure");
+    assert_eq!(out.changed.len(), 1);
+    assert_eq!(out.changed[0].0, with.id);
 }
 
 #[tokio::test]

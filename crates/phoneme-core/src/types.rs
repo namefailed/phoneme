@@ -275,9 +275,22 @@ pub struct SavedSearchFilter {
     #[serde(default)]
     pub kind: Option<SavedSearchKind>,
     /// The frontend's tag-presence filter: `tagged` / `untagged`. Mapped onto the
-    /// daemon's `tagged` flag.
-    #[serde(default)]
+    /// daemon's `tagged` flag. The saved `filter_json` serializes the camelCase
+    /// `UiFilter` key (`tagState`), so accept it via the alias — without it a saved
+    /// search captured with a tag-state filter would run unfiltered server-side
+    /// (the same class of bug as the low-confidence toggle above).
+    #[serde(default, alias = "tagState")]
     pub tag_state: Option<SavedSearchTagState>,
+    /// The frontend's low-confidence toggle (confidence-driven re-do). A boolean
+    /// mirroring the UI shape (`UiFilter.lowConfidence`); [`Self::into_list_filter`]
+    /// turns `Some(true)` into the daemon's numeric [`ListFilter::low_confidence_below`]
+    /// using the configured `[whisper].low_confidence_threshold`, so a saved search
+    /// captured with the Low-confidence filter actually filters server-side.
+    /// Serde-defaulted: an older snapshot that omits it still parses. The frontend
+    /// serializes the `UiFilter` verbatim, so the persisted key is the camelCase
+    /// `lowConfidence` — accepted via the alias (the snake form parses too).
+    #[serde(default, alias = "lowConfidence")]
+    pub low_confidence: Option<bool>,
 }
 
 /// The frontend's four-way Library `kind` choice (a superset of [`ListKind`]:
@@ -315,7 +328,13 @@ impl SavedSearchFilter {
     /// state (semantic / like-mode) and map the four-way `kind` and `tag_state`
     /// onto the daemon's `kind` / `favorite` / `in_place` / `tagged` fields, so
     /// the same query runs in SQL *before* pagination.
-    pub fn into_list_filter(self) -> ListFilter {
+    ///
+    /// `low_confidence_threshold` is the live `[whisper].low_confidence_threshold`
+    /// the daemon passes in: when this filter's `low_confidence` is `Some(true)`,
+    /// it becomes the numeric [`ListFilter::low_confidence_below`], exactly as the
+    /// frontend's `toWireFilter` does with the same configured value. (Passed in
+    /// rather than read from config here so `phoneme-core` stays config-free.)
+    pub fn into_list_filter(self, low_confidence_threshold: f32) -> ListFilter {
         let mut wire = ListFilter {
             limit: self.limit,
             offset: self.offset,
@@ -339,6 +358,9 @@ impl SavedSearchFilter {
             Some(SavedSearchTagState::Untagged) => wire.tagged = Some(false),
             None => {}
         }
+        if self.low_confidence == Some(true) {
+            wire.low_confidence_below = Some(low_confidence_threshold);
+        }
         wire
     }
 
@@ -346,11 +368,17 @@ impl SavedSearchFilter {
     /// Malformed JSON (a bad shape, an unknown `kind`/`status`, a hand-edit)
     /// surfaces as [`crate::Error::InvalidConfig`] so the daemon can return a
     /// clear error rather than silently running an empty/whole-library query.
-    pub fn parse_to_list_filter(filter_json: &str) -> crate::Result<ListFilter> {
+    ///
+    /// `low_confidence_threshold` threads the live config value through to
+    /// [`Self::into_list_filter`] for the low-confidence toggle.
+    pub fn parse_to_list_filter(
+        filter_json: &str,
+        low_confidence_threshold: f32,
+    ) -> crate::Result<ListFilter> {
         let parsed: SavedSearchFilter = serde_json::from_str(filter_json).map_err(|e| {
             crate::Error::InvalidConfig(format!("malformed saved search filter: {e}"))
         })?;
-        Ok(parsed.into_list_filter())
+        Ok(parsed.into_list_filter(low_confidence_threshold))
     }
 }
 
@@ -878,40 +906,62 @@ mod tests {
     fn saved_search_filter_mirrors_to_wire_filter() {
         // `kind:"meeting"` → daemon `kind`.
         let f: SavedSearchFilter = serde_json::from_str(r#"{"kind":"meeting"}"#).unwrap();
-        let wire = f.into_list_filter();
+        let wire = f.into_list_filter(0.6);
         assert_eq!(wire.kind, Some(ListKind::Meeting));
         assert_eq!(wire.favorite, None);
         assert_eq!(wire.in_place, None);
 
         // `kind:"favorite"` → `favorite:true`; `kind:"in_place"` → `in_place:true`.
         let fav: SavedSearchFilter = serde_json::from_str(r#"{"kind":"favorite"}"#).unwrap();
-        assert_eq!(fav.into_list_filter().favorite, Some(true));
+        assert_eq!(fav.into_list_filter(0.6).favorite, Some(true));
         let ip: SavedSearchFilter = serde_json::from_str(r#"{"kind":"in_place"}"#).unwrap();
-        assert_eq!(ip.into_list_filter().in_place, Some(true));
+        assert_eq!(ip.into_list_filter(0.6).in_place, Some(true));
 
         // `tag_state` maps onto `tagged`.
         let tagged: SavedSearchFilter = serde_json::from_str(r#"{"tag_state":"tagged"}"#).unwrap();
-        assert_eq!(tagged.into_list_filter().tagged, Some(true));
+        assert_eq!(tagged.into_list_filter(0.6).tagged, Some(true));
         let untagged: SavedSearchFilter =
             serde_json::from_str(r#"{"tag_state":"untagged"}"#).unwrap();
-        assert_eq!(untagged.into_list_filter().tagged, Some(false));
+        assert_eq!(untagged.into_list_filter(0.6).tagged, Some(false));
 
         // UI-only fields (semantic / like_id / like_label) are accepted-and-ignored.
         let ui: SavedSearchFilter = serde_json::from_str(
             r#"{"search":"hi","semantic":true,"like_id":"x","like_label":"y","kind":"all"}"#,
         )
         .unwrap();
-        let wire = ui.into_list_filter();
+        let wire = ui.into_list_filter(0.6);
         assert_eq!(wire.search.as_deref(), Some("hi"));
         assert_eq!(wire.kind, None, "kind:all is no filter");
     }
 
     #[test]
+    fn saved_search_filter_low_confidence_maps_to_threshold() {
+        // `low_confidence:true` becomes the daemon's numeric `low_confidence_below`
+        // using the configured threshold the daemon threads in.
+        let on: SavedSearchFilter = serde_json::from_str(r#"{"low_confidence":true}"#).unwrap();
+        assert_eq!(on.into_list_filter(0.42).low_confidence_below, Some(0.42));
+
+        // The frontend serializes the camelCase `UiFilter` key verbatim; the alias
+        // must accept it, or a real snapshot still runs unfiltered.
+        let camel: SavedSearchFilter = serde_json::from_str(r#"{"lowConfidence":true}"#).unwrap();
+        assert_eq!(
+            camel.into_list_filter(0.42).low_confidence_below,
+            Some(0.42)
+        );
+
+        // Absent / false leaves it unset (no filter).
+        let off: SavedSearchFilter = serde_json::from_str(r#"{"low_confidence":false}"#).unwrap();
+        assert_eq!(off.into_list_filter(0.42).low_confidence_below, None);
+        let absent: SavedSearchFilter = serde_json::from_str("{}").unwrap();
+        assert_eq!(absent.into_list_filter(0.42).low_confidence_below, None);
+    }
+
+    #[test]
     fn saved_search_filter_rejects_malformed() {
-        assert!(SavedSearchFilter::parse_to_list_filter(r#"{"kind":"bogus"}"#).is_err());
-        assert!(SavedSearchFilter::parse_to_list_filter("not json").is_err());
+        assert!(SavedSearchFilter::parse_to_list_filter(r#"{"kind":"bogus"}"#, 0.6).is_err());
+        assert!(SavedSearchFilter::parse_to_list_filter("not json", 0.6).is_err());
         // An empty object parses to an all-recordings filter.
-        let f = SavedSearchFilter::parse_to_list_filter("{}").unwrap();
+        let f = SavedSearchFilter::parse_to_list_filter("{}", 0.6).unwrap();
         assert_eq!(f, ListFilter::default());
     }
 

@@ -229,6 +229,11 @@ pub struct FindReplaceOutcome {
 /// recording is skipped entirely (no write, no version churn, no event), so the
 /// caller can run its per-recording re-flow/re-embed/event upkeep over exactly
 /// the recordings that were touched.
+///
+/// A recording whose update *errored* (anything other than the benign
+/// no-transcript `NotFound`, which is a normal skip) is counted in `failed` and
+/// its id pushed to `failed_ids`, so the caller can tell the user that some rows
+/// errored rather than silently reporting a smaller success count.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FindReplaceLibraryOutcome {
     /// Number of recordings whose live transcript was actually rewritten.
@@ -238,6 +243,12 @@ pub struct FindReplaceLibraryOutcome {
     /// `(id, new transcript)` for each recording that changed, so the caller can
     /// re-flow timing, re-embed, and emit `transcript_updated` per recording.
     pub changed: Vec<(RecordingId, String)>,
+    /// Number of recordings whose update errored (excluding the benign
+    /// no-transcript skip), so a partial failure isn't hidden as a smaller
+    /// success count.
+    pub failed: usize,
+    /// The ids of the recordings counted in `failed`, for diagnostics.
+    pub failed_ids: Vec<RecordingId>,
 }
 
 /// One step's transcript output in a compounding recipe (PB-COMPOUND). `idx` is

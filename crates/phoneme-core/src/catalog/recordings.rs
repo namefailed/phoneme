@@ -450,12 +450,16 @@ impl Catalog {
                 // no churn).
                 Ok(_) => {}
                 // A recording with no transcript yet reports NotFound from the
-                // per-recording path — for the bulk path that's a skip, not a
-                // failure. Any other error is logged and skipped so one bad row
-                // can't abort the whole sweep.
+                // per-recording path — for the bulk path that's a benign skip, not
+                // a failure.
                 Err(crate::error::Error::NotFound { .. }) => {}
+                // Any other error is logged and skipped so one bad row can't abort
+                // the whole sweep — but it's counted as a failure so the caller can
+                // surface it rather than silently reporting a smaller success count.
                 Err(e) => {
-                    tracing::warn!(id = %rec.id, error = %e, "library find-replace: skipping a recording that failed to update");
+                    tracing::warn!(id = %rec.id, error = %e, "library find-replace: a recording failed to update");
+                    outcome.failed += 1;
+                    outcome.failed_ids.push(rec.id);
                 }
             }
         }

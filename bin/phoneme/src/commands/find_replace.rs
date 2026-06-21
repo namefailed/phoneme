@@ -89,10 +89,16 @@ pub async fn run(args: FindReplaceArgs, cfg: &Config, json: bool) -> ExitCode {
             .get("total_replacements")
             .and_then(|n| n.as_u64())
             .unwrap_or(0);
+        let failed = value.get("failed").and_then(|n| n.as_u64()).unwrap_or(0);
         match (recs, total) {
             (0, _) => println!("no matches across the library (nothing changed)"),
             (1, n) => println!("replaced {n} occurrence(s) in 1 recording"),
             (r, n) => println!("replaced {n} occurrence(s) across {r} recordings"),
+        }
+        // Some rows errored mid-sweep: say so plainly rather than letting the
+        // smaller success count imply everything that could match was handled.
+        if failed > 0 {
+            eprintln!("warning: {failed} recording(s) failed to update (see the daemon log)");
         }
     } else {
         let replaced = value.get("replaced").and_then(|n| n.as_u64()).unwrap_or(0);

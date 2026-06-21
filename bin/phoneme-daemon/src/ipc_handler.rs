@@ -305,10 +305,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         // S2: run a stored saved search by id server-side. Same recordings shape
         // as `ListRecordings`: the catalog parses `filter_json` into a `ListFilter`
         // and runs the normal list query.
-        Request::RunSavedSearch { id } => match state.catalog.run_saved_search(&id).await {
-            Ok(rows) => serialize_response(rows),
-            Err(e) => err_response(&e),
-        },
+        Request::RunSavedSearch { id } => {
+            let threshold = state.config.load().whisper.low_confidence_threshold;
+            match state.catalog.run_saved_search(&id, threshold).await {
+                Ok(rows) => serialize_response(rows),
+                Err(e) => err_response(&e),
+            }
+        }
         Request::ListMeeting { meeting_id } => {
             match state.catalog.list_by_meeting(&meeting_id).await {
                 Ok(rows) => serialize_response(rows),
@@ -732,6 +735,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Response::Ok(serde_json::json!({
                     "recordings_changed": outcome.recordings_changed,
                     "total_replacements": outcome.total_replacements,
+                    "failed": outcome.failed,
                 }))
             }
             Err(e) => err_response(&e),
@@ -2965,7 +2969,8 @@ async fn reflow_and_reembed_after_edit(
     id: &phoneme_core::RecordingId,
     new_text: &str,
 ) {
-    if state.config.load().editor.resync_views_on_edit {
+    let cfg = state.config.load();
+    if cfg.editor.resync_views_on_edit {
         match state.catalog.words_for(id).await {
             Ok(old_words) => {
                 if let Some(r) = phoneme_core::realign::realign_transcript(new_text, &old_words) {
@@ -2974,6 +2979,21 @@ async fn reflow_and_reembed_after_edit(
                     }
                     if let Err(e) = state.catalog.replace_segments(id, &r.segments).await {
                         tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed segments");
+                    }
+                    // The re-flow changed the per-word layer — hand-edited words
+                    // typically drop to NULL confidence — so the row-level
+                    // `mean_confidence` aggregate is now stale. Recompute it from
+                    // the re-flowed words against the live threshold so the badge
+                    // and the low-confidence filter stay correct (the migration
+                    // invariant: `mean_confidence` mirrors the stored words).
+                    // Best-effort like the rest of this function.
+                    let mean = phoneme_core::ConfidenceAggregate::compute(
+                        &r.words,
+                        cfg.whisper.low_confidence_threshold,
+                    )
+                    .map(|a| a.mean);
+                    if let Err(e) = state.catalog.update_confidence(id, mean).await {
+                        tracing::warn!(id = %id, error = %e, "re-align: failed to refresh mean_confidence");
                     }
                 }
             }

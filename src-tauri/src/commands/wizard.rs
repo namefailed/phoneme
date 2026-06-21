@@ -762,36 +762,61 @@ async fn pull_ollama_model_impl(window: tauri::Window, model: String) -> Result<
         return Err(format!("pull failed with status: {}", response.status()).into());
     }
 
+    // Parse one complete NDJSON line: emit its progress, or surface a terminal
+    // `{"error":...}` as a command error. Ollama signals a pull failure with an
+    // `error` field in the stream (e.g. an unknown model) while still returning
+    // 200, so a dropped error line silently turns a FAILED pull into a success.
+    let handle_line = |line: &str| -> Result<(), CommandError> {
+        if line.trim().is_empty() {
+            return Ok(());
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            return Ok(());
+        };
+        if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+            return Err(format!("pull failed: {err}").into());
+        }
+        let status = v["status"].as_str().unwrap_or("").to_string();
+        let completed = v["completed"].as_u64();
+        let total = v["total"].as_u64();
+        let _ = window.emit(
+            "ollama_pull_progress",
+            OllamaPullProgress {
+                status,
+                completed,
+                total,
+            },
+        );
+        Ok(())
+    };
+
     use futures::StreamExt;
     let mut stream = response.bytes_stream();
+    // A leftover buffer carried across chunks: a JSON object can be split across
+    // two HTTP byte-chunks, so we only parse on a newline boundary and keep any
+    // trailing partial line for the next chunk (or the post-stream remainder).
+    let mut buf: Vec<u8> = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("stream error: {}", e))?;
-        if let Ok(s) = std::str::from_utf8(&chunk) {
-            for line in s.lines() {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                    // Ollama signals a pull failure with an `error` field in the
-                    // NDJSON stream (e.g. an unknown model) while still returning
-                    // 200; surface it as a command error instead of silently
-                    // ending an apparently-successful pull.
-                    if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
-                        return Err(format!("pull failed: {err}").into());
-                    }
-                    let status = v["status"].as_str().unwrap_or("").to_string();
-                    let completed = v["completed"].as_u64();
-                    let total = v["total"].as_u64();
-                    let _ = window.emit(
-                        "ollama_pull_progress",
-                        OllamaPullProgress {
-                            status,
-                            completed,
-                            total,
-                        },
-                    );
-                }
+        buf.extend_from_slice(&chunk);
+        // Split off every complete (newline-terminated) line, leaving the partial
+        // tail in `buf`.
+        while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+            let mut line: Vec<u8> = buf.drain(..=nl).collect();
+            line.pop(); // drop the '\n'
+            if line.last() == Some(&b'\r') {
+                line.pop(); // tolerate CRLF framing
             }
+            if let Ok(s) = std::str::from_utf8(&line) {
+                handle_line(s)?;
+            }
+        }
+    }
+    // After the stream ends, parse any non-empty remainder (a final line not
+    // newline-terminated) so a terminal error/status line is never lost.
+    if !buf.is_empty() {
+        if let Ok(s) = std::str::from_utf8(&buf) {
+            handle_line(s)?;
         }
     }
     Ok(())

@@ -377,7 +377,7 @@ async fn transcribe_polish_type(
     // and waits on that server's spawn generation. Main role keeps the historic
     // behavior byte-for-byte.
     let role = crate::app_state::in_place_override_role(&cfg);
-    let (overridden_stt, _model_guard) = crate::pipeline::apply_model_override_for_role(
+    let (overridden_stt, model_guard) = crate::pipeline::apply_model_override_for_role(
         state,
         role,
         cfg.in_place_provider_config(),
@@ -395,6 +395,15 @@ async fn transcribe_polish_type(
         // is never a meeting track, so the normal `Diarize` hint applies.
         .transcribe_with_segments(audio_path, language.as_deref(), DiarizationTrack::Diarize)
         .await?;
+    // Restore the configured whisper model BEFORE releasing the permit, mirroring
+    // the queued pipeline's `drop(guard) -> drop(permit)` order: the override slot
+    // must be cleared while the bundled server is still gated. Otherwise a second
+    // override-bearing job could take the permit during the polish/typing work
+    // below and have its own override clobbered (and the server restarted
+    // mid-transcription) when this guard finally dropped at function end — the
+    // exact #49 whisper-server thrash / wrong-model class. The polish + typing
+    // steps below never touch the whisper server, so neither needs to be held.
+    drop(model_guard);
     drop(permit);
 
     let raw = transcription.text.clone();

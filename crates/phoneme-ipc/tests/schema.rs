@@ -159,6 +159,33 @@ fn find_replace_defaults_case_sensitive_to_false() {
 }
 
 #[test]
+fn find_replace_library_request_roundtrips() {
+    // S6: library-wide literal find-replace, both case modes.
+    roundtrip(&Request::FindReplaceLibrary {
+        find: "teh".into(),
+        replace: "the".into(),
+        case_sensitive: false,
+    });
+    roundtrip(&Request::FindReplaceLibrary {
+        find: "API".into(),
+        replace: "api".into(),
+        case_sensitive: true,
+    });
+}
+
+#[test]
+fn find_replace_library_defaults_case_sensitive_to_false() {
+    // Omitting `case_sensitive` decodes to the forgiving default (insensitive),
+    // matching `find_replace`.
+    let json = r#"{"type":"find_replace_library","find":"a","replace":"b"}"#;
+    let parsed: Request = serde_json::from_str(json).unwrap();
+    let Request::FindReplaceLibrary { case_sensitive, .. } = parsed else {
+        panic!("expected find_replace_library");
+    };
+    assert!(!case_sensitive);
+}
+
+#[test]
 fn get_segments_request_roundtrips() {
     roundtrip(&Request::GetSegments {
         id: RecordingId::new(),

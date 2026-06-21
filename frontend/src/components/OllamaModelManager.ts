@@ -15,7 +15,7 @@
 import { closeModalOverlay } from "../utils/modalAnim";
 import { showToast } from "../utils/toast";
 import { errText } from "../utils/error";
-import { escapeHtml } from "../utils/format";
+import { escapeHtml, escapeAttr } from "../utils/format";
 import { confirmDialog } from "./confirmDialog";
 import {
   listInstalledOllamaModels,
@@ -116,13 +116,13 @@ export function openOllamaModelManager(): Promise<void> {
       listEl.innerHTML = models
         .map(
           (m) => `
-        <div class="om-row" data-name="${escapeHtml(m.name)}"
+        <div class="om-row" data-name="${escapeAttr(m.name)}"
           style="display:flex; align-items:center; gap:10px; padding:8px 6px; border-bottom:1px solid var(--border-subtle);">
           <div style="flex:1; min-width:0;">
             <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.name)}</div>
             <div style="font-size:0.75rem; color: var(--fg-faded);">${escapeHtml(formatBytes(m.size))}</div>
           </div>
-          <button class="modal-btn modal-btn-danger om-del" data-name="${escapeHtml(m.name)}" type="button" title="Delete ${escapeHtml(m.name)}">Delete</button>
+          <button class="modal-btn modal-btn-danger om-del" data-name="${escapeAttr(m.name)}" type="button" title="Delete ${escapeAttr(m.name)}">Delete</button>
         </div>`,
         )
         .join("");
