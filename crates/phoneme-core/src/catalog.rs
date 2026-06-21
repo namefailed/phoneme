@@ -2990,8 +2990,9 @@ impl Catalog {
             .bind(from_id)
             .execute(&self.pool)
             .await?;
-        // Drop any undo-log rows keyed by the absorbed voice — the hard delete below
-        // has no FK cascade, so these would otherwise orphan.
+        // Drop any undo-log rows keyed by the absorbed voice. The FK added in
+        // 20260620000004 now also cascades these on the hard delete below; the
+        // explicit DELETE stays as belt-and-suspenders (and documents the intent).
         sqlx::query("DELETE FROM forgotten_voiceprint_links WHERE named_voice_id = ?")
             .bind(from_id)
             .execute(&self.pool)
