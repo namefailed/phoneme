@@ -55,19 +55,14 @@ The committed work that's in flight or immediately next. This is the active work
 ### Diarization quality
 *The prerequisite for trustworthy Meetings — don't build naming UX on wrong labels.*
 
-- 🔨 **Named-speaker recognition — tuning & validation** — the recognition stack itself **shipped** (voiceprint capture → enroll-on-rename → cosine match → GUI suggestions; see CHANGELOG). What remains is *forward* work: empirically calibrate the merge + match cosine thresholds (both default `0.5`, hand-tuned on a small sample) on real multi-speaker recordings, a native test pass, and tagging stored voiceprints with the embedding-model version so a `models_dir` swap can't silently match against incompatible centroids.
-- 🔨 **DER eval harness** — an RTTM fixture set + a dev-only harness behind speakrs's `_metrics` feature (or a reimplemented collar-0 DER), wired as an optional nightly job (not a release gate).
-- 🔬 **Curated diarization model bundles** — selectable alternative speakrs bundles in the setup wizard (pinned SHA-256, after verifying ONNX shapes match). *(The `diarization.models_dir` override that loads a custom bundle already ships; this is the curated-catalog half.)*
-- 🔨 **In-recording speaker correction — detail-pane editor** — the backend + wire contract **shipped** (reassign / merge / split a recording's speakers: `catalog::{reassign_segment,merge_speakers,split_speaker}`, `ReassignSegmentSpeaker` / `MergeSpeakers` / `SplitSpeaker` IPC + Tauri commands, `phoneme speaker reassign|merge|split`; segments stay authoritative and the prose `[Speaker N]:` markers rebuild in-transaction — see CHANGELOG). What remains is the **interactive merge/split UI** in the recording detail/merged view (click a turn → reassign; select turns → split; pick two speakers → merge), which needs a native design pass. It calls the requests above as-is.
+- 🔨 **Named-speaker recognition — tuning & validation** — the recognition stack itself **shipped** (voiceprint capture → enroll-on-rename → cosine match → GUI suggestions + the cross-recording voice library; see CHANGELOG). What remains is *forward* work: empirically calibrate the merge + match cosine thresholds (both default `0.5`, hand-tuned on a small sample) on real multi-speaker recordings, a native test pass, and tagging stored voiceprints with the embedding-model version so a `models_dir` swap can't silently match against incompatible centroids.
+- 🔬 **Curated diarization model bundles** — selectable alternative speakrs bundles in the setup wizard (pinned SHA-256, after verifying ONNX shapes match). *(The single bundle download + the `diarization.models_dir` custom-bundle override already ship; this is the curated multi-bundle catalog half.)*
+- 🔨 **In-recording speaker correction — detail-pane UI** — the backend, wire contract, and CLI **shipped** (`catalog::{reassign_segment,merge_speakers,split_speaker}`, the matching IPC + Tauri commands, `phoneme speaker reassign|merge|split`; segments stay authoritative and the prose `[Speaker N]:` markers rebuild in-transaction). All that remains is the **interactive UI** in the recording detail/merged view (click a turn → reassign; select turns → split; pick two speakers → merge) — it calls the shipped requests as-is.
 
 ### Foundation & tech-debt
-- 🔨 **Model-override readiness race** — close the residual race in the whisper model-override readiness signal. *(The production `unwrap()` sweep — every runtime `unwrap()` now propagates context or sits behind a guard — and the `clippy::unwrap_used` CI lint that stops new ones have shipped.)*
-- 🔨 **Kill the hook double-fire hazard** — the legacy hook loops still execute in `pipeline::run` alongside the recipe-driven `run_hook_steps`; a partial/stale config (`hooks_migrated = true` + non-empty `hook.commands`) can fire shell hooks **twice** (arbitrary-shell, fires-outside-the-recipe-model). Fold them behind a post-migration empty-assert, or delete now that migration is idempotent.
-- 🔨 **Make `phoneme-agent-core` load-bearing** ⚠️ *(substrate for the H2 in-app Phoneme Agent)* — the crate is the compile-checked tool seam the planned in-app agent will drive, but nothing consumes it yet and it has already drifted from its hand-duplicated `phoneme-mcp` twin (16 tools vs 18). Wire `phoneme-mcp` to consume its registry so there's one source of truth and a renamed `Request` breaks the build — that protects the shipping MCP surface now and leaves the agent a ready substrate. (Keep it; it's pre-built for the agent — just stop maintaining the twin by hand.)
-- 📋 **De-duplicate the whisper-server gating** — the canonical `needed_whisper_servers` and the supervisor's hand-rolled per-loop gates re-derive the same thing; make it one source of truth. *(The matching Doctor↔pipeline LLM-config duplication — `doctor.rs step_llm_connection` vs the pipeline's `*_llm_config` — has been folded into one `resolve_step` helper and shipped.)*
-- 📋 **CI hardening** — flip `cargo audit` / `pnpm audit` from advisory-only to blocking for the core crates (already planned in a `ci.yml` comment), and fix test isolation (per-test temp DB via the `PHONEME_DATA_LOCAL` override) so `--test-threads=1` can go away and parallel CI catches isolation rot instead of masking it (the SQLite race).
+- 🔨 **Kill the hook double-fire hazard** — the legacy hook loops still execute in `pipeline::run` alongside the recipe-driven `run_hook_steps`; a partial/stale config (`hooks_migrated = true` + non-empty `hook.commands`) can fire shell hooks **twice** (arbitrary-shell, fires-outside-the-recipe-model). Fold them behind a post-migration empty-assert, or delete now that migration is idempotent. *(A single-fire regression test already guards the migrated path; this closes the stale-config window.)*
+- 📋 **CI hardening** — flip the existing `cargo audit` / `pnpm audit` jobs from advisory-only (`continue-on-error`) to blocking for the core crates, and drop `--test-threads=1` now that per-test DB isolation exists (in-memory + per-test tempdir) so parallel CI catches isolation rot instead of masking it.
 - 🔬 **Opt-in, local-only diagnostics bundle** — a Doctor button that exports a sanitized log-tail + config for bug reports. "No telemetry" (correct) ≠ "no diagnostics": today a field panic is invisible to you and looks like "it just died" to the user. No network; fully consistent with the privacy posture.
-- 🔬 **Quick-Switcher recipe-awareness** — let the header "Save as default" quick switcher surface (and switch) the active recipe, not just the model. *(Needs a small design pass — normal recordings always run the fixed `default` recipe today, so it isn't yet clear what this would set.)*
 
 ---
 
@@ -80,41 +75,38 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 - 🔬 **Chat with this transcript** — per-recording Q&A; a lighter, scoped version of Ask-my-archive for a single note or meeting.
 - 🔬 **Entity extraction → faceted search** — pull people / projects / dates out of transcripts into filterable facets.
 - 🔬 **Topic timelines** — "everything I said about X, in order" — a chronological thread across recordings.
-- 🔬 **Auto-linking / "see also"** — a knowledge graph of related recordings surfaced in the detail pane (the chunk-embedding substrate makes this cheap).
+- 🔬 **Auto-linking / "see also"** — auto-surface related recordings in the detail pane. *(On-demand "More like this" similarity already ships — `MoreLikeThis` over chunk-centroid cosine; this is the always-on, in-pane version.)*
 - 🔬 **Smart collections** — auto-populating folders from saved-search rules or semantic clusters.
 - 🔬 **Daily / weekly digest** — a generated rollup of what you recorded.
 - 🔬 **Tasks / reminders from voice notes** — "remind me to…" → an action item or an export to your todo system.
 - 📋 **Vector (ANN) index** ⚠️ *(prerequisite for "Ask my archive" at scale)* — replace the brute-force O(N) cosine scan with `sqlite-vec` / HNSW. Today every semantic query re-scans the whole corpus, and past the 200k-vector cache cap it silently degrades to re-decoding every f32 BLOB from SQLite *per query* — so the moat feature slows down exactly as the archive that makes it valuable grows. Build this *before* Ask-my-archive ships onto it. *(Pulled up from H3 "scale to 100k".)*
-- 📋 **Meaning-search + filters together** — let semantic search honour the same tag / date / status / favorite filters `list()` already supports; today they're mutually exclusive, so you can't ask "meaning + last week, tagged work". Backend-mostly — the filter chips already exist in the UI.
-- 🔬 **Find-and-replace across a transcript (and library-wide)** — correct a recurring mis-transcription once, optionally across all recordings. Custom vocabulary only biases *future* decodes; this fixes the existing archive. Pairs with the FTS index.
+- 🔬 **Library-wide find-and-replace** — correct a recurring mis-transcription across *all* recordings at once. *(Per-recording find-replace already ships — `FindReplace` IPC + `phoneme find-replace`, literal/case-insensitive, re-flows timing + re-embeds; this extends it library-wide.)*
 - 🔬 **Pinned recordings** — a true pin that floats a few reference recordings to the top of any view (favorites is a *filter*, not a pin).
 
 ### Meeting archivist
 - 📋 **Whole-meeting digest** — one summary across both tracks / the merged You↔Meeting timeline.
-- 📋 **Speaker enrollment / voice library** ⚠️ *(builds on Horizon 0 named-speaker recognition)* — name a voice once → recognized across **all** future meetings.
 - 🔬 **Meeting templates** — standup → structured action items, interview → Q&A; recipe-driven, selectable per meeting hotkey.
 - 🔬 **Live action-items & decisions** — extract them as the meeting happens (a real-time assistant), not only after.
 - 🔬 **Calendar-based naming & auto-start** — name a meeting from its calendar event; optionally prompt to record at a scheduled call. *(Calendar-driven — not the rejected process-sniffing.)*
 - 🔬 **Per-app audio capture** — capture only the call app's audio (not your music) via per-session loopback.
 - 🔬 **Chapter markers** *(parked)* — split a long meeting on silences into navigable chapters. Promote when someone records genuinely long sessions.
 - 🔬 **Duplicate detection** *(parked — embedding substrate now met, awaiting a real "I have dupes" complaint)* — "you already recorded this call" on import/start.
-- 🔬 **Audio clip export ("share this moment")** — select a transcript span → export just that audio segment + its caption as a small file. Word timings already map text↔audio, so the cut points are free; stays local-first (exports a file, no cloud). Fathom/Grain built a business on this.
+- 🔬 **Audio clip export — GUI** — the backend + CLI already ship (`phoneme_audio::wav::clip_wav`, `ExportClip` IPC, `phoneme clip <id> <start> <end>`). All that remains is the in-app affordance: select a transcript span → export that audio segment + its caption. Local-first (writes a file, no cloud). Fathom/Grain built a business on this.
 
 ### Dictator
 - 📋 **App-aware context, tier 2** — opt-in screenshot → vision-LLM context for the polish prompt (tier 1, window-title context, already ships). The trust-sensitive, later half.
 - 🔬 **Per-app tone / register** — adapt the polish style (email vs. code vs. prose), not just jargon, per foreground app.
 - 🔬 **Real-time translation dictation** — speak one language, type another (Whisper translate path).
 - 🔬 **Snippet / macro expansion** — "insert my signature / address" expanded inline during dictation.
-- 🔬 **User-defined dictation commands** — extensible phrase → edit beyond the built-in "new line / scratch that". *(Distinct from the rejected always-listening wake word.)*
+- 🔬 **User-defined dictation commands** — make the spoken-command phrase set user-editable. *(The command engine already runs — `apply_voice_commands` handles "new line / scratch that" etc. — but the phrase set is hardcoded; this exposes it. Distinct from the rejected always-listening wake word.)*
 - 🔬 **Dictation history / re-grab last** — a quick popover of recent typed snippets to re-paste when focus was lost or the wrong app got it (the #1 dictation failure mode). Wispr Flow keeps a history for exactly this; dictations are already saved, there's just no fast re-grab affordance.
-- 🔬 **Filler-word removal as a deterministic Playbook Transform** — a pure-Rust "strip um/uh/like" move, separate from LLM cleanup. Fast, free, offline, deterministic; category-standard (Otter, Descript). Today it only happens implicitly inside the slow LLM pass.
 - 🔬 **Spoken-language detection → routing** — act on Whisper's auto-detected language per dictation (surface/route) instead of the single configured BCP-47 hint. Detection only; distinct from the translation-dictation item above.
 
 ### Intelligence / engine
-- 📋 **Forced re-alignment of edited transcripts** ⚠️ *(needs a forced-aligner dependency)* — re-derive word timings after a hand edit so the Synced/Timeline views stay precise.
+- 🔬 **True forced re-alignment of edited transcripts** ⚠️ *(needs a forced-aligner dependency)* — re-derive *precise* word timings from the audio after a hand edit. *(A proportional re-flow already ships — `realign.rs realign_transcript`, run on every edit + retranscribe — so the views stay roughly aligned; this swaps in an acoustic aligner for exactness.)*
 - 🔬 **Streaming summaries** — the summary builds as you record, not only at the end.
-- 🔬 **Local LLM model manager** — download/manage Ollama models in-app, the way Whisper models already work.
-- 🔬 **Confidence-driven re-transcription** — auto-flag low-confidence spans for review or a targeted re-do.
+- 🔬 **Local LLM model manager** — list / delete / switch Ollama models in-app. *(A streaming Ollama model **pull** already ships in the wizard; this is the full manage surface.)*
+- 🔬 **Confidence-driven re-transcription** — a review queue / targeted re-do driven by low confidence. *(Per-word confidence is already stored + shown via the Synced-view squiggle/tooltip; nothing acts on it yet — this adds the action.)*
 
 ---
 
@@ -142,7 +134,7 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 - 🔬 **Recipe dry-run / preview** — run a recipe end-to-end against a sample transcript before binding it (only single-hook test exists). Authoring blind and discovering it's wrong on the next real recording is poor UX for the persona whose whole job is configuration.
 
 ### In-app intelligence
-- 📋 **Phoneme Agent** ⚠️ *(builds on the H0 `phoneme-agent-core` consolidation)* — a fully phoneme-aware agent inside the app ("summarize my last five standups", "tag everything about the migration") that *acts*, not just answers. Unlike Ask-my-archive this needs tool-calling, so it's built **on `phoneme-agent-core`** — the in-process tool seam (tool schema → typed daemon `Request`) — **not** on `phoneme-mcp`, which is the *external* door that lets outside hosts (Claude Desktop) drive Phoneme. Same tool registry, opposite directions: once MCP consumes agent-core there's one catalog feeding both. Net-new here is the agent loop (LLM ↔ tool-call orchestration), conversation state, and chat UI; retrieval becomes one of the agent's tools, so RAG and actions combine.
+- 📋 **Phoneme Agent** ⚠️ *(rides the shipped `phoneme-agent-core` tool registry)* — a fully phoneme-aware agent inside the app ("summarize my last five standups", "tag everything about the migration") that *acts*, not just answers. Unlike Ask-my-archive this needs tool-calling, so it's built **on `phoneme-agent-core`** — the in-process tool seam (tool schema → typed daemon `Request`) — **not** on `phoneme-mcp`, which is the *external* door that lets outside hosts (Claude Desktop) drive Phoneme. Same tool registry, opposite directions: `phoneme-mcp` already consumes it, so one catalog feeds both. Net-new here is the agent loop (LLM ↔ tool-call orchestration), conversation state, and chat UI; retrieval becomes one of the agent's tools, so RAG and actions combine.
 
 ---
 
@@ -155,8 +147,7 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 - 📋 **Pre-send cloud-egress guard** — a *backend* gate (per-recording confirm, or a tag-based block) before audio leaves the box to a cloud STT/LLM. Today the egress warning is UI-only — nothing stops a sensitive/meeting recording reaching a configured cloud provider. Narrower and cheaper than the hard local-only mode, and closes a real hole in a privacy-first product.
 - 🔬 **Per-recording local/cloud provenance badge** — 🔒 fully-local vs ☁️ touched-a-cloud-provider, derived from the model provenance already recorded. A lightweight, honest precursor to the transparency log below.
 - 🔬 **Soft-delete / trash with a recovery window** — deleted recordings stay recoverable for N days, beyond the seconds-long undo toast; protects against a fat-fingered bulk delete (audio is unlinked permanently today once the toast lapses).
-- 🔬 **Backup *restore*** — `phoneme import <backup.zip>` to complement the existing export (export with no restore is a half-feature). **Note:** DPAPI-encrypted provider keys are *not* portable across machines (decrypt silently fails → treated as unset), so a machine migration loses all keys — document this regardless. *(The "Not convinced yet" backup-ZIP line reasoned only about export.)*
-- 🔬 **Retention policies per tag / per profile** — finer-grained than the global age/count auto-delete.
+- 🔬 **Retention policies per tag / per profile** — finer-grained than the global age/count auto-delete (which already ships).
 - 🔬 **Data-access transparency log** — what hook / AI step touched which recording.
 
 ### Teams & cloud
@@ -166,10 +157,9 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 - 📋 **Playwright E2E UI coverage** — a full suite driving the frontend against the real Rust backend over IPC (after the architecture stabilizes across platforms).
 - 🔬 **Command palette** — everything reachable by typing.
 - 🔬 **Accessibility pass** — screen-reader support (NVDA/JAWS), ARIA labels, font scaling, high-contrast theme.
-- 🔬 **Batch operations** — batch delete / batch tag update over a selection.
 - 🔬 **Scale to 100k+ catalogs** — DB vacuum strategy, indexing, list() N+1 trims, quoted-FTS5 phrase + boolean search. *(The vector-ANN half is promoted to H1 as a moat prerequisite; this is the rest.)*
-- 🔬 **Data-integrity hygiene** — a single `schema_version` column instead of per-feature `*_migrated` booleans, and the missing `ON DELETE CASCADE` on `dismissed_speaker_suggestions` (its rows orphan on recording delete).
-- 🔬 **Internal tidy-ups** — `catalog.rs` is now split into per-domain modules (`catalog/`); the remaining god-files to split are `config.rs` (~5.5k) and `recorder.rs`. Plus `cargo-deny` + coverage in CI and redundant-clone perf trims. *(Front-load `keyboard.ts` / `RecordingsView/index.ts` — nav bugs measurably recur there, so they earn a split sooner than the Rust ones.)*
+- 🔬 **Data-integrity hygiene** — a single `schema_version` column instead of the per-feature `*_migrated` booleans. *(The `dismissed_speaker_suggestions ON DELETE CASCADE` this item also called for has shipped.)*
+- 🔬 **Internal tidy-ups** — `catalog.rs` and `recorder.rs` are now split into per-domain modules; the remaining Rust god-file is `config.rs` (~5.5k). Plus `cargo-deny` + coverage in CI and redundant-clone perf trims. *(Front-load `keyboard.ts` / `RecordingsView/index.ts` — nav bugs measurably recur there, so they earn a split sooner than the Rust one.)*
 
 *(Protocol versioning moved up to Horizon 0 — it's cheap insurance that gets harder to retrofit with each added client surface.)*
 
@@ -196,7 +186,7 @@ skepticism with reasons*, not a ban. (Earlier-stage speculative ideas live in th
 | Idea | Why we've pushed back (for now) |
 |------|--------|
 | Duration filter | Niche; nobody asked; search + tags already narrow the list |
-| Backup/restore ZIP (as a headline product feature) | Manual export covers most of it; the DB is a single copyable file. *(But the missing `import <backup.zip>` **restore** half — and the fact that DPAPI keys don't survive a machine move — is now a 🔬 item under Horizon 3 → Data & privacy.)* |
+| Backup/restore ZIP (as a headline product feature) | Both `phoneme` export **and** `import-backup` restore now ship (idempotent) — we just don't market it as a headline. *(Caveat: DPAPI-encrypted provider keys don't survive a machine move — decrypt fails → treated as unset.)* |
 | Azure Speech / AWS Transcribe | Enterprise pricing; not the target user; add only on demand |
 | Portable (unsigned) ZIP | A CI task, not a product feature |
 | Winget / Scoop packages | Same — packaging automation, not a roadmap item |
