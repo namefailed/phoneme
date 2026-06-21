@@ -71,27 +71,25 @@ The committed work that's in flight or immediately next. This is the active work
 Where Phoneme wins. Mostly net-new capability on top of the substrate that now exists.
 
 ### Recall librarian
-- 📋 **Ask my archive** — a local RAG chat over your transcripts ("What did we decide about the API last week?"), grounded with citations back to the recordings. The flagship Recall feature. It's retrieval-and-answer, not an agent: it rides the existing hybrid search + embeddings (retrieval) and `[llm]` providers (generation) behind one new request — **no tool-calling, so it needs neither the MCP server nor `phoneme-agent-core`**. The net-new work is the RAG prompt assembly, citation mapping, and chat UI (+ the ANN index below for retrieval that scales).
+- ✅ **Ask my archive** *(shipped — see CHANGELOG)* — a local RAG chat over your transcripts ("What did we decide about the API last week?"), grounded with citations back to the recordings. The flagship Recall feature. It's retrieval-and-answer, not an agent: it rides the existing hybrid search + embeddings (retrieval) and `[llm]` providers (generation) behind one new request — **no tool-calling, so it needs neither the MCP server nor `phoneme-agent-core`**. The net-new work is the RAG prompt assembly, citation mapping, and chat UI (+ the ANN index below for retrieval that scales).
 - 🔬 **Chat with this transcript** — per-recording Q&A; a lighter, scoped version of Ask-my-archive for a single note or meeting.
-- 🔬 **Entity extraction → faceted search** — pull people / projects / dates out of transcripts into filterable facets.
-- 🔬 **Topic timelines** — "everything I said about X, in order" — a chronological thread across recordings.
+- ✅ **Entity extraction → faceted search** *(shipped — see CHANGELOG: "Browse by entity")* — pull people / projects / dates out of transcripts into filterable facets.
+- 🔬 **Topic timelines (cross-recording)** — "everything I said about X, in order" — a chronological thread *across* recordings. *(Per-recording auto-chapters already ship — `phoneme chapters`, the Chapters view; this is the harder cross-recording thread.)*
 - 🔬 **Auto-linking / "see also"** — auto-surface related recordings in the detail pane. *(On-demand "More like this" similarity already ships — `MoreLikeThis` over chunk-centroid cosine; this is the always-on, in-pane version.)*
 - 🔬 **Smart collections** — auto-populating folders from saved-search rules or semantic clusters.
 - 🔬 **Scheduled daily / weekly digest** — *(the on-demand rollup already ships — `phoneme digest` / `rerun_period_digest` generate an LLM digest across every recording in a date window, stored + viewable)*; this is the **scheduler**: fire it automatically at a chosen local time/cadence, and decide what the scheduled run does with its output (store / notify / export). Open product questions on cadence + delivery + missed-run (asleep-at-fire-time) behavior, so it's gated on a human decision.
-- 🔬 **Tasks / reminders from voice notes** — "remind me to…" → an action item or an export to your todo system.
-- 🔬 **Daily / weekly digest** — a generated rollup of what you recorded.
 - 🔬 **Reminders / todo export from voice tasks** — push extracted tasks out to your todo system (or schedule a real reminder). *(Task extraction already ships — an LLM enrichment step pulls checkable action items with a free-text `due_hint` into the `tasks` table, browsable in the detail pane + sidebar, `phoneme suggest-tasks` / `phoneme tasks`. The remaining gap is parsing `due_hint` into a real date and the outbound integration / scheduled reminder.)*
-- 📋 **Vector (ANN) index** ⚠️ *(prerequisite for "Ask my archive" at scale)* — replace the brute-force O(N) cosine scan with `sqlite-vec` / HNSW. Today every semantic query re-scans the whole corpus, and past the 200k-vector cache cap it silently degrades to re-decoding every f32 BLOB from SQLite *per query* — so the moat feature slows down exactly as the archive that makes it valuable grows. Build this *before* Ask-my-archive ships onto it. *(Pulled up from H3 "scale to 100k".)*
-- 🔬 **Library-wide find-and-replace** — correct a recurring mis-transcription across *all* recordings at once. *(Per-recording find-replace already ships — `FindReplace` IPC + `phoneme find-replace`, literal/case-insensitive, re-flows timing + re-embeds; this extends it library-wide.)*
-- 🔬 **Pinned recordings** — a true pin that floats a few reference recordings to the top of any view (favorites is a *filter*, not a pin).
+- ✅ **Vector (ANN) index** *(shipped — flag-gated **off** by default; the brute-force scan stays the fallback)* — replace the brute-force O(N) cosine scan with `sqlite-vec` / HNSW. Today every semantic query re-scans the whole corpus, and past the 200k-vector cache cap it silently degrades to re-decoding every f32 BLOB from SQLite *per query* — so the moat feature slows down exactly as the archive that makes it valuable grows. Build this *before* Ask-my-archive ships onto it. *(Pulled up from H3 "scale to 100k".)*
+- ✅ **Library-wide find-and-replace** *(shipped — see CHANGELOG)* — correct a recurring mis-transcription across *all* recordings at once via `phoneme find-replace --library` + the `find_replace_library` IPC (re-flows timing + re-embeds each changed recording, reports per-recording failures).
+- ✅ **Pinned recordings** *(shipped — see CHANGELOG)* — a true pin that floats a few reference recordings to the top of any view (favorites is a *filter*, not a pin).
 
 ### Meeting archivist
-- 📋 **Whole-meeting digest** — one summary across both tracks / the merged You↔Meeting timeline.
+- ✅ **Whole-meeting digest** *(shipped — see CHANGELOG)* — one summary across both tracks / the merged You↔Meeting timeline.
 - ✅ **Meeting templates** — a meeting-scope recipe that runs once over the merged meeting transcript to produce the digest. v1 is prompt-only: a `scope = "meeting"` recipe with one Enrichment step targeting `meeting_digest`, selected via `meeting_recipe_id` (empty = the built-in digest, so nothing changes by default). Seeds ship `standup` and `interview` templates; pick per-digest from the merged view or `phoneme meeting digest --template <id>`. *(Next: per-template multi-output — separate action-items / Q&A columns, Option B in the brief.)*
 - 🔬 **Live action-items & decisions** — extract them as the meeting happens (a real-time assistant), not only after.
 - 🔬 **Calendar-based naming & auto-start** — name a meeting from its calendar event; optionally prompt to record at a scheduled call. *(Calendar-driven — not the rejected process-sniffing.)*
 - 🔬 **Per-app audio capture** — capture only the call app's audio (not your music) via per-session loopback.
-- 🔬 **Chapter markers** *(parked)* — split a long meeting on silences into navigable chapters. Promote when someone records genuinely long sessions.
+- 🔬 **Silence-split chapter markers** *(parked)* — split a long meeting on **silences** into navigable chapters. *(Note: LLM **topic** auto-chapters already ship — `phoneme chapters`, the Chapters view — so this parked item is now just the cheaper acoustic-only alternative; low priority.)*
 - 🔬 **Duplicate detection** *(parked — embedding substrate now met, awaiting a real "I have dupes" complaint)* — "you already recorded this call" on import/start.
 - 🔬 **Audio clip export — GUI** — the backend + CLI already ship (`phoneme_audio::wav::clip_wav`, `ExportClip` IPC, `phoneme clip <id> <start> <end>`). All that remains is the in-app affordance: select a transcript span → export that audio segment + its caption. Local-first (writes a file, no cloud). Fathom/Grain built a business on this.
 
@@ -99,13 +97,13 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 - 📋 **App-aware context, tier 2** — opt-in screenshot → vision-LLM context for the polish prompt (tier 1, window-title context, already ships). The trust-sensitive, later half.
 - ✅ **Per-app tone / register** — *shipped:* pick the cleanup recipe (and so the polish style — email vs. code vs. prose) by the app focused at record start, via `[in_place].app_recipes`. See the changelog.
 - 🔬 **Real-time translation dictation** — speak one language, type another (Whisper translate path).
-- 🔬 **Dictation history / re-grab last** — a quick popover of recent typed snippets to re-paste when focus was lost or the wrong app got it (the #1 dictation failure mode). Wispr Flow keeps a history for exactly this; dictations are already saved, there's just no fast re-grab affordance.
+- ✅ **Dictation history / re-grab last** *(shipped — see CHANGELOG)* — a bounded history of recent typed dictations to re-insert or re-copy when focus was lost or the wrong app got it (the #1 dictation failure mode), via Settings → Dictation, the `g H` chord, and `phoneme dictation history`/`regrab`. Opt-in (`[in_place].keep_history`).
 
 ### Intelligence / engine
 - 🔬 **True forced re-alignment of edited transcripts** ⚠️ *(needs a forced-aligner dependency)* — re-derive *precise* word timings from the audio after a hand edit. *(A proportional re-flow already ships — `realign.rs realign_transcript`, run on every edit + retranscribe — so the views stay roughly aligned; this swaps in an acoustic aligner for exactness.)*
-- 🔬 **Streaming summaries** — the summary builds as you record, not only at the end.
+- ✅ **Streaming summaries** *(shipped — see CHANGELOG)* — the summary/cleanup output streams token-by-token in the UI (via the `LlmActivity` deltas) instead of appearing only when complete. *(The live-as-you-record variant — building the summary mid-recording — is the remaining stretch.)*
 - 🔬 **Local LLM model manager** — list / delete / switch Ollama models in-app. *(A streaming Ollama model **pull** already ships in the wizard; this is the full manage surface.)*
-- 🔬 **Confidence-driven re-transcription** — a review queue / targeted re-do driven by low confidence. *(Per-word confidence is already stored + shown via the Synced-view squiggle/tooltip; nothing acts on it yet — this adds the action.)*
+- ✅ **Confidence-driven re-transcription** *(shipped — see CHANGELOG)* — a per-recording **mean confidence** (from the per-word ASR scores) flags low-confidence transcripts with an amber badge + a one-click **Improve…** re-transcribe and a **Low confidence** sidebar filter (`low_confidence_below`). *(A full review *queue* that batch-walks every flagged recording is the possible next step.)*
 
 ---
 
