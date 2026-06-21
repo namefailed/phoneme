@@ -119,6 +119,24 @@ where
         .collect())
 }
 
+/// The newest config schema version this build understands — equivalently, the
+/// number of one-time migrations staged in [`Config::run_migrations`]. After a
+/// successful load, every config's [`schema_version`](Config::schema_version) is
+/// bumped to this. Increment it by exactly one whenever you add a migration step.
+///
+/// Version steps:
+/// - `0 → 1`: the Playbook reconcile ([`Config::migrate_playbook`]).
+/// - `1 → 2`: the legacy `[hook]` cutover ([`Config::migrate_hooks`]).
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+
+/// Schema version at/after which the Playbook reconcile is considered done.
+/// A config below this still needs [`Config::migrate_playbook`].
+const SCHEMA_VERSION_PLAYBOOK: u32 = 1;
+
+/// Schema version at/after which the legacy `[hook]` cutover is considered done.
+/// A config below this still needs [`Config::migrate_hooks`].
+const SCHEMA_VERSION_HOOKS: u32 = 2;
+
 /// The root configuration object for Phoneme.
 /// This configuration encapsulates the entire system state, including settings for
 /// transcription (Whisper), audio recording parameters, post-processing hooks,
@@ -180,20 +198,37 @@ pub struct Config {
     /// recording pipeline. Seeded via `default_recipes` when absent.
     #[serde(default = "default_recipes")]
     pub recipes: Vec<PlaybookRecipe>,
-    /// Whether the one-time Playbook migration has run for this config. Defaults
-    /// to `false` so every pre-Playbook config.toml is reconciled exactly once:
-    /// [`Config::migrate_playbook`] copies the user's live resolved cleanup /
-    /// title / summary / auto-tag values into the built-in entries and rebuilds
-    /// the `default` recipe from the legacy enable flags, then sets this `true`
-    /// so it never re-runs (and never clobbers later Playbook edits).
+    /// Monotonic schema version: how many one-time config migrations have already
+    /// been applied to this config. Each migration owns a version step (v0→v1 =
+    /// the Playbook reconcile, v1→v2 = the hooks cutover; see
+    /// [`CURRENT_SCHEMA_VERSION`]). On load Phoneme runs exactly the migrations
+    /// whose step is greater than the stored value, in order, then writes back
+    /// [`CURRENT_SCHEMA_VERSION`] — so reloading an already-migrated config is a
+    /// no-op. Defaults to `0` (absent in pre-versioning configs); the legacy
+    /// `playbook_migrated` / `hooks_migrated` booleans below are read once on load
+    /// to *infer* the real starting version for those older files (so an
+    /// already-migrated config is never re-migrated).
+    ///
+    /// This single integer replaces the per-feature `*_migrated` latches. Add a
+    /// new migration by giving it the next version step and bumping
+    /// [`CURRENT_SCHEMA_VERSION`].
     #[serde(default)]
+    pub schema_version: u32,
+    /// **Deprecated** — superseded by [`schema_version`](Self::schema_version).
+    /// Kept (deserialize-only, never written back) so a pre-versioning
+    /// `config.toml` still parses *and* so its value can be read once to infer
+    /// the starting [`schema_version`](Self::schema_version): if a legacy file
+    /// has this `true`, the Playbook reconcile already ran and must not run again.
+    /// New configs never serialize this field.
+    #[serde(default, skip_serializing)]
     pub playbook_migrated: bool,
-    /// Whether the one-time hooks migration has run (the H3 cutover). Defaults to
-    /// `false` so every pre-cutover config.toml is reconciled exactly once:
-    /// [`Config::migrate_hooks`] moves the legacy `[hook]` commands / keyword
-    /// rules / webhook into built-in Hook entries on the `default` recipe and
-    /// clears the legacy fields, then sets this `true` so it never re-runs.
-    #[serde(default)]
+    /// **Deprecated** — superseded by [`schema_version`](Self::schema_version).
+    /// Kept (deserialize-only, never written back) so a pre-cutover `config.toml`
+    /// still parses *and* so its value can be read once to infer the starting
+    /// [`schema_version`](Self::schema_version): if a legacy file has this `true`,
+    /// the hooks cutover already ran and must not run again. New configs never
+    /// serialize this field.
+    #[serde(default, skip_serializing)]
     pub hooks_migrated: bool,
     /// Frontend OS-level tray behavior.
     pub tray: TrayConfig,
@@ -3048,10 +3083,12 @@ impl Config {
     /// from then on the Playbook entries (not the legacy `[llm_post_process]` /
     /// `[summary]` / `[title]` / `[auto_tag]` sections) drive each built-in step.
     ///
-    /// Idempotent: a no-op (returns `false`) once [`Self::playbook_migrated`] is
-    /// set. On the first run it returns `true`, and the caller must persist the
-    /// config exactly once so the reconciled entries (and the flag) are frozen
-    /// before any unrelated `write_config` could overwrite the seeds.
+    /// This is schema-version step `0 → 1`. Idempotent: a no-op (returns `false`)
+    /// once [`Self::schema_version`] has reached the playbook step (`1`). On
+    /// the first run it returns `true`, bumps the schema version to that step, and
+    /// the caller must persist the config exactly once so the reconciled entries
+    /// (and the version) are frozen before any unrelated `write_config` could
+    /// overwrite the seeds.
     ///
     /// Inheritance mirrors the daemon's per-step `*_llm_config` builders exactly:
     /// each step's provider / model / api_url / timeout falls back to the
@@ -3065,7 +3102,7 @@ impl Config {
     ///
     /// Returns whether a migration actually happened.
     pub fn migrate_playbook(&mut self) -> bool {
-        if self.playbook_migrated {
+        if self.schema_version >= SCHEMA_VERSION_PLAYBOOK {
             return false;
         }
 
@@ -3204,7 +3241,10 @@ impl Config {
             });
         }
 
-        self.playbook_migrated = true;
+        // Advance the schema version past this step. The legacy
+        // `playbook_migrated` boolean is intentionally left untouched (it is
+        // deprecated, deserialize-only, and never written back).
+        self.schema_version = SCHEMA_VERSION_PLAYBOOK;
         true
     }
 
@@ -3219,11 +3259,14 @@ impl Config {
     /// former still gates whether the migrated hooks run on a given pass, the
     /// latter still secures the migrated webhook.
     ///
-    /// Idempotent: a no-op (returns `false`) once [`Self::hooks_migrated`] is set.
-    /// On the first run it returns `true` and the caller persists the config once
-    /// (same contract as [`Self::migrate_playbook`]).
+    /// This is schema-version step `1 → 2`. Idempotent: a no-op (returns `false`)
+    /// once [`Self::schema_version`] has reached the hooks step
+    /// ([`CURRENT_SCHEMA_VERSION`], `2`). On the first run it returns `true`, bumps
+    /// the schema version to that step, and the
+    /// caller persists the config once (same contract as
+    /// [`Self::migrate_playbook`]).
     pub fn migrate_hooks(&mut self) -> bool {
-        if self.hooks_migrated {
+        if self.schema_version >= SCHEMA_VERSION_HOOKS {
             return false;
         }
         let timeout = self.hook.timeout_secs;
@@ -3327,7 +3370,11 @@ impl Config {
         self.hook.keyword_rules.clear();
         self.hook.webhook_url = None;
 
-        self.hooks_migrated = true;
+        // Advance the schema version past this step (the last one, so this lands
+        // at CURRENT_SCHEMA_VERSION). The legacy `hooks_migrated` boolean is
+        // intentionally left untouched (deprecated, deserialize-only, never
+        // written back).
+        self.schema_version = SCHEMA_VERSION_HOOKS;
         true
     }
 
@@ -3707,11 +3754,15 @@ impl Default for Config {
             ],
             playbook: default_playbook(),
             recipes: default_recipes(),
-            // A fresh config's seeds already mirror the legacy defaults, so a
-            // brand-new install needs no reconcile — but leave this `false` so
-            // the migration's idempotent no-op path is exercised uniformly and a
-            // default built from `Config::default()` then customised + saved
-            // (e.g. the first-run wizard) still reconciles on next load.
+            // Start at version 0 so the migrations' idempotent paths are exercised
+            // uniformly: a fresh config's seeds already mirror the legacy defaults,
+            // so the reconcile is a self-confirming no-op — but a default built
+            // from `Config::default()`, then customised + saved (e.g. the first-run
+            // wizard), still reconciles on next load and lands at
+            // `CURRENT_SCHEMA_VERSION`.
+            schema_version: 0,
+            // Deprecated latches — kept only so old configs deserialize; a fresh
+            // config never relies on them and never writes them.
             playbook_migrated: false,
             hooks_migrated: false,
             tray: TrayConfig {
@@ -3781,12 +3832,79 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&text)?;
+        // Back-compat: a config written before `schema_version` existed
+        // deserializes it as 0. Read the deprecated `*_migrated` booleans once to
+        // recover the *real* version it was already at, so the migrations below
+        // (run by the caller, e.g. the daemon's `reconcile_and_persist_config`)
+        // never re-run a migration that already ran on this file.
+        cfg.infer_schema_version_from_legacy();
         // Drop (with a warning) any voice-command entry whose action isn't one
         // the engine recognizes, so a typo'd action is surfaced and ignored
         // rather than silently no-opping — never fatal, the config still loads.
         cfg.in_place.sanitize_voice_commands();
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    /// Recover the true [`schema_version`](Self::schema_version) of a config that
+    /// predates the version field, from the deprecated per-feature `*_migrated`
+    /// booleans — the dangerous part of the latch→version cutover.
+    ///
+    /// A file written before this change has no `schema_version` (it deserializes
+    /// as `0`) but may *already* be fully migrated, with `playbook_migrated` /
+    /// `hooks_migrated` set `true`. Treating it as `0` would silently re-run those
+    /// migrations and corrupt the config (re-reconciling the Playbook, re-folding
+    /// already-cleared `[hook]` fields). So when the stored version is still `0`,
+    /// infer the starting version from the booleans, in the same order the
+    /// migrations run:
+    ///
+    /// - `playbook_migrated && hooks_migrated` → both ran → [`CURRENT_SCHEMA_VERSION`].
+    /// - `playbook_migrated` only → only the Playbook reconcile ran → the playbook
+    ///   step (`1`).
+    /// - neither (a genuine pre-Playbook config, or a brand-new one) → stays `0`,
+    ///   so both migrations run normally.
+    ///
+    /// `hooks_migrated` without `playbook_migrated` is not a real on-disk state
+    /// (the hooks cutover shipped after the Playbook one and the daemon always ran
+    /// them together, playbook first), so it is treated the same as "both ran" —
+    /// the hooks step is the last one, and inferring `CURRENT` is the safe,
+    /// non-re-running choice.
+    ///
+    /// Only ever *raises* the version from `0`; a config that already carries an
+    /// explicit `schema_version` is trusted as-is and the legacy booleans ignored.
+    /// This is idempotent: once the config is saved (which writes `schema_version`
+    /// and drops the booleans), subsequent loads take the trusted-as-is path.
+    fn infer_schema_version_from_legacy(&mut self) {
+        if self.schema_version != 0 {
+            return;
+        }
+        self.schema_version = if self.hooks_migrated {
+            // Hooks ran (the last migration) ⇒ everything before it ran too.
+            CURRENT_SCHEMA_VERSION
+        } else if self.playbook_migrated {
+            SCHEMA_VERSION_PLAYBOOK
+        } else {
+            0
+        };
+    }
+
+    /// Run every staged one-time migration whose version step is newer than this
+    /// config's stored [`schema_version`](Self::schema_version), in order, then
+    /// advance the version to [`CURRENT_SCHEMA_VERSION`]. Returns whether anything
+    /// actually changed (so a caller can persist only when needed).
+    ///
+    /// Idempotent: re-running on an already-migrated config (or one whose version
+    /// was inferred up to `CURRENT` from the legacy booleans on load) runs nothing
+    /// and returns `false`. The individual `migrate_*` methods each self-gate on
+    /// the version too, so calling them directly is equally safe — this is just
+    /// the single ordered entry point.
+    ///
+    /// Migrations run with a non-short-circuiting `|` so each is given its chance,
+    /// playbook first: it rebuilds the `default` recipe from the legacy enable
+    /// flags, then [`migrate_hooks`](Self::migrate_hooks) appends the migrated Hook
+    /// steps after the LLM steps.
+    pub fn run_migrations(&mut self) -> bool {
+        self.migrate_playbook() | self.migrate_hooks()
     }
 
     /// Validate constraints not enforced by the type system.
@@ -4120,10 +4238,13 @@ mod tests {
         cfg.auto_tag.auto = true;
         cfg.auto_tag.prompt = "Custom auto-tag prompt — coin new tags.".into();
 
-        assert!(!cfg.playbook_migrated, "starts un-migrated");
+        assert_eq!(cfg.schema_version, 0, "starts un-migrated");
         let migrated = cfg.migrate_playbook();
         assert!(migrated, "first migration runs");
-        assert!(cfg.playbook_migrated, "flag is now set");
+        assert_eq!(
+            cfg.schema_version, SCHEMA_VERSION_PLAYBOOK,
+            "schema version advanced past the playbook step"
+        );
 
         let entry = |id: &str| cfg.playbook.iter().find(|e| e.id == id).unwrap();
 
@@ -4207,7 +4328,10 @@ mod tests {
             .clone();
 
         assert!(cfg.migrate_hooks(), "first migration runs");
-        assert!(cfg.hooks_migrated);
+        assert_eq!(
+            cfg.schema_version, SCHEMA_VERSION_HOOKS,
+            "schema version advanced past the hooks step"
+        );
 
         // Three Hook entries appended (command, keyword rule, webhook).
         let hook_entries: Vec<_> = cfg
@@ -4295,6 +4419,230 @@ mod tests {
             "every step is disabled here, so the recipe is empty (got {:?})",
             recipe.steps
         );
+    }
+
+    /// Build a "legacy" `config.toml` body that predates `schema_version`: take a
+    /// serialized config, drop its `schema_version` line, and append the two
+    /// deprecated `*_migrated` latches at the requested values (top-level, so they
+    /// land in the implicit root table before the first `[section]`).
+    fn legacy_config_toml(base: &Config, playbook_migrated: bool, hooks_migrated: bool) -> String {
+        let serialized = toml::to_string(base).unwrap();
+        // The serializer no longer writes the deprecated booleans, but it does
+        // still write `schema_version` — strip it so the fixture truly looks
+        // pre-versioning (deserializes the field as its serde default, 0).
+        let without_version: Vec<&str> = serialized
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("schema_version"))
+            .collect();
+        assert!(
+            !without_version.iter().any(|l| l.contains("schema_version")),
+            "the legacy fixture must omit schema_version"
+        );
+        // Prepend the latches so they sit in the root table (before any [section]
+        // header), exactly where a pre-versioning config carried them.
+        format!(
+            "playbook_migrated = {playbook_migrated}\nhooks_migrated = {hooks_migrated}\n{}",
+            without_version.join("\n")
+        )
+    }
+
+    // (a) A fresh/default config, loaded and migrated, ends at
+    // CURRENT_SCHEMA_VERSION with the migrations applied.
+    #[test]
+    fn fresh_config_migrates_to_current_schema_version() {
+        let dir = TempDir::new().unwrap();
+        let cfg_text = toml::to_string(&Config::default()).unwrap();
+        let path = write_config(&dir, &cfg_text);
+
+        let mut cfg = Config::load(&path).expect("loads");
+        assert_eq!(
+            cfg.schema_version, 0,
+            "a fresh config starts at version 0 (no inference, no legacy latches)"
+        );
+        assert!(
+            cfg.run_migrations(),
+            "the staged migrations run on a fresh config"
+        );
+        assert_eq!(
+            cfg.schema_version, CURRENT_SCHEMA_VERSION,
+            "after migrating, a fresh config is at the current schema version"
+        );
+        // Re-running is a no-op (it is already at CURRENT).
+        assert!(!cfg.run_migrations(), "a second pass changes nothing");
+    }
+
+    // (b) A legacy config with BOTH latches true is NOT re-migrated: the inferred
+    // version is CURRENT, the migrations are skipped, and the side-effects (the
+    // already-migrated playbook/recipes/hooks) are left byte-for-byte intact.
+    #[test]
+    fn legacy_already_migrated_config_is_not_re_migrated() {
+        let dir = TempDir::new().unwrap();
+
+        // An already-migrated config: a customized legacy setup run all the way
+        // through both migrations, then frozen. This is the on-disk shape a real
+        // user who already upgraded would have (minus the version field).
+        let mut migrated = Config::default();
+        migrated.llm_post_process.enabled = true;
+        migrated.llm_post_process.provider = "ollama".into();
+        migrated.summary.auto = true;
+        migrated.auto_tag.auto = true;
+        migrated.title.enabled = true;
+        migrated.hook.commands = vec!["echo done".into()];
+        migrated.hook.keyword_rules = vec![KeywordRule {
+            pattern: "TODO".into(),
+            command: "todo.ps1".into(),
+            case_sensitive: false,
+        }];
+        assert!(
+            migrated.run_migrations(),
+            "the fixture is migrated once up front"
+        );
+        assert_eq!(migrated.schema_version, CURRENT_SCHEMA_VERSION);
+
+        // Write it as a pre-versioning file: no schema_version, both latches true.
+        let body = legacy_config_toml(&migrated, true, true);
+        let path = write_config(&dir, &body);
+
+        let mut loaded = Config::load(&path).expect("loads");
+        assert!(loaded.playbook_migrated, "the legacy latch deserialized");
+        assert!(loaded.hooks_migrated, "the legacy latch deserialized");
+        assert_eq!(
+            loaded.schema_version, CURRENT_SCHEMA_VERSION,
+            "both latches true ⇒ inferred straight to CURRENT before any migration"
+        );
+
+        // Snapshot the migration-owned state, then run migrations and prove it is
+        // untouched — no re-reconcile of the playbook, no re-fold of the (already
+        // cleared) [hook] fields.
+        let playbook_before = loaded.playbook.clone();
+        let recipes_before = loaded.recipes.clone();
+        let hook_before = loaded.hook.clone();
+        assert!(
+            !loaded.run_migrations(),
+            "an already-migrated legacy config must run nothing"
+        );
+        assert_eq!(
+            loaded.playbook, playbook_before,
+            "playbook not re-reconciled"
+        );
+        assert_eq!(loaded.recipes, recipes_before, "recipes not rebuilt");
+        assert_eq!(
+            loaded.hook, hook_before,
+            "legacy [hook] fields not re-folded"
+        );
+        assert_eq!(loaded.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    // (c) A legacy config with the latches FALSE (a genuine pre-Playbook config)
+    // runs the migrations and lands at CURRENT — the real upgrade path.
+    #[test]
+    fn legacy_unmigrated_config_runs_migrations() {
+        let dir = TempDir::new().unwrap();
+
+        // A pre-Playbook user: post-processing on, a legacy [hook] command, and
+        // neither latch set.
+        let mut base = Config::default();
+        base.llm_post_process.enabled = true;
+        base.llm_post_process.provider = "ollama".into();
+        base.title.enabled = true;
+        base.hook.commands = vec!["notify.ps1".into()];
+
+        let body = legacy_config_toml(&base, false, false);
+        let path = write_config(&dir, &body);
+
+        let mut loaded = Config::load(&path).expect("loads");
+        assert_eq!(
+            loaded.schema_version, 0,
+            "both latches false ⇒ inference leaves the version at 0 (run everything)"
+        );
+
+        assert!(loaded.run_migrations(), "the migrations actually run");
+        assert_eq!(
+            loaded.schema_version, CURRENT_SCHEMA_VERSION,
+            "after the upgrade the version is bumped to CURRENT"
+        );
+        // The migrations did their work: the legacy [hook] command moved into a
+        // recipe Hook step and the legacy field was cleared.
+        assert!(
+            loaded.hook.commands.is_empty(),
+            "migrate_hooks cleared the legacy [hook] commands"
+        );
+        assert!(
+            loaded
+                .playbook
+                .iter()
+                .any(|e| e.kind == PlaybookKind::Hook && e.hook.command == "notify.ps1"),
+            "the legacy command became a Hook playbook entry"
+        );
+    }
+
+    // (c-partial) Only `playbook_migrated` set ⇒ infer v1, so the Playbook step is
+    // skipped but the hooks step still runs.
+    #[test]
+    fn legacy_partial_migration_runs_only_the_remaining_step() {
+        let dir = TempDir::new().unwrap();
+
+        // A user who upgraded across the Playbook migration but not yet the hooks
+        // cutover: playbook_migrated true, hooks_migrated false, with a pending
+        // legacy [hook] command to fold.
+        let mut base = Config::default();
+        base.hook.commands = vec!["legacy.ps1".into()];
+        let body = legacy_config_toml(&base, true, false);
+        let path = write_config(&dir, &body);
+
+        let mut loaded = Config::load(&path).expect("loads");
+        assert_eq!(
+            loaded.schema_version, SCHEMA_VERSION_PLAYBOOK,
+            "playbook latch only ⇒ inferred to v1"
+        );
+
+        assert!(
+            !loaded.migrate_playbook(),
+            "the playbook step is already done (v1), so it is a no-op"
+        );
+        assert!(
+            loaded.migrate_hooks(),
+            "the hooks step is still pending and runs"
+        );
+        assert_eq!(loaded.schema_version, CURRENT_SCHEMA_VERSION);
+        assert!(
+            loaded.hook.commands.is_empty(),
+            "the remaining hooks migration folded the legacy command"
+        );
+    }
+
+    // (d) Idempotency: loading a config that already carries an explicit
+    // schema_version = CURRENT runs nothing and never writes the legacy latches.
+    #[test]
+    fn already_versioned_config_is_a_noop_and_drops_legacy_latches() {
+        let dir = TempDir::new().unwrap();
+
+        // A config saved by this build: it carries schema_version and no latches.
+        let mut cfg = Config::default();
+        assert!(cfg.run_migrations());
+        assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
+        let serialized = toml::to_string(&cfg).unwrap();
+        assert!(
+            serialized.contains("schema_version"),
+            "a saved config writes schema_version"
+        );
+        assert!(
+            !serialized.contains("playbook_migrated") && !serialized.contains("hooks_migrated"),
+            "the deprecated latches are never written back to disk"
+        );
+
+        let path = write_config(&dir, &serialized);
+        let mut loaded = Config::load(&path).expect("loads");
+        assert_eq!(
+            loaded.schema_version, CURRENT_SCHEMA_VERSION,
+            "an explicit version is trusted as-is"
+        );
+        let before = loaded.clone();
+        assert!(
+            !loaded.run_migrations(),
+            "reloading a migrated config is a no-op"
+        );
+        assert_eq!(loaded, before, "the no-op changes nothing");
     }
 
     #[test]

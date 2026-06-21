@@ -165,8 +165,8 @@ surfaces failures but keeps the recording usable).
 > **Migrating from `[hook]`?** Older configs used a top-level `[hook]` section
 > (`commands` / `keyword_rules` / `webhook_url`). On first launch Phoneme
 > **auto-migrates** those into Hook entries on the Default recipe and clears the
-> `[hook]` table — a one-time `hooks_migrated` latch. Edit them in the Playbook
-> from then on.
+> `[hook]` table — a one-time migration tracked by `schema_version` (it runs
+> exactly once and is never re-applied). Edit them in the Playbook from then on.
 
 ## ⚡ Keyword-triggered hooks
 

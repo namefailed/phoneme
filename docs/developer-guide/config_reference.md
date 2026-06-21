@@ -68,10 +68,11 @@ An optional, **independent** transcription provider used only for the live previ
 ## `[hook]`
 
 > **Legacy.** `commands` / `keyword_rules` / `webhook_url` are **read once** by
-> the `hooks_migrated` migration (below), folded into Hook `[[playbook]]` entries
-> on the `default` recipe, then cleared — hooks now live in the **Playbook**. New
-> setups should add Hook entries there, not here. `run_on_transcribe` still gates
-> whether the recipe's Hook steps fire on a given pass.
+> the hooks-cutover migration (the `schema_version` `1 → 2` step, below), folded
+> into Hook `[[playbook]]` entries on the `default` recipe, then cleared — hooks
+> now live in the **Playbook**. New setups should add Hook entries there, not
+> here. `run_on_transcribe` still gates whether the recipe's Hook steps fire on a
+> given pass.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -310,7 +311,7 @@ Tuning for the **deterministic** filler-word transform — the non-LLM step. A `
 
 ## `[[playbook]]`
 
-Reusable AI "moves" — the building blocks the recording pipeline and Custom Hotkeys run. An array-of-tables: each `[[playbook]]` block is one entry. Curated `builtin` entries (`cleanup`, `title`, `summary`, `auto_tag`) are seeded into a fresh config and are editable; users add their own. The Playbook is the **source of truth** for the whole post-transcription pipeline — the built-in entries drive each LLM step (replacing the legacy `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` sections), and `hook` entries run shell/webhook side-effects (replacing the legacy `[hook]` config). Both are migrated once (see `playbook_migrated` / `hooks_migrated` below). Edited in Settings → 🎭 Playbook.
+Reusable AI "moves" — the building blocks the recording pipeline and Custom Hotkeys run. An array-of-tables: each `[[playbook]]` block is one entry. Curated `builtin` entries (`cleanup`, `title`, `summary`, `auto_tag`) are seeded into a fresh config and are editable; users add their own. The Playbook is the **source of truth** for the whole post-transcription pipeline — the built-in entries drive each LLM step (replacing the legacy `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` sections), and `hook` entries run shell/webhook side-effects (replacing the legacy `[hook]` config). Both are migrated once, tracked by `schema_version` (below). Edited in Settings → 🎭 Playbook.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -350,12 +351,15 @@ Named, ordered chains of `[[playbook]]` entry ids — what the default recording
 
 ---
 
-## `playbook_migrated` · `hooks_migrated`
+## `schema_version`
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `playbook_migrated` | `false` | One-time migration latch (top-level bool). On first load Phoneme copies a user's LIVE `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` values into the matching built-in `[[playbook]]` entries and rebuilds the `default` recipe from the legacy enable flags, then sets this to `true` so the reconcile never runs again. Idempotent — leave it alone. |
-| `hooks_migrated` | `false` | One-time hooks-cutover latch (top-level bool). On first load Phoneme folds the legacy `[hook]` `commands` / `keyword_rules` / `webhook_url` into Hook `[[playbook]]` entries appended to the `default` recipe, clears the `[hook]` fields, and sets this `true`. The daemon's legacy in-pipeline hook loops still exist but iterate the now-empty `[hook]` table, so a hook fires **exactly once** per transcribe (via its recipe Hook step) — never twice. Idempotent — leave it alone. |
+| `schema_version` | `0` | One-time-migration version (top-level integer). Records how many config migrations have already run on this file, so Phoneme runs each migration **exactly once**. On load it runs every staged migration whose version step is newer than the stored value, in order, then writes the current version back; reloading an already-migrated config does nothing. Version steps: `0 → 1` = the Playbook reconcile (copies your LIVE `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` values into the matching built-in `[[playbook]]` entries and rebuilds the `default` recipe from the legacy enable flags); `1 → 2` = the hooks cutover (folds the legacy `[hook]` `commands` / `keyword_rules` / `webhook_url` into Hook `[[playbook]]` entries on the `default` recipe and clears the `[hook]` fields, so a hook fires once per transcribe — never twice). Idempotent — leave it alone. |
+
+### Deprecated: `playbook_migrated` · `hooks_migrated`
+
+These two top-level booleans were the old per-feature migration latches. They are **superseded by `schema_version`** and are now **deprecated**: an existing config that still has them keeps loading (Phoneme reads them **once** to infer the correct starting `schema_version` — `playbook_migrated && hooks_migrated` → already current; `playbook_migrated` only → version 1; neither → version 0), but Phoneme no longer writes them. They disappear from your `config.toml` the next time it is saved, replaced by `schema_version`. Nothing to do — the migration is automatic and runs no migration twice.
 
 ---
 

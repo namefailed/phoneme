@@ -392,8 +392,10 @@ while keeping API keys encrypted.
 primitives, so parity is automatic. `apply_rerun_overrides` mutates only a config
 clone (avoiding the `ReloadConfig` race that leaked a forced pipeline onto other jobs)
 and mirrors overrides into entries; `ensure_default_recipe_steps` slots forced-on
-steps back into canonical order; and `playbook_migrated` / `hooks_migrated` latches
-make the migrations idempotent.
+steps back into canonical order; and a single `schema_version` integer (each
+migration owns a version step) makes the migrations idempotent — superseding the
+old per-feature `playbook_migrated` / `hooks_migrated` latches, whose values are
+still read once on load to infer the starting version of a pre-versioning config.
 
 `pipeline.rs:173-365` — `apply_rerun_overrides`, `ensure_default_recipe_steps`; `pipeline.rs:1447` (`resolve_recipe`), `pipeline.rs:1545` (`run_transform_steps`, the recipe executor)
 
