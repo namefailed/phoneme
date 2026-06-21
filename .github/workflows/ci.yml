@@ -33,6 +33,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Production code must not panic via unwrap(). Without --all-targets this
+      # skips test code (and #[cfg(test)] modules), where unwrap() is fine, so it
+      # only flags unwrap() on a real runtime path. Use .expect("why it can't
+      # fail") or propagate with ? instead.
+      - name: Clippy (no unwrap() in production code)
+        run: cargo clippy --workspace -- -D clippy::unwrap_used
+
       # Standing rule: CI must NEVER inject keystrokes/clipboard. The daemon
       # E2E tests spawn a real `phoneme-daemon` binary (not `cfg!(test)`), so
       # this env var is its only inject-guard — it inherits it from the runner

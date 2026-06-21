@@ -1,0 +1,815 @@
+//! Recording row CRUD, transcript/metadata updates, listing, and lifecycle.
+
+use super::*;
+
+impl Catalog {
+    /// Insert a new recording row. The pipeline calls this once, when capture
+    /// starts; later stages update the same row in place.
+    pub async fn insert(&self, r: &Recording) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO recordings (
+                 id, started_at, duration_ms, audio_path, transcript, model, status,
+                 error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
+                 transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
+                 cleanup_model, diarized
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(r.id.as_str())
+        .bind(r.started_at.to_rfc3339())
+        .bind(r.duration_ms)
+        .bind(&r.audio_path)
+        .bind(r.transcript.as_deref())
+        .bind(r.model.as_deref())
+        .bind(r.status.as_str())
+        .bind(r.error_kind.as_deref())
+        .bind(r.error_message.as_deref())
+        .bind(r.hook_command.as_deref())
+        .bind(r.hook_exit_code)
+        .bind(r.hook_duration_ms)
+        .bind(r.transcribed_at.map(|d| d.to_rfc3339()))
+        .bind(r.hook_ran_at.map(|d| d.to_rfc3339()))
+        .bind(r.notes.as_deref())
+        .bind(r.meeting_id.as_deref())
+        .bind(r.meeting_name.as_deref())
+        .bind(r.track.as_deref())
+        .bind(r.in_place)
+        .bind(r.cleanup_model.as_deref())
+        .bind(r.diarized)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Insert a recording with every persisted DTO column at once — the faithful
+    /// inverse of the library backup export ([`crate::backup`]).
+    ///
+    /// The pipeline's [`Catalog::insert`] writes only the columns a fresh
+    /// recording starts with and fills the rest (title, summary, favorite, the
+    /// per-step model names, …) later via dedicated setters as it advances. A
+    /// backup restore has all of those values up front and must land them in one
+    /// row, so this writes the full column set. Fields the DTO doesn't carry —
+    /// `original_transcript` / `clean_transcript`, segments, words, embeddings,
+    /// voiceprints — are bounded by what the export captured and are simply not
+    /// restored. This is a plain `INSERT`, not an upsert: the restore caller skips
+    /// ids that already exist, so a re-import never overwrites a row (idempotent),
+    /// and a genuine id clash surfaces as an error rather than silently
+    /// clobbering.
+    pub async fn insert_restored(&self, r: &Recording) -> Result<()> {
+        let tag_suggestions = if r.tag_suggestions.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&r.tag_suggestions)?)
+        };
+        sqlx::query(
+            "INSERT INTO recordings (
+                 id, started_at, duration_ms, audio_path, transcript, model, status,
+                 error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
+                 transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
+                 cleanup_model, diarized, user_edited, favorite, tag_suggestions, summary,
+                 summary_model, title, title_is_auto, title_model, tag_model, diarization_model
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(r.id.as_str())
+        .bind(r.started_at.to_rfc3339())
+        .bind(r.duration_ms)
+        .bind(&r.audio_path)
+        .bind(r.transcript.as_deref())
+        .bind(r.model.as_deref())
+        .bind(r.status.as_str())
+        .bind(r.error_kind.as_deref())
+        .bind(r.error_message.as_deref())
+        .bind(r.hook_command.as_deref())
+        .bind(r.hook_exit_code)
+        .bind(r.hook_duration_ms)
+        .bind(r.transcribed_at.map(|d| d.to_rfc3339()))
+        .bind(r.hook_ran_at.map(|d| d.to_rfc3339()))
+        .bind(r.notes.as_deref())
+        .bind(r.meeting_id.as_deref())
+        .bind(r.meeting_name.as_deref())
+        .bind(r.track.as_deref())
+        .bind(r.in_place)
+        .bind(r.cleanup_model.as_deref())
+        .bind(r.diarized)
+        .bind(r.user_edited)
+        .bind(r.favorite)
+        .bind(tag_suggestions)
+        .bind(r.summary.as_deref())
+        .bind(r.summary_model.as_deref())
+        .bind(r.title.as_deref())
+        .bind(r.title_is_auto)
+        .bind(r.title_model.as_deref())
+        .bind(r.tag_model.as_deref())
+        .bind(r.diarization_model.as_deref())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Set (or clear) the display name for every track sharing `meeting_id`.
+    pub async fn update_meeting_name(&self, meeting_id: &str, name: Option<&str>) -> Result<()> {
+        sqlx::query("UPDATE recordings SET meeting_name = ?, updated_at = datetime('now') WHERE meeting_id = ?")
+            .bind(name)
+            .bind(meeting_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Move a recording to a new lifecycle status (the pipeline calls this as it
+    /// advances through transcribing → cleaning up → … → done/failed).
+    pub async fn update_status(&self, id: &RecordingId, status: RecordingStatus) -> Result<()> {
+        sqlx::query("UPDATE recordings SET status = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(status.as_str())
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Record why a recording failed, on the row itself.
+    ///
+    /// `kind` is the short machine label the failed path already uses for the
+    /// inbox quarantine (e.g. `"whisper_error"`, `"hook_failed"`) and `message`
+    /// is the human-readable reason. Storing them here makes the failure reason
+    /// survive a daemon restart: the live failure events and the `failed/`
+    /// quarantine JSON are otherwise the only places it lives, and neither is
+    /// readable once the app session that saw the event is gone. The status
+    /// itself is set separately by [`Self::update_status`]; this only fills the
+    /// two error columns.
+    pub async fn update_error(&self, id: &RecordingId, kind: &str, message: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE recordings SET error_kind = ?, error_message = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(kind)
+        .bind(message)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update both status and duration in a single query.
+    pub async fn update_status_and_duration(
+        &self,
+        id: &RecordingId,
+        status: RecordingStatus,
+        duration_ms: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE recordings SET status = ?, duration_ms = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(status.as_str())
+        .bind(duration_ms)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update the transcript after machine transcription.
+    ///
+    /// `transcript` is the text to store as the live transcript; for recordings
+    /// with LLM post-processing enabled this is the LLM-cleaned text.
+    /// `original_transcript` is always the raw Whisper output, so "View original"
+    /// can show the pre-LLM version even when post-processing is active.
+    /// Re-transcription overwrites both columns (a fresh baseline) and clears any
+    /// stored failure reason (`error_kind`/`error_message`), so a successful retry
+    /// of a previously failed recording stops showing the old error.
+    pub async fn update_transcript(
+        &self,
+        id: &RecordingId,
+        transcript: &str,
+        original_transcript: &str,
+        model: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET transcript = ?, original_transcript = ?, clean_transcript = ?, model = ?,
+                   user_edited = 0, error_kind = NULL, error_message = NULL,
+                   transcribed_at = datetime('now'), updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(transcript)
+        .bind(original_transcript)
+        // `clean_transcript` snapshots the pipeline output (transcribed + cleaned)
+        // so "View unedited transcript" can show it even after the user edits the
+        // live transcript. User edits go through `update_user_transcript`, which
+        // leaves this column untouched.
+        .bind(transcript)
+        .bind(model)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Record which post-processing LLM model ran (if any), whether speaker
+    /// diarization was applied, and the diarizer's model when a cloud diarizer
+    /// produced it (`None` for the local speakrs diarizer or none at all).
+    /// Called by the pipeline after transcription so the list view and the
+    /// detail provenance line can surface these.
+    pub async fn update_processing_meta(
+        &self,
+        id: &RecordingId,
+        cleanup_model: Option<&str>,
+        diarized: bool,
+        diarization_model: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET cleanup_model = ?, diarized = ?, diarization_model = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(cleanup_model)
+        .bind(diarized)
+        .bind(diarization_model)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Record the LLM model the auto-tagger used for this recording (the detail
+    /// provenance line names it). Written once per auto-tag run, independent of
+    /// whether the run produced approve/dismiss suggestions or auto-accepted
+    /// existing tags — so the step shows even when nothing was left to approve.
+    pub async fn set_tag_model(&self, id: &RecordingId, model: &str) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET tag_model = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(model)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Store (or replace) the LLM-generated summary for a recording, along with
+    /// the model that produced it.
+    pub async fn update_summary(
+        &self,
+        id: &RecordingId,
+        summary: &str,
+        model: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET summary = ?, summary_model = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(summary)
+        .bind(model)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update the transcript from a manual user edit, preserving
+    /// `original_transcript`/`clean_transcript` so the edit can be reverted.
+    /// Sets the `user_edited` flag and leaves `model` alone, so the "Transcript
+    /// Model" column keeps showing the transcription model that actually produced
+    /// the text (the hand edit shows up in the "Edited" column instead).
+    pub async fn update_user_transcript(&self, id: &RecordingId, transcript: &str) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET transcript = ?, user_edited = 1, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(transcript)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Find-and-replace across a recording's stored live transcript (S6).
+    ///
+    /// ### Semantics
+    /// - Literal substring replacement, not regex — the safest default, with no
+    ///   accidental metacharacter surprises on a transcript. `find` is matched
+    ///   verbatim; `replace` is inserted verbatim.
+    /// - Case sensitivity is opt-out via `case_sensitive`. A case-insensitive match
+    ///   still substitutes the user's `replace` text exactly; the original casing
+    ///   of each matched run is not preserved (documented).
+    /// - Returns the count of occurrences replaced.
+    ///
+    /// ### Scope
+    /// Only the live `transcript` is rewritten — the same column hand edits and
+    /// `update_user_transcript` touch. The preserved `original_transcript`
+    /// (machine output) and `clean_transcript` (pipeline output) are left intact so
+    /// the edit stays revertible; the per-segment and per-word layers are re-flowed
+    /// by the caller (the daemon) exactly as for a normal transcript edit. The
+    /// recording is marked `user_edited`.
+    ///
+    /// ### No-op safety
+    /// An empty `find`, or zero matches, writes nothing and returns 0. A no-match
+    /// never rewrites (and so never corrupts) the transcript, and never touches
+    /// `updated_at`/`user_edited`.
+    ///
+    /// Errors: [`crate::Error::NotFound`] when the id is unknown, or when the
+    /// recording has no transcript yet (nothing to edit).
+    pub async fn find_replace_transcript(
+        &self,
+        id: &RecordingId,
+        find: &str,
+        replace: &str,
+        case_sensitive: bool,
+    ) -> Result<FindReplaceOutcome> {
+        // Empty needle: defined as a no-op (replacing "" would otherwise splice
+        // `replace` between every char). Resolve the id first so an unknown id
+        // still reports NotFound rather than a silent 0.
+        let Some(rec) = self.get(id).await? else {
+            return Err(crate::error::Error::NotFound { id: id.to_string() });
+        };
+        let Some(current) = rec.transcript else {
+            return Err(crate::error::Error::NotFound {
+                id: format!("{id} (no transcript to edit)"),
+            });
+        };
+        if find.is_empty() {
+            return Ok(FindReplaceOutcome {
+                replaced: 0,
+                transcript: current,
+            });
+        }
+
+        let (count, new_text) = if case_sensitive {
+            (
+                current.matches(find).count(),
+                current.replace(find, replace),
+            )
+        } else {
+            replace_ignore_case(&current, find, replace)
+        };
+
+        // No match → no write: never rewrite on zero matches.
+        if count == 0 {
+            return Ok(FindReplaceOutcome {
+                replaced: 0,
+                transcript: current,
+            });
+        }
+
+        self.update_user_transcript(id, &new_text).await?;
+        Ok(FindReplaceOutcome {
+            replaced: count,
+            transcript: new_text,
+        })
+    }
+
+    /// Replace the LLM-suggested tags awaiting approval for a recording.
+    /// An empty slice clears the column (no lingering empty-array JSON).
+    pub async fn set_tag_suggestions(&self, id: &RecordingId, names: &[String]) -> Result<()> {
+        let json = if names.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(names)?)
+        };
+        sqlx::query(
+            r#"UPDATE recordings
+               SET tag_suggestions = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(json)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Drop every pending tag suggestion across the whole library (the
+    /// Auto-Tagging settings' "Clear all suggestions" action). Returns how many
+    /// recordings actually had suggestions to clear.
+    pub async fn clear_all_tag_suggestions(&self) -> Result<u64> {
+        let result = sqlx::query(
+            r#"UPDATE recordings
+               SET tag_suggestions = NULL, updated_at = datetime('now')
+               WHERE tag_suggestions IS NOT NULL"#,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Set or clear a recording's display title.
+    ///
+    /// Ownership rule: a user title (`title_is_auto = 0`) wins for good. An auto
+    /// write (`is_auto = true` with a title) only lands while the title is still
+    /// auto-owned, so the pipeline can refresh its own titles on retranscribe but
+    /// can never clobber one the user typed. Explicit user writes always apply:
+    /// `Some` with `is_auto = false` takes ownership; `None` clears the title and
+    /// reverts ownership to auto, so the next pipeline run generates a fresh one.
+    ///
+    /// Returns whether a row was actually updated (`false` = unknown id, or
+    /// an auto write skipped because the user owns the title).
+    ///
+    /// `model` records which LLM produced an auto title for the provenance line:
+    /// the auto-title step passes `Some(model)` when an LLM made the title and
+    /// `None` for a heuristic one; user/CLI title writes pass `None`, which also
+    /// clears any stale model so a user-owned title never shows one.
+    pub async fn set_title(
+        &self,
+        id: &RecordingId,
+        title: Option<&str>,
+        is_auto: bool,
+        model: Option<&str>,
+    ) -> Result<bool> {
+        // A cleared title is always auto-owned — `None` means "no title,
+        // generate one next run", never "user-owned empty title".
+        let is_auto = is_auto || title.is_none();
+        let result = if is_auto && title.is_some() {
+            sqlx::query(
+                r#"UPDATE recordings
+                   SET title = ?, title_is_auto = 1, title_model = ?, updated_at = datetime('now')
+                   WHERE id = ? AND title_is_auto = 1"#,
+            )
+            .bind(title)
+            .bind(model)
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"UPDATE recordings
+                   SET title = ?, title_is_auto = ?, title_model = ?, updated_at = datetime('now')
+                   WHERE id = ?"#,
+            )
+            .bind(title)
+            .bind(is_auto)
+            .bind(model)
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?
+        };
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Set or clear the "favorite"/star flag for a recording (Favorites view).
+    pub async fn set_favorite(&self, id: &RecordingId, favorite: bool) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET favorite = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(favorite as i64)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The preserved original (machine) transcript, if any. `None` for
+    /// recordings transcribed before this column existed, or never transcribed.
+    pub async fn get_original_transcript(&self, id: &RecordingId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT original_transcript FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(r) => Ok(r.try_get::<Option<String>, _>("original_transcript")?),
+            None => Ok(None),
+        }
+    }
+
+    /// The preserved "unedited" transcript — the pipeline output (machine
+    /// transcription + any LLM cleanup) before the user made hand edits. `None`
+    /// for recordings transcribed before this column existed, or never
+    /// transcribed.
+    pub async fn get_clean_transcript(&self, id: &RecordingId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT clean_transcript FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(r) => Ok(r.try_get::<Option<String>, _>("clean_transcript")?),
+            None => Ok(None),
+        }
+    }
+
+    /// Update the free-form user notes for a recording.
+    ///
+    /// Notes live in their own column and are completely independent of the
+    /// transcript: neither machine (re-)transcription (`update_transcript`)
+    /// nor user transcript edits (`update_user_transcript`) touch this column,
+    /// so notes always survive those operations.
+    pub async fn update_notes(&self, id: &RecordingId, notes: &str) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET notes = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(notes)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Record the outcome of the hook that ran for a recording (command, exit
+    /// code, duration), stamping `hook_ran_at`.
+    pub async fn update_hook_result(
+        &self,
+        id: &RecordingId,
+        command: &str,
+        exit_code: i32,
+        duration_ms: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET hook_command = ?, hook_exit_code = ?, hook_duration_ms = ?,
+                   hook_ran_at = datetime('now'), updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(command)
+        .bind(exit_code)
+        .bind(duration_ms)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The recording's Meeting-Mode track and meeting link — `(track,
+    /// meeting_id)` — without the speaker-name join [`get`](Self::get) does.
+    ///
+    /// The pipeline needs only these two columns before transcribing, to drive
+    /// track-aware Meeting Mode (a meeting's mic track is labelled as one fixed
+    /// speaker instead of diarized). This narrow read keeps that hot path from
+    /// paying for the full row and its join. Both columns are `None` for a normal
+    /// single-track recording; `(None, None)` when the id is unknown.
+    pub async fn track_and_meeting(
+        &self,
+        id: &RecordingId,
+    ) -> Result<(Option<String>, Option<String>)> {
+        let row = sqlx::query("SELECT track, meeting_id FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(r) => Ok((r.try_get("track")?, r.try_get("meeting_id")?)),
+            None => Ok((None, None)),
+        }
+    }
+
+    /// Fetch a single recording by id, with its custom speaker names populated
+    /// (tags are loaded separately via [`Catalog::tags_for`]). `None` when the
+    /// id is unknown.
+    pub async fn get(&self, id: &RecordingId) -> Result<Option<Recording>> {
+        let row = sqlx::query("SELECT * FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        let mut rec = match row.map(row_to_recording).transpose()? {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+        // Populate the speaker-name map so a single-recording fetch (the daemon's
+        // GetRecording, which backs the detail view) can render custom names.
+        // Tags are deliberately left out here — the detail view loads those
+        // separately via `tags_for`.
+        rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
+        Ok(Some(rec))
+    }
+
+    /// List recordings matching `filter`, newest-first by default, with tags and
+    /// speaker names populated per row.
+    ///
+    /// Every predicate — full-text search, tag, status, kind (single vs. meeting),
+    /// favorites, date range — is applied in SQL before `LIMIT`/`OFFSET`, so
+    /// pagination composes correctly. Filtering after pagination would return
+    /// mostly-empty pages of the chosen kind. Backs the GUI Library and the CLI
+    /// `phoneme list`.
+    pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
+        let mut sql = String::from("SELECT recordings.* FROM recordings");
+
+        let mut fts_query = None;
+        let mut tag_search_query = None;
+        let mut model_search_query = None;
+
+        if let Some(q) = filter.search.as_deref() {
+            let sanitized = sanitize_fts5_query(q);
+            if !sanitized.is_empty() {
+                fts_query = Some(sanitized);
+                let like = format!("%{}%", q);
+                tag_search_query = Some(like.clone());
+                // The same substring also matches any step's model name, so a
+                // search like "large-v3" or "gemma3:4b" finds everything that
+                // model ran on (see the WHERE OR + per-column binds below).
+                model_search_query = Some(like);
+            }
+        }
+
+        if filter.tag_id.is_some() {
+            sql.push_str(" JOIN recording_tags rt ON rt.recording_id = recordings.id");
+        }
+
+        sql.push_str(" WHERE 1=1");
+
+        if fts_query.is_some() {
+            sql.push_str(" AND (recordings.rowid IN (SELECT rowid FROM recordings_fts WHERE transcript MATCH ?) OR recordings.id IN (SELECT recording_id FROM recording_tags rts JOIN tags ts ON ts.id = rts.tag_id WHERE ts.name LIKE ?) OR recordings.model LIKE ? OR recordings.cleanup_model LIKE ? OR recordings.summary_model LIKE ? OR recordings.title_model LIKE ? OR recordings.tag_model LIKE ? OR recordings.diarization_model LIKE ?)");
+        }
+        if let Some(tag_id) = filter.tag_id {
+            // `tag_id` is an `i64`, so formatting it directly is injection-safe —
+            // an integer can't carry SQL. Same rationale as the `u32` LIMIT/OFFSET
+            // below. String filters (FTS, status) go through bound `?` parameters.
+            sql.push_str(&format!(" AND rt.tag_id = {tag_id}"));
+        }
+        if filter.status.is_some() {
+            sql.push_str(" AND recordings.status = ?");
+        }
+        // Kind and favorites are filtered in SQL, not client-side: they must apply
+        // before LIMIT/OFFSET, or pages of the chosen kind come back mostly empty
+        // (post-pagination filtering only ever thins the fetched page).
+        match filter.kind {
+            Some(crate::types::ListKind::Single) => {
+                sql.push_str(" AND recordings.meeting_id IS NULL");
+            }
+            Some(crate::types::ListKind::Meeting) => {
+                sql.push_str(" AND recordings.meeting_id IS NOT NULL");
+            }
+            None => {}
+        }
+        match filter.favorite {
+            Some(true) => sql.push_str(" AND recordings.favorite = 1"),
+            Some(false) => sql.push_str(" AND recordings.favorite = 0"),
+            None => {}
+        }
+        match filter.in_place {
+            Some(true) => sql.push_str(" AND recordings.in_place = 1"),
+            Some(false) => sql.push_str(" AND recordings.in_place = 0"),
+            None => {}
+        }
+        // Tag-presence filter (sidebar "All Tags" / "Untagged"). A static subquery
+        // over recording_tags — no bound params, injection-safe. Independent of the
+        // single-tag `tag_id` JOIN above, so the two compose.
+        match filter.tagged {
+            Some(true) => {
+                sql.push_str(" AND recordings.id IN (SELECT recording_id FROM recording_tags)")
+            }
+            Some(false) => {
+                sql.push_str(" AND recordings.id NOT IN (SELECT recording_id FROM recording_tags)")
+            }
+            None => {}
+        }
+        if filter.since.is_some() {
+            sql.push_str(" AND recordings.started_at >= ?");
+        }
+        if filter.until.is_some() {
+            sql.push_str(" AND recordings.started_at <= ?");
+        }
+        let dir = if filter.sort_desc.unwrap_or(true) {
+            "DESC"
+        } else {
+            "ASC"
+        };
+        sql.push_str(&format!(
+            " ORDER BY recordings.started_at {dir}, recordings.id {dir}"
+        ));
+        // LIMIT / OFFSET for pagination. SQLite requires a LIMIT before an OFFSET,
+        // so an offset given on its own uses `LIMIT -1` (no row cap). `limit` and
+        // `offset` are `u32`, so formatting them directly is injection-safe.
+        match (filter.limit, filter.offset) {
+            (Some(n), Some(m)) => sql.push_str(&format!(" LIMIT {n} OFFSET {m}")),
+            (Some(n), None) => sql.push_str(&format!(" LIMIT {n}")),
+            (None, Some(m)) => sql.push_str(&format!(" LIMIT -1 OFFSET {m}")),
+            (None, None) => {}
+        }
+
+        let mut q = sqlx::query(&sql);
+        if let Some(fq) = &fts_query {
+            q = q.bind(fq);
+        }
+        if let Some(tq) = &tag_search_query {
+            q = q.bind(tq);
+        }
+        if let Some(mq) = &model_search_query {
+            // One bind per model column in the WHERE OR above (transcription +
+            // cleanup + summary + title + tag + diarization), in that order.
+            for _ in 0..6 {
+                q = q.bind(mq);
+            }
+        }
+        if let Some(s) = filter.status {
+            q = q.bind(s.as_str().to_string());
+        }
+        if let Some(t) = filter.since {
+            q = q.bind(t.to_rfc3339());
+        }
+        if let Some(t) = filter.until {
+            q = q.bind(t.to_rfc3339());
+        }
+        let rows = q.fetch_all(&self.pool).await?;
+        let mut recs: Vec<Recording> = rows
+            .into_iter()
+            .map(row_to_recording)
+            .collect::<Result<_>>()?;
+        // Populate tags + custom speaker names for each recording (N+1 query;
+        // acceptable for desktop UI scale).
+        for rec in &mut recs {
+            rec.tags = self.tags_for(&rec.id).await.unwrap_or_default();
+            rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
+        }
+        Ok(recs)
+    }
+
+    /// Fetch all recordings belonging to a single meeting session.
+    ///
+    /// Returns the rows that share `meeting_id`, ordered by `track` then
+    /// `started_at` so the two tracks of a meeting come back in a stable order
+    /// (e.g. "mic" before "system", since "mic" < "system" lexicographically).
+    /// A `meeting_id` with no rows yields an empty `Vec` (not an error) — the
+    /// caller treats that as "no such session".
+    pub async fn list_by_meeting(&self, meeting_id: &str) -> Result<Vec<Recording>> {
+        let rows = sqlx::query(
+            "SELECT * FROM recordings WHERE meeting_id = ? \
+             ORDER BY track ASC, started_at ASC, id ASC",
+        )
+        .bind(meeting_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut recs: Vec<Recording> = rows
+            .into_iter()
+            .map(row_to_recording)
+            .collect::<Result<_>>()?;
+        // The merged meeting view maps `[Speaker N]` → custom names per track, so
+        // each track must carry its own speaker-name map.
+        for rec in &mut recs {
+            rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
+        }
+        Ok(recs)
+    }
+
+    /// Delete a recording's catalog row. Cascading foreign keys take its tags,
+    /// segments, speaker names, and embeddings with it; the caller removes the
+    /// audio file from disk separately.
+    pub async fn delete(&self, id: &RecordingId) -> Result<()> {
+        // Named voices that will lose a sample when the cascade removes this
+        // recording's voiceprints. Capture them before the delete so we can
+        // recompute their cached centroids afterward (audit H1). Null links are
+        // skipped.
+        let affected: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
+             WHERE recording_id = ? AND named_voice_id IS NOT NULL",
+        )
+        .bind(id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
+        sqlx::query("DELETE FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?;
+        // The cascade took this recording's embeddings, voiceprints, and dismissed
+        // suggestions with it — patch its now-empty vectors out of the warm cache,
+        // then recompute any named voice that just lost a sample so its centroid
+        // and count stay accurate.
+        self.patch_recording_in_cache(id).await;
+        for nid in affected {
+            self.recompute_named_centroid(&nid).await?;
+        }
+        Ok(())
+    }
+
+    /// Delete every recording row — and, via the same cascade as [`Self::delete`],
+    /// all their tags, segments, words, speaker names, and embeddings. Used by the
+    /// destructive catalog rebuild, which then re-imports the audio from disk.
+    /// Returns the number of rows removed. The caller leaves the WAV files on disk
+    /// (the rebuild re-links them).
+    pub async fn clear_all_recordings(&self) -> Result<u64> {
+        // Named voices that will lose samples when the cascade removes every
+        // recording's voiceprints. Capture them before the delete so their cached
+        // centroids and counts can be recomputed afterward, mirroring
+        // [`Self::delete`] (audit M1). Null links are skipped.
+        let affected: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
+             WHERE named_voice_id IS NOT NULL",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let res = sqlx::query("DELETE FROM recordings")
+            .execute(&self.pool)
+            .await?;
+        self.invalidate_embedding_cache();
+        for nid in affected {
+            self.recompute_named_centroid(&nid).await?;
+        }
+        Ok(res.rows_affected())
+    }
+
+    /// Run an explicit WAL checkpoint. PASSIVE mode is non-blocking — readers
+    /// can keep going while the checkpoint runs. The daemon calls this on idle
+    /// (e.g., when the queue worker has been quiet for a few minutes) to keep
+    /// the `-wal` file from growing unbounded under sustained read pressure
+    /// from `SubscribeEvents` subscribers.
+    pub async fn checkpoint(&self) -> Result<()> {
+        sqlx::query("PRAGMA wal_checkpoint(PASSIVE)")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+}

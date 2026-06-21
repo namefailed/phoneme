@@ -237,16 +237,17 @@ pub fn redact_secrets(text: &str) -> String {
     let prefixed = regex::Regex::new(
         r"\b(?:sk-[A-Za-z0-9_-]{8,}|sk_(?:live|test)_[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{8,}|gho_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|AKIA[0-9A-Z]{12,})",
     )
-    .unwrap();
+    .expect("valid static regex");
     // `{8,}` keeps prose like "bearer of bad news" intact; real bearer tokens
     // are far longer.
-    let bearer = regex::Regex::new(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{8,}=*").unwrap();
+    let bearer = regex::Regex::new(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{8,}=*")
+        .expect("valid static regex");
     // The value may be bare or quoted; the key name and the `=` are kept so the
     // user can still tell which assignment their script printed.
     let assigned = regex::Regex::new(
         r#"(?i)\b(api[_-]?key|key|token|password|secret)(\s*=\s*)("[^"]*"|'[^']*'|[^\s"']+)"#,
     )
-    .unwrap();
+    .expect("valid static regex");
 
     let masked = prefixed.replace_all(text, REDACTED);
     let masked = bearer.replace_all(&masked, format!("Bearer {REDACTED}"));

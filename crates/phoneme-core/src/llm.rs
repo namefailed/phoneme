@@ -131,9 +131,9 @@ fn combine(prompt: &str, text: &str) -> String {
 fn normalize_response(text: &str) -> String {
     // Compiled once: matching every response is hot, and `Regex::new` is costly.
     static EXCESS_NEWLINES: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"\n{3,}").unwrap());
+        LazyLock::new(|| regex::Regex::new(r"\n{3,}").expect("valid static regex"));
     static WRAPPED_SENTENCE: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"([^\n.!?])\n([a-z])").unwrap());
+        LazyLock::new(|| regex::Regex::new(r"([^\n.!?])\n([a-z])").expect("valid static regex"));
 
     // Collapse 3+ consecutive newlines down to 2, keeping paragraph breaks.
     let collapsed = EXCESS_NEWLINES.replace_all(text, "\n\n");

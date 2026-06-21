@@ -983,7 +983,7 @@ impl DaemonRecorder {
             }
             return Err(Error::NotRecording);
         }
-        let active = active_lock.as_mut().unwrap();
+        let active = active_lock.as_mut().expect("active is Some; the is_none() case returned above");
         if active.paused {
             return Ok(active.id.clone());
         }
@@ -1044,7 +1044,7 @@ impl DaemonRecorder {
             }
             return Err(Error::NotRecording);
         }
-        let active = active_lock.as_mut().unwrap();
+        let active = active_lock.as_mut().expect("active is Some; the is_none() case returned above");
         if !active.paused {
             return Ok(active.id.clone());
         }

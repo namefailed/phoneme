@@ -264,12 +264,12 @@ pub struct WhisperModelOverride {
 impl WhisperModelOverride {
     /// Current override model path, if any.
     pub fn get(&self) -> Option<String> {
-        self.model.lock().unwrap().clone()
+        self.model.lock().expect("model-override mutex poisoned").clone()
     }
 
     /// Set (`Some`) or clear (`None`) the override and wake the supervisor.
     pub fn set(&self, value: Option<String>) {
-        *self.model.lock().unwrap() = value;
+        *self.model.lock().expect("model-override mutex poisoned") = value;
         self.changed.notify_waiters();
     }
 }
@@ -472,7 +472,7 @@ impl AppState {
             ResolvedPaths::from_config_in(&config, data_local)?
         } else {
             // Env/dirs path: serialize the read against any other env-based build.
-            let _guard = INIT_LOCK.lock().unwrap();
+            let _guard = INIT_LOCK.lock().expect("init lock poisoned");
             ResolvedPaths::from_config_in(&config, None)?
         };
         tokio::fs::create_dir_all(&paths.audio_dir).await?;
