@@ -63,6 +63,21 @@ impl MockDaemon {
                                 continue;
                             };
                             let req = *req;
+                            // The CLI client handshakes on connect (F3). Answer it
+                            // transparently — compatible, not recorded, responder
+                            // not invoked — so command tests still assert only the
+                            // request their subcommand actually sends.
+                            if let Request::Handshake { protocol_version } = req {
+                                let resp = Response::Ok(serde_json::json!({
+                                    "protocol_version": protocol_version,
+                                    "app_version": env!("CARGO_PKG_VERSION"),
+                                    "compatible": true,
+                                }));
+                                if conn.send_response(resp).await.is_err() {
+                                    return;
+                                }
+                                continue;
+                            }
                             let response = responder(&req);
                             received.lock().unwrap().push(req);
                             if conn.send_response(response).await.is_err() {
