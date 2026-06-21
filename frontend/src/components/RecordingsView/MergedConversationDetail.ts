@@ -14,6 +14,8 @@ import {
   type ChronoBlock,
 } from "./mergeMeeting";
 import { applyMoreLikeThis } from "../../state/filter";
+import { subscribe, type DaemonEvent } from "../../services/events";
+import { applyLlmActivity, emptyLlmStream, matchesLlmStream, type LlmStreamState } from "./llmStream";
 
 /** Distinct, theme-agnostic colors so each speaker is easy to follow at a glance.
  *  Indexed by the 1-based speaker label; wraps for meetings with many speakers. */
@@ -85,9 +87,28 @@ export class MergedConversationDetail extends LitElement {
    *  event (the parent calls `reload()`), or on a request error. */
   @state() private digestPending = false;
 
+  /** Live accumulation of the streamed digest (the `summarizing` LLM stage keyed
+   *  on the meeting's first track) so the card shows tokens as they generate,
+   *  the same `llm_activity` stream the AI-activity popout consumes. Display-only:
+   *  the daemon caps it, and the `meeting_digest_updated` reload settles the card
+   *  to the full stored `digest`. Only painted while `digestPending` (Layer 2.4):
+   *  a per-track summary can stream on this same id + stage, so the pending flag
+   *  is what tells the digest's stream apart from a stray per-track one. */
+  @state() private digestStream: LlmStreamState = emptyLlmStream();
+  /** The meeting a pending digest stream belongs to, so a reload that switches to
+   *  a different meeting can drop the stale stream (a same-meeting reload keeps
+   *  it). Null when no digest is in flight. */
+  private digestMeetingId: string | null = null;
+
   private onConfigSaved = (e: Event) => {
     this.config = (e as CustomEvent).detail ?? null;
   };
+
+  /** Teardown for the daemon-event subscription that feeds `digestStream`. */
+  private llmUnsub: (() => void) | null = null;
+  /** Set once the element disconnected, so a subscription that resolves after
+   *  teardown unlistens itself instead of leaking. */
+  private gone = false;
 
   connectedCallback() {
     super.connectedCallback();
@@ -97,11 +118,34 @@ export class MergedConversationDetail extends LitElement {
         this.config = cfg;
       }).catch(console.error);
     }
+    this.gone = false;
+    void subscribe((event: DaemonEvent) => this.onLlmActivity(event)).then((unsub) => {
+      if (this.gone) unsub();
+      else this.llmUnsub = unsub;
+    });
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("config:saved", this.onConfigSaved);
+    this.gone = true;
+    if (this.llmUnsub) {
+      this.llmUnsub();
+      this.llmUnsub = null;
+    }
+  }
+
+  /** Consume the digest's `summarizing` LLM stream (keyed on the meeting's first
+   *  track, where the daemon emits the digest's activity — `generate_meeting_digest`)
+   *  and accumulate it into `digestStream`. Only matters while `digestPending`,
+   *  so a per-track summary streaming on the same id+stage can't cross-paint the
+   *  digest card (Layer 2.4 / risk 3). The `@state` write re-renders the card. */
+  private onLlmActivity(event: DaemonEvent) {
+    if (!this.digestPending) return;
+    const firstTrackId = this.recordings[0]?.id;
+    if (!firstTrackId || !matchesLlmStream(event, { id: firstTrackId, stage: "summarizing" })) return;
+    if (event.event !== "llm_activity") return; // narrow for applyLlmActivity
+    this.digestStream = applyLlmActivity(this.digestStream, event);
   }
 
   async updated(changedProperties: PropertyValues) {
@@ -135,6 +179,17 @@ export class MergedConversationDetail extends LitElement {
     this.loading = true;
     this.error = null;
     this.suggestions = [];
+    // A reload for a DIFFERENT meeting drops any in-flight digest stream/pending
+    // from the previous one, so a late delta for the old meeting's digest can't
+    // paint into the one now loading. A reload for the SAME meeting (e.g. a track
+    // finished transcribing while a digest is mid-stream) leaves the live stream
+    // untouched — the digest's own result lands via the dedicated meeting_digest
+    // reload path, which repopulates `digest` and clears pending below.
+    if (this.digestMeetingId && this.digestMeetingId !== this.meetingId) {
+      this.digestPending = false;
+      this.digestStream = emptyLlmStream();
+      this.digestMeetingId = null;
+    }
     // Capture the meeting this load is for; each await below can resolve after
     // the user has switched to a different meeting, and assigning a previous
     // meeting's tracks/segments/digest onto the current one paints the wrong
@@ -161,8 +216,17 @@ export class MergedConversationDetail extends LitElement {
       const digest = await getMeetingDigest(mid).catch(() => null);
       if (this.meetingId !== mid) return;
       this.digest = digest;
-      // A finished (re)generation clears the pending state when reload() lands.
-      this.digestPending = false;
+      // A finished (re)generation clears the pending state when its result lands.
+      // But an unrelated reload (e.g. a track finished transcribing) while a
+      // digest is still streaming must NOT clear pending — that would freeze the
+      // live stream. Keep pending only while the stream is still arriving and no
+      // newer digest landed; the dedicated meeting_digest reload brings the
+      // stored digest, which clears it here.
+      if (digest || !this.digestStream.streaming) {
+        this.digestPending = false;
+        this.digestStream = emptyLlmStream();
+        this.digestMeetingId = null;
+      }
     } catch (e) {
       if (this.meetingId === mid) {
         this.error = errText(e);
@@ -332,6 +396,10 @@ export class MergedConversationDetail extends LitElement {
    *  so we only flip the pending state here and let the reload paint the result. */
   private async handleGenerateDigest() {
     if (this.digestPending || !this.meetingId) return;
+    // Drop any prior live buffer so this run's stream starts clean (the daemon's
+    // prompt-start resets it too); flip pending so onLlmActivity starts painting.
+    this.digestStream = emptyLlmStream();
+    this.digestMeetingId = this.meetingId;
     this.digestPending = true;
     try {
       await rerunMeetingDigest(this.meetingId);
@@ -494,7 +562,11 @@ export class MergedConversationDetail extends LitElement {
           >${btnLabel}</button>
         </div>
         ${this.digestPending && !d
-          ? html`<div class="merged-digest-body" style="color: var(--fg-muted)">Generating the meeting digest…</div>`
+          ? this.digestStream.text
+            // Stream the digest live, token by token, with a spinner while more
+            // is still arriving. White-space pre-wrap matches the settled digest.
+            ? html`<div class="merged-digest-body" style="white-space: pre-wrap">${this.digestStream.text}${this.digestStream.streaming ? html`<span class="thinking-spin" aria-hidden="true" style="margin-left: 6px; vertical-align: middle"></span>` : nothing}</div>`
+            : html`<div class="merged-digest-body" style="color: var(--fg-muted)">Generating the meeting digest…</div>`
           : d
             ? html`<div class="merged-digest-body">${d.digest}</div>`
             : html`<div class="merged-digest-body" style="color: var(--fg-muted)">No digest yet — generate one cohesive summary across both tracks.</div>`}

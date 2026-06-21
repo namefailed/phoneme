@@ -39,6 +39,8 @@ import { WaveformPlayer } from "./WaveformPlayer";
 import { TimelineView } from "./TimelineView";
 import { SyncedTranscript } from "./SyncedTranscript";
 import { ChaptersView } from "./ChaptersView";
+import { subscribe, type DaemonEvent } from "../../services/events";
+import { applyLlmActivity, emptyLlmStream, matchesLlmStream, type LlmStreamState } from "./llmStream";
 
 /**
  * The right pane: one recording, fully editable. This file owns the detail
@@ -105,6 +107,19 @@ export class RecordingDetail {
    *  its generation is stale. So a regenerate-while-polling retires the old poll
    *  and starts a fresh one. */
   private summaryPollGen = 0;
+  /** Live accumulation of the streamed summary (the `summarizing` LLM stage), fed
+   *  from the daemon's `llm_activity` deltas so the peek shows tokens as they
+   *  generate — the same stream the AI-activity popout consumes. Display-only: the
+   *  daemon caps it at MAX_STREAMED_CHARS, so the poll/`summary_updated` settle
+   *  step overwrites it with the full stored summary. Reset on each prompt-start. */
+  private summaryStream: LlmStreamState = emptyLlmStream();
+  /** Teardown for the daemon-event subscription that feeds `summaryStream`. The
+   *  detail is reused across recordings (one instance per slot, app-lifetime), so
+   *  this is set up once in the constructor. */
+  private llmUnsub: (() => void) | null = null;
+  /** Set once `dispose()` has run, so a subscription that resolves after teardown
+   *  unlistens itself instead of leaking. */
+  private disposed = false;
   /** The 24-hour-time setting, for the header date (K). Loaded from config and
    *  kept current via the config:saved event. */
   private use24h = false;
@@ -139,6 +154,14 @@ export class RecordingDetail {
       const c = (e as CustomEvent).detail;
       this.use24h = !!c?.interface?.format_24h;
       this.lowConfThreshold = lowConfidenceThreshold(c);
+    });
+    // Feed the summary peek's live stream off the shared daemon event bus. The
+    // detail instance is app-lifetime (created per slot, never disposed — only
+    // cleared), so one subscription for its whole life is right; store the unsub
+    // for `dispose()` and to guard the post-await teardown race below.
+    void subscribe((event: DaemonEvent) => this.onLlmActivity(event)).then((unsub) => {
+      if (this.disposed) unsub();
+      else this.llmUnsub = unsub;
     });
   }
 
@@ -245,6 +268,18 @@ export class RecordingDetail {
     this.notesDirty = false;
     this.player.destroy();
     this.renderEmpty();
+  }
+
+  /** Tear down the app-lifetime daemon-event subscription. The detail instances
+   *  live for the whole app today (so this is rarely called), but releasing the
+   *  listener keeps the component safe to drop without leaking the handler. */
+  dispose() {
+    this.disposed = true;
+    if (this.llmUnsub) {
+      this.llmUnsub();
+      this.llmUnsub = null;
+    }
+    this.clear();
   }
 
   /** Mark this pane as half of a dual-timeline split (group = the meeting id),
@@ -532,19 +567,26 @@ export class RecordingDetail {
     });
 
     // Summary peek: shows the stored AI summary. If none exists yet, generates
-    // one on demand (RerunSummary) and shows a pending state; `requestSummary`
-    // polls for the result and fills the peek in place.
+    // one on demand (RerunSummary) and shows a pending state; the summary's
+    // `summarizing` LLM stage streams into the peek live via `onLlmActivity`, and
+    // `requestSummary` polls for the final stored text and settles the peek.
     peeks.summary.btn?.addEventListener("click", async () => {
       if (activePeek === "summary") return resetPeek();
+      // Open first so onLlmActivity (which only paints the visible peek) can take
+      // over the moment a delta lands.
+      openPeek("summary");
       if (r.summary && r.summary.trim()) {
         this.fillSummaryPeek(peeks.summary.el!, r);
+      } else if (this.summaryStream.streaming || this.summaryStream.text) {
+        // A summarize is already in flight (e.g. the pipeline is mid-run) —
+        // show the accumulating stream rather than kicking off a fresh one.
+        this.paintSummaryStream(peeks.summary.el!);
       } else {
         peeks.summary.el!.innerHTML = `
           <div style="font-size: 0.7857rem; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary (read-only)</div>
           <div style="color: var(--fg-muted); line-height: 1.6;">Generating summary…</div>`;
         void this.requestSummary(r.id);
       }
-      openPeek("summary");
     });
 
     // Timeline peek: the machine segments as a clickable, time-coded list.
@@ -1228,6 +1270,39 @@ export class RecordingDetail {
     });
   }
 
+  /** Consume the daemon's `llm_activity` stream for THIS recording's summary
+   *  stage and paint the accumulating text into the open summary peek live, the
+   *  way the AI-activity popout does. Display-only — the poll/`summary_updated`
+   *  settle step (`requestSummary` / `fillSummaryPeek`) remains the source of
+   *  truth for the final stored summary + model, since the stream is capped at
+   *  the daemon's MAX_STREAMED_CHARS and aborts to a bare `done` on skip. */
+  private onLlmActivity(event: DaemonEvent) {
+    const id = this.recording?.id;
+    if (!id || !matchesLlmStream(event, { id, stage: "summarizing" })) return;
+    // matchesLlmStream guarantees the discriminant; narrow for applyLlmActivity.
+    if (event.event !== "llm_activity") return;
+    this.summaryStream = applyLlmActivity(this.summaryStream, event);
+    // Only paint while the summary peek is the visible peek — don't fight the
+    // editor/original/unedited/timeline/synced peeks (or a stream for a meeting
+    // digest that happens to key on this same recording id, since the digest
+    // renders in the merged view, never here).
+    if (!this.summaryPeeking) return;
+    const peekEl = this.container.querySelector<HTMLElement>("#summary-peek");
+    if (peekEl && peekEl.style.display !== "none") this.paintSummaryStream(peekEl);
+  }
+
+  /** Render the live streaming buffer into the summary peek, with a spinner while
+   *  it's still arriving. Mirrors `fillSummaryPeek`'s read-only header + pre-wrap
+   *  body, but feeds the in-flight `summaryStream` rather than the stored text. */
+  private paintSummaryStream(peekEl: HTMLElement) {
+    const caret = this.summaryStream.streaming
+      ? `<span class="thinking-spin" aria-hidden="true" style="margin-left: 6px; vertical-align: middle;"></span>`
+      : "";
+    peekEl.innerHTML = `
+      <div style="font-size: 0.7857rem; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary (read-only)${caret}</div>
+      <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(this.summaryStream.text)}</div>`;
+  }
+
   /** Kick off on-demand summary generation, then poll for the result and fill
    *  the peek box in place. Summaries are produced asynchronously by the daemon
    *  (RerunSummary spawns a task and emits SummaryUpdated), so polling keeps the
@@ -1238,6 +1313,10 @@ export class RecordingDetail {
     // captured before some earlier job — otherwise a still-running poll could
     // satisfy this call with the first job's result and stop early.
     const prev = this.recording?.summary ?? null;
+    // Drop any prior live buffer so a regenerate's stream replaces the old one
+    // (the daemon's prompt-start does this too; this also clears a completed
+    // stream left from a different recording's earlier view).
+    this.summaryStream = emptyLlmStream();
     try {
       await rerunSummary(id, model, prompt);
     } catch (e) {

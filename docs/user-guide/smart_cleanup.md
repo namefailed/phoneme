@@ -166,6 +166,8 @@ Separately from cleanup, Phoneme can produce a short **AI summary** of each reco
 - **On demand:** click **View summary** in any recording's detail view to generate (or regenerate) a summary.
 - **Automatic:** enable **Summarize every recording** (`summary.auto`) under Settings → Post-Processing → Auto AI Summary, and a summary is generated as the **last step** of every recording's pipeline.
 
+The summary **streams live** into the peek as it generates — you watch it write itself token by token (with a small spinner) rather than waiting on a "Generating summary…" placeholder, then it settles to the final stored text. The whole-meeting digest card streams the same way.
+
 The summary uses its **own** provider, model, and prompt (`[summary]`). Leave the summary provider on **inherit** (blank) to reuse your cleanup connection, or pick a completely different provider+model — for example, clean up locally with Ollama but summarize with Claude. The stored summary lives in the `summary` column alongside the model that produced it (`summary_model`).
 
 Built-in summary presets include bullet-point summary, 2–3 sentence summary, action items & decisions, a TL;DR paragraph, and meeting minutes.

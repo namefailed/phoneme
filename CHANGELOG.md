@@ -136,6 +136,15 @@ trust boundary.*
   replaces the set. Reuses the existing auto-tag/summary LLM machinery (same
   provider resolution, streaming, skip/empty/error handling); the default pipeline
   is unchanged unless the recipe includes the step.
+- [x] **Summaries stream live in the detail pane** — the AI summary peek and the
+  whole-meeting digest card now render the LLM output **token by token as it
+  generates**, instead of sitting on a "Generating summary…" placeholder until the
+  final text lands. They subscribe to the daemon's existing `llm_activity` stream
+  (the same one the 🧠 AI-activity popout consumes) for the `summarizing` stage and
+  paint the accumulating text with a live spinner; the poll / `summary_updated` /
+  `meeting_digest_updated` settle step still overwrites the (capped) live view with
+  the full stored summary, so the final shown text is always authoritative.
+  Frontend-only — the daemon already streamed every LLM stage.
 
 ### Reliability & foundation
 

@@ -1607,7 +1607,11 @@ pub enum DaemonEvent {
     },
     /// Live AI activity for one pipeline stage (transcribing, cleanup,
     /// summary, or tagging), so the GUI's activity popout can show the exact
-    /// prompt and the response as it streams. Lifecycle per stage: (1) one
+    /// prompt and the response as it streams. The GUI's summary peek and
+    /// meeting-digest card also consume the `summarizing`-stage events (a digest
+    /// is keyed on the meeting's first track id) to render the summary live, then
+    /// settle to the stored text on `SummaryUpdated` / `MeetingDigestUpdated`.
+    /// Lifecycle per stage: (1) one
     /// event with the full `prompt` (`done=false`) — for the Transcribing
     /// stage this names the provider/model/file instead, (2) zero or more
     /// `delta` chunks as the response streams (Ollama) or one full delta
@@ -1647,8 +1651,8 @@ pub enum DaemonEvent {
     ///
     /// A new event (not overloaded `LlmActivity`) because `LlmActivity` is keyed
     /// by `RecordingId` + `PipelineStage`, persisted per recording, and consumed
-    /// by the AI-activity popout + queue UI — Ask has no recording, no stage, and
-    /// carries a citation list.
+    /// by the AI-activity popout, the summary peek, and the meeting-digest card —
+    /// Ask has no recording, no stage, and carries a citation list.
     AskActivity {
         /// The Ask request this activity belongs to (echoed verbatim).
         request_id: String,

@@ -1782,6 +1782,10 @@ export class RecordingsView {
     // The pane-click follower is on this.container (which App reuses across
     // views), so it has to be detached explicitly or it leaks onto the next view.
     if (this.paneClickHandler) this.container.removeEventListener("pointerdown", this.paneClickHandler, true);
+    // Both detail panes hold a daemon-event subscription (for the live summary
+    // stream); release it so it doesn't outlive the view on revisit.
+    this.detail.dispose();
+    this.detail2.dispose();
   }
 
   private applyLayout() {

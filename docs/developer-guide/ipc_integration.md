@@ -281,6 +281,14 @@ The whole-meeting digest emits `meeting_digest_updated` (success) or
 `summary_updated` / `summary_failed`, keyed by `meeting_id` rather than a
 recording `id`.
 
+Both the summary and the digest also stream while they generate: their
+`summarizing`-stage `llm_activity` events (keyed on the recording `id`, or the
+meeting's **first track** `id` for a digest) carry the prompt then incremental
+`delta`s, so the GUI's summary peek and meeting-digest card render the text token
+by token, then settle to the full stored text on the `*_updated` event. The
+stream is display-only (the daemon caps it at `MAX_STREAMED_CHARS`); the
+`*_updated` result is authoritative.
+
 Entity extraction emits `entities_updated` (`{ id }`) when the typed entities are
 stored, or `entities_failed` (`{ id, error }`) on failure — the entity twins of
 `tag_suggestions_updated` / `tag_failed`. A failure is best-effort: the
