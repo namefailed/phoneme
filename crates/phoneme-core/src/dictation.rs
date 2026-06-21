@@ -146,6 +146,84 @@ pub fn apply_voice_commands(text: &str, commands: &BTreeMap<String, String>) -> 
     capitalize_sentence_starts(out.trim())
 }
 
+/// Expand user-defined text macros (snippets) in dictated text: each `trigger`
+/// found in `text` is replaced with its `expansion` (the literal string, typed
+/// verbatim). The classic case is a shorthand for boilerplate you say often —
+/// `"my email"` → `you@example.com`, `"sig"` → a multi-line signature.
+///
+/// Conservative, like the voice-command pass, so a macro never fires inside an
+/// unrelated word:
+/// * matching is **case-insensitive**, but the **expansion is used verbatim**
+///   (its own casing is preserved — a macro is a literal string, not a word to
+///   recase);
+/// * a trigger only matches on **word boundaries** — the characters on either
+///   side of the match must be non-alphanumeric (or the string edge), so the
+///   trigger `"sig"` does not fire inside `"signal"` or `"design"`;
+/// * longer triggers are tried first, so when one trigger is a prefix of another
+///   (`"addr"` and `"address"`) the more specific one wins;
+/// * triggers are matched left to right and a match consumes its span, so an
+///   expansion can never be re-scanned and trigger a second macro (no cascade).
+///
+/// `snippets` is the effective `trigger → expansion` map. Pass an **empty** map
+/// (the default, and what the daemon passes when snippets are disabled) to make
+/// this a pure byte-for-byte pass-through — there is no built-in macro set.
+/// Triggers should be lowercased (the config layer lowercases them on load); a
+/// trigger that is empty or all-whitespace is skipped so it can never match the
+/// gaps between every character.
+pub fn apply_snippets(text: &str, snippets: &BTreeMap<String, String>) -> String {
+    if snippets.is_empty() {
+        return text.to_string();
+    }
+    // Precompute each (lowercased-trigger chars, expansion) pair once, dropping
+    // empty/whitespace triggers, then sort longest-first so a longer, more
+    // specific trigger wins over a shorter one it contains as a prefix.
+    let mut triggers: Vec<(Vec<char>, &str)> = snippets
+        .iter()
+        .filter(|(t, _)| !t.trim().is_empty())
+        .map(|(t, e)| (t.to_ascii_lowercase().chars().collect(), e.as_str()))
+        .collect();
+    if triggers.is_empty() {
+        return text.to_string();
+    }
+    triggers.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
+
+    let lower = text.to_ascii_lowercase();
+    let chars: Vec<char> = text.chars().collect();
+    let lower_chars: Vec<char> = lower.chars().collect();
+    // `to_ascii_lowercase` is 1:1 on chars, so the lowercased view aligns
+    // index-for-index with the original — a match position in one is the same in
+    // the other, letting us copy the original (cased) text outside matches.
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let mut matched = false;
+        for (t, expansion) in &triggers {
+            if i + t.len() > lower_chars.len() {
+                continue;
+            }
+            if lower_chars[i..i + t.len()] != t[..] {
+                continue;
+            }
+            // Word-boundary guard: the char before and after the span must not be
+            // alphanumeric, so a trigger never fires inside a larger word.
+            let left_ok = i == 0 || !chars[i - 1].is_alphanumeric();
+            let right_ok =
+                i + t.len() == chars.len() || !chars[i + t.len()].is_alphanumeric();
+            if left_ok && right_ok {
+                out.push_str(expansion);
+                i += t.len();
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// Uppercase the first alphabetic character at the start of the text and after
 /// each line break (intervening spaces are skipped).
 fn capitalize_sentence_starts(s: &str) -> String {
@@ -774,6 +852,70 @@ mod tests {
             fast_polish("send it tomorrow. scratch that. send it today.", &cmds),
             "Send it today."
         );
+    }
+
+    /// A small snippet map for the macro tests below.
+    fn sn(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(t, e)| (t.to_string(), e.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn snippets_empty_map_is_a_pure_passthrough() {
+        let empty = BTreeMap::new();
+        assert_eq!(apply_snippets("my email is here", &empty), "my email is here");
+    }
+
+    #[test]
+    fn snippets_expand_a_trigger_to_its_literal() {
+        let m = sn(&[("my email", "you@example.com")]);
+        assert_eq!(
+            apply_snippets("send it to my email please", &m),
+            "send it to you@example.com please"
+        );
+    }
+
+    #[test]
+    fn snippets_match_case_insensitively_but_keep_the_expansion_verbatim() {
+        // The trigger matches regardless of case; the expansion's own casing is
+        // preserved (it's a literal string, not a word to recase).
+        let m = sn(&[("my email", "You@Example.COM")]);
+        assert_eq!(apply_snippets("My Email", &m), "You@Example.COM");
+    }
+
+    #[test]
+    fn snippets_only_fire_on_word_boundaries() {
+        // "sig" must not fire inside "signal" or "design".
+        let m = sn(&[("sig", "[SIGNATURE]")]);
+        assert_eq!(
+            apply_snippets("the signal design is sig", &m),
+            "the signal design is [SIGNATURE]"
+        );
+    }
+
+    #[test]
+    fn snippets_prefer_the_longer_trigger() {
+        // "address" wins over "addr" where both could match the same span.
+        let m = sn(&[("addr", "ADDR"), ("address", "ADDRESS")]);
+        assert_eq!(apply_snippets("my address here", &m), "my ADDRESS here");
+        assert_eq!(apply_snippets("my addr here", &m), "my ADDR here");
+    }
+
+    #[test]
+    fn snippets_do_not_cascade_into_the_expansion() {
+        // The expansion of one macro must not be re-scanned and trigger another:
+        // "a" expands to "b", but the already-emitted "b" is not re-read.
+        let m = sn(&[("a", "b"), ("b", "c")]);
+        assert_eq!(apply_snippets("a b", &m), "b c");
+    }
+
+    #[test]
+    fn snippets_skip_blank_triggers() {
+        // A whitespace-only trigger must never match the gaps between characters.
+        let m = sn(&[("   ", "XXX"), ("hi", "hello")]);
+        assert_eq!(apply_snippets("hi there", &m), "hello there");
     }
 
     #[test]

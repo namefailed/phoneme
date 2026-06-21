@@ -241,6 +241,24 @@ voice_commands_enabled = true
 # "scratch that"  = "scratch"
 # "delete that"   = "scratch"
 
+# Master switch for text macros (snippets). true (default) expands them; false
+# types every trigger literally. (No effect until `snippets` has entries.)
+snippets_enabled = true
+
+# `snippets` — OPTIONAL trigger -> expansion map of text macros. Each trigger
+# transcribed in your dictation is replaced with its expansion (the literal text,
+# typed verbatim) — e.g. "my email" -> your address, "sig" -> a signature block.
+# Matching is case-insensitive and only fires on whole words (so "sig" never
+# expands inside "signal"); longer triggers win over shorter ones they contain.
+#
+# UNLIKE voice_commands, there is NO built-in set — leave this out (or empty) for
+# NO expansion (the dictation output is unchanged). Triggers are lowercased on
+# load; the expansion's own casing is preserved.
+#
+# [in_place.snippets]
+# "my email" = "you@example.com"
+# "my addr"  = "123 Example St, Springfield"
+
 # `stt` — OPTIONAL dedicated STT provider for dictation, shaped exactly like
 # [whisper]. Unset (the default): dictation follows the live preview's provider
 # when the preview is enabled, else the main [whisper]. For a local model, point

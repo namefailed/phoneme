@@ -114,6 +114,53 @@ voice_commands_enabled = true
 | `voice_commands_enabled` | bool | `true` | Master switch. `false` types every phrase literally, regardless of the map. |
 | `voice_commands` | map (phrase → `"newline"` \| `"paragraph"` \| `"scratch"`) | `{}` (empty) | Empty = the built-in set. A non-empty map fully replaces the defaults. Phrases are lowercased on load; entries with an unknown action are dropped with a warning (the config still loads). |
 
+## 📋 Text macros (snippets)
+
+**Macros** are *trigger → expansion* shorthands: when you dictate the trigger,
+it's replaced with the expansion typed verbatim. Say **"my email"** and your
+address lands instead; say **"sig"** and a whole signature block appears. Edit
+them under **Settings → Capture → Dictation → Text macros**.
+
+| Say | Becomes (example) |
+|-----|-------------------|
+| "my email" | `you@example.com` |
+| "my addr" | `123 Example St, Springfield` |
+| "sig" | your multi-line signature |
+
+How matching works, kept deliberately conservative so a macro never fires by
+accident:
+
+- **Case-insensitive** trigger, but the **expansion is used exactly as you typed
+  it** — its own casing is preserved.
+- **Whole words only** — `sig` expands as a standalone word, never inside
+  "signal" or "design".
+- **Longer triggers win** — if `addr` and `address` are both defined, "address"
+  expands to the `address` macro, not `addr` + "ess".
+- **No cascade** — an expansion is never re-scanned, so one macro can't trigger
+  another.
+
+Macros run in **every** cleanup mode (Fast, Off, AI cleanup), applied *after*
+polish, so the expanded text is never reshaped by the rule polish and (unlike a
+spoken command) is never sent to the cleanup model.
+
+Unlike voice commands there's **no built-in set** — an empty list means no
+expansion at all. The **Expand snippets** toggle turns the whole pass off without
+clearing your macros. In `config.toml`:
+
+```toml
+[in_place]
+snippets_enabled = true
+
+[in_place.snippets]
+"my email" = "you@example.com"
+"my addr"  = "123 Example St, Springfield"
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `snippets_enabled` | bool | `true` | Master switch. `false` types every trigger literally. (No effect until `snippets` has entries.) |
+| `snippets` | map (trigger → expansion) | `{}` (empty) | Empty = no expansion. Triggers are lowercased on load and matched case-insensitively on whole words; the expansion is kept verbatim. A blank trigger is ignored. |
+
 > [!NOTE]
 > In-place runs its own fast path, so the [live streaming
 > preview](streaming_preview_and_preroll.md) is **skipped** during dictation —

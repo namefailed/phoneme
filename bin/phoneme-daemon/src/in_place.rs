@@ -471,6 +471,20 @@ async fn transcribe_polish_type(
         _ => phoneme_core::dictation::fast_polish(&raw, &cmds),
     };
 
+    // Text macros (snippets) expand on the polished output, just before it's
+    // typed — so a trigger like "my email" becomes its literal expansion in
+    // every cleanup mode (off/fast/llm alike). With the pass disabled, or no
+    // macros defined, this is a pure pass-through (an empty map → byte-for-byte
+    // the polished text). The expansion runs after polish so a macro's literal
+    // text is never reshaped by the rule polish (and never advertised to the
+    // cleanup LLM); the daemon owns the table, mirroring the voice-command gate.
+    let snippets = if cfg.in_place.snippets_enabled {
+        cfg.in_place.effective_snippets()
+    } else {
+        std::collections::BTreeMap::new()
+    };
+    let polished = phoneme_core::dictation::apply_snippets(&polished, &snippets);
+
     // (6b) Resolve how the text lands for the focused app: a per-app override
     // ("type"/"paste"/"off") wins over the global `type_mode`; an unlisted (or
     // undetectable) app falls back to the global mode. With the default empty

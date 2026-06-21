@@ -80,6 +80,18 @@ trust boundary.*
   cleanup. Resolved entirely daemon-side at record start over the existing
   `pending_recipe` path — no new IPC, bridge, or migration. Empty (default) =
   unchanged. Windows-only (foreground-app detection).
+- [x] **Dictation text macros (snippets)** — define **trigger → expansion**
+  shorthands that expand in dictation output before it's typed: say "my email"
+  and your address lands instead, "sig" becomes a whole signature block. Edited
+  under **Settings → Capture → Dictation → Text macros** (and
+  `[in_place.snippets]` in config). Matching is case-insensitive and word-boundary
+  aware (so "sig" never fires inside "signal"), longer triggers win over shorter
+  ones they contain, and an expansion is never re-scanned (no cascade). It runs in
+  every cleanup mode, after polish, so a macro's literal text is never reshaped by
+  the rule polish or sent to the cleanup LLM. Unlike voice commands there's **no
+  built-in set** — an empty map means no expansion, so existing configs are
+  unchanged byte-for-byte; a master `snippets_enabled` switch turns the whole pass
+  off without clearing your macros.
 - [x] **Library-wide find & replace** — `phoneme find-replace --library <FIND>
   <REPLACE>` (and the new `find_replace_library` IPC request) runs the same
   literal, revertible replacement across **every** recording's transcript in one

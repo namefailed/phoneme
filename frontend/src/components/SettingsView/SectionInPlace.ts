@@ -258,6 +258,12 @@ export class SectionInPlace {
     // pristine config byte-for-byte unchanged. The enable flag defaults on.
     if (!ip.voice_commands || typeof ip.voice_commands !== "object") ip.voice_commands = {};
     if (typeof ip.voice_commands_enabled !== "boolean") ip.voice_commands_enabled = true;
+    // Text-macro (snippet) editor bindings. Unlike voice commands there is no
+    // built-in set, so an empty map means *no expansion* — the editor stays empty
+    // until the user adds a macro. The enable flag defaults on (a no-op while the
+    // map is empty), matching the daemon's snippets_enabled default.
+    if (!ip.snippets || typeof ip.snippets !== "object") ip.snippets = {};
+    if (typeof ip.snippets_enabled !== "boolean") ip.snippets_enabled = true;
     const sttMode = this.sttMode();
 
     this.container.innerHTML = `
@@ -478,6 +484,51 @@ export class SectionInPlace {
       </div>
 
       <div class="settings-section">
+        <h3>Text macros</h3>
+
+        <div class="settings-field">
+          <label>Expand snippets</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "in_place.snippets_enabled", label: "", kind: "checkbox" },
+              ip.snippets_enabled ?? true,
+            )}</div>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              On by default, but does nothing until you add a macro below. A macro is a
+              <b>trigger → expansion</b> shorthand: when you dictate the trigger, it is replaced with
+              the expansion typed verbatim — say <b>"my email"</b> and your address lands instead.
+              Matching is case-insensitive and only fires on whole words (so <code>sig</code> never
+              expands inside "signal"). Turn this off to type every trigger literally.
+            </span>
+          </div>
+        </div>
+        ${
+          ip.snippets_enabled
+            ? `
+        <div class="settings-field">
+          <label>Macros</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Add a <b>trigger</b> (what you say) and its <b>expansion</b> (the literal text typed in
+              its place). There are no built-in macros — an empty list means no expansion. Triggers are
+              lowercased and matched case-insensitively against whole words; longer triggers win over
+              shorter ones they contain.
+            </span>
+            <div id="ip-snippets" style="display: flex; flex-direction: column; gap: 6px; width: 100%;"></div>
+            <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
+              <input id="ip-sn-add-trigger" type="text" placeholder="Trigger (e.g. my email)"
+                style="flex: 1 1 auto; min-width: 0;" />
+              <input id="ip-sn-add-expansion" type="text" placeholder="Expansion (e.g. you@example.com)"
+                style="flex: 2 1 auto; min-width: 0;" />
+              <button id="ip-sn-add-btn" type="button">Add</button>
+            </div>
+          </div>
+        </div>`
+            : ""
+        }
+      </div>
+
+      <div class="settings-section">
         <h3>Dictation pipeline</h3>
 
         <div class="settings-field">
@@ -576,11 +627,17 @@ export class SectionInPlace {
     this.container
       .querySelector<HTMLInputElement>('input[data-key="in_place.voice_commands_enabled"]')
       ?.addEventListener("change", () => this.render());
+    // The snippets enable toggle shows/hides the macro editor; rebuild so it
+    // appears/hides. bindFieldEvents already wrote the new boolean.
+    this.container
+      .querySelector<HTMLInputElement>('input[data-key="in_place.snippets_enabled"]')
+      ?.addEventListener("change", () => this.render());
 
     this.renderAppOverrides();
     this.renderAppRecipes();
     this.renderContextDenylist();
     this.renderVoiceCommands();
+    this.renderSnippets();
     this.renderSttDetail();
   }
 
@@ -691,6 +748,74 @@ export class SectionInPlace {
         add();
       }
     });
+  }
+
+  /** Render the text-macro (snippet) trigger→expansion rows + the Add control.
+   *  Each row writes straight into `in_place.snippets` (trigger keys lowercased,
+   *  matching how the daemon compares them case-insensitively). There is no
+   *  built-in set, so the empty state says exactly that. Only present while
+   *  snippets are enabled (the section rebuilds when that flips). */
+  private renderSnippets() {
+    const host = this.container.querySelector<HTMLElement>("#ip-snippets");
+    if (!host) return;
+    const map: Record<string, string> = this.config.in_place.snippets ?? {};
+    const triggers = Object.keys(map).sort();
+    host.innerHTML =
+      triggers.length === 0
+        ? `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No macros yet — add a trigger and its expansion to get started.</span>`
+        : triggers
+            .map(
+              (trigger) => `
+        <div class="ip-sn-row" data-trigger="${escapeAttr(trigger)}"
+          style="display: flex; gap: 6px; width: 100%; align-items: center;">
+          <span style="flex: 1 1 auto; min-width: 0; font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis;">${escHtml(trigger)}</span>
+          <span style="flex: 0 0 auto; color: var(--fg-faded);">→</span>
+          <input class="ip-sn-expansion" type="text" data-trigger="${escapeAttr(trigger)}"
+            value="${escapeAttr(map[trigger])}" style="flex: 2 1 auto; min-width: 0;" />
+          <button class="ip-sn-remove" type="button" data-trigger="${escapeAttr(trigger)}" title="Remove">✕</button>
+        </div>`,
+            )
+            .join("");
+
+    host.querySelectorAll<HTMLInputElement>(".ip-sn-expansion").forEach((inp) => {
+      inp.addEventListener("input", () => {
+        const trigger = inp.getAttribute("data-trigger");
+        if (trigger) this.config.in_place.snippets[trigger] = inp.value;
+      });
+    });
+    host.querySelectorAll<HTMLButtonElement>(".ip-sn-remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const trigger = btn.getAttribute("data-trigger");
+        if (trigger) delete this.config.in_place.snippets[trigger];
+        this.renderSnippets();
+      });
+    });
+
+    const triggerInput = this.container.querySelector<HTMLInputElement>("#ip-sn-add-trigger");
+    const expansionInput = this.container.querySelector<HTMLInputElement>("#ip-sn-add-expansion");
+    const addBtn = this.container.querySelector<HTMLButtonElement>("#ip-sn-add-btn");
+    const add = () => {
+      // Lowercase the trigger — the daemon compares triggers case-insensitively,
+      // and lowercasing keeps the stored key canonical (so "My Email" / "my email"
+      // are one entry). The expansion is kept verbatim (its casing is the output).
+      const trigger = (triggerInput?.value ?? "").trim().toLowerCase();
+      const expansion = expansionInput?.value ?? "";
+      if (!trigger) return;
+      this.config.in_place.snippets[trigger] = expansion;
+      if (triggerInput) triggerInput.value = "";
+      if (expansionInput) expansionInput.value = "";
+      this.renderSnippets();
+    };
+    addBtn?.addEventListener("click", add);
+    // Enter in either Add field commits the row (only when a trigger is present).
+    [triggerInput, expansionInput].forEach((el) =>
+      el?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          add();
+        }
+      }),
+    );
   }
 
   /** Render the per-app delivery rows (app name + mode + remove) and wire the

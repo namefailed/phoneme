@@ -1693,6 +1693,27 @@ pub struct InPlaceConfig {
     /// whole feature off without clearing their customized map.
     #[serde(default = "default_true")]
     pub voice_commands_enabled: bool,
+    /// User-defined text macros expanded in the dictation output before typing: a
+    /// map of `trigger → expansion`. Each trigger spoken/transcribed in the text
+    /// is replaced with its expansion (the literal string, verbatim) — e.g.
+    /// `"my email"` → your address, `"sig"` → a signature block. Matching is
+    /// case-insensitive and word-boundary-aware (so `"sig"` never fires inside
+    /// `"signal"`); see [`crate::dictation::apply_snippets`].
+    ///
+    /// Unlike `voice_commands`, there is **no built-in macro set**, so the
+    /// **default empty map means no snippets** (the dictation output is unchanged
+    /// byte-for-byte). Triggers are lowercased on load (see
+    /// `deserialize_lowercase_keys`) so a cased entry still matches the
+    /// case-insensitively-compared text.
+    #[serde(default, deserialize_with = "deserialize_lowercase_keys")]
+    pub snippets: std::collections::BTreeMap<String, String>,
+    /// Master switch for the snippet (text-macro) pass. **Default true.** When
+    /// false, no trigger is ever expanded regardless of `snippets`, so a user can
+    /// turn the feature off without clearing a customized map. (With the default
+    /// empty `snippets` the pass is already a no-op, so this only matters once
+    /// macros are defined.)
+    #[serde(default = "default_true")]
+    pub snippets_enabled: bool,
 }
 
 impl Default for InPlaceConfig {
@@ -1719,6 +1740,12 @@ impl Default for InPlaceConfig {
             // before. `effective_voice_commands` swaps in the defaults at use.
             voice_commands: std::collections::BTreeMap::new(),
             voice_commands_enabled: true,
+            // No built-in macros: an empty `snippets` map is no expansion at all,
+            // so the dictation output is unchanged until the user defines one.
+            // `snippets_enabled` defaults on, but it's a no-op while the map is
+            // empty — it only matters once macros exist.
+            snippets: std::collections::BTreeMap::new(),
+            snippets_enabled: true,
         }
     }
 }
@@ -1829,6 +1856,25 @@ impl InPlaceConfig {
             .filter(|(_, action)| {
                 crate::dictation::VOICE_COMMAND_ACTIONS.contains(&action.as_str())
             })
+            .collect()
+    }
+
+    /// The text-macro (snippet) map the dictation engine should actually use:
+    /// the configured `snippets` with empty/whitespace-only triggers dropped (a
+    /// blank trigger would otherwise match the gaps between every character —
+    /// [`crate::dictation::apply_snippets`] already guards this, but filtering
+    /// here keeps the active set honest).
+    ///
+    /// Unlike [`effective_voice_commands`](Self::effective_voice_commands) there
+    /// is **no built-in fallback** — an empty `snippets` map yields an empty map
+    /// (no expansion). Like that method it does **not** consult
+    /// `snippets_enabled`; the daemon checks the flag and passes an empty map to
+    /// disable the pass, keeping "what's the active set" and "is it on" separate.
+    pub fn effective_snippets(&self) -> std::collections::BTreeMap<String, String> {
+        self.snippets
+            .iter()
+            .filter(|(trigger, _)| !trigger.trim().is_empty())
+            .map(|(trigger, expansion)| (trigger.clone(), expansion.clone()))
             .collect()
     }
 
@@ -5421,6 +5467,71 @@ mod tests {
             .voice_commands
             .insert("break here".into(), "paragraph".into());
         cfg.in_place.voice_commands_enabled = false;
+        let serialized = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn snippets_default_empty_and_enabled() {
+        // No built-in macros: a fresh config has an empty map (no expansion) but
+        // the master switch defaults on, so adding a macro just works.
+        let ip = InPlaceConfig::default();
+        assert!(ip.snippets.is_empty());
+        assert!(ip.snippets_enabled);
+        assert!(ip.effective_snippets().is_empty());
+    }
+
+    #[test]
+    fn snippets_absent_in_legacy_toml_default_to_empty_and_enabled() {
+        // A config written before snippets existed must still load: empty map
+        // (no expansion → output unchanged) with the feature switch on.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(ip) = toml_val.get_mut("in_place").and_then(|v| v.as_table_mut()) {
+            ip.remove("snippets");
+            ip.remove("snippets_enabled");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy config without snippets");
+        assert!(parsed.in_place.snippets.is_empty());
+        assert!(parsed.in_place.snippets_enabled);
+    }
+
+    #[test]
+    fn effective_snippets_drops_blank_triggers() {
+        let mut ip = InPlaceConfig::default();
+        ip.snippets.insert("my email".into(), "you@example.com".into());
+        // A whitespace-only trigger must never reach the engine.
+        ip.snippets.insert("   ".into(), "junk".into());
+        let eff = ip.effective_snippets();
+        assert_eq!(eff.len(), 1);
+        assert_eq!(eff.get("my email").map(String::as_str), Some("you@example.com"));
+    }
+
+    #[test]
+    fn snippets_lowercase_cased_triggers_on_load() {
+        // A cased trigger canonicalizes lowercased so it matches the
+        // case-insensitively-compared dictation text.
+        let toml = r#"
+            type_mode = "type"
+
+            [snippets]
+            "My Email" = "you@example.com"
+        "#;
+        let parsed: InPlaceConfig = toml::from_str(toml).unwrap();
+        assert!(parsed.snippets.contains_key("my email"));
+    }
+
+    #[test]
+    fn snippets_round_trip_through_toml() {
+        let mut cfg = Config::default();
+        cfg.in_place
+            .snippets
+            .insert("my email".into(), "you@example.com".into());
+        cfg.in_place.snippets_enabled = false;
         let serialized = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(parsed, cfg);
