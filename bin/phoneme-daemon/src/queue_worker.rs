@@ -122,38 +122,56 @@ async fn maybe_generate_meeting_digest(state: &AppState, rec_id: &phoneme_core::
         return;
     }
 
+    // Exactly-once claim. The two meeting tracks finish near-simultaneously, so
+    // both spawned digest tasks can pass the "all tracks terminal" gate at once;
+    // without this, each would fire its own (expensive) LLM digest for the same
+    // meeting. The first task to claim the id generates; a sibling that finds it
+    // already claimed defers. Released at the end so a later explicit regen
+    // (RerunMeetingDigest) or a retranscribe can run again.
+    if !state
+        .digest_in_flight
+        .lock()
+        .await
+        .insert(meeting_id.clone())
+    {
+        return;
+    }
+
     let event_id = tracks[0].id.clone();
     state.events.emit(DaemonEvent::PipelineStageChanged {
         id: event_id.clone(),
         stage: phoneme_ipc::PipelineStage::Summarizing,
     });
     match crate::pipeline::generate_meeting_digest(state, &cfg, &event_id, &tracks).await {
-        Ok((digest, model)) => {
-            if let Err(e) = state
-                .catalog
-                .update_meeting_digest(&meeting_id, &digest, Some(&model))
-                .await
-            {
+        Ok((digest, model)) => match state
+            .catalog
+            .update_meeting_digest(&meeting_id, &digest, Some(&model))
+            .await
+        {
+            Ok(()) => {
+                tracing::info!(session = %meeting_id, "auto meeting digest saved");
+                state.events.emit(DaemonEvent::MeetingDigestUpdated {
+                    meeting_id: meeting_id.clone(),
+                });
+            }
+            Err(e) => {
                 tracing::warn!(session = %meeting_id, error = %e, "meeting digest: persist failed");
                 state.events.emit(DaemonEvent::MeetingDigestFailed {
-                    meeting_id,
+                    meeting_id: meeting_id.clone(),
                     error: e.to_string(),
                 });
-                return;
             }
-            tracing::info!(session = %meeting_id, "auto meeting digest saved");
-            state
-                .events
-                .emit(DaemonEvent::MeetingDigestUpdated { meeting_id });
-        }
+        },
         Err(reason) => {
             tracing::warn!(session = %meeting_id, reason = %reason, "auto meeting digest failed");
             state.events.emit(DaemonEvent::MeetingDigestFailed {
-                meeting_id,
+                meeting_id: meeting_id.clone(),
                 error: reason,
             });
         }
     }
+
+    state.digest_in_flight.lock().await.remove(&meeting_id);
 }
 
 pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow::Result<()> {

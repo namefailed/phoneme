@@ -136,6 +136,13 @@ pub struct AppState {
             )>,
         >,
     >,
+    /// Meeting ids whose auto-digest is currently generating. The two tracks of
+    /// a meeting (mic + system) finish near-simultaneously, so both spawned
+    /// digest tasks can pass the "all tracks terminal" gate at once and each
+    /// fire an (expensive) LLM digest for the same meeting. The first task
+    /// claims the meeting id here; a sibling that finds it already claimed
+    /// defers. Cleared when generation finishes (success or failure).
+    pub digest_in_flight: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
     /// A one-job-scoped override of the bundled whisper-server's model file,
     /// used by a model-override re-transcription. `None` (the default) means the
     /// supervisor runs the configured `whisper.model_path`.
@@ -664,6 +671,7 @@ impl AppState {
             whisper_sem: Arc::new(tokio::sync::Semaphore::new(1)),
             preview2_sem: Arc::new(tokio::sync::Semaphore::new(1)),
             processing: Arc::new(std::sync::Mutex::new(None)),
+            digest_in_flight: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
             whisper_model_override: Arc::new(WhisperModelOverride::default()),
             preview_model_override: Arc::new(WhisperModelOverride::default()),
             dictation_model_override: Arc::new(WhisperModelOverride::default()),
