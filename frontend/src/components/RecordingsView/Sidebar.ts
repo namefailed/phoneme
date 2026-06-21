@@ -1,9 +1,19 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { listTags, tagUsageCounts, kindCounts, type Tag, type KindCounts } from "../../services/ipc";
+import { listTags, tagUsageCounts, kindCounts, listAllEntities, type Tag, type KindCounts, type EntityFacet } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
-import { filterStore, type UiFilter, type RecordingKind, type TagState } from "../../state/filter";
+import { filterStore, applyEntityFilter, type UiFilter, type RecordingKind, type TagState } from "../../state/filter";
 import "./QueuePanel";
+
+/** The entity classes, in display order, with their sidebar group label + icon.
+ *  Mirrors EntityChips' KIND_META so the browse facet groups entities the same
+ *  way the detail chips do. An unknown kind falls into its own trailing group. */
+const ENTITY_KIND_META: Array<{ kind: string; label: string; icon: string }> = [
+  { kind: "person", label: "People", icon: "👤" },
+  { kind: "org", label: "Organizations", icon: "🏢" },
+  { kind: "topic", label: "Topics", icon: "💡" },
+  { kind: "term", label: "Terms", icon: "🔤" },
+];
 
 /**
  * The left pane: Library kind-filters (All / Voice Notes / Meetings /
@@ -35,19 +45,26 @@ export class SidebarElement extends LitElement {
    *  (mirrors the per-tag counts). Null until first loaded; badges only render
    *  once it's known, so they never flash a wrong/zero value. */
   @state() private kindTotals: KindCounts | null = null;
+  /** The cross-recording entity facet (distinct extracted entities + recording
+   *  counts), grouped by kind into the Entities section. Mirrors `tags`. */
+  @state() private entities: EntityFacet[] = [];
   @state() private filterState: UiFilter = filterStore.get();
   @state() private libraryOpen = localStorage.getItem("phoneme.sidebar.libraryOpen") !== "false";
   @state() private tagsOpen = localStorage.getItem("phoneme.sidebar.tagsOpen") !== "false";
+  @state() private entitiesOpen = localStorage.getItem("phoneme.sidebar.entitiesOpen") !== "false";
   private unsubFilter: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
 
-  private toggleSection(which: "library" | "tags") {
+  private toggleSection(which: "library" | "tags" | "entities") {
     if (which === "library") {
       this.libraryOpen = !this.libraryOpen;
       localStorage.setItem("phoneme.sidebar.libraryOpen", String(this.libraryOpen));
-    } else {
+    } else if (which === "tags") {
       this.tagsOpen = !this.tagsOpen;
       localStorage.setItem("phoneme.sidebar.tagsOpen", String(this.tagsOpen));
+    } else {
+      this.entitiesOpen = !this.entitiesOpen;
+      localStorage.setItem("phoneme.sidebar.entitiesOpen", String(this.entitiesOpen));
     }
   }
 
@@ -62,6 +79,7 @@ export class SidebarElement extends LitElement {
     });
     void this.loadTags();
     void this.loadKindCounts();
+    void this.loadEntities();
     window.addEventListener("phoneme:counts-stale", this.onCountsStale);
     await this.subscribeToEvents();
   }
@@ -98,6 +116,18 @@ export class SidebarElement extends LitElement {
     }
   }
 
+  /** Load the cross-recording entity facet (distinct entities + counts) for the
+   *  Entities section. Failures clear the list (the section then shows empty),
+   *  mirroring `loadTags`. */
+  private async loadEntities() {
+    try {
+      this.entities = await listAllEntities();
+    } catch (e) {
+      console.error("Failed to load entities for sidebar:", e);
+      this.entities = [];
+    }
+  }
+
   private async subscribeToEvents() {
     const unsub = await subscribe((event: DaemonEvent) => {
       const eventName = (event as { event: string }).event;
@@ -125,6 +155,12 @@ export class SidebarElement extends LitElement {
       ) {
         void this.loadKindCounts();
       }
+      // The entity facet (distinct entities + recording counts) shifts whenever a
+      // recording's entities are (re)extracted or a recording is removed; refresh
+      // it off those triggers, the entity counterpart of the tag-event refresh.
+      if (eventName === "entities_updated" || eventName === "recording_deleted") {
+        void this.loadEntities();
+      }
     });
     // If the element disconnected while subscribe was awaiting,
     // disconnectedCallback already ran with this.unsubEvents null — tear the
@@ -150,6 +186,21 @@ export class SidebarElement extends LitElement {
   private setTagState(next: TagState) {
     const active = this.filterState.tagState === next ? null : next;
     filterStore.set({ ...this.filterState, tagState: active, tag_id: null });
+  }
+
+  /** Apply (or toggle off) the cross-recording entity filter for one facet row.
+   *  The entity counterpart of `setTagFilter`: clicking a row narrows the list to
+   *  recordings mentioning that `(kind, value)`; clicking the active row again
+   *  clears it. The `label` is the kind's group name shown in the header pill.
+   *  Combines with the Library `kind` / date / status filters (left untouched);
+   *  only the single-tag / tag-presence selections it would visually conflict
+   *  with are cleared so the active facet is unambiguous. */
+  private setEntityFilter(facet: EntityFacet, label: string) {
+    // An entity is a narrower selection than a tag; clear the tag selections so
+    // the active filter reads as exactly one entity (mirrors `setTagFilter`
+    // clearing `tagState`). `applyEntityFilter` handles the click-to-toggle-off.
+    filterStore.set({ ...this.filterState, tag_id: null, tagState: null });
+    applyEntityFilter(facet.value, facet.kind, label);
   }
 
   /** Set the Library type-filter. Independent of the tag filter — they COMBINE,
@@ -182,6 +233,47 @@ export class SidebarElement extends LitElement {
           : ""}
       </div>
     `;
+  }
+
+  /** Render the entity facet grouped by kind (People / Organizations / Topics /
+   *  Terms, in ENTITY_KIND_META order; an unexpected kind trails in its own
+   *  group). Each value is a clickable `.sidebar-item` row — same shape + count
+   *  badge as a tag row, active when it matches the entity filter — so the
+   *  vim-layer's sidebar grid picks it up for keyboard nav automatically. */
+  private renderEntityGroups(f: UiFilter) {
+    // Group the flat facet list by kind, preserving the daemon's value order.
+    const byKind = new Map<string, EntityFacet[]>();
+    for (const e of this.entities) {
+      const list = byKind.get(e.kind) ?? [];
+      list.push(e);
+      byKind.set(e.kind, list);
+    }
+    const orderedKinds = [
+      ...ENTITY_KIND_META.map((m) => m.kind).filter((k) => byKind.has(k)),
+      ...[...byKind.keys()].filter((k) => !ENTITY_KIND_META.some((m) => m.kind === k)),
+    ];
+    return orderedKinds.map((kind) => {
+      const meta = ENTITY_KIND_META.find((m) => m.kind === kind);
+      const label = meta?.label ?? kind;
+      const icon = meta?.icon ?? "•";
+      const facets = byKind.get(kind) ?? [];
+      return html`
+        <div class="sidebar-entity-group-label"
+          style="padding: 6px 12px 2px; font-size: 0.7143rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-faded);"
+          title="${label}">${icon} ${label}</div>
+        ${facets.map((e) => {
+          const active = f.entity_value === e.value && (f.entity_kind ?? null) === e.kind;
+          return html`
+            <div class="sidebar-item ${active ? "active" : ""}" @click=${() => this.setEntityFilter(e, label)}
+              title="${e.count} recording${e.count === 1 ? "" : "s"} mentioning “${e.value}”">
+              <span class="sidebar-icon">${icon}</span>
+              <span class="sidebar-label">${e.value}</span>
+              <span class="sidebar-count">${e.count}</span>
+            </div>
+          `;
+        })}
+      `;
+    });
   }
 
   render() {
@@ -242,6 +334,18 @@ export class SidebarElement extends LitElement {
                   <span class="sidebar-count" title="${this.counts[String(t.id)] ?? 0} recordings with this tag">${this.counts[String(t.id)] ?? 0}</span>
                 </div>
               `)}
+            </div>
+          ` : ""}
+
+          <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);"
+            @click=${() => this.toggleSection("entities")} title="Collapse / expand">
+            <span class="sidebar-chevron ${this.entitiesOpen ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>Entities
+          </div>
+          ${this.entitiesOpen ? html`
+            <div class="sidebar-list">
+              ${this.entities.length === 0 ? html`
+                <div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No entities yet. Extract them from a recording's detail view.</div>
+              ` : this.renderEntityGroups(f)}
             </div>
           ` : ""}
         </div>

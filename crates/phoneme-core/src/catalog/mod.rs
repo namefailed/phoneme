@@ -28,9 +28,9 @@ use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
 use crate::types::{
-    AiActivityEntry, Entity, ListFilter, MeetingDigest, NamedVoice, PropagationCandidate,
-    Recording, RecordingStatus, SavedSearch, SpeakerName, SpeakerSuggestion, TranscriptSegment,
-    TranscriptWord,
+    AiActivityEntry, Entity, EntityFacet, ListFilter, MeetingDigest, NamedVoice,
+    PropagationCandidate, Recording, RecordingStatus, SavedSearch, SpeakerName, SpeakerSuggestion,
+    TranscriptSegment, TranscriptWord,
 };
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};

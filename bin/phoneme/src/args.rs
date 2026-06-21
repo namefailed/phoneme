@@ -86,6 +86,9 @@ pub enum Command {
     Hook(HookArgs),
     /// Manage recording tags.
     Tag(TagArgs),
+    /// List the extracted entities across the library (the cross-recording
+    /// entity facet: people, orgs, topics, terms — each with a recording count).
+    Entities(EntitiesArgs),
     /// Manage config profiles (named full-config snapshots).
     Profile(ProfileArgs),
     /// Export all recordings and metadata to a zip file.
@@ -684,6 +687,14 @@ pub enum QueueAction {
         /// The recording id whose failed-quarantine file to remove.
         id: String,
     },
+}
+
+#[derive(Debug, clap::Args)]
+pub struct EntitiesArgs {
+    /// Show only entities of this kind (person / org / topic / term). Omit to
+    /// list every kind, grouped.
+    #[arg(long, value_name = "KIND", value_parser = ["person", "org", "topic", "term"])]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]

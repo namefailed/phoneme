@@ -288,6 +288,16 @@ export class RecordingsListElement extends LitElement {
     if (f.tag_id != null) out = out.filter((r) => (r.tags ?? []).some((t) => t.id === f.tag_id));
     if (f.tagState === "tagged") out = out.filter((r) => (r.tags ?? []).length > 0);
     else if (f.tagState === "untagged") out = out.filter((r) => (r.tags ?? []).length === 0);
+    // Entity facet filter: same client-side fallback as the single-tag filter
+    // above — a no-op on the plain list path (SQL already applied it) but real
+    // work on the semantic/▸similar paths, so a sidebar entity narrows those too.
+    if (f.entity_value != null) {
+      out = out.filter((r) =>
+        (r.entities ?? []).some(
+          (e) => e.value === f.entity_value && (f.entity_kind == null || e.kind === f.entity_kind),
+        ),
+      );
+    }
     // Low-confidence is applied in SQL on the plain list path (no-op here), but the
     // semantic/like paths don't carry it to the backend — re-apply it client-side
     // so the sidebar "Low confidence" row narrows a search/▸similar too. Matches

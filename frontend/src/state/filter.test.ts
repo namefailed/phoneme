@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { filterStore, applyMoreLikeThis, clearMoreLikeThis, toWireFilter } from './filter';
+import {
+  filterStore,
+  applyMoreLikeThis,
+  clearMoreLikeThis,
+  applyEntityFilter,
+  clearEntityFilter,
+  toWireFilter,
+} from './filter';
 
 describe('Filter Store', () => {
   it('initializes as an empty object', () => {
@@ -79,6 +86,68 @@ describe('toWireFilter', () => {
       expect(f.tagged).toBeUndefined();
       expect('tagged' in f).toBe(false);
     }
+  });
+
+  it('maps the entity facet value + kind onto the wire entity fields', () => {
+    const wire = toWireFilter({ entity_value: 'Alice', entity_kind: 'person', entity_label: 'Person' });
+    expect(wire.entity_value).toBe('Alice');
+    expect(wire.entity_kind).toBe('person');
+    // The UI-only label never crosses the wire.
+    expect('entity_label' in wire).toBe(false);
+  });
+
+  it('sends the entity value alone when no kind is set (matches across kinds)', () => {
+    const wire = toWireFilter({ entity_value: 'Mercury' });
+    expect(wire.entity_value).toBe('Mercury');
+    expect('entity_kind' in wire).toBe(false);
+  });
+
+  it('omits the entity fields when no entity value is set', () => {
+    for (const f of [toWireFilter({ entity_kind: 'person' }), toWireFilter({})]) {
+      expect('entity_value' in f).toBe(false);
+      expect('entity_kind' in f).toBe(false);
+    }
+  });
+});
+
+describe('Entity-filter helpers', () => {
+  it('applyEntityFilter narrows to one entity and keeps other dimensions', () => {
+    filterStore.set({ search: 'typed query', tag_id: 7 });
+    applyEntityFilter('Alice', 'person', 'Person');
+    expect(filterStore.get()).toEqual({
+      search: 'typed query',
+      tag_id: 7, // other dimensions are left alone — it COMBINES
+      entity_value: 'Alice',
+      entity_kind: 'person',
+      entity_label: 'Person',
+    });
+  });
+
+  it('applyEntityFilter on the active entity toggles it off', () => {
+    filterStore.set({});
+    applyEntityFilter('Alice', 'person', 'Person');
+    // Re-clicking the same (value, kind) clears it back to the unfiltered list.
+    applyEntityFilter('Alice', 'person', 'Person');
+    const f = filterStore.get();
+    expect(f.entity_value).toBeNull();
+    expect(f.entity_kind).toBeNull();
+    expect(f.entity_label).toBeNull();
+  });
+
+  it('applyEntityFilter to a different entity replaces, not toggles', () => {
+    filterStore.set({});
+    applyEntityFilter('Alice', 'person');
+    applyEntityFilter('Bob', 'person');
+    expect(filterStore.get().entity_value).toBe('Bob');
+  });
+
+  it('clearEntityFilter returns to the normal list', () => {
+    applyEntityFilter('Alice', 'person', 'Person');
+    clearEntityFilter();
+    const f = filterStore.get();
+    expect(f.entity_value).toBeNull();
+    expect(f.entity_kind).toBeNull();
+    expect(f.entity_label).toBeNull();
   });
 });
 

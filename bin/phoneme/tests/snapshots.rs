@@ -69,6 +69,7 @@ fn new_subcommands_are_recognized() {
         "refire-hook",
         "suggest-tags",
         "suggest-entities",
+        "entities",
         "speaker",
         "import-backup",
         "find-replace",

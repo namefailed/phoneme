@@ -267,6 +267,16 @@ pub struct SavedSearchFilter {
     /// Keep only recordings carrying this tag.
     #[serde(default)]
     pub tag_id: Option<i64>,
+    /// Keep only recordings that mention this extracted entity (the entity facet
+    /// filter). The frontend serializes the `UiFilter` verbatim, so the persisted
+    /// keys are the same `entity_value` / `entity_kind`; carried through to the
+    /// daemon's [`ListFilter`] so a saved search captured with an entity filter
+    /// actually filters server-side (the same class of fix as `tag_state`).
+    #[serde(default)]
+    pub entity_value: Option<String>,
+    /// The entity facet filter's `kind`, paired with [`Self::entity_value`].
+    #[serde(default)]
+    pub entity_kind: Option<String>,
     /// `true` (default) = newest first; `false` = oldest first.
     #[serde(default)]
     pub sort_desc: Option<bool>,
@@ -346,6 +356,8 @@ impl SavedSearchFilter {
             status: self.status,
             search: self.search,
             tag_id: self.tag_id,
+            entity_value: self.entity_value,
+            entity_kind: self.entity_kind,
             sort_desc: self.sort_desc,
             ..ListFilter::default()
         };
@@ -612,6 +624,23 @@ pub struct Entity {
     pub value: String,
 }
 
+/// One row of the cross-recording entity facet: a distinct `(kind, value)` plus
+/// how many recordings mention it. The entity counterpart of a tag-with-usage
+/// row — it powers the sidebar's browse-by-entity surface (group by `kind`,
+/// each `value` a clickable filter row showing its `count`), the way
+/// [`crate::tags::Tag`] + [`KindCounts`] back the tag facet. Distinct across
+/// recordings: the same `(kind, value)` mentioned in several recordings is one
+/// facet row whose `count` is the number of recordings, not mentions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityFacet {
+    /// The entity class: `person` / `org` / `topic` / `term`.
+    pub kind: String,
+    /// The entity's surface text (a name, organization, concept, or term).
+    pub value: String,
+    /// How many recordings mention this `(kind, value)`.
+    pub count: i64,
+}
+
 /// A whole-meeting digest: one LLM-generated synthesis across **all** tracks of a
 /// meeting (mic + system together), distinct from the per-recording
 /// [`Recording::summary`] which summarizes a single track.
@@ -859,6 +888,23 @@ pub struct ListFilter {
     /// Serde-defaulted: older clients that omit it still deserialize.
     #[serde(default)]
     pub tagged: Option<bool>,
+    /// Entity facet filter: keep only recordings that mention this exact entity
+    /// `value` (the cross-recording browse-by-entity surface, the entity
+    /// counterpart of `tag_id`). When set, the list is narrowed to recordings
+    /// whose id is in the `entities` table for this `value` — and, when
+    /// `entity_kind` is also set, that exact `(kind, value)` pair. `None` = no
+    /// filter. Applied in SQL via a `recordings.id IN (SELECT recording_id FROM
+    /// entities WHERE value = ? [AND kind = ?])` subquery, before `LIMIT`/`OFFSET`
+    /// so it composes with pagination, exactly like the tag subquery.
+    /// Serde-defaulted: older clients that omit it still deserialize.
+    #[serde(default)]
+    pub entity_value: Option<String>,
+    /// The entity facet filter's `kind` (`person` / `org` / `topic` / `term`),
+    /// pairing with [`Self::entity_value`] so the same surface text under two
+    /// kinds can be told apart. Ignored unless `entity_value` is set; `None` (with
+    /// a value set) matches that value across every kind. Serde-defaulted.
+    #[serde(default)]
+    pub entity_kind: Option<String>,
     /// Low-confidence filter: when `Some(t)`, keep only recordings whose stored
     /// `mean_confidence` is non-NULL **and strictly below** `t` — the
     /// confidence-driven "needs a closer look" view. Applied in SQL like the

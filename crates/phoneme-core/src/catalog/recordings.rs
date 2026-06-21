@@ -788,6 +788,23 @@ impl Catalog {
             }
             None => {}
         }
+        // Entity facet filter (sidebar browse-by-entity). A subquery over the
+        // `entities` child table, the entity counterpart of the `tag_id` JOIN:
+        // keep recordings that mention this exact entity `value`, optionally
+        // pinned to one `kind`. Both are user-supplied strings, so they go through
+        // bound `?` params (injection-safe) — unlike the integer `tag_id`. Applied
+        // before LIMIT/OFFSET so it composes with pagination.
+        if filter.entity_value.is_some() {
+            if filter.entity_kind.is_some() {
+                sql.push_str(
+                    " AND recordings.id IN (SELECT recording_id FROM entities WHERE value = ? AND kind = ?)",
+                );
+            } else {
+                sql.push_str(
+                    " AND recordings.id IN (SELECT recording_id FROM entities WHERE value = ?)",
+                );
+            }
+        }
         // Low-confidence filter: only recordings with a non-NULL mean confidence
         // strictly below the threshold (carried in the filter, set by the daemon
         // from `[whisper].low_confidence_threshold`). The `IS NOT NULL` guard keeps
@@ -843,6 +860,15 @@ impl Catalog {
         }
         if let Some(s) = filter.status {
             q = q.bind(s.as_str().to_string());
+        }
+        // Bound in WHERE order: the entity facet subquery sits between the
+        // tag-presence filter and the low-confidence clause. `value` first, then
+        // `kind` (only when the kind-qualified subquery was emitted).
+        if let Some(value) = &filter.entity_value {
+            q = q.bind(value);
+            if let Some(kind) = &filter.entity_kind {
+                q = q.bind(kind);
+            }
         }
         // Bound in WHERE order: the low-confidence threshold clause sits between the
         // tag-presence filter and the date-range clauses above.

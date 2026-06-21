@@ -20,6 +20,17 @@ trust boundary.*
   `pinned` on the list filter), `phoneme edit <ID> --pin/--unpin`, and matching
   REST (`POST /api/recordings/{id}/pinned`) and MCP (`set_pinned`) surfaces. Pins
   survive restarts and travel with library exports.
+- [x] **Browse by entity (cross-recording entity facet)** — the extracted
+  entities that were only ever per-recording chips are now a **library-wide
+  browse + filter**, exactly mirroring the tag facet. A new **Entities** sidebar
+  section groups every distinct extracted entity by kind (People / Organizations
+  / Topics / Terms), each value a clickable row showing how many recordings
+  mention it; clicking one filters the library to those recordings (toggle off by
+  re-clicking, or via a dismissable pill in the search header). Backed by a new
+  `ListAllEntities` IPC (returning `{kind, value, count}` rows from
+  `Catalog::entity_facets`) and an `entity_value` / `entity_kind` filter on the
+  list query (a `recordings.id IN (SELECT … FROM entities …)` subquery, the entity
+  counterpart of `tag_id`), with a matching `phoneme entities [--kind]` CLI.
 
 ### Transcripts
 
@@ -171,6 +182,17 @@ trust boundary.*
 
 ### Internals & refactors
 
+- [x] **Unified config `schema_version`** — the per-feature one-time-migration
+  latches (`playbook_migrated`, `hooks_migrated`) are replaced by a single
+  top-level `schema_version` integer. Each migration owns a version step (the
+  Playbook reconcile is `0 → 1`, the legacy `[hook]` cutover is `1 → 2`); on load
+  Phoneme runs only the steps newer than the stored version and then records the
+  current version, so every migration runs **exactly once** and re-loading an
+  already-migrated config does nothing. Existing configs upgrade transparently:
+  the old booleans still deserialize and are read **once** to infer the correct
+  starting version (so a config that already migrated is never re-migrated), after
+  which they are dropped from `config.toml` on the next save. Future structural
+  migrations just claim the next version step instead of inventing a new flag.
 - [x] **`catalog.rs` split into a module directory** — the 7.6k-line catalog
   god-object became `catalog/` with per-domain files (`recordings`, `embeddings`,
   `tags`, `speakers`, `segments`, `saved_search`, plus `mod.rs` for the structs and

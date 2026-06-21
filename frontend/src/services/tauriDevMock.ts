@@ -202,11 +202,14 @@ const SEGMENTS: Record<string, Seg[]> = {
 function track(
   id: string, meetingId: string, name: string, trackKind: "mic" | "system",
   daysAgo: number, h: number, m: number, segs: Seg[], tagIds: number[],
+  // Extra per-track fields (e.g. seeded `entities`), merged after the meeting
+  // fields so a track can carry its own enrichment in the mock.
+  extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const durMs = segs.length ? segs[segs.length - 1].end_ms : 0;
   const diarized = segs.some((s) => s.speaker != null);
   return rec(id, daysAgo, h, m, durMs, name, tagIds, false, trackTranscript(segs), {
-    meeting_id: meetingId, track: trackKind, meeting_name: name, diarized,
+    meeting_id: meetingId, track: trackKind, meeting_name: name, diarized, ...extra,
   });
 }
 
@@ -253,9 +256,22 @@ function moreRecordings(): Array<Record<string, unknown>> {
 }
 
 const RECORDINGS: Array<Record<string, unknown>> = [
-  rec("r01", 0, 15, 11, 12200, "Sample voice note", [1], true, `Placeholder transcript used to render the preview without a backend.\n\n${PARA}`),
+  // r01 carries a couple of extracted entities so the sidebar's browse-by-entity
+  // facet renders without a backend; "Ada Lovelace" is shared with m1a below so
+  // its facet count reads 2 (distinct recordings, not mentions).
+  rec("r01", 0, 15, 11, 12200, "Sample voice note", [1], true, `Placeholder transcript used to render the preview without a backend.\n\n${PARA}`, {
+    entities: [
+      { kind: "person", value: "Ada Lovelace" },
+      { kind: "org", value: "ACME Corp" },
+      { kind: "topic", value: "project roadmap" },
+    ],
+    entities_model: "phi3:mini",
+  }),
   // Meeting 1 (day 0, 10:05) — two tracks kept adjacent so the list groups them.
-  track("m1a", "m1", "Product sync call", "mic", 0, 10, 5, M1_MIC, [1]),
+  track("m1a", "m1", "Product sync call", "mic", 0, 10, 5, M1_MIC, [1], {
+    entities: [{ kind: "person", value: "Ada Lovelace" }],
+    entities_model: "phi3:mini",
+  }),
   track("m1b", "m1", "Product sync call", "system", 0, 10, 5, M1_SYS, [1]),
   // Meeting 2 (day 1, 09:30).
   track("m2a", "m2", "Design critique", "mic", 1, 9, 30, M2_MIC, [1, 3]),
@@ -555,6 +571,17 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       // Tag-presence filter ("All Tags" = true, "Untagged" = false).
       if (f.tagged === true) rows = rows.filter((r) => (r.tags as unknown[]).length > 0);
       else if (f.tagged === false) rows = rows.filter((r) => (r.tags as unknown[]).length === 0);
+      // Entity facet filter: keep recordings mentioning this exact entity value,
+      // optionally pinned to one kind (mirrors the daemon's `entities` subquery).
+      const entityValue = f.entity_value as string | undefined;
+      if (entityValue != null) {
+        const entityKind = f.entity_kind as string | undefined;
+        rows = rows.filter((r) =>
+          ((r.entities as Array<{ kind: string; value: string }> | undefined) ?? []).some(
+            (e) => e.value === entityValue && (entityKind == null || e.kind === entityKind),
+          ),
+        );
+      }
       return rows;
     }
     case "get_recording": return RECORDINGS.find((r) => r.id === id) ?? RECORDINGS[0];
@@ -773,6 +800,23 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       tagged: RECORDINGS.filter((r) => Array.isArray(r.tags) && (r.tags as unknown[]).length > 0).length,
       untagged: RECORDINGS.filter((r) => !Array.isArray(r.tags) || (r.tags as unknown[]).length === 0).length,
     };
+    // The cross-recording entity facet: distinct (kind, value) across the seeded
+    // recordings with their recording counts, kind- then value-sorted (mirrors the
+    // daemon's `entity_facets`). Powers the sidebar's browse-by-entity section.
+    case "list_all_entities": {
+      const counts = new Map<string, { kind: string; value: string; count: number }>();
+      for (const r of RECORDINGS) {
+        for (const e of ((r.entities as Array<{ kind: string; value: string }> | undefined) ?? [])) {
+          const key = `${e.kind} ${e.value}`;
+          const row = counts.get(key);
+          if (row) row.count += 1;
+          else counts.set(key, { kind: e.kind, value: e.value, count: 1 });
+        }
+      }
+      return [...counts.values()].sort(
+        (a, b) => a.kind.localeCompare(b.kind) || a.value.localeCompare(b.value),
+      );
+    }
     case "get_segments": return id ? (SEGMENTS[id] ?? []) : [];
     case "get_words": return [];
     case "get_original_transcript":

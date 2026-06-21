@@ -2,7 +2,7 @@ import { errText } from "../utils/error";
 import { LitElement, html } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 
-import { filterStore, clearMoreLikeThis, type UiFilter } from '../state/filter';
+import { filterStore, clearMoreLikeThis, clearEntityFilter, type UiFilter } from '../state/filter';
 import { listTags, listProfiles, switchProfile, type Tag } from '../services/ipc';
 import { subscribeHealth, refreshHealth, startHealthPolling } from '../state/health';
 import {
@@ -709,6 +709,13 @@ export class HeaderBarElement extends LitElement {
                 <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">~similar: ${f.like_label || f.like_id}</span>
                 <button class="hb-like-clear" aria-label="Back to all recordings"
                   title="Back to all recordings" @click=${() => clearMoreLikeThis()}>✕</button>
+              </div>`
+            : f.entity_value
+            ? html`<div class="filter-pill hb-entity-pill" style="flex:1; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;"
+                title="Showing recordings that mention “${f.entity_value}”${f.entity_label ? ` (${f.entity_label})` : ""}">
+                <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">🔎 ${f.entity_label ? `${f.entity_label}: ` : ""}${f.entity_value}</span>
+                <button class="hb-like-clear" aria-label="Back to all recordings"
+                  title="Back to all recordings" @click=${() => clearEntityFilter()}>✕</button>
               </div>`
             : html`<input type="search" class="search" style="flex:1;" placeholder="Search transcripts…"
             .value=${f.search || ""} @input=${this.handleSearch} title="Search through your transcripts by text" />`}

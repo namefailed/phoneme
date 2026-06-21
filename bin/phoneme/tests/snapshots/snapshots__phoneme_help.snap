@@ -34,6 +34,7 @@ Commands:
   watch             Subscribe to the daemon's event stream
   hook              Test the configured hook
   tag               Manage recording tags
+  entities          List the extracted entities across the library (the cross-recording entity facet: people, orgs, topics, terms — each with a recording count)
   profile           Manage config profiles (named full-config snapshots)
   export            Export all recordings and metadata to a zip file
   import-backup     Restore recordings + audio from a backup zip (the inverse of `export`)

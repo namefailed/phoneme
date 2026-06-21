@@ -1146,6 +1146,15 @@ pub enum Request {
     /// (see [`phoneme_core::types::KindCounts`]). Powers the GUI sidebar's
     /// Library count badges.
     KindCounts,
+    /// The cross-recording entity facet: every distinct extracted entity across
+    /// the library with its recording count, the entity counterpart of
+    /// [`Request::ListAllTags`] + [`Request::TagUsageCounts`]. Ok = a JSON array
+    /// of `{"kind":"person"|"org"|"topic"|"term","value":"…","count":n}`
+    /// (see [`phoneme_core::types::EntityFacet`]), kind- then value-sorted.
+    /// Powers the GUI sidebar's browse-by-entity surface and `phoneme entities`.
+    /// The entity *filter* itself rides on the existing [`Request::ListRecordings`]
+    /// via `ListFilter::entity_value` / `entity_kind`.
+    ListAllEntities,
     /// Merge one tag into another: re-point all recordings, then delete
     /// `from_id`. Ok `null`; emits [`DaemonEvent::TagDeleted`] for the
     /// source tag (consumers refresh on it). GUI Tag Manager merge,

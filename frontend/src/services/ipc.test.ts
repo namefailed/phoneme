@@ -12,6 +12,7 @@ import {
   type TranscriptWord,
   listTags,
   listAllTags,
+  listAllEntities,
   addTag,
   updateTag,
   deleteTag,
@@ -19,6 +20,7 @@ import {
   detachTag,
   tagsFor,
   type Tag,
+  type EntityFacet,
 } from './ipc';
 import * as tauriCore from '@tauri-apps/api/core';
 
@@ -210,6 +212,17 @@ describe('Tag IPC functions', () => {
     const result = await listAllTags();
     expect(tauriCore.invoke).toHaveBeenCalledWith('list_all_tags');
     expect(result).toEqual(fakeTags);
+  });
+
+  it('listAllEntities calls list_all_entities and returns the facet', async () => {
+    const fakeFacets: EntityFacet[] = [
+      { kind: 'org', value: 'ACME', count: 1 },
+      { kind: 'person', value: 'Alice', count: 2 },
+    ];
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce(fakeFacets);
+    const result = await listAllEntities();
+    expect(tauriCore.invoke).toHaveBeenCalledWith('list_all_entities');
+    expect(result).toEqual(fakeFacets);
   });
 
   it('addTag calls add_tag with name and color', async () => {

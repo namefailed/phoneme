@@ -45,6 +45,10 @@ export type UiFilter = Omit<ListFilter, "kind" | "favorite" | "pinned"> & {
   /** Human label for the like-mode pill (the source's title); falls back to
    *  `like_id` when absent. Display-only. */
   like_label?: string | null;
+  /** Display label for the entity-filter pill (the entity's `kind` group name,
+   *  e.g. "Person"). Display-only — `entity_value` / `entity_kind` carry the
+   *  actual filter. Mirrors `like_label`. */
+  entity_label?: string | null;
 };
 
 /** The one shared library-filter store. `{}` = no filters (the whole library).
@@ -78,6 +82,13 @@ export function toWireFilter(f: UiFilter, lowConfidenceThreshold?: number): List
   // the kind/tag_id filters it combines with.
   if (f.tagState === "tagged") wire.tagged = true;
   else if (f.tagState === "untagged") wire.tagged = false;
+  // Entity facet filter (sidebar browse-by-entity): pass the exact value through,
+  // plus its kind so the same surface text under two kinds stays distinct. The
+  // `entity_label` is UI-only (the pill text) and never goes over the wire.
+  if (f.entity_value) {
+    wire.entity_value = f.entity_value;
+    if (f.entity_kind) wire.entity_kind = f.entity_kind;
+  }
   // Low-confidence: the UI boolean becomes the daemon's numeric threshold so the
   // SQL `mean_confidence < t` comparison uses the configured value. Without a
   // threshold (config not loaded) the filter is simply dropped rather than
@@ -107,4 +118,38 @@ export function applyMoreLikeThis(id: string, label?: string | null): void {
 /** Leave "More like this" mode and return to the normal (unfiltered) list. */
 export function clearMoreLikeThis(): void {
   filterStore.set({ ...filterStore.get(), like_id: null, like_label: null });
+}
+
+/**
+ * Apply the cross-recording entity filter: narrow the list to recordings that
+ * mention this entity, the entity counterpart of clicking a sidebar tag. Pass the
+ * `kind` so the same surface text under two kinds stays distinct; `label` is the
+ * human group name shown in the header pill. Clicking the already-active entity
+ * row toggles it off (mirrors the tag rows). Leaves the other filter dimensions
+ * alone so it COMBINES with kind/date/etc.
+ */
+export function applyEntityFilter(value: string, kind?: string | null, label?: string | null): void {
+  const f = filterStore.get();
+  // Re-clicking the active entity (same value + kind) turns it off, back to all.
+  const sameKind = (f.entity_kind ?? null) === (kind ?? null);
+  if (f.entity_value === value && sameKind) {
+    clearEntityFilter();
+    return;
+  }
+  filterStore.set({
+    ...f,
+    entity_value: value,
+    entity_kind: kind ?? null,
+    entity_label: label?.trim() || null,
+  });
+}
+
+/** Clear the entity filter and return to the normal list. */
+export function clearEntityFilter(): void {
+  filterStore.set({
+    ...filterStore.get(),
+    entity_value: null,
+    entity_kind: null,
+    entity_label: null,
+  });
 }

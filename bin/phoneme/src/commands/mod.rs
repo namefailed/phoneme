@@ -13,6 +13,7 @@ pub mod daemon_cmd;
 pub mod delete;
 pub mod doctor;
 pub mod edit;
+pub mod entities;
 pub mod export;
 pub mod find_replace;
 pub mod hook_cmd;

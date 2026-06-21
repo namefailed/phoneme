@@ -764,6 +764,30 @@ phoneme tag clear-suggestions
 phoneme tag merge old-name work
 ```
 
+### 🔎 `phoneme entities`
+
+List the cross-recording **entity facet** — every distinct entity the LLM
+entity-extraction step pulled across the whole library (people, organizations,
+topics, terms), each with the number of recordings that mention it, grouped by
+kind. The entity counterpart of `phoneme tag list`, and the CLI face of the GUI
+sidebar's browse-by-entity section. Extract entities for a recording with
+`phoneme suggest-entities <ID>`.
+
+To then list the *recordings* for one entity, the GUI sidebar applies the entity
+filter on the recording list (`ListFilter.entity_value` / `entity_kind`); from
+the CLI, narrow by kind and read the values you care about.
+
+```bash
+# List every extracted entity across the library, grouped by kind, with counts
+phoneme entities
+
+# Show only one kind (person / org / topic / term)
+phoneme entities --kind person
+
+# Machine-readable (one JSON object per facet row: {kind, value, count})
+phoneme entities --json
+```
+
 ### 🎭 `phoneme profile`
 
 Manage config profiles (named full-config snapshots).

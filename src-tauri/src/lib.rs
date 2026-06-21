@@ -584,6 +584,7 @@ pub fn run() {
             commands::tags_for,
             commands::tag_usage_counts,
             commands::kind_counts,
+            commands::list_all_entities,
             commands::merge_tags,
             commands::wizard_download_model,
             commands::wizard_download_semantic_model,

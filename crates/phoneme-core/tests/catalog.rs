@@ -906,6 +906,181 @@ async fn list_with_tag_filter_returns_empty_for_unused_tag() {
     );
 }
 
+// ── Entity facet filter in list() ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn list_filters_by_entity_value() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let r1 = sample_recording(RecordingId::new());
+    let r2 = sample_recording(RecordingId::new());
+    catalog.insert(&r1).await.unwrap();
+    catalog.insert(&r2).await.unwrap();
+    // Only r1 mentions Alice; r2 mentions someone else entirely.
+    catalog
+        .set_entities(
+            &r1.id,
+            &[phoneme_core::Entity {
+                kind: "person".into(),
+                value: "Alice".into(),
+            }],
+        )
+        .await
+        .unwrap();
+    catalog
+        .set_entities(
+            &r2.id,
+            &[phoneme_core::Entity {
+                kind: "person".into(),
+                value: "Bob".into(),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let results = catalog
+        .list(&ListFilter {
+            entity_value: Some("Alice".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 1, "only the Alice recording should return");
+    assert_eq!(results[0].id, r1.id);
+}
+
+#[tokio::test]
+async fn list_entity_filter_can_pin_to_a_kind() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let person_rec = sample_recording(RecordingId::new());
+    let topic_rec = sample_recording(RecordingId::new());
+    catalog.insert(&person_rec).await.unwrap();
+    catalog.insert(&topic_rec).await.unwrap();
+    // The same surface text "Mercury" lands under two kinds in two recordings:
+    // the person and the planet/topic. The kind disambiguates.
+    catalog
+        .set_entities(
+            &person_rec.id,
+            &[phoneme_core::Entity {
+                kind: "person".into(),
+                value: "Mercury".into(),
+            }],
+        )
+        .await
+        .unwrap();
+    catalog
+        .set_entities(
+            &topic_rec.id,
+            &[phoneme_core::Entity {
+                kind: "topic".into(),
+                value: "Mercury".into(),
+            }],
+        )
+        .await
+        .unwrap();
+
+    // Value-only matches both recordings.
+    let any_kind = catalog
+        .list(&ListFilter {
+            entity_value: Some("Mercury".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(any_kind.len(), 2, "value alone matches across kinds");
+
+    // (kind, value) narrows to the one recording with that pair.
+    let person_only = catalog
+        .list(&ListFilter {
+            entity_value: Some("Mercury".into()),
+            entity_kind: Some("person".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(person_only.len(), 1, "kind disambiguates the same value");
+    assert_eq!(person_only[0].id, person_rec.id);
+}
+
+#[tokio::test]
+async fn list_with_entity_filter_returns_empty_for_unknown_entity() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .set_entities(
+            &rec.id,
+            &[phoneme_core::Entity {
+                kind: "person".into(),
+                value: "Alice".into(),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let results = catalog
+        .list(&ListFilter {
+            entity_value: Some("Nobody".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(results.is_empty(), "an unmentioned entity matches nothing");
+}
+
+#[tokio::test]
+async fn entity_facets_counts_distinct_recordings() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let r1 = sample_recording(RecordingId::new());
+    let r2 = sample_recording(RecordingId::new());
+    catalog.insert(&r1).await.unwrap();
+    catalog.insert(&r2).await.unwrap();
+    // Alice appears in both recordings (count 2); ACME only in r1 (count 1).
+    catalog
+        .set_entities(
+            &r1.id,
+            &[
+                phoneme_core::Entity {
+                    kind: "person".into(),
+                    value: "Alice".into(),
+                },
+                phoneme_core::Entity {
+                    kind: "org".into(),
+                    value: "ACME".into(),
+                },
+            ],
+        )
+        .await
+        .unwrap();
+    catalog
+        .set_entities(
+            &r2.id,
+            &[phoneme_core::Entity {
+                kind: "person".into(),
+                value: "Alice".into(),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let facets = catalog.entity_facets().await.unwrap();
+    // Kind- then value-sorted: org/ACME before person/Alice.
+    assert_eq!(
+        facets,
+        vec![
+            phoneme_core::EntityFacet {
+                kind: "org".into(),
+                value: "ACME".into(),
+                count: 1,
+            },
+            phoneme_core::EntityFacet {
+                kind: "person".into(),
+                value: "Alice".into(),
+                count: 2,
+            },
+        ]
+    );
+}
+
 // ── Transcript history (original_transcript) ──────────────────────────────────
 
 /// Machine transcription stores the output in both columns so the original

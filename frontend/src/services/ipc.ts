@@ -257,6 +257,15 @@ export type ListFilter = {
    *  in SQL before pagination. Independent of `tag_id` (which scopes to a single
    *  tag). Powers the sidebar's "Untagged" / "Tagged" rows. */
   tagged?: boolean | null;
+  /** Server-side entity facet filter: keep only recordings that mention this exact
+   *  entity `value` (the cross-recording browse-by-entity surface, the entity
+   *  counterpart of `tag_id`). Applied in SQL before pagination via a subquery
+   *  over the `entities` child table. */
+  entity_value?: string | null;
+  /** The entity facet filter's `kind` (`person`/`org`/`topic`/`term`), pairing
+   *  with `entity_value` so the same surface text under two kinds is distinct.
+   *  Ignored unless `entity_value` is set; omit to match the value across kinds. */
+  entity_kind?: string | null;
   /** Server-side low-confidence filter: when set, only recordings whose stored
    *  `mean_confidence` is non-null AND strictly below this value. Applied in SQL
    *  before pagination. The value is the configured
@@ -1072,6 +1081,22 @@ export type KindCounts = {
 /** Fetch the per-kind recording counts for the Library section badges. */
 export async function kindCounts(): Promise<KindCounts> {
   return await tauriInvoke<KindCounts>("kind_counts");
+}
+
+// ── Entities (cross-recording facet) ──────────────────────────────────────────
+
+/** One row of the cross-recording entity facet: a distinct extracted entity
+ *  (`kind` = person/org/topic/term, `value` = surface text) plus how many
+ *  recordings mention it. The entity counterpart of a `Tag` + its usage count. */
+export type EntityFacet = { kind: string; value: string; count: number };
+
+/** Every distinct extracted entity across the library with its recording count,
+ *  kind- then value-sorted. Powers the sidebar's browse-by-entity surface (the
+ *  entity counterpart of {@link listAllTags} + {@link tagUsageCounts}). The
+ *  entity *filter* itself rides on `listRecordings` via `ListFilter.entity_value`
+ *  / `entity_kind`. */
+export async function listAllEntities(): Promise<EntityFacet[]> {
+  return await tauriInvoke<EntityFacet[]>("list_all_entities");
 }
 
 /**

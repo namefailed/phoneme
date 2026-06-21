@@ -131,14 +131,28 @@ The `list_recordings` filter takes `limit`/`offset` (pagination),
 **before** pagination so pages stay full: `kind` (`"single"` voice notes /
 `"meeting"` tracks; omit for all), `favorite` (`true` = starred only,
 `false` = unstarred only), `pinned` (`true` = pinned only, `false` = unpinned
-only), and `in_place` (`true` = only in-place-dictation recordings). All fields
-are optional; older clients that omit the newer ones keep working. `list` always
-sorts pinned recordings first (`pinned DESC` leads the ORDER BY), ahead of the
-date sort, so pins float to the top regardless of `sort_desc`.
+only), and `in_place` (`true` = only in-place-dictation recordings). It also
+takes `tagged` (`true` = recordings with ≥1 tag, `false` = untagged) and the
+**entity facet filter** `entity_value` (+ optional `entity_kind`) — keep only
+recordings that mention this extracted entity, via a `recordings.id IN (SELECT
+recording_id FROM entities WHERE value = ? [AND kind = ?])` subquery, the entity
+counterpart of `tag_id`. All fields are optional; older clients that omit the
+newer ones keep working. `list` always sorts pinned recordings first
+(`pinned DESC` leads the ORDER BY), ahead of the date sort, so pins float to the
+top regardless of `sort_desc`.
 
 `kind_counts` returns full-corpus recording counts per Library kind as a JSON
-object — `{all, single, meeting, in_place, favorite, pinned}` (one SQL pass,
-`Catalog::kind_counts`) — powering the sidebar's Library count badges.
+object — `{all, single, meeting, in_place, favorite, pinned, tagged, untagged}`
+(one SQL pass, `Catalog::kind_counts`) — powering the sidebar's Library count
+badges.
+
+`list_all_entities` returns the **cross-recording entity facet**: every distinct
+extracted entity across the library with its recording count, as a JSON array of
+`{kind, value, count}`, kind- then value-sorted (`Catalog::entity_facets`). It is
+the entity counterpart of `list_all_tags` + `tag_usage_counts`, powers the
+sidebar's browse-by-entity surface and `phoneme entities`, and pairs with the
+`entity_value` / `entity_kind` list filter above to drill from a facet row into
+the recordings that mention it.
 
 Recording `status` values: `recording`, `paused`, `queued`, `transcribing`,
 `cleaning_up`, `summarizing`, `tagging`, `hook_running`, `done`,

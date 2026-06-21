@@ -215,6 +215,8 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
         pinned: None,               // no CLI flag for this yet
         in_place: None,             // no CLI flag for this yet
         tagged: None,               // no CLI flag for this yet
+        entity_value: None,         // no CLI flag for this yet (see `phoneme entities`)
+        entity_kind: None,          // no CLI flag for this yet
         low_confidence_below: None, // no CLI flag for this yet
     }
 }

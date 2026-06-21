@@ -88,6 +88,35 @@ impl Catalog {
             .collect()
     }
 
+    /// The cross-recording entity facet: every distinct `(kind, value)` across
+    /// the library with its recording count, ordered by kind then value. The
+    /// entity counterpart of the tag facet — [`Catalog::list_all_tags`] plus
+    /// [`Catalog::tag_usage_counts`] in one pass — powering the sidebar's
+    /// browse-by-entity surface (group by `kind`, each `value` a filter row
+    /// showing its `count`).
+    ///
+    /// The `(recording_id, kind, value)` UNIQUE means each recording contributes
+    /// at most one row per `(kind, value)`, so `COUNT(*)` after grouping is the
+    /// number of recordings that mention it (not raw mentions). De-duplicated
+    /// across recordings via the GROUP BY.
+    pub async fn entity_facets(&self) -> Result<Vec<EntityFacet>> {
+        let rows = sqlx::query(
+            "SELECT kind, value, COUNT(*) AS cnt FROM entities \
+             GROUP BY kind, value ORDER BY kind, value",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(EntityFacet {
+                    kind: r.try_get("kind")?,
+                    value: r.try_get("value")?,
+                    count: r.try_get("cnt")?,
+                })
+            })
+            .collect()
+    }
+
     /// Every distinct entity of one `kind` across the library, value-sorted —
     /// the by-kind slice of [`Catalog::list_all_entities`] for a browse filter
     /// (e.g. "show every person"). De-duplicated across recordings.

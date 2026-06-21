@@ -1239,6 +1239,14 @@ pub async fn kind_counts(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::KindCounts).await
 }
 
+/// The cross-recording entity facet: every distinct extracted entity across the
+/// library with its recording count. Powers the sidebar's browse-by-entity
+/// surface (the entity counterpart of `list_all_tags` + `tag_usage_counts`).
+#[tauri::command]
+pub async fn list_all_entities(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ListAllEntities).await
+}
+
 /// Merge one tag into another: re-point all of `from_id`'s recordings onto
 /// `into_id`, then delete `from_id`.
 #[tauri::command]

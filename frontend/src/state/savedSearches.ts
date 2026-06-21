@@ -245,6 +245,7 @@ export function describeFilter(f: UiFilter): string {
     parts.push(f.kind === "meeting" ? "meetings" : f.kind === "favorite" ? "favorites" : "single-track");
   }
   if (f.tag_id != null) parts.push("tagged");
+  if (f.entity_value) parts.push(`🔎 ${f.entity_value}`);
   if (f.status) parts.push(String(f.status));
   if (f.since || f.until) {
     const s = f.since ? f.since.split("T")[0] : "…";
