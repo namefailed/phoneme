@@ -1196,6 +1196,15 @@ trust boundary.*
 
 ### GUI parity
 
+- [x] **Export an audio clip from the app.** The detail pane gained a **✂ Clip…**
+  control under the waveform: pick a **Start** and **End** in seconds (or hit
+  **⟱ Playhead** to set either from the current playback position) and **Export
+  clip** writes that range to a new WAV — the GUI front for the existing
+  `phoneme clip <ID> <START> <END>` (same `ExportClip` request and sibling
+  `_clip_<start>-<end>.wav` default path). The range is validated client-side
+  first (end > start, within duration, end clamped to the recording's length like
+  the CLI), so an empty or back-to-front range shows a hint and never sends; the
+  saved path comes back in a success toast.
 - [x] **AI-activity log persists across restarts.** The 🧠 "AI Activity" popout
   was in-memory only — every completed cleanup/summary prompt+response vanished
   when the app reopened. The daemon now writes each finished streaming LLM

@@ -27,6 +27,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { applyMoreLikeThis } from "../../state/filter";
 import { speakerDisplayName, speakersForRename, renameSpeakerInTranscript, applySpeakerNames } from "./mergeMeeting";
 import { ActionRow, readPlaybackSpeed } from "./ActionRow";
+import { ClipExport } from "./ClipExport";
 import { isLowConfidence, lowConfidenceThreshold } from "../../utils/confidence";
 import { TagChips } from "./TagChips";
 import { TranscriptDiff } from "./TranscriptDiff";
@@ -67,6 +68,9 @@ export class RecordingDetail {
   private player = new WaveformPlayer();
   private editor: TranscriptEditor | null = null;
   private notesEditor: NotesEditor | null = null;
+  /** The clip-export control (under the waveform), when a recording is rendered.
+   *  Re-created per render like the ActionRow; cleared on `clear()`. */
+  private clipExport: ClipExport | null = null;
   private onRefresh: () => void;
   private dirty = false;
   private notesDirty = false;
@@ -220,6 +224,9 @@ export class RecordingDetail {
     this.editor = null;
     this.notesEditor?.dispose();
     this.notesEditor = null;
+    // The clip-export element lives in the container that renderEmpty() wipes, so
+    // just drop the reference (no listeners survive the innerHTML rewrite).
+    this.clipExport = null;
     this.timeline?.dispose();
     this.timeline = null;
     this.synced?.dispose();
@@ -312,6 +319,7 @@ export class RecordingDetail {
           </div>
         </div>
         <div class="waveform" id="wf-${r.id}"><span class="wf-speed-badge" id="wf-speed-${r.id}" title="Playback speed">${readPlaybackSpeed()}×</span></div>
+        <div id="clip-export"></div>
         <div id="actions"></div>
         <div id="tags"></div>
         <div class="transcript-block">
@@ -375,6 +383,15 @@ export class RecordingDetail {
         },
       }, isLowConfidence(r.mean_confidence, this.lowConfThreshold));
       this.player.setOnPlayStateChange((playing) => row.setPlayState(playing));
+    }
+
+    // Clip export: pick a start/end (seconds) under the waveform and write that
+    // range to a new WAV (the GUI front for `phoneme clip`). Re-created per render
+    // like the ActionRow; the playhead it offers as a "Use playhead" source is
+    // kept current by the time-update handler below.
+    const clipRoot = this.container.querySelector<HTMLElement>("#clip-export");
+    if (clipRoot) {
+      this.clipExport = new ClipExport(clipRoot, r.id, r.duration_ms);
     }
 
     const tagsRoot = this.container.querySelector<HTMLElement>("#tags");
@@ -550,6 +567,8 @@ export class RecordingDetail {
     this.player.setOnTimeUpdate((t) => {
       this.timeline?.setPlaybackTime(t);
       this.synced?.setPlaybackTime(t);
+      // Keep the clip control's "Use playhead" buttons aimed at the live position.
+      this.clipExport?.setPlayhead(t);
     });
     if (this.pendingTimeline) {
       this.pendingTimeline = false;

@@ -100,6 +100,36 @@ phoneme export --captions 20260519T143500823 -o -
 
 Find a recording's ID in the detail pane or via `phoneme list`.
 
+## ✂️ Exporting an audio clip
+
+Need just a slice of a recording's audio — a quotable moment, a single answer
+from a meeting — without the whole file? Export a **time range to a new WAV**.
+The clip is cut on sample-frame boundaries from the source audio, so it's an
+exact, lossless excerpt (not a re-encode).
+
+### From the app
+
+Open the recording, then under the waveform click **✂ Clip…**. Type a **Start**
+and **End** time in seconds, or click **⟱ Playhead** beside either field to drop
+in the waveform's current playback position. Press **Export clip** (or Enter in a
+field). Phoneme writes the WAV next to the source — named
+`<recording>_clip_<start>-<end>.wav` — and shows you the saved path in a toast.
+
+The range is validated before anything is sent: the end must be after the start,
+the start must fall within the recording, and the end is clamped to the
+recording's length (so you can set it past the tail and still clip to the end).
+An empty or back-to-front range just shows a hint and doesn't write a file.
+
+### From the CLI
+
+```bash
+# Seconds as floats; END is clamped to the recording's duration.
+phoneme clip 20260519T143500823 12.5 30
+
+# Choose the output path explicitly (otherwise it lands next to the source).
+phoneme clip 20260519T143500823 12.5 30 highlights/answer.wav
+```
+
 ## 🖱️ Exporting transcripts from the GUI
 
 For sharing transcripts without the full archive, you have a few options:

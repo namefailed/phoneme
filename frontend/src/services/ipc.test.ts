@@ -7,6 +7,7 @@ import {
   moreLikeThis,
   getWords,
   exportCaptions,
+  exportClip,
   exportLibraryZip,
   type TranscriptWord,
   listTags,
@@ -149,6 +150,33 @@ describe('IPC Services', () => {
     expect(tauriCore.invoke).toHaveBeenCalledWith('export_captions', {
       id: '20260519T143500823',
       format: 'vtt',
+    });
+  });
+
+  it('exportClip forwards id + ms range and defaults outPath to null', async () => {
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce({ path: 'C:\\audio\\rec_clip_12500-30000.wav' });
+
+    const res = await exportClip('20260519T143500823', 12_500, 30_000);
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('export_clip', {
+      id: '20260519T143500823',
+      startMs: 12_500,
+      endMs: 30_000,
+      outPath: null,
+    });
+    expect(res).toEqual({ path: 'C:\\audio\\rec_clip_12500-30000.wav' });
+  });
+
+  it('exportClip passes an explicit outPath through unchanged', async () => {
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce({ path: 'C:\\tmp\\cut.wav' });
+
+    await exportClip('20260519T143500823', 0, 1_000, 'C:\\tmp\\cut.wav');
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('export_clip', {
+      id: '20260519T143500823',
+      startMs: 0,
+      endMs: 1_000,
+      outPath: 'C:\\tmp\\cut.wav',
     });
   });
 

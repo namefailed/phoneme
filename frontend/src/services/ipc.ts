@@ -791,6 +791,26 @@ export async function exportLibraryZip(dest: string): Promise<number> {
   return await tauriInvoke<number>("export_library_zip", { dest });
 }
 
+/**
+ * Export a time range of a recording's audio to a new WAV (the GUI counterpart
+ * of `phoneme clip <ID> <START> <END> [OUT]`). `startMs`/`endMs` are
+ * milliseconds from the recording's start; the daemon slices `[start, end)` on
+ * sample-frame boundaries and clamps `end` to the recording's duration. Pass
+ * `outPath: null` (the default) to let the daemon pick the sibling
+ * `_clip_<start>-<end>.wav` path next to the source, matching the CLI. Returns
+ * the path of the WAV that was written. Rejects with the structured command
+ * error on failure (e.g. the range collapsed to nothing, or the source audio is
+ * gone) — the caller toasts it.
+ */
+export async function exportClip(
+  id: string,
+  startMs: number,
+  endMs: number,
+  outPath: string | null = null,
+): Promise<{ path: string }> {
+  return await tauriInvoke<{ path: string }>("export_clip", { id, startMs, endMs, outPath });
+}
+
 /** Skip the LLM step (cleanup / summary / tagging) currently running for the
  *  active queue item; the pipeline continues with the next step. */
 export async function skipCurrentStage(): Promise<void> {

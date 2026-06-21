@@ -446,6 +446,96 @@ mark.search-hit {
   color: var(--accent);
 }
 
+/* Clip export — under the waveform. Collapsed to a single "✂ Clip…" toggle so
+   it never crowds the action row; expanding reveals the two time fields and the
+   Export action. The toggle borrows the action-row button look; the fields use
+   the app's surface/border tokens. */
+.clip-export {
+  padding: 0 18px;
+  margin-bottom: 8px;
+}
+.clip-toggle {
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 0.8571rem;
+  font-weight: 500;
+  color: var(--fg-default);
+  cursor: pointer;
+  transition: all var(--ui-motion-fast) ease-out;
+}
+.clip-toggle:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.clip-export--open .clip-toggle {
+  margin-bottom: 8px;
+}
+.clip-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+.clip-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.clip-field-label {
+  font-size: 0.7857rem;
+  color: var(--fg-muted);
+}
+.clip-input {
+  width: 84px;
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 0.8571rem;
+}
+.clip-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.clip-playhead-btn,
+.clip-export-btn {
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.7857rem;
+  font-weight: 500;
+  color: var(--fg-default);
+  cursor: pointer;
+  transition: all var(--ui-motion-fast) ease-out;
+}
+.clip-playhead-btn:hover,
+.clip-export-btn:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.clip-export-btn {
+  font-size: 0.8571rem;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.clip-export-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+  border-color: var(--border-subtle);
+  color: var(--fg-muted);
+}
+.clip-hint {
+  margin-top: 6px;
+  font-size: 0.7857rem;
+  color: var(--err);
+}
+
 /* Transcript view-toggle row: Speakers + Summary anchor left, Compare /
    Original / Unedited anchor right. Each group wraps internally if the pane is
    too narrow. */

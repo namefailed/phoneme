@@ -780,6 +780,36 @@ pub async fn export_recording_json(bridge: Br<'_>, id: String) -> Result<String,
         .map_err(|e| CommandError::new("internal", format!("serializing recording: {e}")))
 }
 
+/// Export a time range of a recording's audio to a new WAV — the GUI entry
+/// point for the same `ExportClip` request behind `phoneme clip`. `start_ms` /
+/// `end_ms` are milliseconds from the recording's start; the daemon slices
+/// `[start, end)` on sample-frame boundaries and clamps `end` to the recording's
+/// duration, so an `end` past the audio is fine (the CLI relies on the same
+/// clamp). `out_path` is `None`/empty to let the daemon pick the sibling
+/// `_clip_<start>-<end>.wav` path next to the source. Returns the daemon's
+/// `{ "path": "…" }` for the WebView to toast. A thin forwarder — every check
+/// (id validity, non-empty range, dest ≠ source) lives in the daemon handler.
+#[tauri::command]
+pub async fn export_clip(
+    bridge: Br<'_>,
+    id: String,
+    start_ms: i64,
+    end_ms: i64,
+    out_path: Option<String>,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::ExportClip {
+            id,
+            start_ms,
+            end_ms,
+            out_path,
+        },
+    )
+    .await
+}
+
 /// Zip-entry name for one audio file under `audio_dir`, preserving its day
 /// folder. WAVs live at `<audio_dir>/<YYYY-MM-DD>/<HHmmssMMM>.wav` and the stem
 /// is time-of-day only, so two recordings at the same ms-of-day on different
