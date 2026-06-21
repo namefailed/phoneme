@@ -789,13 +789,13 @@ pub(crate) async fn generate_summary_with(
     }
 }
 
-/// The instruction the whole-meeting digest is generated with. A meeting digest
-/// synthesizes ACROSS every track (the user's mic + the system/other-party
-/// audio), so it asks for an overview/decisions/action-items shaped at meeting
-/// scope — deliberately distinct from the per-recording `[summary]` prompt, which
-/// summarizes a single track. Reuses the `[summary]` provider/model connection
-/// (see [`summary_llm_config`]); only the prompt differs, so no new provider keys.
-pub(crate) const MEETING_DIGEST_PROMPT: &str = "You are summarizing a whole meeting. The transcript below interleaves every participant's audio track (the local microphone and the system/other-party audio), each turn prefixed with its source. Write one cohesive digest of the entire meeting: a short overview, the key topics discussed, decisions reached, and any action items (with the owner when stated). Synthesize across all tracks into a single account — do not summarize each track separately. Output only the digest, with no preamble.";
+/// The instruction the built-in whole-meeting digest is generated with — the
+/// daemon's fallback prompt when no meeting recipe is configured. Defined once in
+/// phoneme-core ([`phoneme_core::config::MEETING_DIGEST_PROMPT`]) so the built-in
+/// `meeting_digest` Playbook entry seeds with the exact same text; re-exported
+/// here for the in-module callers ([`generate_meeting_digest`],
+/// [`resolve_meeting_recipe`]).
+pub(crate) use phoneme_core::config::MEETING_DIGEST_PROMPT;
 
 /// Human source label for one meeting track, used when assembling the merged
 /// transcript the digest reads. Mirrors the frontend `sourceFor` mapping
@@ -883,6 +883,241 @@ pub(crate) async fn generate_meeting_digest(
         endpoint_hint.as_deref(),
     )
     .await
+}
+
+/// One resolved meeting-scope step, ready to dispatch by [`run_meeting_recipe`].
+/// The meeting executor is deliberately narrower than the per-track one: only an
+/// Enrichment writing the meeting digest and a Hook side-effect make sense over a
+/// merged transcript (there is no single canonical transcript to rewrite back to,
+/// so Transform/FillerRemoval are warn-and-skipped before they ever become a
+/// `ResolvedMeetingStep`).
+enum ResolvedMeetingStep {
+    /// Run the summary primitive over the merged transcript with this entry's
+    /// resolved LLM config + prompt, writing the meeting digest. The meeting
+    /// counterpart of [`ResolvedStep::Summary`].
+    Digest {
+        llm_cfg: LlmPostProcessConfig,
+        prompt: String,
+    },
+    /// A side-effect step (a `Hook` Playbook entry) run once with the merged
+    /// transcript. The meeting counterpart of [`ResolvedStep::Hook`].
+    Hook {
+        hook: phoneme_core::config::PlaybookHook,
+    },
+}
+
+/// Resolve the configured meeting recipe (`cfg.meeting_recipe_id`) into an ordered
+/// list of meeting-scope steps. Mirrors [`resolve_recipe`], but for the
+/// meeting-template path:
+///
+/// - An empty `meeting_recipe_id` (the default), a missing recipe (a user deleted
+///   the one a setting still names), or a non-`Meeting`-scope recipe **all fall
+///   back to the built-in single-step digest** (the [`MEETING_DIGEST_PROMPT`] over
+///   the summary connection) — so behaviour is never worse than today and the
+///   function never panics.
+/// - Each step id maps to its Playbook entry. An Enrichment whose target is
+///   `meeting_digest` or `summary` becomes a [`ResolvedMeetingStep::Digest`]; a
+///   `Hook` entry with a command/webhook becomes a [`ResolvedMeetingStep::Hook`].
+/// - `Transform` / `FillerRemoval` and unsupported Enrichment targets are
+///   warn-and-skipped: there is no single merged transcript to rewrite, and no
+///   keyed-by-meeting store for other targets in v1.
+fn resolve_meeting_recipe(cfg: &Config) -> Vec<ResolvedMeetingStep> {
+    use phoneme_core::config::{PlaybookKind, RecipeScope};
+
+    // The built-in fallback: the digest prompt over the summary connection. Used
+    // whenever no usable meeting recipe is configured.
+    let fallback = || {
+        vec![ResolvedMeetingStep::Digest {
+            llm_cfg: summary_llm_config(cfg),
+            prompt: MEETING_DIGEST_PROMPT.to_string(),
+        }]
+    };
+
+    let id = cfg.meeting_recipe_id.trim();
+    if id.is_empty() {
+        return fallback();
+    }
+
+    let seeded = phoneme_core::config::default_recipes();
+    let recipe = cfg
+        .recipes
+        .iter()
+        .find(|r| r.id == id)
+        .or_else(|| seeded.iter().find(|r| r.id == id));
+    let Some(recipe) = recipe else {
+        tracing::warn!(
+            recipe = %id,
+            "meeting_recipe_id names no recipe; falling back to the built-in meeting digest"
+        );
+        return fallback();
+    };
+    if recipe.scope != RecipeScope::Meeting {
+        tracing::warn!(
+            recipe = %id,
+            "meeting_recipe_id names a non-meeting-scope recipe; falling back to the built-in meeting digest"
+        );
+        return fallback();
+    }
+
+    let mut steps = Vec::with_capacity(recipe.steps.len());
+    for step_id in &recipe.steps {
+        let Some(entry) = cfg.playbook.iter().find(|e| &e.id == step_id) else {
+            tracing::warn!(step = %step_id, "meeting recipe references a missing Playbook entry; skipping");
+            continue;
+        };
+        match entry.kind {
+            PlaybookKind::Enrichment => {
+                let target = entry.target.trim();
+                if target == "meeting_digest" || target == "summary" {
+                    steps.push(ResolvedMeetingStep::Digest {
+                        llm_cfg: entry_llm_config(cfg, &entry.llm),
+                        prompt: entry.llm.prompt.clone(),
+                    });
+                } else {
+                    tracing::warn!(
+                        target = %target,
+                        "meeting recipe enrichment target is not meeting-scope (only `meeting_digest` is supported in v1); skipping"
+                    );
+                }
+            }
+            PlaybookKind::Hook => {
+                if entry.hook.command.trim().is_empty() && entry.hook.webhook_url.trim().is_empty() {
+                    tracing::warn!(step = %step_id, "meeting Hook entry has no command or webhook; skipping");
+                } else {
+                    steps.push(ResolvedMeetingStep::Hook {
+                        hook: entry.hook.clone(),
+                    });
+                }
+            }
+            PlaybookKind::Transform | PlaybookKind::FillerRemoval => {
+                tracing::warn!(
+                    step = %step_id,
+                    "meeting recipe Transform/FillerRemoval step skipped — there is no single merged transcript to rewrite at meeting scope"
+                );
+            }
+        }
+    }
+
+    // A recipe whose only steps were all skipped (e.g. all Transforms) still must
+    // produce a digest — fall back rather than silently produce nothing.
+    if steps.is_empty() {
+        tracing::warn!(
+            recipe = %id,
+            "meeting recipe resolved to no runnable steps; falling back to the built-in meeting digest"
+        );
+        return fallback();
+    }
+    steps
+}
+
+/// Run the configured meeting template (a `scope = Meeting` recipe) once
+/// over a meeting's merged transcript, returning `(digest, model)` on success or a
+/// human-readable reason on failure (it reaches the UI toast verbatim). This is
+/// [`generate_meeting_digest`] generalized: when `cfg.meeting_recipe_id` is empty
+/// (the default) it runs the exact built-in digest path; otherwise it runs the
+/// named meeting recipe's Digest + Hook steps.
+///
+/// The Digest step is the recipe's single persisted output — the last Digest
+/// step's result is the `(digest, model)` returned and stored against the meeting.
+/// Hook steps run with the merged transcript JSON (gated by their keyword trigger,
+/// honouring `required` exactly like the per-track path). The empty-merge guard is
+/// kept (a meeting with no transcribed track yet is "nothing to digest", not a
+/// failure). The `LlmActivity`/skip stream is keyed on `event_id` (the meeting's
+/// first track); the result is stored against the meeting by the caller.
+pub(crate) async fn run_meeting_recipe(
+    state: &AppState,
+    cfg: &Config,
+    event_id: &RecordingId,
+    tracks: &[phoneme_core::Recording],
+) -> std::result::Result<(String, String), String> {
+    let merged = assemble_meeting_transcript(tracks);
+    if merged.trim().is_empty() {
+        return Err("no transcribed tracks yet — nothing to digest".into());
+    }
+
+    let steps = resolve_meeting_recipe(cfg);
+    let mut result: Option<(String, String)> = None;
+
+    for step in steps {
+        match step {
+            ResolvedMeetingStep::Digest { llm_cfg, prompt } => {
+                let endpoint_hint = {
+                    let u = llm_cfg.api_url.trim();
+                    (!u.is_empty()).then(|| u.to_string())
+                };
+                let (digest, model) = generate_summary_with(
+                    state,
+                    event_id,
+                    &merged,
+                    llm_cfg,
+                    &prompt,
+                    endpoint_hint.as_deref(),
+                )
+                .await?;
+                result = Some((digest, model));
+            }
+            ResolvedMeetingStep::Hook { hook } => {
+                run_meeting_hook(state, cfg, &hook, &merged, tracks).await;
+            }
+        }
+    }
+
+    result.ok_or_else(|| "the meeting recipe produced no digest step".to_string())
+}
+
+/// Run a single meeting-scope Hook step (a `Hook` Playbook entry) once over the
+/// merged meeting transcript. Best-effort: a meeting's tracks are already complete,
+/// so a side-effect failure is logged and surfaced but never fails the meeting (the
+/// per-track `required`-fails-the-recording contract has no terminal-status home at
+/// meeting scope, where there is no single recording to quarantine). The payload is
+/// built from the meeting's first track (id/timestamp/audio_path) carrying the
+/// merged transcript, so a webhook/shell hook sees the whole-meeting text.
+async fn run_meeting_hook(
+    state: &AppState,
+    cfg: &Config,
+    hook: &phoneme_core::config::PlaybookHook,
+    merged: &str,
+    tracks: &[phoneme_core::Recording],
+) {
+    if !hook.should_run(merged) {
+        return;
+    }
+    let Some(first) = tracks.first() else {
+        return;
+    };
+    let payload = HookPayload {
+        id: first.id.clone(),
+        timestamp: first.started_at,
+        transcript: merged.to_string(),
+        audio_path: first.audio_path.clone(),
+        duration_ms: first.duration_ms,
+        model: first.model.clone().unwrap_or_default(),
+        metadata: HookMetadata::current(),
+    };
+    let timeout = Duration::from_secs(hook.timeout_secs);
+
+    let cmd = hook.command.trim();
+    if !cmd.is_empty() {
+        let runner = HookRunner::new(phoneme_core::config::expand_cmd(cmd), timeout);
+        match runner.run(&payload).await {
+            Ok(result) if result.exit_code == 0 => {
+                tracing::info!(command = %cmd, "meeting hook ran");
+            }
+            Ok(result) => {
+                tracing::warn!(command = %cmd, exit_code = result.exit_code, "meeting hook exited non-zero");
+            }
+            Err(e) => {
+                tracing::warn!(command = %cmd, error = %e, "meeting hook failed to run");
+            }
+        }
+    }
+
+    let url = hook.webhook_url.trim();
+    if !url.is_empty() {
+        if let Err(e) = state.webhook.post(url, timeout, &payload, &cfg.webhook).await {
+            tracing::warn!(url = %url, error = %e, "meeting webhook failed");
+        }
+    }
 }
 
 /// Whether this pipeline run should type the transcript at the cursor.

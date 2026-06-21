@@ -459,11 +459,15 @@ let config: Record<string, unknown> = {
       llm: { provider: "", model: "", prompt: "", api_url: "", api_key: "", timeout_secs: 300 }, hook: { command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\phoneme-todos.md') -Value ('- '+$d.transcript)\"", webhook_url: "", timeout_secs: 60, keyword: "Todo:", case_sensitive: false, required: false } },
   ],
   recipes: [
-    { id: "default", name: "Default pipeline", description: "What every normal recording runs: cleanup, then title, summary, and tag suggestions.", builtin: true, steps: ["cleanup", "title", "summary", "auto_tag"] },
-    { id: "prompt_capture", name: "Dictate → prompt", description: "Clean up the dictation, then reshape it into a polished LLM prompt.", builtin: false, steps: ["cleanup", "prompt_polish"] },
-    { id: "meeting_notes", name: "Meeting notes", description: "Clean up, then summarize, pull action items, and tag — a full notes pass.", builtin: false, steps: ["cleanup", "summary", "action_items", "auto_tag"] },
-    { id: "journal_note", name: "Journal note", description: "Clean up the dictation, then append it to your daily journal file.", builtin: false, steps: ["cleanup", "journal"] },
+    { id: "default", name: "Default pipeline", description: "What every normal recording runs: cleanup, then title, summary, and tag suggestions.", builtin: true, scope: "recording", steps: ["cleanup", "title", "summary", "auto_tag"] },
+    { id: "prompt_capture", name: "Dictate → prompt", description: "Clean up the dictation, then reshape it into a polished LLM prompt.", builtin: false, scope: "recording", steps: ["cleanup", "prompt_polish"] },
+    { id: "meeting_notes", name: "Meeting notes", description: "Clean up, then summarize, pull action items, and tag — a full notes pass.", builtin: false, scope: "recording", steps: ["cleanup", "summary", "action_items", "auto_tag"] },
+    { id: "journal_note", name: "Journal note", description: "Clean up the dictation, then append it to your daily journal file.", builtin: false, scope: "recording", steps: ["cleanup", "journal"] },
+    { id: "meeting_digest", name: "Meeting digest", description: "Default whole-meeting summary: overview, topics, decisions, and action items across every track.", builtin: true, scope: "meeting", steps: ["meeting_digest"] },
+    { id: "standup", name: "Standup", description: "Meeting template: a standup digest grouped by participant (recent work, next steps, blockers).", builtin: false, scope: "meeting", steps: ["meeting_standup"] },
+    { id: "interview", name: "Interview", description: "Meeting template: a Q&A digest pairing each question with the answer given.", builtin: false, scope: "meeting", steps: ["meeting_interview"] },
   ],
+  meeting_recipe_id: "",
   playbook_migrated: false,
   hooks_migrated: false,
   tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: false },
@@ -790,11 +794,13 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     //    The event carries `meeting_id` (not a recording id) per events.ts. ──
     case "rerun_meeting_digest": {
       const mid = args.meetingId as string;
+      const tmpl = (args.recipeId as string) || "";
+      const tmplNote = tmpl ? ` (template: ${tmpl})` : "";
       MEETING_DIGESTS[mid] = {
         meeting_id: mid,
         digest:
-          "Demo whole-meeting digest: the mic and system tracks were synthesized into one " +
-          "reading. Decisions, owners, and follow-ups would be summarized here.",
+          `Demo whole-meeting digest${tmplNote}: the mic and system tracks were synthesized ` +
+          "into one reading. Decisions, owners, and follow-ups would be summarized here.",
         digest_model: (args.model as string) || "phi3:mini",
       };
       emitDaemon({ event: "meeting_digest_updated", meeting_id: mid });

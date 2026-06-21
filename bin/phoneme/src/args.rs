@@ -198,6 +198,11 @@ pub enum MeetingAction {
         /// Override the summary model for this run only (never persisted).
         #[arg(long)]
         model: Option<String>,
+        /// Run a specific meeting template (a `scope = Meeting` recipe id, e.g.
+        /// `standup` or `interview`) for this digest only, instead of the
+        /// configured one. An unknown id falls back to the built-in digest.
+        #[arg(long)]
+        template: Option<String>,
     },
     /// Set or clear a meeting session's display name. Give a NAME to set it, or
     /// pass --clear (with no NAME) to remove the name and fall back to the

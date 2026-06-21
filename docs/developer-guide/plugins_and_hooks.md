@@ -162,6 +162,22 @@ surfaces failures but keeps the recording usable).
 > (and `phoneme record [start|toggle] --recipe <ID|NAME>` for live captures);
 > omit the flag for the `default` pipeline.
 
+> **Meeting templates (a recipe's *scope*).** Every recipe has a **scope**: by
+> default it runs **per recording**. Set a recipe's scope to **Meeting** (Settings
+> → Playbook → the recipe's "Runs over" picker, or `scope = "meeting"` in TOML) to
+> make it a **meeting template** — it runs **once** over a whole meeting's *merged*
+> transcript (mic + system together) to produce the meeting digest. A meeting
+> template is just a meeting-scope recipe with one **Enrichment** step targeting
+> `meeting_digest`; the seeds ship a built-in `meeting_digest` plus `standup` and
+> `interview` examples that differ only by **prompt**. Pick which one the auto- and
+> on-demand digest uses with the **Meeting template** selector (it sets the
+> top-level `meeting_recipe_id`; empty = the built-in digest). The merged meeting
+> view's digest card and `phoneme meeting digest <ID> --template <recipe_id>` let
+> you run a different template for one digest only. At meeting scope only
+> Enrichment (the `meeting_digest` target) and Hook steps apply — Transform /
+> filler-removal steps are skipped, because there is no single transcript to
+> rewrite across tracks.
+>
 > **Migrating from `[hook]`?** Older configs used a top-level `[hook]` section
 > (`commands` / `keyword_rules` / `webhook_url`). On first launch Phoneme
 > **auto-migrates** those into Hook entries on the Default recipe and clears the

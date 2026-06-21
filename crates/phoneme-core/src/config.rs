@@ -205,6 +205,14 @@ pub struct Config {
     /// [`LanguageRoute`].
     #[serde(default = "default_language_routes")]
     pub language_routes: Vec<LanguageRoute>,
+    /// Which [`RecipeScope::Meeting`] recipe (a "meeting template") runs once over
+    /// a meeting's merged transcript. **Empty (the default) = the built-in digest
+    /// path** — identical to today's behaviour, so no migration is needed and
+    /// existing configs are unchanged. A non-empty value names a recipe in
+    /// [`recipes`](Self::recipes) whose `scope` is `Meeting`; if it is missing or
+    /// not meeting-scope, the daemon falls back to the built-in digest prompt.
+    #[serde(default)]
+    pub meeting_recipe_id: String,
     /// Monotonic schema version: how many one-time config migrations have already
     /// been applied to this config. Each migration owns a version step (v0→v1 =
     /// the Playbook reconcile, v1→v2 = the hooks cutover; see
@@ -2249,6 +2257,15 @@ impl Default for FillerConfig {
 // llm_post_process / summary / title / auto_tag config. Later phases migrate the
 // runtime onto recipes, add the Settings UI, and rewire hotkeys.
 
+/// The instruction the built-in whole-meeting digest is generated with. A
+/// meeting digest synthesizes ACROSS every track (the user's mic + the
+/// system/other-party audio), so it asks for an overview/decisions/action-items
+/// shaped at meeting scope — deliberately distinct from the per-recording
+/// `summary` prompt, which summarizes a single track. It is the seed prompt of
+/// the built-in `meeting_digest` Playbook entry AND the daemon's fallback prompt
+/// when no meeting recipe is configured, so both paths stay identical.
+pub const MEETING_DIGEST_PROMPT: &str = "You are summarizing a whole meeting. The transcript below interleaves every participant's audio track (the local microphone and the system/other-party audio), each turn prefixed with its source. Write one cohesive digest of the entire meeting: a short overview, the key topics discussed, decisions reached, and any action items (with the owner when stated). Synthesize across all tracks into a single account — do not summarize each track separately. Output only the digest, with no preamble.";
+
 /// What a [`PlaybookEntry`] does. A flat discriminant (not a data-carrying enum)
 /// so it round-trips cleanly through TOML and stays forward-compatible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -2285,6 +2302,27 @@ pub enum StepInput {
     Previous,
     /// Read the original raw transcription, ignoring earlier steps' output.
     Base,
+}
+
+/// What a [`PlaybookRecipe`] runs over: a single recording (the default — every
+/// existing recipe is this) or a whole meeting's merged transcript. A meeting-
+/// scope recipe is the "meeting template" — its steps run **once** over the
+/// source-labelled merge of every track (the digest spine), not per-track. A flat
+/// discriminant so it round-trips through TOML and stays forward-compatible;
+/// `#[serde(default)]` means every recipe on an existing config loads as
+/// `Recording`, so nothing about the per-track pipeline changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RecipeScope {
+    /// Runs per recording (every track of a meeting runs it independently) — the
+    /// normal recording pipeline. This is the default for every existing recipe.
+    #[default]
+    Recording,
+    /// Runs once over a meeting's merged transcript (a "meeting template"). Only
+    /// Enrichment (the `meeting_digest` target) and Hook steps apply at this scope;
+    /// Transform/FillerRemoval are warn-and-skipped (there is no single canonical
+    /// transcript to rewrite back to).
+    Meeting,
 }
 
 /// The LLM half of a Playbook entry (used when `kind` is `Transform`/`Enrichment`).
@@ -2489,6 +2527,11 @@ pub struct PlaybookRecipe {
     /// Seeded by Phoneme (vs. user-created).
     #[serde(default)]
     pub builtin: bool,
+    /// What this recipe runs over: a single recording (default) or a whole
+    /// meeting's merged transcript (a "meeting template"). `#[serde(default)]` so
+    /// every existing recipe loads as [`RecipeScope::Recording`] — no migration.
+    #[serde(default)]
+    pub scope: RecipeScope,
     /// Ordered [`PlaybookEntry`] ids to run.
     #[serde(default)]
     pub steps: Vec<String>,
@@ -2720,6 +2763,45 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
                 ..Default::default()
             },
         },
+        // ── Meeting-scope enrichment entries (a "meeting template" is a
+        // `scope = Meeting` recipe built from these). Each is an Enrichment whose
+        // target is `meeting_digest` — it writes the one keyed-by-meeting digest
+        // column, so templates differ only by PROMPT (standup vs interview vs the
+        // generic digest). The built-in `meeting_digest` entry carries the same
+        // text the daemon's fallback prompt uses ([`MEETING_DIGEST_PROMPT`]).
+        PlaybookEntry {
+            id: "meeting_digest".into(),
+            name: "Meeting digest".into(),
+            description: "The default whole-meeting summary: overview, topics, decisions, and action items across every track.".into(),
+            builtin: true,
+            kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
+            llm: llm(MEETING_DIGEST_PROMPT),
+            target: "meeting_digest".into(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "meeting_standup".into(),
+            name: "Standup".into(),
+            description: "Meeting template: structure the meeting as a standup — per-person yesterday / today / blockers.".into(),
+            builtin: false,
+            kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
+            llm: llm("You are summarizing a team standup. The transcript below interleaves every participant's audio track, each turn prefixed with its source. Produce a structured standup digest grouped by participant: for each person, list what they did (yesterday/recently), what they plan to do next, and any blockers. End with a short list of action items (with the owner when stated). Output only the digest, no preamble."),
+            target: "meeting_digest".into(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "meeting_interview".into(),
+            name: "Interview".into(),
+            description: "Meeting template: structure the meeting as an interview — a Q&A of the questions asked and the answers given.".into(),
+            builtin: false,
+            kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
+            llm: llm("You are summarizing an interview. The transcript below interleaves the interviewer's and the candidate's audio tracks, each turn prefixed with its source. Produce a Q&A digest: pair each substantive question with a concise summary of the answer given. End with a short overall impression. Output only the digest, no preamble."),
+            target: "meeting_digest".into(),
+            hook: PlaybookHook::default(),
+        },
     ]
 }
 
@@ -2767,7 +2849,10 @@ pub fn default_language_routes() -> Vec<LanguageRoute> {
 }
 
 /// Curated starter recipes. `default` is the normal-recording pipeline —
-/// cleanup → title → summary → auto-tag — matching today's behaviour.
+/// cleanup → title → summary → auto-tag — matching today's behaviour. The
+/// `meeting_digest` recipe (scope [`RecipeScope::Meeting`]) is the built-in
+/// meeting template, with `standup`/`interview` as opt-in example templates;
+/// `meeting_recipe_id` defaults empty, so a fresh install still runs the digest.
 pub fn default_recipes() -> Vec<PlaybookRecipe> {
     vec![
         PlaybookRecipe {
@@ -2777,6 +2862,7 @@ pub fn default_recipes() -> Vec<PlaybookRecipe> {
                 "What every normal recording runs: cleanup, then title, summary, and tag suggestions."
                     .into(),
             builtin: true,
+            scope: RecipeScope::Recording,
             steps: vec![
                 "cleanup".into(),
                 "title".into(),
@@ -2792,6 +2878,7 @@ pub fn default_recipes() -> Vec<PlaybookRecipe> {
             description: "Clean up the dictation, then reshape it into a polished LLM prompt."
                 .into(),
             builtin: false,
+            scope: RecipeScope::Recording,
             steps: vec!["cleanup".into(), "prompt_polish".into()],
         },
         // Example: a full meeting-notes pass — clean up, summarize, pull action
@@ -2802,6 +2889,7 @@ pub fn default_recipes() -> Vec<PlaybookRecipe> {
             description: "Clean up, then summarize, pull action items, and tag — a full notes pass."
                 .into(),
             builtin: false,
+            scope: RecipeScope::Recording,
             steps: vec![
                 "cleanup".into(),
                 "summary".into(),
@@ -2816,7 +2904,40 @@ pub fn default_recipes() -> Vec<PlaybookRecipe> {
             name: "Journal note".into(),
             description: "Clean up the dictation, then append it to your daily journal file.".into(),
             builtin: false,
+            scope: RecipeScope::Recording,
             steps: vec!["cleanup".into(), "journal".into()],
+        },
+        // ── Meeting templates (scope = Meeting). Each runs ONCE over a meeting's
+        // merged transcript and writes the meeting digest. `meeting_digest` is the
+        // built-in (its prompt == the daemon fallback); `standup`/`interview` are
+        // opt-in examples that differ only by prompt. Select one via
+        // `meeting_recipe_id` (empty = the built-in digest path, today's default).
+        PlaybookRecipe {
+            id: "meeting_digest".into(),
+            name: "Meeting digest".into(),
+            description: "Default whole-meeting summary: overview, topics, decisions, and action items across every track."
+                .into(),
+            builtin: true,
+            scope: RecipeScope::Meeting,
+            steps: vec!["meeting_digest".into()],
+        },
+        PlaybookRecipe {
+            id: "standup".into(),
+            name: "Standup".into(),
+            description: "Meeting template: a standup digest grouped by participant (recent work, next steps, blockers)."
+                .into(),
+            builtin: false,
+            scope: RecipeScope::Meeting,
+            steps: vec!["meeting_standup".into()],
+        },
+        PlaybookRecipe {
+            id: "interview".into(),
+            name: "Interview".into(),
+            description: "Meeting template: a Q&A digest pairing each question with the answer given."
+                .into(),
+            builtin: false,
+            scope: RecipeScope::Meeting,
+            steps: vec!["meeting_interview".into()],
         },
     ]
 }
@@ -3416,6 +3537,7 @@ impl Config {
                 description:
                     "What every normal recording runs, migrated from your existing settings.".into(),
                 builtin: true,
+                scope: RecipeScope::Recording,
                 steps,
             });
         }
@@ -3538,6 +3660,7 @@ impl Config {
                     name: "Default pipeline".into(),
                     description: "What every normal recording runs.".into(),
                     builtin: true,
+                    scope: RecipeScope::Recording,
                     steps: step_ids,
                 });
             }
@@ -3936,6 +4059,10 @@ impl Default for Config {
             // Off by default: no language routes, so every recording uses the
             // global Whisper model + `default` recipe (today's behaviour).
             language_routes: default_language_routes(),
+            // Empty by default: a fresh install runs the built-in digest path,
+            // identical to today's behaviour (the `standup`/`interview` templates
+            // are opt-in).
+            meeting_recipe_id: String::new(),
             // Start at version 0 so the migrations' idempotent paths are exercised
             // uniformly: a fresh config's seeds already mirror the legacy defaults,
             // so the reconcile is a self-confirming no-op — but a default built
@@ -4487,6 +4614,91 @@ mod tests {
         let before = cfg.clone();
         assert!(!cfg.migrate_playbook(), "second migration is a no-op");
         assert_eq!(cfg, before, "config unchanged after a redundant migration");
+    }
+
+    #[test]
+    fn meeting_template_defaults_are_behaviour_preserving() {
+        // A fresh config: the meeting-template knob is empty (built-in digest path)
+        // and every default recipe is recording-scope except the meeting seeds.
+        let cfg = Config::default();
+        assert_eq!(
+            cfg.meeting_recipe_id, "",
+            "a fresh install runs the built-in digest (no meeting template)"
+        );
+
+        let recipes = default_recipes();
+        let meeting: Vec<&PlaybookRecipe> = recipes
+            .iter()
+            .filter(|r| r.scope == RecipeScope::Meeting)
+            .collect();
+        // Exactly one BUILTIN meeting recipe (the `meeting_digest`); standup/
+        // interview are examples (builtin: false).
+        let builtin_meeting: Vec<&&PlaybookRecipe> =
+            meeting.iter().filter(|r| r.builtin).collect();
+        assert_eq!(
+            builtin_meeting.len(),
+            1,
+            "exactly one built-in meeting recipe is seeded"
+        );
+        assert_eq!(builtin_meeting[0].id, "meeting_digest");
+        // The built-in meeting recipe's single step is the `meeting_digest` entry,
+        // whose prompt is the daemon's fallback prompt (so both paths match).
+        let entry = default_playbook()
+            .into_iter()
+            .find(|e| e.id == "meeting_digest")
+            .expect("meeting_digest entry seeded");
+        assert_eq!(entry.target, "meeting_digest");
+        assert_eq!(entry.llm.prompt, MEETING_DIGEST_PROMPT);
+        // The standup/interview example templates are present, opt-in, meeting-scope.
+        for id in ["standup", "interview"] {
+            let r = meeting
+                .iter()
+                .find(|r| r.id == id)
+                .unwrap_or_else(|| panic!("{id} meeting template seeded"));
+            assert!(!r.builtin, "{id} is an opt-in example");
+        }
+    }
+
+    #[test]
+    fn old_config_without_scope_loads_as_recording_and_empty_meeting_recipe() {
+        // A pre-meeting-template config has no `scope` on its recipes and no
+        // `meeting_recipe_id`. Both must default cleanly: every recipe loads as
+        // Recording, and the meeting-recipe knob is empty (the digest path).
+        let toml = r#"
+            [[recipes]]
+            id = "default"
+            name = "Default pipeline"
+            builtin = true
+            steps = ["cleanup", "summary"]
+        "#;
+        let cfg: Config = toml::from_str(toml).expect("parses without scope/meeting_recipe_id");
+        assert_eq!(cfg.meeting_recipe_id, "", "meeting_recipe_id defaults empty");
+        let default = cfg
+            .recipes
+            .iter()
+            .find(|r| r.id == "default")
+            .expect("default recipe parsed");
+        assert_eq!(
+            default.scope,
+            RecipeScope::Recording,
+            "a recipe with no scope loads as Recording"
+        );
+    }
+
+    #[test]
+    fn recipe_scope_round_trips_through_toml() {
+        let recipe = PlaybookRecipe {
+            id: "standup".into(),
+            name: "Standup".into(),
+            description: "x".into(),
+            builtin: false,
+            scope: RecipeScope::Meeting,
+            steps: vec!["meeting_standup".into()],
+        };
+        let serialized = toml::to_string(&recipe).expect("serializes");
+        let back: PlaybookRecipe = toml::from_str(&serialized).expect("round-trips");
+        assert_eq!(back.scope, RecipeScope::Meeting);
+        assert_eq!(back, recipe);
     }
 
     #[test]

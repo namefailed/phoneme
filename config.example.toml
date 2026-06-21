@@ -29,6 +29,20 @@
 
 
 # -----------------------------------------------------------------------------
+# Top-level keys (must appear BEFORE the first [section] header below).
+# -----------------------------------------------------------------------------
+# meeting_recipe_id — which Playbook recipe (a "meeting template") runs once over
+# a meeting's MERGED transcript to produce its digest. Empty (the default) uses
+# the built-in digest — identical to prior behaviour. Set it to a recipe whose
+# `scope = "meeting"` (the seeds ship `standup` and `interview`) to get a
+# structured digest instead. A meeting template is just a meeting-scope recipe
+# with one Enrichment step targeting `meeting_digest`; templates differ only by
+# prompt. Edit/add them in Settings → Playbook (set a recipe's scope to Meeting),
+# or override per-run with `phoneme meeting digest <id> --template <recipe_id>`.
+meeting_recipe_id = ""
+
+
+# -----------------------------------------------------------------------------
 # [whisper] — the transcription engine for the FINAL transcript
 # -----------------------------------------------------------------------------
 [whisper]

@@ -86,6 +86,11 @@ export class MergedConversationDetail extends LitElement {
    *  state and the button is disabled. Cleared by the `meeting_digest_*` daemon
    *  event (the parent calls `reload()`), or on a request error. */
   @state() private digestPending = false;
+  /** The meeting template to (re)generate with: a `scope: "meeting"` recipe id, or
+   *  `""` for the configured/built-in digest. A one-shot per-run override that is
+   *  not persisted (it rides `rerunMeetingDigest`'s `recipeId`). `null` means "not
+   *  yet set" → initialized from `config.meeting_recipe_id` on first render. */
+  @state() private digestTemplate: string | null = null;
 
   /** Live accumulation of the streamed digest (the `summarizing` LLM stage keyed
    *  on the meeting's first track) so the card shows tokens as they generate,
@@ -401,12 +406,24 @@ export class MergedConversationDetail extends LitElement {
     this.digestStream = emptyLlmStream();
     this.digestMeetingId = this.meetingId;
     this.digestPending = true;
+    // The chosen template (a `scope: "meeting"` recipe id) is a one-shot override
+    // for this run only — `""`/null uses the configured `meeting_recipe_id`.
+    const template = (this.digestTemplate ?? this.config?.meeting_recipe_id ?? "") || null;
     try {
-      await rerunMeetingDigest(this.meetingId);
+      await rerunMeetingDigest(this.meetingId, null, template);
     } catch (e) {
       this.digestPending = false;
       showToast(`Couldn't generate meeting digest: ${errText(e)}`, "error");
     }
+  }
+
+  /** The meeting templates (`scope: "meeting"` recipes) available for the digest
+   *  picker, from the loaded config. Empty array when config hasn't loaded. */
+  private get meetingTemplates(): { id: string; name: string }[] {
+    const recipes = (this.config?.recipes ?? []) as Array<{ id?: string; name?: string; scope?: string }>;
+    return recipes
+      .filter((r) => r.scope === "meeting" && r.id && r.id !== "meeting_digest")
+      .map((r) => ({ id: String(r.id), name: String(r.name || r.id) }));
   }
 
   private async handleExport() {
@@ -550,10 +567,27 @@ export class MergedConversationDetail extends LitElement {
     // Nothing to generate from yet: no transcript and no stored digest → hide
     // the card entirely (matches "No transcript yet for this meeting" below).
     if (!d && !haveTranscript && !this.digestPending) return nothing;
+    // The meeting-template picker — only shown when the user has at least one
+    // meeting template beyond the built-in digest. The selection is a one-shot
+    // override for the next Regenerate (see handleGenerateDigest).
+    const templates = this.meetingTemplates;
+    const selected = this.digestTemplate ?? this.config?.meeting_recipe_id ?? "";
+    const templatePicker = templates.length
+      ? html`<select
+          class="merged-digest-template"
+          title="Which meeting template to generate with (this run only)"
+          ?disabled=${this.digestPending}
+          @change=${(e: Event) => { this.digestTemplate = (e.target as HTMLSelectElement).value; }}
+        >
+          <option value="" ?selected=${!selected}>Built-in digest</option>
+          ${templates.map((t) => html`<option value=${t.id} ?selected=${selected === t.id}>${t.name}</option>`)}
+        </select>`
+      : nothing;
     return html`
       <div class="merged-digest">
         <div class="merged-digest-head">
           <span class="merged-digest-label">✨ Meeting digest${modelNote}</span>
+          ${templatePicker}
           <button
             class="inline-button"
             ?disabled=${this.digestPending || !haveTranscript}

@@ -148,12 +148,20 @@ phoneme meeting rename 20260519T143500823 --clear
 # immediately and generates in the background.
 phoneme meeting digest 20260519T143500823
 phoneme meeting digest 20260519T143500823 --model llama3.2:3b
+
+# Run a specific MEETING TEMPLATE for this digest only (a `scope = meeting`
+# recipe — the seeds ship `standup` and `interview`). Overrides the configured
+# `meeting_recipe_id` for this run; an unknown id falls back to the built-in
+# digest. Templates differ only by prompt; build your own in Settings → Playbook.
+phoneme meeting digest 20260519T143500823 --template standup
 ```
 
 A digest is also generated automatically when a meeting finishes (after both
 tracks transcribe), gated on the same `[summary].auto` switch as the
 per-recording auto-summary — so meetings get a digest with no extra step when
-auto-summary is on.
+auto-summary is on. Which template the auto-digest uses is set by the top-level
+`meeting_recipe_id` config key (empty = the built-in digest; see the config
+reference).
 
 ### 📥 `phoneme import <FILE-OR-URL>`
 

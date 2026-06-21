@@ -1659,9 +1659,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::RerunSummary { id, model, prompt } => {
             rerun_summary(state, id, model, prompt).await
         }
-        Request::RerunMeetingDigest { meeting_id, model } => {
-            rerun_meeting_digest(state, meeting_id, model).await
-        }
+        Request::RerunMeetingDigest {
+            meeting_id,
+            model,
+            recipe_id,
+        } => rerun_meeting_digest(state, meeting_id, model, recipe_id).await,
         Request::RunDoctor => {
             let cfg = state.config.load();
             // Thread the bundled servers' live ports into the backend probes so a
@@ -2648,15 +2650,19 @@ async fn rerun_summary(
 
 /// Generate (or regenerate) a whole-meeting digest on demand — the meeting-scope
 /// twin of [`rerun_summary`]. Loads every track of the meeting, assembles the
-/// merged (source-labelled) transcript, and runs it through the configured summary
-/// provider with the meeting-scope prompt. Like `rerun_summary`, the LLM call runs
-/// in a spawned task so it doesn't block the IPC connection; the result is stored
-/// keyed by `meeting_id` and the UI listens for `MeetingDigestUpdated`. `model`
-/// overrides the configured summary model for this run only (never persisted).
+/// merged (source-labelled) transcript, and runs the configured meeting template
+/// (a `scope = Meeting` recipe) over it via [`run_meeting_recipe`]. Like
+/// `rerun_summary`, the LLM call runs in a spawned task so it doesn't block the IPC
+/// connection; the result is stored keyed by `meeting_id` and the UI listens for
+/// `MeetingDigestUpdated`. `model` overrides the configured summary model for this
+/// run only (never persisted); `recipe_id`, when set, overrides the configured
+/// `meeting_recipe_id` for this run only ("run with template X once") — a missing
+/// or non-meeting-scope id falls back to the built-in digest inside the executor.
 async fn rerun_meeting_digest(
     state: &AppState,
     meeting_id: String,
     model: Option<String>,
+    recipe_id: Option<String>,
 ) -> Response {
     let tracks = match state.catalog.list_by_meeting(&meeting_id).await {
         Ok(rows) if !rows.is_empty() => rows,
@@ -2675,13 +2681,17 @@ async fn rerun_meeting_digest(
         });
     }
 
-    // Bake the one-shot model override into a [summary] clone, then let the digest
-    // generator resolve the summary connection exactly as the auto-digest does.
-    // The digest reuses the summary provider/key/url; only the model can differ
-    // per-run, mirroring `phoneme summarize --model`.
+    // Bake the one-shot overrides into a config clone, then let the meeting
+    // executor resolve the connection exactly as the auto-digest does. The digest
+    // reuses the summary provider/key/url; only the model can differ per-run
+    // (mirroring `phoneme summarize --model`), and `recipe_id` can swap the meeting
+    // template for this run only (`""`/`None` keeps the configured one).
     let mut cfg = (**state.config.load()).clone();
     if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
         cfg.summary.model = m;
+    }
+    if let Some(r) = recipe_id.filter(|r| !r.trim().is_empty()) {
+        cfg.meeting_recipe_id = r;
     }
 
     // Require a usable LLM provider up front so the user gets a clear error rather
@@ -2706,8 +2716,7 @@ async fn rerun_meeting_digest(
             id: event_id.clone(),
             stage: PipelineStage::Summarizing,
         });
-        match crate::pipeline::generate_meeting_digest(&task_state, &cfg, &event_id, &tracks).await
-        {
+        match crate::pipeline::run_meeting_recipe(&task_state, &cfg, &event_id, &tracks).await {
             Ok((digest, model)) => {
                 if let Err(e) = task_state
                     .catalog

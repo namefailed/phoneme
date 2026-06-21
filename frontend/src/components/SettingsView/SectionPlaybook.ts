@@ -63,11 +63,30 @@ function defaultPlaybook(): PlaybookEntry[] {
 }
 
 function defaultRecipes(): PlaybookRecipe[] {
-  return [{
-    id: "default", name: "Default pipeline", builtin: true,
-    description: "What every normal recording runs: cleanup, then title, summary, and tag suggestions.",
-    steps: ["cleanup", "title", "summary", "auto_tag"],
-  }];
+  return [
+    {
+      id: "default", name: "Default pipeline", builtin: true, scope: "recording",
+      description: "What every normal recording runs: cleanup, then title, summary, and tag suggestions.",
+      steps: ["cleanup", "title", "summary", "auto_tag"],
+    },
+    // Meeting templates (scope: "meeting") — run once over a meeting's merged
+    // transcript. Mirror crates/phoneme-core/src/config.rs `default_recipes()`.
+    {
+      id: "meeting_digest", name: "Meeting digest", builtin: true, scope: "meeting",
+      description: "Default whole-meeting summary: overview, topics, decisions, and action items across every track.",
+      steps: ["meeting_digest"],
+    },
+    {
+      id: "standup", name: "Standup", builtin: false, scope: "meeting",
+      description: "Meeting template: a standup digest grouped by participant (recent work, next steps, blockers).",
+      steps: ["meeting_standup"],
+    },
+    {
+      id: "interview", name: "Interview", builtin: false, scope: "meeting",
+      description: "Meeting template: a Q&A digest pairing each question with the answer given.",
+      steps: ["meeting_interview"],
+    },
+  ];
 }
 
 export class SectionPlaybook {
@@ -95,7 +114,9 @@ export class SectionPlaybook {
     });
     (config.recipes as Array<Record<string, unknown>>).forEach((r) => {
       if (!Array.isArray(r.steps)) r.steps = [];
+      if (r.scope !== "meeting" && r.scope !== "recording") r.scope = "recording";
     });
+    if (typeof config.meeting_recipe_id !== "string") config.meeting_recipe_id = "";
     this.entries = config.playbook as PlaybookEntry[];
     this.recipes = config.recipes as PlaybookRecipe[];
 
@@ -129,6 +150,15 @@ export class SectionPlaybook {
           <button class="inline-button" id="pb-add-recipe" type="button">+ Add recipe</button>
         </div>
         <div class="settings-field" style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+          <label for="pb-meeting-recipe">Meeting template</label>
+          <div>
+            <select id="pb-meeting-recipe" class="settings-select"></select>
+          </div>
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Which template runs once over a <b>meeting's</b> merged transcript (mic + system together) to produce its digest. <b>Built-in digest</b> is the default. Pick <b>Standup</b> or <b>Interview</b> for a structured digest, or any meeting-scope recipe you build above.
+          </span>
+        </div>
+        <div class="settings-field" style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
           <label>Run hooks after transcription</label>
           <div>
             <input type="checkbox" class="toggle-switch" id="pb-run-on-transcribe" ${(this.config.hook?.run_on_transcribe ?? true) ? "checked" : ""} />
@@ -152,10 +182,39 @@ export class SectionPlaybook {
 
     this.renderEntries();
     this.renderRecipes();
+    this.renderMeetingRecipeSelect();
   }
 
   private notifyChanged() {
     this.container.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  /** Populate the meeting-template selector from the `scope: "meeting"` recipes
+   *  and bind it to `config.meeting_recipe_id` (empty = the built-in digest). Also
+   *  re-run after recipe edits so a newly-added meeting recipe shows up. */
+  private renderMeetingRecipeSelect() {
+    const sel = this.container.querySelector<HTMLSelectElement>("#pb-meeting-recipe");
+    if (!sel) return;
+    const current = String(this.config.meeting_recipe_id ?? "");
+    const meetingRecipes = this.recipes.filter((r) => r.scope === "meeting");
+    const opts = [`<option value="">Built-in digest (default)</option>`];
+    for (const r of meetingRecipes) {
+      const id = String(r.id ?? "");
+      // The built-in `meeting_digest` recipe is equivalent to the empty default,
+      // so don't offer a redundant duplicate of "Built-in digest".
+      if (id === "meeting_digest") continue;
+      opts.push(`<option value="${escapeAttr(id)}">${escapeHtml(r.name || id)}</option>`);
+    }
+    sel.innerHTML = opts.join("");
+    // Keep the selection if its recipe still exists; otherwise fall back to empty.
+    sel.value = meetingRecipes.some((r) => r.id === current) && current !== "meeting_digest" ? current : "";
+    if (sel.value !== current) {
+      this.config.meeting_recipe_id = sel.value;
+    }
+    sel.onchange = () => {
+      this.config.meeting_recipe_id = sel.value;
+      this.notifyChanged();
+    };
   }
 
   /** A unique-ish slug id from a name, deduped against existing ids. */
@@ -488,11 +547,19 @@ export class SectionPlaybook {
               <input type="text" class="pb-r-name" value="${escapeAttr(r.name)}" placeholder="Recipe name" aria-label="Recipe name" ${open ? "" : "readonly"} />
               <input type="text" class="pb-r-desc" value="${escapeAttr(r.description)}" placeholder="What this chain does" aria-label="Recipe description" ${open ? "" : "readonly"} />
             </div>
+            ${r.scope === "meeting" ? `<span class="pb-badge">meeting</span>` : ``}
             ${r.builtin ? `<span class="pb-badge">built-in</span>` : `<span></span>`}
             <button class="inline-button pb-r-expand" type="button" aria-expanded="${open}">${CHEVRON} Steps</button>
             <button class="inline-button pb-r-del" type="button" title="Delete recipe" aria-label="Delete recipe">✕</button>
           </div>
           <div class="pb-r-detail" style="display: ${open ? "block" : "none"}; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
+            <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px;">
+              <label style="font-size: 0.7857rem; color: var(--fg-faded);" for="pb-r-scope-${escapeAttr(r.id)}">Runs over</label>
+              <select class="pb-r-scope" id="pb-r-scope-${escapeAttr(r.id)}">
+                <option value="recording"${r.scope !== "meeting" ? " selected" : ""}>Each recording</option>
+                <option value="meeting"${r.scope === "meeting" ? " selected" : ""}>A whole meeting (template)</option>
+              </select>
+            </div>
             <div class="pb-steps" style="display: flex; flex-direction: column; gap: 6px;">${stepRows}</div>
             <div style="margin-top: 10px; display: flex; gap: 6px; align-items: center;">
               <select class="pb-add-step">
@@ -517,6 +584,12 @@ export class SectionPlaybook {
         if (open) this.expanded.add(id); else this.expanded.delete(id);
         this.renderRecipes();
       });
+      card.querySelector<HTMLSelectElement>(".pb-r-scope")?.addEventListener("change", (ev) => {
+        const v = (ev.target as HTMLSelectElement).value;
+        r.scope = v === "meeting" ? "meeting" : "recording";
+        this.renderRecipes();
+        this.notifyChanged();
+      });
       card.querySelector<HTMLSelectElement>(".pb-add-step")?.addEventListener("change", (ev) => {
         const sel = ev.target as HTMLSelectElement;
         if (sel.value) { r.steps.push(sel.value); this.expanded.add(id); this.renderRecipes(); this.notifyChanged(); }
@@ -531,5 +604,9 @@ export class SectionPlaybook {
         const i = Number(btn.dataset.i); if (i < r.steps.length - 1) { [r.steps[i + 1], r.steps[i]] = [r.steps[i], r.steps[i + 1]]; this.renderRecipes(); this.notifyChanged(); }
       }));
     });
+
+    // A recipe's scope (or a delete/add) may have changed which recipes are
+    // meeting-scope — keep the meeting-template selector in sync.
+    this.renderMeetingRecipeSelect();
   }
 }

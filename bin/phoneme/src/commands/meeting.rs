@@ -75,10 +75,17 @@ pub async fn run(args: MeetingArgs, cfg: &Config, json: bool) -> ExitCode {
         } => Request::UpdateMeetingName { meeting_id, name },
         // The whole-meeting digest re-run mirrors `phoneme summarize`: the daemon
         // ACKs immediately and generates in the background, storing the result and
-        // emitting `MeetingDigestUpdated` / `MeetingDigestFailed`.
-        MeetingAction::Digest { meeting_id, model } => {
-            Request::RerunMeetingDigest { meeting_id, model }
-        }
+        // emitting `MeetingDigestUpdated` / `MeetingDigestFailed`. `--template`
+        // rides the one-shot `recipe_id` (a meeting-scope recipe for this run only).
+        MeetingAction::Digest {
+            meeting_id,
+            model,
+            template,
+        } => Request::RerunMeetingDigest {
+            meeting_id,
+            model,
+            recipe_id: template,
+        },
     };
 
     // The digest re-run ACKs with `null` (it runs in the background), so it has no

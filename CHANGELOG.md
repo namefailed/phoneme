@@ -327,6 +327,18 @@ trust boundary.*
   `RerunMeetingDigest` IPC. Surfaced over `GetMeetingDigest`, with
   `meeting_digest_updated` / `meeting_digest_failed` events mirroring
   `summary_updated` / `summary_failed` at meeting scope.
+- [x] **Meeting templates** — the whole-meeting digest is now a **selectable
+  recipe**, not one hardcoded prompt. A Playbook recipe carries a `scope`
+  (`recording` — the default for every existing recipe, so nothing changes — or
+  `meeting`); a `scope = meeting` recipe (a "meeting template") runs **once** over
+  the merged meeting transcript. Seeds ship a built-in `meeting_digest` plus
+  `standup` and `interview` example templates (differing only by prompt). Pick the
+  one the auto- and on-demand digest uses with the new top-level
+  `meeting_recipe_id` config key (empty = the built-in digest, identical to prior
+  behaviour — no migration), the **Meeting template** selector in Settings →
+  Playbook, or per-digest from the merged view's picker / `phoneme meeting digest
+  <id> --template <recipe_id>` / `RerunMeetingDigest.recipe_id` (a one-shot, never
+  persisted). The auto-fire keeps its exactly-once `digest_in_flight` claim.
 - [x] **Merged meeting view** — selecting a meeting's group header opens a single,
   read-only reading of every track, labelled 🎤 Microphone / 🔊 System audio with the
   diarizer's `[Speaker N]` turns surfaced, plus Copy / Export

@@ -594,11 +594,14 @@ pub enum Request {
     /// Generate (or regenerate) the whole-meeting digest: one LLM synthesis
     /// across ALL tracks of a meeting (mic + system together), distinct from
     /// the per-recording [`Request::RerunSummary`]. The daemon assembles the
-    /// merged meeting transcript (every track, source-labelled) and runs it
-    /// through the configured summary provider, storing the result keyed by
-    /// `meeting_id` (the `meeting_digests` table). Reuses the summary connection;
-    /// `model` optionally overrides the summary model for this run only (never
-    /// persisted). Ok `null` immediately — the LLM call runs detached, emitting
+    /// merged meeting transcript (every track, source-labelled) and runs the
+    /// configured **meeting template** (the `scope = Meeting` recipe named by
+    /// `meeting_recipe_id`, or the built-in digest prompt when unset) over it,
+    /// storing the result keyed by `meeting_id` (the `meeting_digests` table).
+    /// Reuses the summary connection; `model` optionally overrides the summary
+    /// model and `recipe_id` optionally overrides the meeting template — both for
+    /// this run only (never persisted). Ok `null` immediately — the LLM call runs
+    /// detached, emitting
     /// `PipelineStageChanged(Summarizing)` + [`DaemonEvent::LlmActivity`], and
     /// the result arrives as [`DaemonEvent::MeetingDigestUpdated`] (or
     /// `MeetingDigestFailed`). Errors up front: `not_found` for an unknown
@@ -610,6 +613,13 @@ pub enum Request {
         /// One-time summary model override (never persisted).
         #[serde(default)]
         model: Option<String>,
+        /// One-time meeting-template override (never persisted): the id of a
+        /// `scope = Meeting` recipe to run for THIS digest only, instead of the
+        /// configured `meeting_recipe_id`. `None`/empty uses the configured
+        /// template (or the built-in digest when none is set). A missing or
+        /// non-meeting-scope id falls back to the built-in digest, never an error.
+        #[serde(default)]
+        recipe_id: Option<String>,
     },
 
     // ── Library: transcript & metadata edits ────────────────────────────

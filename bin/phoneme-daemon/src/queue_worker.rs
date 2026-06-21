@@ -142,7 +142,11 @@ async fn maybe_generate_meeting_digest(state: &AppState, rec_id: &phoneme_core::
         id: event_id.clone(),
         stage: phoneme_ipc::PipelineStage::Summarizing,
     });
-    match crate::pipeline::generate_meeting_digest(state, &cfg, &event_id, &tracks).await {
+    // Run the configured meeting template (a `scope = Meeting` recipe) over the
+    // merged transcript. `run_meeting_recipe` is the generalization of the
+    // built-in digest: with `meeting_recipe_id` empty (the default) it runs the
+    // exact same single-step digest path, so this is behaviour-preserving.
+    match crate::pipeline::run_meeting_recipe(state, &cfg, &event_id, &tracks).await {
         Ok((digest, model)) => match state
             .catalog
             .update_meeting_digest(&meeting_id, &digest, Some(&model))

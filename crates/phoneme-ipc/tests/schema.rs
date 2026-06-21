@@ -411,10 +411,18 @@ fn meeting_digest_requests_and_events_roundtrip() {
     roundtrip(&Request::RerunMeetingDigest {
         meeting_id: "meeting-abc".into(),
         model: None,
+        recipe_id: None,
     });
     roundtrip(&Request::RerunMeetingDigest {
         meeting_id: "meeting-abc".into(),
         model: Some("llama3.2:3b".into()),
+        recipe_id: None,
+    });
+    // With a one-shot meeting-template override.
+    roundtrip(&Request::RerunMeetingDigest {
+        meeting_id: "meeting-abc".into(),
+        model: None,
+        recipe_id: Some("standup".into()),
     });
     roundtrip(&Request::GetMeetingDigest {
         meeting_id: "meeting-abc".into(),

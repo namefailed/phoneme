@@ -2871,6 +2871,18 @@ ph-sidebar .queue-item-main.kbd-cursor {
   font-size: 0.7857rem;
   font-weight: 600;
   color: var(--fg-muted);
+  /* Push the label left so the template picker + Regenerate button group on the
+     right (the head is a flex row of label · picker · button). */
+  margin-right: auto;
+}
+.merged-digest-template {
+  font-size: 0.7857rem;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--bg-input, var(--bg-surface));
+  color: var(--fg-default);
+  border: 1px solid var(--border-subtle);
+  max-width: 180px;
 }
 .merged-digest-body {
   white-space: pre-wrap;

@@ -220,13 +220,22 @@ export type PlaybookEntry = {
   hook: PlaybookHook;
 };
 
+/** What a {@link PlaybookRecipe} runs over: a single recording (the default) or a
+ *  whole meeting's merged transcript (a "meeting template"). Mirrors the Rust
+ *  `RecipeScope`. */
+export type RecipeScope = "recording" | "meeting";
+
 /** A named, ordered chain of {@link PlaybookEntry} ids (`config.recipes`) — what
- *  the default recording pipeline and Custom Hotkeys run. */
+ *  the default recording pipeline and Custom Hotkeys run. `scope` distinguishes a
+ *  per-recording recipe from a meeting template (one pass over the merged
+ *  transcript); omitted/`"recording"` for every existing recipe. */
 export type PlaybookRecipe = {
   id: string;
   name: string;
   description: string;
   builtin: boolean;
+  /** Defaults to `"recording"` when absent (the Rust serde default). */
+  scope?: RecipeScope;
   steps: string[];
 };
 
@@ -495,14 +504,17 @@ export async function getMeetingDigest(meetingId: string): Promise<MeetingDigest
  * Generate (or regenerate) a meeting's whole-meeting digest on demand — one LLM
  * synthesis across every track (mic + system together), distinct from a single
  * track's {@link rerunSummary}. Reuses the configured summary provider; `model`
- * overrides the summary model for this run only (never persisted). The digest
- * arrives via the `MeetingDigestUpdated` daemon event — re-fetch when it fires.
+ * overrides the summary model for this run only (never persisted). `recipeId`, when
+ * set, runs a specific meeting template (a `scope: "meeting"` recipe) for this run
+ * only instead of the configured one. The digest arrives via the
+ * `MeetingDigestUpdated` daemon event — re-fetch when it fires.
  */
 export async function rerunMeetingDigest(
   meetingId: string,
   model: string | null = null,
+  recipeId: string | null = null,
 ): Promise<void> {
-  await tauriInvoke("rerun_meeting_digest", { meetingId, model });
+  await tauriInvoke("rerun_meeting_digest", { meetingId, model, recipeId });
 }
 
 /**

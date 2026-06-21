@@ -393,15 +393,25 @@ pub async fn rerun_summary(
 
 /// Generate (or regenerate) a meeting's whole-meeting digest on demand — the
 /// LLM synthesis across all of a meeting's tracks. `model` overrides the
-/// configured summary model for this run only. The digest arrives via the
-/// `MeetingDigestUpdated` daemon event. Meeting-scope twin of `rerun_summary`.
+/// configured summary model for this run only; `recipe_id` runs a specific meeting
+/// template (a `scope = Meeting` recipe) for this run only. The digest arrives via
+/// the `MeetingDigestUpdated` daemon event. Meeting-scope twin of `rerun_summary`.
 #[tauri::command]
 pub async fn rerun_meeting_digest(
     bridge: Br<'_>,
     meeting_id: String,
     model: Option<String>,
+    recipe_id: Option<String>,
 ) -> Result<Value, CommandError> {
-    forward(&bridge, Request::RerunMeetingDigest { meeting_id, model }).await
+    forward(
+        &bridge,
+        Request::RerunMeetingDigest {
+            meeting_id,
+            model,
+            recipe_id,
+        },
+    )
+    .await
 }
 
 /// List the transcription pipeline queue (pending + processing items).

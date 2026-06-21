@@ -351,6 +351,7 @@ Named, ordered chains of `[[playbook]]` entry ids — what the default recording
 | `name` | `""` | User-facing name |
 | `description` | `""` | One-line description |
 | `builtin` | `false` | Seeded by Phoneme vs. user-created |
+| `scope` | `"recording"` | What this recipe runs over: `"recording"` (per recording — the default for every recipe, so existing configs are unchanged) or `"meeting"` (a **meeting template** — its steps run **once** over a meeting's merged transcript). A meeting-scope recipe only honours an Enrichment step targeting `meeting_digest` (plus optional `hook` steps); `transform`/`filler_removal` steps are warn-and-skipped, since there is no single transcript to rewrite at meeting scope. The seeds ship one built-in meeting recipe (`meeting_digest`) and two examples (`standup`, `interview`). Selected via the top-level `meeting_recipe_id`. |
 | `steps` | `[]` | Ordered list of `[[playbook]]` entry ids to run — `transform`/`enrichment` (LLM) **and** `hook` (shell/webhook) steps, in order. A dangling id (entry deleted) is skipped with a warning; an empty list is a bare transcribe-only run. |
 
 ---
@@ -369,6 +370,11 @@ Detection requires a provider that **reports** the language: the local `whisper.
 | `whisper_model` | `""` | Transcription/STT model for this language. Empty keeps the model pass 1 used (no re-transcription). A non-empty value that **differs** triggers one routed re-transcription. |
 | `recipe_id` | `""` | The `[[recipes]]` id to run this language's post-processing through. Empty = the `default` recipe. A deleted/missing id degrades to `default`. |
 | `enabled` | `true` | Set `false` to park a rule without deleting it; disabled rules are skipped during lookup. |
+## `meeting_recipe_id`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `meeting_recipe_id` | `""` | Top-level string. Which `[[recipes]]` recipe (with `scope = "meeting"`) runs once over a meeting's MERGED transcript to produce its digest — the auto-digest on meeting finalize and the on-demand `rerun_meeting_digest`. **Empty (the default) = the built-in digest prompt**, identical to prior behaviour, so no migration and existing configs are unchanged. A non-empty value naming a missing or non-meeting-scope recipe falls back to the built-in digest (never an error). Override per run with `phoneme meeting digest <id> --template <recipe_id>` or the merged meeting view's template picker (one-shot, never persisted). |
 
 ---
 

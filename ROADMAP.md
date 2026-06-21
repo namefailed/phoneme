@@ -85,7 +85,7 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 
 ### Meeting archivist
 - 📋 **Whole-meeting digest** — one summary across both tracks / the merged You↔Meeting timeline.
-- 🔬 **Meeting templates** — standup → structured action items, interview → Q&A; recipe-driven, selectable per meeting hotkey.
+- ✅ **Meeting templates** — a meeting-scope recipe that runs once over the merged meeting transcript to produce the digest. v1 is prompt-only: a `scope = "meeting"` recipe with one Enrichment step targeting `meeting_digest`, selected via `meeting_recipe_id` (empty = the built-in digest, so nothing changes by default). Seeds ship `standup` and `interview` templates; pick per-digest from the merged view or `phoneme meeting digest --template <id>`. *(Next: per-template multi-output — separate action-items / Q&A columns, Option B in the brief.)*
 - 🔬 **Live action-items & decisions** — extract them as the meeting happens (a real-time assistant), not only after.
 - 🔬 **Calendar-based naming & auto-start** — name a meeting from its calendar event; optionally prompt to record at a scheduled call. *(Calendar-driven — not the rejected process-sniffing.)*
 - 🔬 **Per-app audio capture** — capture only the call app's audio (not your music) via per-session loopback.

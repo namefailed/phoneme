@@ -2326,7 +2326,7 @@ fn step_label(step: &crate::pipeline::ResolvedStep) -> &'static str {
 /// "transform-only" recipe (`hotkey_recipe` → just the `cleanup` transform), so
 /// the recipe-resolution tests can tell the two chains apart by their steps.
 fn config_with_custom_recipe() -> Config {
-    use phoneme_core::config::{default_playbook, default_recipes, PlaybookRecipe};
+    use phoneme_core::config::{default_playbook, default_recipes, PlaybookRecipe, RecipeScope};
     let mut cfg = Config {
         playbook: default_playbook(),
         recipes: default_recipes(),
@@ -2337,6 +2337,7 @@ fn config_with_custom_recipe() -> Config {
         name: "Hotkey recipe".into(),
         description: "Cleanup only.".into(),
         builtin: false,
+        scope: RecipeScope::Recording,
         steps: vec!["cleanup".into()],
     });
     cfg
@@ -2374,7 +2375,9 @@ fn resolve_recipe_empty_falls_back_to_default() {
 /// command or webhook is skipped so it never adds an empty step.
 #[test]
 fn resolve_recipe_includes_hook_steps_and_skips_empty_ones() {
-    use phoneme_core::config::{PlaybookEntry, PlaybookHook, PlaybookKind, PlaybookRecipe};
+    use phoneme_core::config::{
+        PlaybookEntry, PlaybookHook, PlaybookKind, PlaybookRecipe, RecipeScope,
+    };
     let mut cfg = config_with_custom_recipe();
     // An empty Hook entry (no command, no webhook) — must be skipped.
     cfg.playbook.push(PlaybookEntry {
@@ -2393,6 +2396,7 @@ fn resolve_recipe_includes_hook_steps_and_skips_empty_ones() {
         name: "With hooks".into(),
         description: "Cleanup, the journal hook, and an empty (skipped) hook.".into(),
         builtin: false,
+        scope: RecipeScope::Recording,
         steps: vec!["cleanup".into(), "journal".into(), "empty_hook".into()],
     });
     let labels: Vec<_> = crate::pipeline::resolve_recipe(&cfg, "with_hooks")
@@ -2410,13 +2414,14 @@ fn resolve_recipe_includes_hook_steps_and_skips_empty_ones() {
 /// `filler_removal` step (no LLM provider involved) — the non-LLM Transform path.
 #[test]
 fn resolve_recipe_includes_filler_removal_step() {
-    use phoneme_core::config::PlaybookRecipe;
+    use phoneme_core::config::{PlaybookRecipe, RecipeScope};
     let mut cfg = config_with_custom_recipe();
     cfg.recipes.push(PlaybookRecipe {
         id: "tidy".into(),
         name: "Tidy".into(),
         description: "Strip fillers, then clean up.".into(),
         builtin: false,
+        scope: RecipeScope::Recording,
         steps: vec!["filler_removal".into(), "cleanup".into()],
     });
     let labels: Vec<_> = crate::pipeline::resolve_recipe(&cfg, "tidy")
@@ -3544,6 +3549,91 @@ async fn generate_meeting_digest_errors_when_no_tracks_transcribed() {
         meeting_track("m-empty", "system", None),
     ];
     let err = crate::pipeline::generate_meeting_digest(&state, &cfg, &tracks[0].id, &tracks)
+        .await
+        .expect_err("no transcribed tracks → error");
+    assert!(err.contains("nothing to digest"), "got: {err}");
+}
+
+/// A meeting digest config clone wired at `server` with the given
+/// `meeting_recipe_id`. The mock returns "MEETING DIGEST" and is asserted to have
+/// seen the chosen template's prompt (so the recipe path actually drove it).
+async fn meeting_cfg_at(server_uri: &str, meeting_recipe_id: &str) -> Config {
+    let mut cfg = Config::default();
+    cfg.summary.provider = "openai".into();
+    cfg.summary.api_url = format!("{server_uri}/v1/chat/completions");
+    cfg.summary.model = "digest-llm".into();
+    cfg.meeting_recipe_id = meeting_recipe_id.into();
+    cfg
+}
+
+#[tokio::test]
+async fn run_meeting_recipe_uses_the_configured_meeting_template_prompt() {
+    // With `meeting_recipe_id = "standup"`, the meeting executor runs the standup
+    // template's prompt (not the built-in digest prompt) over the merged transcript.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        // The standup prompt is distinctive ("standup" + per-participant framing).
+        .and(body_string_contains("standup"))
+        .and(body_string_contains("alpha from the mic"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "STANDUP DIGEST" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = meeting_cfg_at(&server.uri(), "standup").await;
+    let state = test_state(tmp.path(), cfg.clone()).await;
+    let tracks = vec![
+        meeting_track("m-standup", "mic", Some("alpha from the mic")),
+        meeting_track("m-standup", "system", Some("beta from the system")),
+    ];
+    let (digest, model) =
+        crate::pipeline::run_meeting_recipe(&state, &cfg, &tracks[0].id, &tracks)
+            .await
+            .expect("meeting recipe should produce a digest");
+    assert_eq!(digest, "STANDUP DIGEST");
+    assert_eq!(model, "digest-llm");
+}
+
+#[tokio::test]
+async fn run_meeting_recipe_falls_back_to_built_in_digest_when_unset_or_missing() {
+    // Empty, a missing id, and a non-meeting-scope id all fall back to the built-in
+    // digest prompt — never an error, never a silent no-op.
+    for recipe_id in ["", "no-such-recipe", "default" /* recording-scope */] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            // The built-in digest prompt's distinctive phrase.
+            .and(body_string_contains("summarizing a whole meeting"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "role": "assistant", "content": "FALLBACK DIGEST" } }]
+            })))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = meeting_cfg_at(&server.uri(), recipe_id).await;
+        let state = test_state(tmp.path(), cfg.clone()).await;
+        let tracks = vec![meeting_track("m-fb", "mic", Some("alpha from the mic"))];
+        let (digest, _model) =
+            crate::pipeline::run_meeting_recipe(&state, &cfg, &tracks[0].id, &tracks)
+                .await
+                .unwrap_or_else(|e| panic!("recipe_id={recipe_id:?} should fall back, got err: {e}"));
+        assert_eq!(digest, "FALLBACK DIGEST", "recipe_id={recipe_id:?}");
+    }
+}
+
+#[tokio::test]
+async fn run_meeting_recipe_errors_when_no_tracks_transcribed() {
+    // Same empty-merge guard as the built-in digest path — no transcribed track is
+    // "nothing to digest", not a failure of the meeting.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = Config::default();
+    let state = test_state(tmp.path(), cfg.clone()).await;
+    let tracks = vec![meeting_track("m-empty2", "mic", None)];
+    let err = crate::pipeline::run_meeting_recipe(&state, &cfg, &tracks[0].id, &tracks)
         .await
         .expect_err("no transcribed tracks → error");
     assert!(err.contains("nothing to digest"), "got: {err}");
