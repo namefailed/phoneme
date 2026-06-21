@@ -42,6 +42,31 @@ payload under `value`. On error, `value` is an `IpcError` with a machine-readabl
 `whisper_unreachable`, `whisper_timeout`, `hook_failed`, `daemon_not_running`,
 `pipe_in_use`, `shutting_down`, `io`, `internal`) plus a human `message`.
 
+### 🤝 Version handshake (optional)
+
+The wire protocol carries an integer version (`PROTOCOL_VERSION`, currently `1`).
+Additive changes — a new request variant, a new optional field — keep it stable;
+it only bumps on a breaking revision. A client that wants to fail fast against an
+incompatible daemon can send a handshake as its first request:
+
+```json
+{"type": "handshake", "protocol_version": 1}
+```
+
+The daemon replies with its own view:
+
+```json
+{"status": "ok", "value": {"protocol_version": 1, "app_version": "2.0.0", "compatible": true}}
+```
+
+`compatible` is simply whether the daemon's `protocol_version` equals the one you
+sent. The handshake is optional and backwards-compatible: `protocol_version`
+defaults to `0` ("unversioned — proceed"), so an older daemon that doesn't know
+the variant, or a client that never sends it, still works. The bundled `phoneme`
+CLI sends this on connect and treats only an explicit `compatible: false` as a
+hard stop (prompting you to restart the daemon or update the CLI so both sides
+match); anything else proceeds.
+
 ### 📋 Full Request Schema
 
 Phoneme supports the commands below (all snake_case). This page is a **map**; the

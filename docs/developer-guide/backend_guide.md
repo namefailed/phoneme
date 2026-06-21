@@ -30,7 +30,7 @@ The repository is a Cargo workspace of three library crates and three binaries
 
 | Crate | Owns | Notable modules |
 | :--- | :--- | :--- |
-| [`phoneme-core`](../../crates/phoneme-core/src/lib.rs) | All domain logic & the data layer, knows nothing about IPC/windows/hotkeys | [`config`](../../crates/phoneme-core/src/config.rs), [`transcription`](../../crates/phoneme-core/src/transcription.rs), [`llm`](../../crates/phoneme-core/src/llm.rs), [`diarization`](../../crates/phoneme-core/src/diarization.rs), [`catalog`](../../crates/phoneme-core/src/catalog.rs), [`chunk`](../../crates/phoneme-core/src/chunk.rs)/[`embed`](../../crates/phoneme-core/src/embed.rs)/[`fusion`](../../crates/phoneme-core/src/fusion.rs), [`hook`](../../crates/phoneme-core/src/hook.rs)/[`webhook`](../../crates/phoneme-core/src/webhook.rs), [`doctor`](../../crates/phoneme-core/src/doctor.rs), [`queue`](../../crates/phoneme-core/src/queue.rs), [`types`](../../crates/phoneme-core/src/types.rs) |
+| [`phoneme-core`](../../crates/phoneme-core/src/lib.rs) | All domain logic & the data layer, knows nothing about IPC/windows/hotkeys | [`config`](../../crates/phoneme-core/src/config.rs), [`transcription`](../../crates/phoneme-core/src/transcription.rs), [`llm`](../../crates/phoneme-core/src/llm.rs), [`diarization`](../../crates/phoneme-core/src/diarization.rs), [`catalog`](../../crates/phoneme-core/src/catalog/mod.rs), [`chunk`](../../crates/phoneme-core/src/chunk.rs)/[`embed`](../../crates/phoneme-core/src/embed.rs)/[`fusion`](../../crates/phoneme-core/src/fusion.rs), [`hook`](../../crates/phoneme-core/src/hook.rs)/[`webhook`](../../crates/phoneme-core/src/webhook.rs), [`doctor`](../../crates/phoneme-core/src/doctor.rs), [`queue`](../../crates/phoneme-core/src/queue.rs), [`types`](../../crates/phoneme-core/src/types.rs) |
 | [`phoneme-audio`](../../crates/phoneme-audio/src/lib.rs) | Capture & encoding to canonical 16 kHz mono i16 | [`recorder`](../../crates/phoneme-audio/src/recorder.rs), [`source`](../../crates/phoneme-audio/src/source.rs), [`convert`](../../crates/phoneme-audio/src/convert.rs), [`silence`](../../crates/phoneme-audio/src/silence.rs), [`preroll`](../../crates/phoneme-audio/src/preroll.rs), [`decode`](../../crates/phoneme-audio/src/decode.rs), [`meeting_align`](../../crates/phoneme-audio/src/meeting_align.rs) |
 | [`phoneme-ipc`](../../crates/phoneme-ipc/src/lib.rs) | The wire contract between daemon and clients | [`schema`](../../crates/phoneme-ipc/src/schema.rs) (the protocol reference), [`codec`](../../crates/phoneme-ipc/src/codec.rs), [`named_pipe`](../../crates/phoneme-ipc/src/named_pipe.rs), [`transport`](../../crates/phoneme-ipc/src/transport.rs) |
 
@@ -38,7 +38,7 @@ The repository is a Cargo workspace of three library crates and three binaries
 
 | Binary | Owns | Notable modules |
 | :--- | :--- | :--- |
-| [`phoneme-daemon`](../../bin/phoneme-daemon/src/main.rs) | The brain — IPC server, recorder glue, inbox worker, pipeline, supervisors, event bus | [`main`](../../bin/phoneme-daemon/src/main.rs), [`app_state`](../../bin/phoneme-daemon/src/app_state.rs), [`recorder`](../../bin/phoneme-daemon/src/recorder.rs), [`queue_worker`](../../bin/phoneme-daemon/src/queue_worker.rs), [`pipeline`](../../bin/phoneme-daemon/src/pipeline.rs), [`in_place`](../../bin/phoneme-daemon/src/in_place.rs), [`whisper_supervisor`](../../bin/phoneme-daemon/src/whisper_supervisor.rs), [`ollama_launcher`](../../bin/phoneme-daemon/src/ollama_launcher.rs), [`event_bus`](../../bin/phoneme-daemon/src/event_bus.rs), [`shutdown`](../../bin/phoneme-daemon/src/shutdown.rs), [`reconcile`](../../bin/phoneme-daemon/src/reconcile.rs), [`retention`](../../bin/phoneme-daemon/src/retention.rs) |
+| [`phoneme-daemon`](../../bin/phoneme-daemon/src/main.rs) | The brain — IPC server, recorder glue, inbox worker, pipeline, supervisors, event bus | [`main`](../../bin/phoneme-daemon/src/main.rs), [`app_state`](../../bin/phoneme-daemon/src/app_state.rs), [`recorder`](../../bin/phoneme-daemon/src/recorder/mod.rs), [`queue_worker`](../../bin/phoneme-daemon/src/queue_worker.rs), [`pipeline`](../../bin/phoneme-daemon/src/pipeline.rs), [`in_place`](../../bin/phoneme-daemon/src/in_place.rs), [`whisper_supervisor`](../../bin/phoneme-daemon/src/whisper_supervisor.rs), [`ollama_launcher`](../../bin/phoneme-daemon/src/ollama_launcher.rs), [`event_bus`](../../bin/phoneme-daemon/src/event_bus.rs), [`shutdown`](../../bin/phoneme-daemon/src/shutdown.rs), [`reconcile`](../../bin/phoneme-daemon/src/reconcile.rs), [`retention`](../../bin/phoneme-daemon/src/retention.rs) |
 | [`phoneme`](../../bin/phoneme/src/main.rs) | The CLI — one module per subcommand, translating to IPC requests | [`args`](../../bin/phoneme/src/args.rs) (clap), [`client`](../../bin/phoneme/src/client.rs) (spawn vs observe), [`commands/`](../../bin/phoneme/src/commands/mod.rs) |
 | [`src-tauri`](../../src-tauri/src/lib.rs) | The Tauri 2 tray shell — spawn/bridge the daemon, forward commands, re-emit events | [`lib`](../../src-tauri/src/lib.rs), [`auto_spawn`](../../src-tauri/src/auto_spawn.rs), [`bridge`](../../src-tauri/src/bridge.rs), [`commands`](../../src-tauri/src/commands/mod.rs), [`events`](../../src-tauri/src/events.rs), [`tray`](../../src-tauri/src/tray.rs), [`overlay`](../../src-tauri/src/overlay.rs), [`wizard`](../../src-tauri/src/wizard.rs)/[`checksums`](../../src-tauri/src/checksums.rs) |
 
@@ -64,7 +64,7 @@ Exclusive hardware (microphone, loopback) is owned by an **actor**
 exposes a `Sender<RecorderCommand>` rather than its buffers, and a long-running
 loop owns the device state and processes commands (`Stop`, `Cancel`, `Pause`,
 `Resume`, `Snapshot`) one at a time, replying over a `oneshot`. The daemon-side
-glue ([`bin/phoneme-daemon/src/recorder.rs`](../../bin/phoneme-daemon/src/recorder.rs))
+glue ([`bin/phoneme-daemon/src/recorder/mod.rs`](../../bin/phoneme-daemon/src/recorder/mod.rs))
 ties that lifecycle to the catalog, the inbox queue, and the event bus, and owns
 the "at most one capture", toggle-atomicity, and no-slow-await-under-a-lock
 invariants.
@@ -98,7 +98,7 @@ bounded autocheckpoint, idle checkpointing), the three-transcript-layer design,
 the FTS5 sync triggers and query sanitizing, and the in-memory embedding cache
 are all detailed in
 [internals.md](internals.md#sqlite-catalog--search-internals). The module is
-[`catalog.rs`](../../crates/phoneme-core/src/catalog.rs).
+[`catalog`](../../crates/phoneme-core/src/catalog/mod.rs).
 
 ---
 

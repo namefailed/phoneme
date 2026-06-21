@@ -86,7 +86,7 @@ UI data is synchronized via a custom reactive store ([`store.ts`](../../frontend
 The backend is built in **Rust** using the **Tokio** async runtime.
 
 ### SQLite Database & sqlx
-The catalog is stored in `catalog.db` ([`catalog.rs`](../../crates/phoneme-core/src/catalog.rs)).
+The catalog is stored in `catalog.db` ([`catalog`](../../crates/phoneme-core/src/catalog/mod.rs)).
 - **Migrations:** All schema changes must be versioned. Schema migration files are placed under [`crates/phoneme-core/migrations/`](../../crates/phoneme-core/migrations).
 - **WAL Mode:** The catalog is opened in Write-Ahead Logging mode to ensure read queries don't block concurrent writes.
 

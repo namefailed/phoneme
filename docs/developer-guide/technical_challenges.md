@@ -343,7 +343,7 @@ recomputes to the *exact* old unweighted centroid until new, duration-bearing
 captures arrive. The capture-time duration is the sum of that speaker's segment
 spans, summed in the pipeline from the persisted segment timeline.
 
-`catalog.rs` — `save_speaker_voiceprint` (stores `duration_ms`), `drop_centroid_outliers`,
+`catalog/speakers.rs` — `save_speaker_voiceprint` (stores `duration_ms`), `drop_centroid_outliers`,
 `recompute_named_centroid`; `voiceprint.rs` — `weighted_mean_centroid`;
 `pipeline.rs` — per-speaker duration sum at capture.
 

@@ -170,7 +170,7 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 - 🔬 **Batch operations** — batch delete / batch tag update over a selection.
 - 🔬 **Scale to 100k+ catalogs** — DB vacuum strategy, indexing, list() N+1 trims, quoted-FTS5 phrase + boolean search. *(The vector-ANN half is promoted to H1 as a moat prerequisite; this is the rest.)*
 - 🔬 **Data-integrity hygiene** — a single `schema_version` column instead of per-feature `*_migrated` booleans, and the missing `ON DELETE CASCADE` on `dismissed_speaker_suggestions` (its rows orphan on recording delete).
-- 🔬 **Internal tidy-ups** — split the god-files (`config.rs` ~4.6k, `catalog.rs` ~4.7k, `recorder.rs`), `cargo-deny` + coverage in CI, redundant-clone perf trims. *(Front-load `keyboard.ts` / `RecordingsView/index.ts` — nav bugs measurably recur there, so they earn a split sooner than the Rust ones.)*
+- 🔬 **Internal tidy-ups** — `catalog.rs` is now split into per-domain modules (`catalog/`); the remaining god-files to split are `config.rs` (~5.5k) and `recorder.rs`. Plus `cargo-deny` + coverage in CI and redundant-clone perf trims. *(Front-load `keyboard.ts` / `RecordingsView/index.ts` — nav bugs measurably recur there, so they earn a split sooner than the Rust ones.)*
 
 *(Protocol versioning moved up to Horizon 0 — it's cheap insurance that gets harder to retrofit with each added client surface.)*
 

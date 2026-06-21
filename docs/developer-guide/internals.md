@@ -115,7 +115,7 @@ is the actor described in [backend_guide.md](backend_guide.md#2-tokio-async-arch
 ## SQLite catalog & search internals
 
 The catalog lives in `catalog.db` under local app data
-([`catalog.rs`](../../crates/phoneme-core/src/catalog.rs)).
+([`catalog`](../../crates/phoneme-core/src/catalog/mod.rs)).
 
 ### Connection settings
 
@@ -159,7 +159,7 @@ parser doesn't know errors the whole query, so every variant must have an arm.
 
 ### FTS5 query sanitizing
 
-User queries are sanitized in [`catalog.rs`](../../crates/phoneme-core/src/catalog.rs)
+User queries are sanitized in [`catalog`](../../crates/phoneme-core/src/catalog/mod.rs)
 so dangling quotes/operators can't crash the SQLite query engine: non-alphanumeric
 characters are stripped and terms become prefix matches joined with `AND` (e.g.
 `"data migration"` → `data* AND migration*`).

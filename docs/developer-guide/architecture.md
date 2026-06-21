@@ -210,7 +210,7 @@ archive.
 ### Trigger → capture
 
 A `RecordStart` / `StartMeeting` / `RecordToggle` request arrives over the pipe
-and reaches the daemon [`recorder`](../../bin/phoneme-daemon/src/recorder.rs).
+and reaches the daemon [`recorder`](../../bin/phoneme-daemon/src/recorder/mod.rs).
 `start` inserts the catalog row (status `recording`), opens the audio source,
 and emits `RecordingStarted`. The capture itself is the
 [`phoneme-audio`](../../crates/phoneme-audio/src/lib.rs) `Recorder` actor — a
@@ -238,13 +238,13 @@ override is ignored for meetings (a meeting always records both tracks). One edg
 case the code handles: **pre-roll is dropped when the override differs from the
 global source** — the idle ring buffer is mic-only audio captured under the
 global source, so on a mismatch the buffered samples are discarded and a fresh
-stream is opened for the override source ([`recorder.rs`](../../bin/phoneme-daemon/src/recorder.rs) `start`).
+stream is opened for the override source ([`recorder.rs`](../../bin/phoneme-daemon/src/recorder/mod.rs) `start`).
 
 ### The fast-lane-vs-queue decision
 
 On `stop`, the recorder finalizes the WAV and makes the one branching decision
 that defines the rest of the recording's life
-([`recorder.rs`](../../bin/phoneme-daemon/src/recorder.rs), `stop`):
+([`recorder.rs`](../../bin/phoneme-daemon/src/recorder/mod.rs), `stop`):
 
 ```text
 fast_lane = active.in_place && !in_place_cfg.full_pipeline
@@ -334,7 +334,7 @@ step's model/prompt from its entry), then the clone is discarded.
 
 ### Catalog & UI refresh
 
-Every result is written to the SQLite [`Catalog`](../../crates/phoneme-core/src/catalog.rs)
+Every result is written to the SQLite [`Catalog`](../../crates/phoneme-core/src/catalog/mod.rs)
 (WAL mode, FTS5 full-text index, per-chunk embedding vectors). As stages
 complete, the [`event_bus`](../../bin/phoneme-daemon/src/event_bus.rs) broadcasts
 `DaemonEvent`s; every subscribed client follows along (§8). For schema details,
@@ -474,7 +474,7 @@ Phoneme finds a recording whether you remember its *gist* or its one distinctive
   sentence-transformer (bundled `all-MiniLM-L6-v2`, 384-dim, L2-normalized so
   cosine is a dot product). The knobs (pooling, max length, prefixes) are
   config-driven so you can swap in E5/BGE/GTE/MPNet.
-- **Embedding cache** ([`catalog.rs`](../../crates/phoneme-core/src/catalog.rs)):
+- **Embedding cache** ([`catalog/embeddings.rs`](../../crates/phoneme-core/src/catalog/embeddings.rs)):
   the cosine scan is brute-force over every stored vector, so the catalog holds
   the decoded corpus in memory (`Arc<RwLock<…>>`, shared across clones) instead
   of re-reading and re-decoding f32 BLOBs from disk every query. Invalidation is
