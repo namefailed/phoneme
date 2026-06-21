@@ -2974,9 +2974,13 @@ async fn reflow_and_reembed_after_edit(
         match state.catalog.words_for(id).await {
             Ok(old_words) => {
                 if let Some(r) = phoneme_core::realign::realign_transcript(new_text, &old_words) {
-                    if let Err(e) = state.catalog.replace_words(id, &r.words).await {
-                        tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed words");
-                    }
+                    let words_stored = match state.catalog.replace_words(id, &r.words).await {
+                        Ok(()) => true,
+                        Err(e) => {
+                            tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed words");
+                            false
+                        }
+                    };
                     if let Err(e) = state.catalog.replace_segments(id, &r.segments).await {
                         tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed segments");
                     }
@@ -2985,15 +2989,18 @@ async fn reflow_and_reembed_after_edit(
                     // `mean_confidence` aggregate is now stale. Recompute it from
                     // the re-flowed words against the live threshold so the badge
                     // and the low-confidence filter stay correct (the migration
-                    // invariant: `mean_confidence` mirrors the stored words).
-                    // Best-effort like the rest of this function.
-                    let mean = phoneme_core::ConfidenceAggregate::compute(
-                        &r.words,
-                        cfg.whisper.low_confidence_threshold,
-                    )
-                    .map(|a| a.mean);
-                    if let Err(e) = state.catalog.update_confidence(id, mean).await {
-                        tracing::warn!(id = %id, error = %e, "re-align: failed to refresh mean_confidence");
+                    // invariant: `mean_confidence` mirrors the stored words). Only
+                    // when those words actually persisted, so the aggregate can
+                    // never reflect a word layer that failed to write. Best-effort.
+                    if words_stored {
+                        let mean = phoneme_core::ConfidenceAggregate::compute(
+                            &r.words,
+                            cfg.whisper.low_confidence_threshold,
+                        )
+                        .map(|a| a.mean);
+                        if let Err(e) = state.catalog.update_confidence(id, mean).await {
+                            tracing::warn!(id = %id, error = %e, "re-align: failed to refresh mean_confidence");
+                        }
                     }
                 }
             }
