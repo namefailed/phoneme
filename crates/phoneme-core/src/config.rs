@@ -620,6 +620,40 @@ impl LlmPostProcessConfig {
     pub fn api_key_str(&self) -> &str {
         self.api_key.expose_secret()
     }
+
+    /// The EFFECTIVE LLM connection for a pipeline step that inherits the base
+    /// `[llm_post_process]` connection but may override any field: a non-blank
+    /// `provider` / `api_url` / `api_key` / `model` wins, a blank one inherits
+    /// from `self`. `enabled` is forced on (a step runs under its own gate, not
+    /// the post-processor's switch).
+    ///
+    /// THE single source of truth for per-step LLM inheritance — the daemon
+    /// pipeline (`summary_llm_config` / `auto_tag_llm_config` / title / Playbook
+    /// `entry_llm_config`) and the Doctor's connection probes both call this, so
+    /// "what connection will this step use" is computed identically everywhere.
+    pub fn resolve_step(
+        &self,
+        provider: &str,
+        api_url: &str,
+        api_key: &str,
+        model: &str,
+    ) -> LlmPostProcessConfig {
+        let mut llm = self.clone();
+        llm.enabled = true;
+        if !provider.trim().is_empty() {
+            llm.provider = provider.to_string();
+        }
+        if !api_url.trim().is_empty() {
+            llm.api_url = api_url.to_string();
+        }
+        if !api_key.trim().is_empty() {
+            llm.set_api_key(api_key.to_string());
+        }
+        if !model.trim().is_empty() {
+            llm.model = model.to_string();
+        }
+        llm
+    }
 }
 
 fn default_llm_post_process() -> LlmPostProcessConfig {

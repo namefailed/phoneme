@@ -621,23 +621,9 @@ pub(crate) async fn llm_provider_for_run(
 /// Always `enabled` — summaries have their own on/off gate (`summary.auto` /
 /// the explicit on-demand request).
 pub fn summary_llm_config(cfg: &Config) -> LlmPostProcessConfig {
-    let mut llm = cfg.llm_post_process.clone();
-    llm.enabled = true;
     let s = &cfg.summary;
-    if !s.provider.trim().is_empty() {
-        llm.provider = s.provider.clone();
-    }
-    if !s.api_url.trim().is_empty() {
-        llm.api_url = s.api_url.clone();
-    }
-    let key = s.api_key_str();
-    if !key.trim().is_empty() {
-        llm.set_api_key(key.to_string());
-    }
-    if !s.model.trim().is_empty() {
-        llm.model = s.model.clone();
-    }
-    llm
+    cfg.llm_post_process
+        .resolve_step(&s.provider, &s.api_url, s.api_key_str(), &s.model)
 }
 
 /// Generate an LLM summary of `transcript`, returning `(summary, model)` on
@@ -854,23 +840,9 @@ async fn run_summary_step(
 /// auto-tag-specific provider / URL / key / model. Always `enabled` — the
 /// auto-tag step has its own gate (`auto_tag.auto` / the on-demand request).
 pub fn auto_tag_llm_config(cfg: &Config) -> LlmPostProcessConfig {
-    let mut llm = cfg.llm_post_process.clone();
-    llm.enabled = true;
     let t = &cfg.auto_tag;
-    if !t.provider.trim().is_empty() {
-        llm.provider = t.provider.clone();
-    }
-    if !t.api_url.trim().is_empty() {
-        llm.api_url = t.api_url.clone();
-    }
-    let key = t.api_key_str();
-    if !key.trim().is_empty() {
-        llm.set_api_key(key.to_string());
-    }
-    if !t.model.trim().is_empty() {
-        llm.model = t.model.clone();
-    }
-    llm
+    cfg.llm_post_process
+        .resolve_step(&t.provider, &t.api_url, t.api_key_str(), &t.model)
 }
 
 /// Parse the tagger LLM's reply into clean tag names: prefer a JSON string
@@ -1381,22 +1353,12 @@ fn entry_llm_config(
     cfg: &Config,
     entry: &phoneme_core::config::PlaybookLlm,
 ) -> LlmPostProcessConfig {
-    let mut llm = cfg.llm_post_process.clone();
-    llm.enabled = true;
-    if !entry.provider.trim().is_empty() {
-        llm.provider = entry.provider.clone();
-    }
-    if !entry.api_url.trim().is_empty() {
-        llm.api_url = entry.api_url.clone();
-    }
-    let key = entry.api_key_str();
-    if !key.trim().is_empty() {
-        llm.set_api_key(key.to_string());
-    }
-    if !entry.model.trim().is_empty() {
-        llm.model = entry.model.clone();
-    }
-    llm
+    cfg.llm_post_process.resolve_step(
+        &entry.provider,
+        &entry.api_url,
+        entry.api_key_str(),
+        &entry.model,
+    )
 }
 
 /// Resolve the migrated Enrichment ENTRY for a given `target` ("summary" /

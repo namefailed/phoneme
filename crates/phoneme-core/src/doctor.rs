@@ -857,10 +857,9 @@ struct LlmStep {
 }
 
 /// Overlay a step's own non-blank provider/URL/key/model over the cleanup
-/// connection. This is the SAME per-field inheritance `summary_llm_config`,
-/// `auto_tag_llm_config` and `title_llm_config` perform in the daemon's
-/// pipeline (bin/phoneme-daemon/src/pipeline.rs) — core can't link against
-/// the daemon binary, so keep the two in lockstep.
+/// connection. Thin wrapper over [`LlmPostProcessConfig::resolve_step`] — the
+/// single source of truth shared with the daemon pipeline's per-step config
+/// builders, so the Doctor probes exactly the connection a run would use.
 fn step_llm_connection(
     base: &LlmPostProcessConfig,
     provider: &str,
@@ -868,21 +867,7 @@ fn step_llm_connection(
     api_key: &str,
     model: &str,
 ) -> LlmPostProcessConfig {
-    let mut llm = base.clone();
-    llm.enabled = true;
-    if !provider.trim().is_empty() {
-        llm.provider = provider.to_string();
-    }
-    if !api_url.trim().is_empty() {
-        llm.api_url = api_url.to_string();
-    }
-    if !api_key.trim().is_empty() {
-        llm.set_api_key(api_key.to_string());
-    }
-    if !model.trim().is_empty() {
-        llm.model = model.to_string();
-    }
-    llm
+    base.resolve_step(provider, api_url, api_key, model)
 }
 
 /// The LLM steps that will actually run, with their effective connections, in
