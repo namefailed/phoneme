@@ -106,6 +106,30 @@ Your final transcript will look like this:
 > with one click. See [Recognize named speakers](diarization_and_whisper.md) for the
 > full flow and the Speaker Library.
 
+## 📋 Meeting templates (structured digests)
+
+A meeting's whole-conversation digest is a **selectable template**, not one fixed
+prompt — so the rollup can match the *kind* of meeting. Phoneme ships three:
+
+- **Meeting digest** (default) — a concise summary of decisions and action items.
+- **Standup** — grouped by participant: what each person did, what's next, and any
+  blockers, ending with action items.
+- **Interview** — structured as the questions asked and the answers given.
+
+Pick the active template three ways:
+
+- the **Meeting template** selector in **Settings → 🎭 Playbook** — applies to
+  every meeting, both the automatic digest and on-demand re-runs;
+- the template **picker in the merged meeting view** — a one-shot for just that
+  re-run, never saved;
+- the CLI: `phoneme meeting digest <meeting-id> --template standup`.
+
+Leaving it on the default **Meeting digest** is identical to Phoneme's original
+behavior, so nothing changes until you choose a template. A template reuses your
+configured **Summary** provider/model — with **Local Ollama** the meeting
+transcript never leaves your machine. Templates are ordinary Playbook recipes:
+duplicate one and edit its prompt in the Playbook manager to write your own.
+
 ## 🏆 Best Practices for Meeting Mode
 
 > [!TIP]

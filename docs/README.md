@@ -36,6 +36,7 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [Search & Organization](user-guide/search_and_organization.md) — Keyword search, tags, favorites, saved searches, side-by-side, bulk actions
 - [Auto-Tagging](user-guide/auto_tagging.md) — AI-suggested tags, approved by you before they apply
 - [Tasks from Voice](user-guide/tasks_and_reminders.md) — AI-extracted, checkable action items per recording + library-wide
+- [Topic Timelines](user-guide/topic_timelines.md) — AI auto-chapters: a navigable, time-coded outline per recording
 - [Semantic Search](user-guide/semantic_search.md) — Meaning-based search (offline ONNX embeddings)
 - [Importing Audio](user-guide/importing_audio.md) — Bring `.wav` / `.mp3` / `.m4a` / `.flac` into the pipeline
 - [Exporting & Backup](user-guide/exporting_and_backup.md) — JSON, CSV, TXT, catalog backup

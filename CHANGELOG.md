@@ -65,6 +65,19 @@ trust boundary.*
   `period_digest_failed` events, and Tauri commands behind them. Period digests
   travel with library exports. (Scheduling the rollup to fire automatically is a
   deliberate follow-up.)
+- [x] **Topic timelines (auto-chapters)** — an LLM enrichment that splits a
+  recording into **time-ranged chapters** (a titled, optionally-summarized span
+  per topic), so a long recording becomes navigable instead of one wall of text.
+  The daemon sends the transcript to the provider on the recipe's `chapters`
+  entry, parses the returned chapters, and **snaps each boundary to a real segment
+  start** so a chapter always lines up with the audio. Stored wholesale in a new
+  `chapters` child table (`start_ms`, `end_ms`, `title`, `summary`) + a
+  `chapters_model` provenance column (migration `20260622000000_add_chapters.sql`),
+  surfaced as a **Chapters** view in the detail pane (with a ✨ Generate button)
+  and an opt-in `chapters` Playbook enrichment target. New `SuggestChapters` /
+  `GetChapters` IPC + `chapters_updated` / `chapters_failed` events, and a
+  `phoneme chapters <ID> [--show]` CLI. Re-deriving is one re-run away; deleting a
+  recording deletes its chapters with it.
 - [x] **Ask my archive (local RAG)** — ask a plain-language question and get an
   answer drawn **only** from your own recordings, with a citation for every
   claim. The daemon embeds the question, retrieves the best-matching transcript
