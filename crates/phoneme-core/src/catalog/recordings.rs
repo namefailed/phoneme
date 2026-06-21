@@ -360,6 +360,79 @@ impl Catalog {
         })
     }
 
+    /// Library-wide find-and-replace: run the same literal replace as
+    /// [`Self::find_replace_transcript`] over **every** recording's live
+    /// transcript, in one call.
+    ///
+    /// Each recording is processed through `find_replace_transcript`, so the
+    /// per-recording guarantees carry over verbatim: literal (not regex)
+    /// substring matching, case-insensitive by default, only the live
+    /// `transcript` is rewritten (the preserved original/clean baselines stay,
+    /// keeping each edit revertible), and the recording is marked `user_edited`.
+    /// The caller (the daemon) re-flows the timing layers and re-embeds for each
+    /// changed recording, exactly as for a single-recording edit.
+    ///
+    /// ### Skip-on-no-match
+    /// A recording with zero matches is left completely untouched — no write, no
+    /// version churn, no `updated_at`/`user_edited` change — and is omitted from
+    /// `changed`. So the returned `recordings_changed`/`changed` cover exactly the
+    /// recordings that were actually rewritten, and the caller emits
+    /// `transcript_updated` only for those.
+    ///
+    /// ### No-op safety
+    /// An empty `find` is a whole-operation no-op (`find_replace_transcript`
+    /// treats an empty needle as a no-op per recording), returning an empty
+    /// outcome without writing anything.
+    ///
+    /// Recordings with no transcript yet are silently skipped (their
+    /// per-recording `NotFound` is not an error for the bulk path) — the bulk
+    /// operation is best-effort across the corpus, never aborted by one
+    /// untranscribed row.
+    pub async fn find_replace_transcript_library(
+        &self,
+        find: &str,
+        replace: &str,
+        case_sensitive: bool,
+    ) -> Result<FindReplaceLibraryOutcome> {
+        // Empty needle: a whole-operation no-op, mirroring the per-recording
+        // empty-find contract. Bail before listing the corpus.
+        if find.is_empty() {
+            return Ok(FindReplaceLibraryOutcome::default());
+        }
+
+        // Every recording, unfiltered. We only need the ids; `find_replace_transcript`
+        // re-reads each row's current transcript itself (and applies its own
+        // no-transcript / zero-match guards), so this stays correct even if the
+        // list snapshot is slightly stale.
+        let recordings = self.list(&ListFilter::default()).await?;
+
+        let mut outcome = FindReplaceLibraryOutcome::default();
+        for rec in recordings {
+            match self
+                .find_replace_transcript(&rec.id, find, replace, case_sensitive)
+                .await
+            {
+                Ok(per) if per.replaced > 0 => {
+                    outcome.recordings_changed += 1;
+                    outcome.total_replacements += per.replaced;
+                    outcome.changed.push((rec.id, per.transcript));
+                }
+                // Zero-match: nothing was written; skip it entirely (no event,
+                // no churn).
+                Ok(_) => {}
+                // A recording with no transcript yet reports NotFound from the
+                // per-recording path — for the bulk path that's a skip, not a
+                // failure. Any other error is logged and skipped so one bad row
+                // can't abort the whole sweep.
+                Err(crate::error::Error::NotFound { .. }) => {}
+                Err(e) => {
+                    tracing::warn!(id = %rec.id, error = %e, "library find-replace: skipping a recording that failed to update");
+                }
+            }
+        }
+        Ok(outcome)
+    }
+
     /// Replace the LLM-suggested tags awaiting approval for a recording.
     /// An empty slice clears the column (no lingering empty-array JSON).
     pub async fn set_tag_suggestions(&self, id: &RecordingId, names: &[String]) -> Result<()> {

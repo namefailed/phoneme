@@ -712,6 +712,30 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
             Err(e) => err_response(&e),
         },
+        Request::FindReplaceLibrary {
+            find,
+            replace,
+            case_sensitive,
+        } => match state
+            .catalog
+            .find_replace_transcript_library(&find, &replace, case_sensitive)
+            .await
+        {
+            Ok(outcome) => {
+                // Re-flow timing + re-embed + emit TranscriptUpdated for each
+                // recording that actually changed. Zero-match recordings were
+                // skipped by the catalog and never appear in `changed`, so no
+                // spurious events or version churn.
+                for (id, transcript) in &outcome.changed {
+                    reflow_and_reembed_after_edit(state, id, transcript).await;
+                }
+                Response::Ok(serde_json::json!({
+                    "recordings_changed": outcome.recordings_changed,
+                    "total_replacements": outcome.total_replacements,
+                }))
+            }
+            Err(e) => err_response(&e),
+        },
         Request::UpdateMeetingName { meeting_id, name } => {
             match state
                 .catalog

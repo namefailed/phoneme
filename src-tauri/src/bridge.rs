@@ -221,6 +221,10 @@ fn is_retry_safe(req: &Request) -> bool {
         // UpdateTranscript (a re-send after a lost reply could re-apply against
         // already-changed text), so never blind-retry.
         | FindReplace { .. }
+        // Library-wide find-replace mutates many transcripts; a blind re-send
+        // after a lost reply could re-apply against already-changed text, so
+        // single-attempt like the per-recording FindReplace.
+        | FindReplaceLibrary { .. }
         | UpdateMeetingName { .. }
         | UpdateNotes { .. }
         | SetFavorite { .. }

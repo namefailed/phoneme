@@ -555,6 +555,30 @@ pub enum Request {
         #[serde(default)]
         case_sensitive: bool,
     },
+    /// Library-wide find-and-replace — the across-all-recordings counterpart of
+    /// [`Request::FindReplace`]. Runs the same literal (not regex) substring
+    /// replacement, case-insensitive by default, over **every** recording's live
+    /// transcript in one request: each recording goes through the same
+    /// preserve-and-re-flow path (only the live `transcript` is rewritten, the
+    /// original/clean baselines stay so each edit is revertible, and the
+    /// word/segment timing is re-flowed + the text re-embedded). A recording with
+    /// zero matches is skipped entirely — no write, no version churn, no event —
+    /// so only the recordings that actually changed are touched. A literal empty
+    /// `find` is a whole-operation no-op (nothing written). Ok =
+    /// `{"recordings_changed":R,"total_replacements":N}` (R recordings rewritten,
+    /// N occurrences total); emits one [`DaemonEvent::TranscriptUpdated`] per
+    /// changed recording. GUI library-wide find/replace, `phoneme find-replace
+    /// --library <FIND> <REPLACE>`.
+    FindReplaceLibrary {
+        /// The literal text to find across the whole library (empty = no-op).
+        find: String,
+        /// The literal text to substitute for each match.
+        replace: String,
+        /// `false` (default) = case-insensitive match; `true` = exact case.
+        /// Serde-defaulted to match [`Request::FindReplace`].
+        #[serde(default)]
+        case_sensitive: bool,
+    },
     /// Set (`Some`) or clear (`None`) a meeting session's display name. Ok
     /// `null`; emits [`DaemonEvent::MeetingNameUpdated`]. GUI meeting
     /// header, `phoneme meeting rename`.

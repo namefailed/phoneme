@@ -423,12 +423,19 @@ pub struct EditArgs {
 
 #[derive(Debug, clap::Args)]
 pub struct FindReplaceArgs {
-    /// The recording whose transcript to edit.
-    pub id: String,
+    /// The recording whose transcript to edit — `phoneme find-replace <ID>
+    /// <FIND> <REPLACE>`. Omit it and pass `--library` to run across every
+    /// recording, in which case the two positionals are FIND and REPLACE.
+    pub id: Option<String>,
     /// Literal text to find (not a regex). Empty matches nothing (no-op).
-    pub find: String,
+    pub find: Option<String>,
     /// Literal text to substitute for each match.
-    pub replace: String,
+    pub replace: Option<String>,
+    /// Apply across EVERY recording's transcript instead of a single one. The
+    /// positionals are then FIND REPLACE (no recording id):
+    /// `phoneme find-replace --library <FIND> <REPLACE>`.
+    #[arg(long)]
+    pub library: bool,
     /// Match case exactly (default is case-insensitive).
     #[arg(long)]
     pub case_sensitive: bool,

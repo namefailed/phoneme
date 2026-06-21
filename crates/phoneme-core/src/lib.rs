@@ -126,7 +126,7 @@ pub mod voiceprint_eval;
 pub mod webhook;
 pub mod wer;
 
-pub use catalog::{Catalog, FindReplaceOutcome};
+pub use catalog::{Catalog, FindReplaceLibraryOutcome, FindReplaceOutcome};
 pub use chunk::chunk_transcript;
 pub use config::Config;
 pub use embed::Embedder;

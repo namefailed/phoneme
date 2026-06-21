@@ -371,6 +371,12 @@ and unedited (pipeline) copies stay intact, so the change is revertible, and the
 timing layers are re-flowed onto the result like any hand edit. A no-match is a
 no-op (nothing is written). Prints the number of occurrences replaced.
 
+Pass **`--library`** to run the same literal replacement across **every**
+recording in one shot — the positionals are then `FIND REPLACE` (no id).
+Recordings with no match are left untouched (no version churn, no event), so
+only the ones that actually change are rewritten. Prints how many occurrences
+were replaced and across how many recordings.
+
 ```bash
 # Fix a recurring misspelling across the whole transcript
 phoneme find-replace 20260519T143500823 "teh" "the"
@@ -380,6 +386,11 @@ phoneme find-replace 20260519T143500823 "API" "api" --case-sensitive
 
 # Machine-readable count
 phoneme --json find-replace 20260519T143500823 "teh" "the"   # → {"replaced":3}
+
+# Library-wide: fix a name everywhere at once
+phoneme find-replace --library "Jon" "John"
+phoneme --json find-replace --library "Jon" "John"
+#   → {"recordings_changed":4,"total_replacements":11}
 ```
 
 ### ✂️ `phoneme clip <ID> <START> <END> [OUT]`

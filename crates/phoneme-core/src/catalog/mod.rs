@@ -220,6 +220,26 @@ pub struct FindReplaceOutcome {
     pub transcript: String,
 }
 
+/// The result of a [`Catalog::find_replace_transcript_library`] — the
+/// across-all-recordings find-and-replace. Aggregates how many recordings were
+/// actually rewritten and the grand total of occurrences replaced, plus the
+/// per-recording `(id, new transcript)` for each recording that changed.
+///
+/// Only recordings with at least one match appear in `changed`: a zero-match
+/// recording is skipped entirely (no write, no version churn, no event), so the
+/// caller can run its per-recording re-flow/re-embed/event upkeep over exactly
+/// the recordings that were touched.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FindReplaceLibraryOutcome {
+    /// Number of recordings whose live transcript was actually rewritten.
+    pub recordings_changed: usize,
+    /// Grand total of occurrences replaced across every changed recording.
+    pub total_replacements: usize,
+    /// `(id, new transcript)` for each recording that changed, so the caller can
+    /// re-flow timing, re-embed, and emit `transcript_updated` per recording.
+    pub changed: Vec<(RecordingId, String)>,
+}
+
 /// One step's transcript output in a compounding recipe (PB-COMPOUND). `idx` is
 /// the step order — `0` is the raw ASR, later rows are each Transform step's
 /// output, and the last is the transcript that landed. Powers the Compare-versions

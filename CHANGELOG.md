@@ -11,6 +11,12 @@ trust boundary.*
 
 ### Transcripts
 
+- [x] **Library-wide find & replace** — `phoneme find-replace --library <FIND>
+  <REPLACE>` (and the new `find_replace_library` IPC request) runs the same
+  literal, revertible replacement across **every** recording's transcript in one
+  shot. Recordings with no match are left untouched (no version churn, no event),
+  and the timing layers are re-flowed + re-embedded per changed recording exactly
+  like a single-recording edit.
 - [x] **Compounding Playbook steps** — a recipe's `transform` steps chain by
   default (each refines the previous, toward a "perfect" transcript), with a new
   per-step `input = previous | base` to instead run an independent pass off the raw
