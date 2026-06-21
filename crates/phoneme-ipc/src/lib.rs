@@ -50,6 +50,14 @@
 //!   surface at once; don't.
 //! - Clients ignore JSON keys they don't recognize (serde's default) and must
 //!   tolerate unknown event variants by skipping them.
+//!
+//! On top of additive evolution, [`PROTOCOL_VERSION`] gives the wire an explicit
+//! integer version and [`Request::Handshake`] lets a client check it on connect:
+//! the daemon reports its protocol + app version and whether the client's
+//! protocol matches, so a hard-incompatible (post-breaking-change) client refuses
+//! to operate with a clear message rather than misbehaving later. The handshake
+//! is optional and best-effort — an unversioned old daemon, or any non-`false`
+//! answer, lets the client proceed on the additive contract.
 
 #![warn(missing_docs)]
 
@@ -58,6 +66,13 @@ pub mod error;
 pub mod named_pipe;
 pub mod schema;
 pub mod transport;
+
+/// Integer version of the IPC wire contract. Bumped only on a BREAKING schema
+/// change (a removed/renamed variant or field — what additive evolution can't
+/// cover); additive changes keep it stable. Carried in [`Request::Handshake`] so
+/// a client built against a breaking revision can detect an incompatible daemon
+/// up front and refuse cleanly. See the crate docs' "Protocol version" section.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 pub use codec::JsonLineCodec;
 pub use error::{IpcTransportError, TransportResult};

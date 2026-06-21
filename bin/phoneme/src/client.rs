@@ -20,7 +20,7 @@
 use crate::auto_spawn;
 use crate::exit;
 use phoneme_core::Config;
-use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport};
+use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport, PROTOCOL_VERSION};
 use std::process::ExitCode;
 
 // All four methods on Client are exercised once Tasks 5–11 wire up the
@@ -47,22 +47,22 @@ impl Client {
     /// For read-only or inspection commands use [`Client::connect_observe`].
     pub async fn connect(cfg: &Config) -> Result<Self, ExitCode> {
         let pipe_name = &cfg.daemon.pipe_name;
-        match NamedPipeTransport::connect(pipe_name).await {
-            Ok(t) => Ok(Self { transport: t }),
+        let transport = match NamedPipeTransport::connect(pipe_name).await {
+            Ok(t) => t,
             Err(_) => {
                 if let Err(e) = auto_spawn::ensure_running(cfg).await {
                     eprintln!("error: failed to auto-spawn daemon: {e}");
                     return Err(ExitCode::from(exit::DAEMON_NOT_REACHABLE));
                 }
-                NamedPipeTransport::connect(pipe_name)
-                    .await
-                    .map(|t| Self { transport: t })
-                    .map_err(|e| {
-                        eprintln!("error: daemon not reachable: {e}");
-                        ExitCode::from(exit::DAEMON_NOT_REACHABLE)
-                    })
+                NamedPipeTransport::connect(pipe_name).await.map_err(|e| {
+                    eprintln!("error: daemon not reachable: {e}");
+                    ExitCode::from(exit::DAEMON_NOT_REACHABLE)
+                })?
             }
-        }
+        };
+        let mut client = Self { transport };
+        client.verify_protocol().await?;
+        Ok(client)
     }
 
     /// Connect to the daemon without spawning it if absent.
@@ -78,16 +78,49 @@ impl Client {
     /// that the daemon is down without masking it with a silent start.
     pub async fn connect_observe(cfg: &Config) -> Result<Self, ExitCode> {
         let pipe_name = &cfg.daemon.pipe_name;
-        NamedPipeTransport::connect(pipe_name)
-            .await
-            .map(|t| Self { transport: t })
-            .map_err(|e| {
-                eprintln!(
-                    "error: daemon not reachable: {e}\n\
-                     hint: start it with `phoneme daemon start`"
-                );
-                ExitCode::from(exit::DAEMON_NOT_REACHABLE)
+        let transport = NamedPipeTransport::connect(pipe_name).await.map_err(|e| {
+            eprintln!(
+                "error: daemon not reachable: {e}\n\
+                 hint: start it with `phoneme daemon start`"
+            );
+            ExitCode::from(exit::DAEMON_NOT_REACHABLE)
+        })?;
+        let mut client = Self { transport };
+        client.verify_protocol().await?;
+        Ok(client)
+    }
+
+    /// Best-effort IPC wire-protocol check (F3): refuse to operate against a
+    /// daemon that reports an INCOMPATIBLE protocol, with a clear message. Only a
+    /// daemon explicitly answering `compatible: false` is a hard stop — an old
+    /// daemon that predates the handshake (it replies with an error), or any
+    /// transport hiccup here, is treated as "unversioned, proceed" so a minor
+    /// skew never bricks the CLI. A handshake is one request/response and leaves
+    /// the connection in request mode (a later `subscribe` reframes it cleanly).
+    async fn verify_protocol(&mut self) -> Result<(), ExitCode> {
+        let resp = self
+            .transport
+            .request(Request::Handshake {
+                protocol_version: PROTOCOL_VERSION,
             })
+            .await;
+        if let Ok(Response::Ok(v)) = resp {
+            if v.get("compatible").and_then(|c| c.as_bool()) == Some(false) {
+                let daemon_proto = v
+                    .get("protocol_version")
+                    .and_then(|p| p.as_u64())
+                    .unwrap_or(0);
+                let daemon_app = v.get("app_version").and_then(|s| s.as_str()).unwrap_or("?");
+                eprintln!(
+                    "error: this `phoneme` CLI speaks IPC protocol v{PROTOCOL_VERSION}, but the \
+                     running daemon speaks v{daemon_proto} (daemon {daemon_app}). They're \
+                     incompatible — run `phoneme daemon restart` (or update the CLI) so both are \
+                     the same build."
+                );
+                return Err(ExitCode::from(exit::DAEMON_NOT_REACHABLE));
+            }
+        }
+        Ok(())
     }
 
     /// Send a request and decode the response. On `Response::Err`, prints the

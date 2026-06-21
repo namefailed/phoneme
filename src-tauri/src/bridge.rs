@@ -150,7 +150,8 @@ fn is_retry_safe(req: &Request) -> bool {
     use Request::*;
     match req {
         // ── Pure reads ───────────────────────────────────────────────────
-        DaemonStatus
+        Handshake { .. }
+        | DaemonStatus
         | RecordStatus
         | ListRecordings { .. }
         | GetRecording { .. }

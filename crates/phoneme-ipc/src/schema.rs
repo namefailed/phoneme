@@ -915,6 +915,20 @@ pub enum Request {
     /// stale-daemon handshake.
     /// `phoneme daemon status`, the GUI daemon panel.
     DaemonStatus,
+    /// Wire-protocol handshake. The client sends its own [`crate::PROTOCOL_VERSION`];
+    /// the daemon replies Ok
+    /// `{"protocol_version":n,"app_version":"x.y.z","compatible":bool}` where
+    /// `compatible` is `protocol_version == <client's>`. Lets a client built
+    /// against a BREAKING wire revision detect an incompatible daemon at connect
+    /// time and refuse cleanly. Optional + best-effort: an old daemon predating
+    /// this answers it as an unknown request, which the client reads as
+    /// "unversioned — proceed". `protocol_version` defaults to 0 so a peer that
+    /// omits it is treated as unversioned. The CLI client sends this on connect.
+    Handshake {
+        /// The client's compiled [`crate::PROTOCOL_VERSION`].
+        #[serde(default)]
+        protocol_version: u32,
+    },
     /// Ask the daemon to exit. Replies Ok `null` FIRST — the actual trigger
     /// is delayed a fraction of a second so the acknowledgement always
     /// reaches the pipe before teardown. The daemon then finalizes any

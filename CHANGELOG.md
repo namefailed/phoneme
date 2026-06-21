@@ -23,6 +23,16 @@ trust boundary.*
   into a separate "cleaned" timing layer (the raw machine truth is preserved), and
   both views gained a **Raw ⇄ Cleaned** toggle.
 
+### Reliability & foundation
+
+- [x] **IPC wire protocol version + handshake** — the daemon↔client NDJSON wire
+  now carries an explicit `PROTOCOL_VERSION`, and a new `Handshake` request lets a
+  client check it on connect. A `phoneme` CLI built against a breaking wire
+  revision now refuses to run against an incompatible daemon with a clear
+  "run `phoneme daemon restart`" message instead of failing obscurely later.
+  Best-effort + backward-compatible: an older daemon that predates the handshake
+  is treated as unversioned and the client proceeds on the additive contract.
+
 ### Recall
 
 - [x] **Chunked hybrid semantic search** — transcripts are split into overlapping,

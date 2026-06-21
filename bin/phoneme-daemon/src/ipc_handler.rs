@@ -135,6 +135,16 @@ pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
 
 pub async fn handle_request(req: Request, state: &AppState) -> Response {
     match req {
+        Request::Handshake { protocol_version } => {
+            // Cheap, config-free wire handshake (F3). Report our protocol + app
+            // version and whether the client's protocol matches ours. Never an
+            // error: even an incompatible client gets a clear, parseable answer.
+            Response::Ok(serde_json::json!({
+                "protocol_version": phoneme_ipc::PROTOCOL_VERSION,
+                "app_version": env!("CARGO_PKG_VERSION"),
+                "compatible": protocol_version == phoneme_ipc::PROTOCOL_VERSION,
+            }))
+        }
         Request::DaemonStatus => {
             // Bundled whisper-server ports: `preferred` is the configured
             // value, `effective` is the port the supervisor actually bound —
