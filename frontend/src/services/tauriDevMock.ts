@@ -471,6 +471,10 @@ function emitDaemon(evt: Record<string, unknown>): void {
   });
 }
 
+/** Whole-meeting digests generated in preview, keyed by meeting_id. Starts empty
+ *  (no digest until the user clicks Generate), mirroring a fresh daemon. */
+const MEETING_DIGESTS: Record<string, { meeting_id: string; digest: string; digest_model: string | null }> = {};
+
 /** Replace a non-empty `api_key`/secret string on `obj` with the mask placeholder. */
 function maskKey(obj: unknown, field: string): void {
   if (obj && typeof obj === "object") {
@@ -701,6 +705,25 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
         emitDaemon({ event: "entities_updated", id });
       }
       return undefined;
+    }
+    // ── Whole-meeting digest (the merged-view digest card): store a canned digest
+    //    and broadcast so the parent reloads + clears the "Generating…" state.
+    //    The event carries `meeting_id` (not a recording id) per events.ts. ──
+    case "rerun_meeting_digest": {
+      const mid = args.meetingId as string;
+      MEETING_DIGESTS[mid] = {
+        meeting_id: mid,
+        digest:
+          "Demo whole-meeting digest: the mic and system tracks were synthesized into one " +
+          "reading. Decisions, owners, and follow-ups would be summarized here.",
+        digest_model: (args.model as string) || "phi3:mini",
+      };
+      emitDaemon({ event: "meeting_digest_updated", meeting_id: mid });
+      return undefined;
+    }
+    case "get_meeting_digest": {
+      const mid = args.meetingId as string;
+      return MEETING_DIGESTS[mid] ?? null;
     }
     case "approve_tag_suggestion": {
       const r = RECORDINGS.find((x) => x.id === id);

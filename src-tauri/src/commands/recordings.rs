@@ -888,11 +888,11 @@ fn audio_zip_entry_name(audio_dir: &std::path::Path, path: &std::path::Path) -> 
 
 /// Write a portable backup of the whole library to `dest` (a `.zip` path the
 /// WebView picked via the save dialog). Mirrors `phoneme export <FILE>`: a
-/// `catalog.json` versioned envelope (recordings + tags fetched from the
-/// daemon) plus every `.wav` under the configured audio dir packed into
-/// `audio/`. The GUI's plain JSON/CSV/TXT "Export All" carries no audio — this
-/// is the one that round-trips with the CLI backup. Returns how many audio
-/// files were packed so the caller can report it.
+/// `catalog.json` versioned envelope (recordings + tags + whole-meeting
+/// digests fetched from the daemon) plus every `.wav` under the configured
+/// audio dir packed into `audio/`. The GUI's plain JSON/CSV/TXT "Export All"
+/// carries no audio — this is the one that round-trips with the CLI backup.
+/// Returns how many audio files were packed so the caller can report it.
 #[tauri::command]
 pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, CommandError> {
     reject_executable_dest(&dest)?;
@@ -908,11 +908,18 @@ pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, Com
     let tags = forward(&bridge, Request::ListTags)
         .await
         .unwrap_or_else(|_| serde_json::json!([]));
+    // Whole-meeting digests live in their own side table (keyed by meeting_id),
+    // so the per-recording list doesn't carry them — fetch them separately so
+    // they round-trip. Best-effort like the tags.
+    let meeting_digests = forward(&bridge, Request::ListMeetingDigests)
+        .await
+        .unwrap_or_else(|_| serde_json::json!([]));
 
     let export_data = serde_json::json!({
         "version": 1,
         "recordings": recordings,
         "tags": tags,
+        "meeting_digests": meeting_digests,
     });
     let json_bytes = serde_json::to_vec_pretty(&export_data)
         .map_err(|e| CommandError::new("internal", format!("serializing catalog: {e}")))?;

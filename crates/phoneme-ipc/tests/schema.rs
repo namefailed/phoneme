@@ -354,6 +354,8 @@ fn meeting_digest_requests_and_events_roundtrip() {
     roundtrip(&Request::GetMeetingDigest {
         meeting_id: "meeting-abc".into(),
     });
+    // The list-all read the backup export uses to capture every digest.
+    roundtrip(&Request::ListMeetingDigests);
     // The result + failure events (the meeting-scope twins of SummaryUpdated /
     // SummaryFailed).
     roundtrip(&DaemonEvent::MeetingDigestUpdated {

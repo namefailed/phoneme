@@ -163,6 +163,7 @@ fn is_retry_safe(req: &Request) -> bool {
         | ListNamedVoices
         | ListMeeting { .. }
         | GetMeetingDigest { .. }
+        | ListMeetingDigests
         | GetSegments { .. }
         | GetWords { .. }
         | ListTranscriptVersions { .. }

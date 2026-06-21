@@ -334,6 +334,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        // Every stored digest, for the library-backup export to capture (the
+        // digests live in a side table the per-recording list never carries).
+        Request::ListMeetingDigests => match state.catalog.list_all_meeting_digests().await {
+            Ok(digests) => serialize_response(digests),
+            Err(e) => err_response(&e),
+        },
         // An unknown id yields an empty list, not `NotFound`: "no segments" is a
         // normal state (pre-capture recordings, providers without timing) and
         // callers treat the two identically.
@@ -696,6 +702,25 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             path = %r.audio_path,
                             "refusing to delete audio file outside the audio directory"
                         );
+                    }
+                }
+                // If this was a meeting track and it was the last one, drop the
+                // whole-meeting digest too: it lives in `meeting_digests` keyed by
+                // `meeting_id` with no FK to `recordings`, so `Catalog::delete`
+                // (which only cascades FK child tables) never reaches it. Mirrors
+                // the `DeleteSession` cleanup. Best-effort: a leftover digest row is
+                // harmless, so a cleanup miss only warns and never fails the delete.
+                if let Some(mid) = r.meeting_id.as_deref() {
+                    match state.catalog.list_by_meeting(mid).await {
+                        Ok(remaining) if remaining.is_empty() => {
+                            if let Err(e) = state.catalog.delete_meeting_digest(mid).await {
+                                tracing::warn!(session = %mid, error = %e, "recording delete: digest cleanup failed");
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(session = %mid, error = %e, "recording delete: meeting track lookup failed");
+                        }
                     }
                 }
                 state.events.emit(DaemonEvent::RecordingDeleted { id });

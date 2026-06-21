@@ -135,34 +135,48 @@ export class MergedConversationDetail extends LitElement {
     this.loading = true;
     this.error = null;
     this.suggestions = [];
+    // Capture the meeting this load is for; each await below can resolve after
+    // the user has switched to a different meeting, and assigning a previous
+    // meeting's tracks/segments/digest onto the current one paints the wrong
+    // reading (audit — mid-flight meeting switch). Bail before EACH assignment
+    // if we've moved on, mirroring loadSuggestions()'s guard.
+    const mid = this.meetingId;
     try {
-      this.recordings = await listSession(this.meetingId);
+      const recordings = await listSession(mid);
+      if (this.meetingId !== mid) return;
+      this.recordings = recordings;
       // Segment timelines make the merge chronological; a track without them
       // (transcribed before segment capture) just falls back to the coarse
       // by-source merge, so fetch failures degrade silently to [].
       const entries = await Promise.all(
-        this.recordings.map(async (r) => {
+        recordings.map(async (r) => {
           const segs = await getSegments(r.id).catch(() => [] as TranscriptSegment[]);
           return [r.id, segs] as const;
         }),
       );
+      if (this.meetingId !== mid) return;
       this.segmentsMap = new Map(entries);
       // The whole-meeting digest is fetched alongside the tracks; a missing
       // digest is the normal "not generated yet" state (null), not an error.
-      this.digest = await getMeetingDigest(this.meetingId).catch(() => null);
+      const digest = await getMeetingDigest(mid).catch(() => null);
+      if (this.meetingId !== mid) return;
+      this.digest = digest;
       // A finished (re)generation clears the pending state when reload() lands.
       this.digestPending = false;
     } catch (e) {
-      this.error = errText(e);
-      this.recordings = [];
-      this.segmentsMap = new Map();
-      this.digest = null;
+      if (this.meetingId === mid) {
+        this.error = errText(e);
+        this.recordings = [];
+        this.segmentsMap = new Map();
+        this.digest = null;
+      }
     } finally {
       this.loading = false;
     }
     // Recognition is a non-blocking convenience — let the reading render first,
-    // then fill the banner when the matches come back.
-    void this.loadSuggestions();
+    // then fill the banner when the matches come back. Skip if we've switched
+    // meetings; the new meeting's load runs its own loadSuggestions().
+    if (this.meetingId === mid) void this.loadSuggestions();
   }
 
   /** Recognize unnamed speakers across every track and collect the suggestions

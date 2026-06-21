@@ -18,18 +18,25 @@
 //! not overwritten), so re-importing the same backup never duplicates a row or
 //! reverts a hand edit made since.
 //!
-//! Restore fidelity is bounded by what the backup captured. The DTO columns and
-//! the tags round-trip; machine-truth side tables the export never wrote
-//! (`original_transcript` / `clean_transcript`, transcript segments + words,
-//! embeddings, voiceprints, AI-activity, custom speaker names) do not, so the
-//! restored recording is whatever the backup said it was, and a re-transcribe
-//! regenerates the derived data.
+//! Restore fidelity is bounded by what the backup captured. The DTO columns, the
+//! tags, the per-recording entities, and the whole-meeting digests round-trip;
+//! machine-truth side tables the export never wrote (`original_transcript` /
+//! `clean_transcript`, transcript segments + words, embeddings, voiceprints,
+//! AI-activity, custom speaker names) do not, so the restored recording is
+//! whatever the backup said it was, and a re-transcribe regenerates the derived
+//! data.
+//!
+//! Whole-meeting digests are a side table keyed by `meeting_id` (not a
+//! [`Recording`] DTO column, since a meeting isn't one row), so they ride
+//! alongside the recordings in their own manifest array rather than on any track:
+//! the export captures them (over IPC, mirroring the tag list) and restore
+//! replays each via the idempotent [`Catalog::update_meeting_digest`] upsert.
 
 use crate::catalog::Catalog;
 use crate::error::{Error, Result};
 use crate::id::RecordingId;
 use crate::tags::Tag;
-use crate::types::Recording;
+use crate::types::{MeetingDigest, Recording};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -53,9 +60,10 @@ const MAX_RESTORE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// The deserialized `catalog.json` envelope.
 ///
-/// `recordings`/`tags` are the same DTOs the IPC layer emits, so the envelope
-/// is just those two arrays under a version tag. `#[serde(default)]` on `tags`
-/// keeps an older or hand-written backup that omits the tag list readable.
+/// `recordings`/`tags`/`meeting_digests` are the same DTOs the IPC layer emits,
+/// so the envelope is just those arrays under a version tag. `#[serde(default)]`
+/// on `tags` and `meeting_digests` keeps an older or hand-written backup that
+/// omits them readable (a pre-digest backup simply restores no digests).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupManifest {
     /// Envelope schema version — must be `<= BACKUP_VERSION` to restore.
@@ -65,6 +73,11 @@ pub struct BackupManifest {
     /// The tag list (id/name/color). Re-created by name on restore.
     #[serde(default)]
     pub tags: Vec<Tag>,
+    /// The whole-meeting digests, one per meeting. A side table keyed by
+    /// `meeting_id` (not a [`Recording`] column), so it's carried here and
+    /// replayed via [`Catalog::update_meeting_digest`] on restore.
+    #[serde(default)]
+    pub meeting_digests: Vec<MeetingDigest>,
 }
 
 /// What a [`restore_from_zip`] did: how many recordings were newly imported and
@@ -101,13 +114,14 @@ fn audio_entry_name(audio_dir: &Path, path: &Path) -> String {
 /// Write a backup zip: the `catalog.json` envelope plus every `.wav` under
 /// `audio_dir`, into a freshly created file at `out`.
 ///
-/// The recordings/tags are supplied by the caller (the daemon-driven export
-/// fetches them over IPC; the round-trip test reads them straight from a
-/// `Catalog`), so this owns only the archive format — the one place the layout
-/// is defined for both directions.
+/// The recordings/tags/meeting digests are supplied by the caller (the
+/// daemon-driven export fetches them over IPC; the round-trip test reads them
+/// straight from a `Catalog`), so this owns only the archive format — the one
+/// place the layout is defined for both directions.
 pub fn write_to_zip(
     recordings: &[Recording],
     tags: &[Tag],
+    meeting_digests: &[MeetingDigest],
     audio_dir: &Path,
     out: &Path,
 ) -> Result<()> {
@@ -115,6 +129,7 @@ pub fn write_to_zip(
         version: BACKUP_VERSION,
         recordings: recordings.to_vec(),
         tags: tags.to_vec(),
+        meeting_digests: meeting_digests.to_vec(),
     };
     let json_bytes = serde_json::to_vec_pretty(&manifest)?;
 
@@ -260,6 +275,24 @@ pub async fn restore_from_zip(
         }
 
         report.imported += 1;
+    }
+
+    // Replay the whole-meeting digests (the side table keyed by `meeting_id`,
+    // carried in the manifest rather than on any track). Idempotent like the
+    // recordings: a digest is only written when the target has none for that
+    // meeting, so a re-import never clobbers a digest regenerated since restore —
+    // matching the "skip existing ids / never revert a hand edit" guarantee.
+    for digest in &manifest.meeting_digests {
+        if catalog.meeting_digest(&digest.meeting_id).await?.is_some() {
+            continue;
+        }
+        catalog
+            .update_meeting_digest(
+                &digest.meeting_id,
+                &digest.digest,
+                digest.digest_model.as_deref(),
+            )
+            .await?;
     }
 
     Ok(report)
@@ -410,12 +443,19 @@ mod tests {
         let a2 = write_audio(&src_audio, &r2, b"RIFF-two-audio");
         assert!(a1.exists() && a2.exists());
 
+        // Seed a whole-meeting digest (a side table keyed by meeting_id, not a
+        // Recording column) so the round-trip below proves it survives.
+        src.update_meeting_digest("meeting-xyz", "Overview: shipped v2.", Some("llama3.2:3b"))
+            .await
+            .unwrap();
+
         // Export to a temp zip via the shared writer (the same archive format
         // the CLI export emits).
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
         let tags = src.list_all_tags().await.unwrap();
-        write_to_zip(&recordings, &tags, &src_audio, &zip_path).unwrap();
+        let digests = src.list_all_meeting_digests().await.unwrap();
+        write_to_zip(&recordings, &tags, &digests, &src_audio, &zip_path).unwrap();
         assert!(zip_path.exists());
 
         // Import into a FRESH catalog + audio dir.
@@ -457,6 +497,12 @@ mod tests {
             .join(r2.id.day_folder())
             .join(format!("{}.wav", r2.id.file_stem()));
         assert_eq!(std::fs::read(&restored_a2).unwrap(), b"RIFF-two-audio");
+
+        // The whole-meeting digest round-tripped: it rode in the manifest's own
+        // array (no Recording column carries it) and was replayed on restore.
+        let restored_digest = dst.meeting_digest("meeting-xyz").await.unwrap().unwrap();
+        assert_eq!(restored_digest.digest, "Overview: shipped v2.");
+        assert_eq!(restored_digest.digest_model.as_deref(), Some("llama3.2:3b"));
     }
 
     #[tokio::test]
@@ -470,7 +516,7 @@ mod tests {
 
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
-        write_to_zip(&recordings, &[], &src_audio, &zip_path).unwrap();
+        write_to_zip(&recordings, &[], &[], &src_audio, &zip_path).unwrap();
 
         let dst_audio = tmp.path().join("dst");
         let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
@@ -516,7 +562,7 @@ mod tests {
 
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
-        write_to_zip(&recordings, &[], &src_audio, &zip_path).unwrap();
+        write_to_zip(&recordings, &[], &[], &src_audio, &zip_path).unwrap();
 
         let dst_audio = tmp.path().join("dst");
         let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();

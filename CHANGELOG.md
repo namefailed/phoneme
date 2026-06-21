@@ -133,6 +133,27 @@ trust boundary.*
   pure; an explicit `reconcile_and_persist_config` step does the migrate-and-write
   and `apply_runtime_defaults` does the in-memory preview wiring, each called
   deliberately at startup.
+- [x] **Meeting digests survive a backup round-trip** — a whole-meeting digest
+  lives in its own side table keyed by `meeting_id` (a meeting isn't a single
+  recording row), so it was neither exported nor restored and silently vanished on
+  `export` → `import-backup`. The library backup now captures every digest (a new
+  `ListMeetingDigests` read, fetched alongside the tag list) and replays it on
+  restore via the idempotent digest upsert, so a re-import never clobbers a digest
+  regenerated since. Pre-digest backups still restore cleanly.
+- [x] **Deleting every track of a meeting clears its digest** — removing a meeting
+  track-by-track (rather than via *Delete session*) left its digest row orphaned,
+  since the digest table has no foreign key to cascade. Deleting the last track of
+  a meeting now drops the digest too (best-effort; never fails the delete).
+- [x] **Auto meeting-digest no longer stalls the queue** — the on-finalize
+  meeting digest ran inline on the single serial transcription worker, blocking the
+  next recording for the whole LLM call. It now spawns off-thread like the
+  on-demand re-run, so the queue keeps draining while the digest is written.
+- [x] **Entity extraction provenance + partial parses** — the per-recording
+  entities step now records its model only after a non-empty parse, so the
+  provenance line can't name a model that produced nothing while the displayed
+  entities came from an earlier run; and a single malformed object in the model's
+  JSON reply no longer discards every entity — the array is parsed element-by-
+  element, keeping all the well-formed ones.
 
 ### Providers & models
 

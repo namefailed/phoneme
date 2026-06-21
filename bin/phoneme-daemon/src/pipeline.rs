@@ -1424,21 +1424,34 @@ struct RawEntity {
 /// array, all-empty values) — the caller treats that as "nothing extracted".
 fn parse_entities(raw: &str, max: usize) -> Vec<Entity> {
     let cleaned = raw.trim();
-    // Find the first valid JSON array-of-objects anywhere in the reply, scanning
-    // each '[' (same rationale as parse_tag_names): a greedy first-'['..last-']'
-    // slice would span bracket-bearing prose and fail to parse.
-    let parsed: Option<Vec<RawEntity>> = cleaned
+    // Find the first JSON array anywhere in the reply that yields at least one
+    // well-formed entity, scanning each '[' (same rationale as parse_tag_names):
+    // a greedy first-'['..last-']' slice would span bracket-bearing prose and
+    // fail to parse. Each candidate '[' is parsed as untyped `Value`s and then
+    // each element is deserialized into `RawEntity` *separately*, so a single
+    // malformed object (a missing/null/non-string `value`) can't reject the whole
+    // batch — the bad element is skipped and every valid sibling is kept. The
+    // per-position "at least one valid entity" gate keeps a stray non-entity array
+    // earlier in the prose (e.g. `[1, 2]`) from being mistaken for the answer.
+    let candidates: Vec<RawEntity> = cleaned
         .char_indices()
         .filter(|(_, c)| *c == '[')
         .find_map(|(start, _)| {
-            serde_json::Deserializer::from_str(&cleaned[start..])
-                .into_iter::<Vec<RawEntity>>()
+            let elems = serde_json::Deserializer::from_str(&cleaned[start..])
+                .into_iter::<Vec<serde_json::Value>>()
                 .next()?
-                .ok()
-        });
-    let Some(candidates) = parsed else {
-        return Vec::new();
-    };
+                .ok()?;
+            let parsed: Vec<RawEntity> = elems
+                .into_iter()
+                .filter_map(|v| serde_json::from_value::<RawEntity>(v).ok())
+                .collect();
+            if parsed.is_empty() {
+                None
+            } else {
+                Some(parsed)
+            }
+        })
+        .unwrap_or_default();
     let mut seen: Vec<(String, String)> = Vec::new();
     let mut out: Vec<Entity> = Vec::new();
     for c in candidates {
@@ -1499,8 +1512,9 @@ pub async fn extract_entities(
 /// (reads the `entities` entry) share one implementation — same provider mint,
 /// streaming, parse, persistence, events, and skip/empty/error classification as
 /// the auto-tag path it is modelled on. Records the model via `set_entities_model`
-/// once per run (before the parse) so the provenance line shows it even when the
-/// reply parsed to nothing.
+/// once per run, only after a non-empty parse, so the model column never advances
+/// past the entities actually stored — on an empty parse the prior entities (and
+/// their model) are kept untouched.
 pub(crate) async fn extract_entities_with(
     state: &AppState,
     id: &RecordingId,
@@ -1535,16 +1549,22 @@ pub(crate) async fn extract_entities_with(
     .await
     {
         Ok(reply) => {
-            // Record which model ran the extractor (the detail provenance line
-            // names it), once per run and before the parse — so it sticks even
-            // when the reply parsed to nothing.
-            if let Err(e) = state.catalog.set_entities_model(id, &llm_cfg.model).await {
-                tracing::warn!(error = %e, "failed to persist entities model");
-            }
             let entities = parse_entities(&reply, MAX_ENTITIES);
             if entities.is_empty() {
+                // Keep the prior entities (and their model) on an empty parse —
+                // the same deliberate keep-prior-on-empty behavior the auto-tag
+                // path uses. The model column is written only below, *after* this
+                // guard, so it never advances past the entities actually stored:
+                // recording it here would name a model that produced nothing while
+                // the displayed entities came from an earlier run.
                 tracing::info!(id = %id.as_str(), "entity extraction produced nothing");
                 return None;
+            }
+            // Record which model ran the extractor (the detail provenance line
+            // names it), once per run and only once we have entities to attribute
+            // to it — so the model column never disagrees with the stored set.
+            if let Err(e) = state.catalog.set_entities_model(id, &llm_cfg.model).await {
+                tracing::warn!(error = %e, "failed to persist entities model");
             }
             match state.catalog.set_entities(id, &entities).await {
                 Ok(()) => {

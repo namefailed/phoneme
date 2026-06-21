@@ -280,6 +280,13 @@ pub enum Request {
         /// The meeting session whose digest to fetch.
         meeting_id: String,
     },
+    /// List every stored whole-meeting digest, one per meeting. Ok = a JSON array
+    /// (possibly empty) of `MeetingDigest` objects (`{meeting_id, digest,
+    /// digest_model}`). A pure read used by the library-backup export to capture
+    /// digests, which live in their own side table keyed by `meeting_id` (no
+    /// `Recording` DTO column) and so aren't carried by `ListRecordings`. The
+    /// many-meetings sibling of [`Request::GetMeetingDigest`].
+    ListMeetingDigests,
     /// Fetch one recording's machine transcript segments in timeline order.
     /// Ok = JSON array (possibly empty) of `TranscriptSegment` objects:
     /// `start_ms`/`end_ms` offsets into the track's audio, the segment text,

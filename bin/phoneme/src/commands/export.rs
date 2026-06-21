@@ -1,10 +1,11 @@
 //! `phoneme export` — two export modes behind one command.
 //!
 //! **Library zip** (`phoneme export <FILE>`): fetches every recording
-//! (`ListRecordings` with the default filter) and the tag list
-//! (`ListTags`), writes them as `catalog.json` (versioned envelope), and
-//! packs every `.wav` under the configured audio dir into `audio/` —
-//! a portable backup of the whole library.
+//! (`ListRecordings` with the default filter), the tag list (`ListTags`),
+//! and the whole-meeting digests (`ListMeetingDigests`), writes them as
+//! `catalog.json` (versioned envelope), and packs every `.wav` under the
+//! configured audio dir into `audio/` — a portable backup of the whole
+//! library.
 //!
 //! **Captions** (`phoneme export --captions <ID> [--format srt|vtt]
 //! [--out FILE|-]`): fetches the recording's machine segments
@@ -18,7 +19,7 @@
 
 use crate::args::{CaptionFormat, ExportArgs};
 use phoneme_core::backup;
-use phoneme_core::{Config, ListFilter, Recording, Tag, TranscriptSegment};
+use phoneme_core::{Config, ListFilter, MeetingDigest, Recording, Tag, TranscriptSegment};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -166,6 +167,16 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
 
+    // Whole-meeting digests live in their own side table (keyed by meeting_id),
+    // so the per-recording list never carries them — fetch them separately so
+    // they round-trip. Best-effort like the tags: a failure exports the rest.
+    let meeting_digests: Vec<MeetingDigest> = conn
+        .send(phoneme_ipc::Request::ListMeetingDigests)
+        .await
+        .ok()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
     let expanded = match cfg.expanded() {
         Ok(c) => c,
         Err(e) => {
@@ -175,7 +186,13 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
     };
     let audio_dir = Path::new(&expanded.recording.audio_dir);
 
-    if let Err(e) = backup::write_to_zip(&recordings, &tags, audio_dir, Path::new(zip_path)) {
+    if let Err(e) = backup::write_to_zip(
+        &recordings,
+        &tags,
+        &meeting_digests,
+        audio_dir,
+        Path::new(zip_path),
+    ) {
         eprintln!("failed to write backup zip: {e}");
         return ExitCode::from(crate::exit::GENERIC_FAIL);
     }

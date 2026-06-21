@@ -251,7 +251,22 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                         // the meeting digest. A single, all-pipeline-exit-paths-covering
                         // hook (the pipeline's `run` has several success returns), so
                         // it triggers exactly once — after the *last* track lands.
-                        maybe_generate_meeting_digest(&state, &rec_id).await;
+                        //
+                        // Spawn it off the worker rather than awaiting inline: the
+                        // digest is a full LLM call, and this is the single serial
+                        // queue worker — awaiting here blocks the next claim for the
+                        // whole synthesis (and `state.processing` is already cleared,
+                        // so it wouldn't even be cancellable). The on-demand twin
+                        // `rerun_meeting_digest` spawns for the same reason. `AppState`
+                        // clones cheaply (Arc handles), and the digest's own internal
+                        // gates keep it a no-op when there's nothing to do.
+                        {
+                            let s = state.clone();
+                            let rid = rec_id.clone();
+                            tokio::spawn(async move {
+                                maybe_generate_meeting_digest(&s, &rid).await;
+                            });
+                        }
                     }
                     Err(e @ Error::WhisperUnreachable { .. })
                     | Err(e @ Error::WhisperTimeout { .. }) => {

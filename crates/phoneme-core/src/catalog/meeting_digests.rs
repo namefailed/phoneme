@@ -46,6 +46,28 @@ impl Catalog {
         Ok(())
     }
 
+    /// List every stored whole-meeting digest, one row per meeting. Used by the
+    /// library backup export to capture digests — they live in this side table
+    /// (keyed by `meeting_id`, no `Recording` DTO column), so a per-recording
+    /// export would otherwise miss them. Ordered by `meeting_id` for a stable
+    /// archive. An empty library yields an empty vec.
+    pub async fn list_all_meeting_digests(&self) -> Result<Vec<MeetingDigest>> {
+        let rows = sqlx::query(
+            "SELECT meeting_id, digest, digest_model FROM meeting_digests ORDER BY meeting_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(MeetingDigest {
+                    meeting_id: r.try_get("meeting_id")?,
+                    digest: r.try_get("digest")?,
+                    digest_model: r.try_get("digest_model")?,
+                })
+            })
+            .collect()
+    }
+
     /// Fetch the stored whole-meeting digest for `meeting_id`, or `None` when none
     /// has been generated yet. Read where the merged meeting is loaded (the daemon
     /// pairs this with [`Catalog::list_by_meeting`] for `ListMeeting`).

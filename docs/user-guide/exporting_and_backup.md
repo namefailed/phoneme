@@ -60,9 +60,9 @@ Restoring is **idempotent**. A recording whose id already exists is skipped —
 never overwritten — so re-running on the same backup never duplicates anything,
 and an edit you've made since the backup survives. The command reports how many
 recordings it imported and how many it skipped. The recording metadata,
-transcripts, tags and audio round-trip; derived data such as transcript
-segments, search embeddings and speaker voiceprints isn't stored in the backup
-and is regenerated when you re-transcribe.
+transcripts, tags, audio, and whole-meeting digests round-trip; derived data
+such as transcript segments, search embeddings and speaker voiceprints isn't
+stored in the backup and is regenerated when you re-transcribe.
 
 ## 🎬 Exporting Captions (SRT / WebVTT)
 

@@ -1916,6 +1916,49 @@ fn parse_entities_scans_prose_normalizes_kind_and_dedupes() {
     assert!(parse_entities("", 10).is_empty());
 }
 
+/// One malformed element (a missing `value`) must not drop its well-formed
+/// siblings: the array is parsed element-by-element, so a bad object is skipped
+/// and every valid entity is kept — not the old all-or-nothing behavior where a
+/// single bad object discarded the whole batch.
+#[test]
+fn parse_entities_skips_a_bad_element_and_keeps_the_good_ones() {
+    use crate::pipeline::parse_entities;
+    use phoneme_core::Entity;
+
+    // The middle object has no `value` (required field), so it fails to shape
+    // into a RawEntity and is skipped; the two good ones survive.
+    let parsed = parse_entities(
+        "[{\"kind\":\"person\",\"value\":\"Ada\"},{\"kind\":\"org\"},{\"kind\":\"term\",\"value\":\"Paris\"}]",
+        10,
+    );
+    assert_eq!(
+        parsed,
+        vec![
+            Entity {
+                kind: "person".into(),
+                value: "Ada".into()
+            },
+            Entity {
+                kind: "term".into(),
+                value: "Paris".into()
+            },
+        ],
+    );
+
+    // A null `value` (wrong type) is likewise skipped, not fatal to the batch.
+    let with_null = parse_entities(
+        "[{\"kind\":\"topic\",\"value\":\"Rust\"},{\"kind\":\"topic\",\"value\":null}]",
+        10,
+    );
+    assert_eq!(
+        with_null,
+        vec![Entity {
+            kind: "topic".into(),
+            value: "Rust".into()
+        }],
+    );
+}
+
 /// End-to-end on-demand entity extraction against a mocked LLM: the model
 /// returns a JSON entity array, and `extract_entities` parses it, stores the
 /// typed entities (`set_entities`), records the model (`set_entities_model`), and
