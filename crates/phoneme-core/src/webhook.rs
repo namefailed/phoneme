@@ -416,7 +416,7 @@ mod tests {
         }
     }
 
-    /// A policy with retries OFF, for tests asserting single-attempt behaviour
+    /// A policy with retries off, for tests asserting single-attempt behaviour
     /// (failure mapping, the SSRF guard) without backoff delays.
     fn no_retry() -> WebhookConfig {
         WebhookConfig {

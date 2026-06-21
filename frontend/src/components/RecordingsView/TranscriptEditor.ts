@@ -240,7 +240,7 @@ export class TranscriptEditorElement extends LitElement {
       parent: this.editorRoot,
     });
 
-    // Reflect the REAL vim mode in the badge by subscribing to the editor's
+    // Reflect the real vim mode in the badge by subscribing to the editor's
     // own mode-change events, rather than guessing from keystrokes. The legacy
     // CodeMirror adapter from `getCM` emits "vim-mode-change" with the actual
     // mode ("normal" | "insert" | "visual" | ...).

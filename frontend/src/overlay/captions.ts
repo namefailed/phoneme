@@ -89,7 +89,7 @@ function esc(s: string): string {
 function renderWords(el: HTMLElement | null, words: string[], committedCount = Infinity): void {
   if (!el) return;
   const fitted = toWords(fitTail(el, words)); // may have dropped words off the LEFT
-  // The committed/tentative boundary is counted from the FULL word list; shift it
+  // The committed/tentative boundary is counted from the full word list; shift it
   // into the fitted window (a fully-tentative tail clamps to 0).
   const droppedFromLeft = words.length - fitted.length;
   const cut = Math.max(0, Math.min(fitted.length, committedCount - droppedFromLeft));

@@ -204,7 +204,7 @@ fn stitch_preview(committed: &str, window: &str) -> Option<String> {
 
     if let Some((overlap, skip)) = best {
         // Keep ALL the committed words (its copy of the overlap stays — committed
-        // casing/punctuation wins at the boundary) and append ONLY the window
+        // casing/punctuation wins at the boundary) and append only the window
         // words after its overlap region. Window words before `skip` (a revised
         // leading fragment) and the overlap itself restate committed content, so
         // they are dropped — no run is ever duplicated.

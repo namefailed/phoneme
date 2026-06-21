@@ -94,7 +94,7 @@ export class TagChipsElement extends LitElement {
     };
     document.addEventListener("click", this.docClickHandler);
     // Live-refresh the suggestion chips when the daemon finishes a suggestion
-    // run (auto pipeline or the ✨ button) for THIS recording.
+    // run (auto pipeline or the ✨ button) for this recording.
     void subscribe((e: DaemonEvent) => {
       if (e.event === "tag_suggestions_updated" && e.id === this.recordingId) {
         this.suggesting = false;

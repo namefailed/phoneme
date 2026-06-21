@@ -41,7 +41,7 @@ describe("shared health poll", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(runDoctorMock).toHaveBeenCalledTimes(1); // the initial check
 
-    // A second consumer calling start must NOT spin up a second poll.
+    // A second consumer calling start must not spin up a second poll.
     startHealthPolling();
     await vi.advanceTimersByTimeAsync(0);
     expect(runDoctorMock).toHaveBeenCalledTimes(1);

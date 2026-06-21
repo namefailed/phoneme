@@ -3,7 +3,7 @@
  *
  * Every model/provider surface in the app (Post-Processing cleanup, Auto
  * Summary, the Re-run cleanup overrides, the header Models picker, and the
- * first-run wizard) draws from THIS list so the options stay consistent and we
+ * first-run wizard) draws from this list so the options stay consistent and we
  * support as many providers out-of-the-box as possible with minimal config.
  *
  * The daemon only speaks four wire protocols (`kind`): `ollama`, `openai`

@@ -39,7 +39,7 @@ export function confirmDialog(opts: {
         resolve(v);
       });
     };
-    // Capture phase + stopPropagation so Esc/Enter resolve THIS dialog and never
+    // Capture phase + stopPropagation so Esc/Enter resolve this dialog and never
     // leak to the app-level handlers (which might also act on Escape).
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

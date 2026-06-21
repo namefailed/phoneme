@@ -310,7 +310,7 @@ export class HeaderBarElement extends LitElement {
       this.isRecording = !s.meeting && !!s.recording;
       this.isPaused = !!s.paused;
       if (this.isMeeting) this.recordMode = "meeting";
-      // Once nothing is capturing (e.g. the LAST meeting track just stopped),
+      // Once nothing is capturing (e.g. the last meeting track just stopped),
       // drop any lingering live-preview caption. Meeting stops route through
       // here (a per-track `recording_stopped` re-syncs status), so without this
       // the ticker would keep the final partial on screen after the meeting ends.

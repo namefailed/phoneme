@@ -619,7 +619,7 @@ function handleTypingTargetKeys(e: KeyboardEvent) {
     if ((vimNav || arrowNav) && isSearch) {
       const input = active as HTMLInputElement;
       if (e.key === "ArrowDown") { e.preventDefault(); input.blur(); dispatchVim("focus-list"); return; }
-      // ←/→ at the caret edges hop OUT of the text box back to header-cursor nav.
+      // ←/→ at the caret edges hop out of the text box back to header-cursor nav.
       const len = input.value?.length ?? 0;
       const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
       const atEnd = input.selectionStart === len && input.selectionEnd === len;

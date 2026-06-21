@@ -1420,7 +1420,7 @@ fn default_normalize_target_dbfs() -> f32 {
 ///
 /// **The fast lane is the point**: by default an in-place recording skips the
 /// inbox queue and the full pipeline entirely — transcribe with a fast
-/// provider, polish locally, type at the cursor — and only THEN persists to
+/// provider, polish locally, type at the cursor — and only then persists to
 /// the library in the background. A dictation never waits behind a meeting
 /// that's mid-transcription, never runs diarization, and never pays for an
 /// LLM round-trip unless explicitly asked to.
@@ -4127,7 +4127,7 @@ mod tests {
         off.recording.streaming_preview = false;
         assert!(!off.preview_needs_own_server());
 
-        // Cloud API preview → independent provider, but NO second local server.
+        // Cloud API preview → independent provider, but no second local server.
         let mut api = Config::default();
         api.recording.streaming_preview = true;
         let mut pv = api.whisper.clone();
@@ -4228,7 +4228,7 @@ mod tests {
         // Only the main model present → nothing strictly smaller → no override.
         let cfg = local_main_cfg(dir.path(), "ggml-base.bin", &[]);
         assert!(cfg.derived_auto_preview().is_none());
-        // Fallback: effective preview is the MAIN provider, unchanged.
+        // Fallback: effective preview is the main provider, unchanged.
         let eff = cfg.effective_preview_provider_config();
         assert_eq!(eff.model_path, cfg.whisper.model_path);
         assert_eq!(eff.bundled_server_port, cfg.whisper.bundled_server_port);
@@ -4919,7 +4919,7 @@ mod tests {
         assert_eq!(cfg.needed_whisper_servers().len(), 1);
     }
 
-    /// The new opt-in flag is serde-defaulted, so an OLD config that never wrote
+    /// The new opt-in flag is serde-defaulted, so an old config that never wrote
     /// the key parses unchanged with the flag false. Simulated by serializing a
     /// real default config, deleting the line, and parsing it back.
     #[test]

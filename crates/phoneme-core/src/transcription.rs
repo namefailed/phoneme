@@ -2102,7 +2102,7 @@ mod tests {
     async fn deepgram_decodes_words_with_confidence_on_the_non_diarize_path() {
         let server = MockServer::start().await;
         // Deepgram returns word timing + confidence whether or not diarization
-        // is on. With diarize OFF the text falls back to plain prose, but the
+        // is on. With diarize off the text falls back to plain prose, but the
         // word substrate must still be captured.
         Mock::given(method("POST"))
             .and(path("/v1/listen"))

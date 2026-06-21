@@ -399,7 +399,7 @@ export class SettingsViewElement extends LitElement {
       // Managers (each its own rail entry under the "Managers" group).
       { tab: "managers/tags", label: "Tags", mount: (h) => { new SectionTags(h, c); } },
       { tab: "managers/profiles", label: "Profiles", mount: (h) => { new SectionProfiles(h, c); } },
-      // Integrations tab — inbound automation (REST + MCP) shown FIRST, then the
+      // Integrations tab — inbound automation (REST + MCP) shown first, then the
       // outbound hooks/webhooks below it.
       { tab: "managers/hooks", label: "Integrations", mount: (h) => { new SectionIntegrations(h, c); } },
       { tab: "managers/hooks", label: "Integrations", mount: (h) => { new SectionHook(h, c); } },

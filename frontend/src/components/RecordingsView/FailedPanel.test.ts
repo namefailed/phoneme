@@ -7,7 +7,7 @@ import type { DaemonEvent } from "../../services/events";
 // Stub the CSS import so Vitest doesn't choke on stylesheet syntax.
 vi.mock("../modal.css", () => ({}));
 
-// One ipc mock covers BOTH elements under test: the failed panel and the
+// One ipc mock covers both elements under test: the failed panel and the
 // queue panel that opens it (the queue panel pulls in the whole queue API).
 const listRecordingsMock = vi.fn<[ListFilter?], Promise<Recording[]>>();
 const retranscribeMock = vi.fn<unknown[], Promise<void>>();

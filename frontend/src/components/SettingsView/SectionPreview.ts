@@ -320,7 +320,7 @@ export class SectionPreview {
 
     // Feel/perf knobs. Toggles/number fields write straight through to
     // config.recording (persisted by the global Settings Save) and deliberately
-    // do NOT re-render — re-rendering a focused number input would lose the caret.
+    // do not re-render — re-rendering a focused number input would lose the caret.
     this.container.querySelector<HTMLInputElement>("#prev-adaptive")?.addEventListener("change", (e) => {
       this.config.recording.preview_adaptive = (e.target as HTMLInputElement).checked;
     });

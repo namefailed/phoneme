@@ -856,7 +856,7 @@ export class RecordingsListElement extends LitElement {
       ...widthsForGrid,
       ...(hasFlexTrack ? [] : ["minmax(0, 1fr)"]),
     ].join(" ");
-    // Row min-width (used only when transcript is NOT the tail) so a row's
+    // Row min-width (used only when transcript is not the tail) so a row's
     // background/selection extends the full scrolled width when the fixed columns
     // overflow the pane, instead of stopping at the pane edge.
     const gridMinWidth =

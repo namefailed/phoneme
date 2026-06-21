@@ -697,7 +697,7 @@ pub struct KindCounts {
     pub favorite: i64,
     /// Distinct recordings carrying at least one tag (the sidebar "All Tags" badge).
     pub tagged: i64,
-    /// Recordings carrying NO tags (the sidebar "Untagged" badge). `all - tagged`.
+    /// Recordings carrying no tags (the sidebar "Untagged" badge). `all - tagged`.
     pub untagged: i64,
 }
 

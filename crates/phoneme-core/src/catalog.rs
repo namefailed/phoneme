@@ -5223,7 +5223,7 @@ mod tests {
             "a snapshot taken before a racing invalidation must NOT be cached"
         );
 
-        // Control: with no racing invalidation, the same store DOES cache (so the
+        // Control: with no racing invalidation, the same store does cache (so the
         // guard isn't just refusing to ever cache).
         let gen_now = db.embedding_cache_gen.load(Ordering::Acquire);
         let fresh_corpus = Arc::new(EmbeddingCorpus {
@@ -7399,7 +7399,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        // A recording with NO voiceprint for label 1.
+        // A recording with no voiceprint for label 1.
         let novp = embedded_recording(None);
         db.insert(&novp).await.unwrap();
 

@@ -288,7 +288,7 @@ export class MergedConversationDetail extends LitElement {
 
   /** "More like this" for the whole meeting: seed the similarity search from
    *  one transcribed track. Track choice barely matters — the daemon excludes
-   *  the meeting by its dedupe key (so neither of THIS meeting's tracks comes
+   *  the meeting by its dedupe key (so neither of this meeting's tracks comes
    *  back) and the tracks' transcripts are near-identical — so take the first
    *  track that has a transcript. The pill is labelled with the meeting name. */
   private handleMoreLikeThis() {
