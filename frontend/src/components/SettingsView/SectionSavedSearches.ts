@@ -143,7 +143,7 @@ export class SectionSavedSearches {
       row.querySelector<HTMLButtonElement>(".ssm-rename")?.addEventListener("click", () => {
         this.renamingId = id;
         this.render();
-        // Re-query by the SAME data-id (this `row` is detached after render), but
+        // Re-query by the same data-id (this `row` is detached after render), but
         // pin the selector to this id via dataset rather than splicing the raw id
         // into the selector string — a stray quote in the id can't break out.
         const input = [...this.container.querySelectorAll<HTMLElement>(".ssm-row")]

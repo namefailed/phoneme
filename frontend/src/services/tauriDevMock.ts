@@ -8,8 +8,8 @@
  * cursor + glow animations can be exercised and screenshotted without the native
  * window.
  *
- * SAFETY — never affects the real app:
- *   - Installed ONLY when this is a Vite dev build (`import.meta.env.DEV`) AND
+ * Safety — never affects the real app:
+ *   - Installed only when this is a Vite dev build (`import.meta.env.DEV`) and
  *     there is no real Tauri runtime. In `cargo tauri dev` and production builds
  *     `window.__TAURI_INTERNALS__` is injected by Tauri, so the mock is skipped.
  *   - In a production build `import.meta.env.DEV` is statically false, so the whole
@@ -102,13 +102,13 @@ const CONVERSATION = [
    track ("mic" = your voice, "system" = everyone on the call). The list folds
    the tracks into a single expandable group (groupRecordings), and the merged
    view interleaves them chronologically from each track's stored segments
-   (mergeChronological) — which is the UI we want this fake data to exercise.
+   (mergeChronological) — the UI this fake data exists to exercise.
 
    Each segment is `{ start_ms, end_ms, text, speaker? }`, offsets into that
    track's audio; the tracks share a wall clock, so equal offsets are "the same
    moment". A system track can carry diarized `[Speaker N]:` turns (speaker set
    on its segments); a mic track is a single voice (speaker null). Both tracks
-   MUST have segments or the merge falls back to the coarse by-source order. */
+   need segments, or the merge falls back to the coarse by-source order. */
 type Seg = { start_ms: number; end_ms: number; text: string; speaker: string | null };
 const seg = (start_ms: number, end_ms: number, text: string, speaker: string | null = null): Seg =>
   ({ start_ms, end_ms, text, speaker });
@@ -209,9 +209,9 @@ function track(
   });
 }
 
-// A deliberately LONG transcript (the synthetic paragraphs repeated) so the
-// detail pane scrolls far enough to exercise the "back to top" button + long-
-// content layout.
+// A deliberately long transcript (the synthetic paragraphs repeated) so the
+// detail pane scrolls far enough to exercise the "back to top" button and the
+// long-content layout.
 const LONG = Array.from({ length: 12 }, (_, i) => `${i + 1}. ${i % 2 ? P1 : P2}`).join("\n\n");
 const MORE_TITLES = [
   "Sprint retro notes", "Customer call summary", "Reading notes — chapter 3",
@@ -333,7 +333,7 @@ function fakeWavUrl(): string {
 
 // Fresh-install defaults — mirrors `Config::default()` from phoneme-core so the
 // preview shows the out-of-the-box experience: bundled local Whisper, AI post-
-// processing OFF, no custom hotkeys, the four built-in Playbook entries + the
+// processing off, no custom hotkeys, the four built-in Playbook entries plus the
 // single "default" recipe, Catppuccin Mocha, mouse/Tab navigation (no vim/arrow),
 // live preview / overlay / REST / semantic search all off. (Generated from the
 // Rust default via the config dump test; keep it in sync if defaults change.)
@@ -720,7 +720,7 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     case "list_profiles": return ["default"];
     case "list_profiles_detailed": return [{ name: "default", modified_ms: null }];
     // Event plumbing: accept listen/unlisten so subscribe() resolves. For the
-    // "daemon-event" stream we ALSO capture the listener's callback (Tauri stores
+    // "daemon-event" stream we also capture the listener's callback (Tauri stores
     // it on window as `_<handler>` via transformCallback) so emitDaemon can drive
     // it — tag edits then refresh every subscribed surface, like the real bridge.
     case "plugin:event|listen": {
@@ -756,10 +756,10 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       ];
     case "merge_named_voices": return { merged: true };
     case "forget_named_voice": return { removed: true };
-    // Commands the real backend serves but the mock used to drop to `default`,
-    // leaving the preview unable to populate a device picker, the wizard's
+    // Commands the real backend serves; without these stubs they fall through to
+    // `default` and the preview can't populate a device picker, the wizard's
     // "Test connection" button, the overlay source toggle, or window-state saves.
-    // Stub them to the backend's return shapes so those surfaces behave natively.
+    // Return the backend's shapes so those surfaces behave natively.
     case "list_input_devices": return ["default", "Microphone (mock)", "Headset (mock)"];
     case "wizard_test_whisper": return { ok: true, message: "HTTP 200" };
     case "set_preview_source": // overlay source toggle: a no-op in the browser.

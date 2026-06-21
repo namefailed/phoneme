@@ -47,7 +47,7 @@ function localModelLabel(path: string): string {
  * The unified Models modal ("Quick Model Switcher"): one dialog with a tab
  * per model-using subsystem — Transcription, Post-processing (cleanup),
  * Summary, Auto-tag, Live preview, and Semantic embeddings — each built from
- * the SHARED connection/model field idioms (SettingsView/connectionField +
+ * the shared connection/model field idioms (SettingsView/connectionField +
  * modelField), so it offers exactly the same provider/model choices as the
  * corresponding Settings sections.
  *

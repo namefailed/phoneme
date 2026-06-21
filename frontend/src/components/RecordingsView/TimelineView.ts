@@ -12,7 +12,7 @@
  * Clicking a line seeks the host pane's waveform to that row's start. When two
  * panes show the two tracks of one meeting (the dual-timeline split), the
  * views share a `syncGroup` (the meeting id) and coordinate over window
- * events, so a click seeks BOTH waveforms and scrolling one list scrolls the
+ * events, so a click seeks both waveforms and scrolling one list scrolls the
  * other to the same point in time — the tracks are wall-clock synced at
  * capture, so equal offsets mean "the same moment".
  *
@@ -39,10 +39,8 @@ export function activeSegmentIndex(segments: TranscriptSegment[], ms: number): n
 }
 
 /** One displayed timeline row: consecutive raw segments merged into a coherent
- *  turn. Whisper emits segments at its own boundaries — often mid-sentence or as
- *  tiny fragments — which read as illogical splits; grouping them into
- *  sentence/speaker-bounded turns is much easier to scan. Carries the merged
- *  time span (so click-seek + playhead-follow still land on real audio). */
+ *  turn (sentence/speaker-bounded; see groupSegments). Carries the merged time
+ *  span so click-seek and playhead-follow still land on real audio. */
 export type TlGroup = {
   startMs: number;
   endMs: number;
@@ -63,7 +61,7 @@ function tlEndsSentence(text: string): boolean {
 }
 
 /** Merge raw segments into display rows: keep appending to the current row
- *  while it's the SAME speaker and the row hasn't reached a natural boundary —
+ *  while it's the same speaker and the row hasn't reached a natural boundary —
  *  a sentence end, a >2s gap, or the length cap. A speaker change always starts
  *  a new row. Blank segments are dropped. The result reads as turns/sentences
  *  instead of raw whisper fragments. */
@@ -124,7 +122,7 @@ export class TimelineView {
   private variant: "raw" | "cleaned" = "raw";
   private hasCleaned = false;
   private probedCleaned = false;
-  /** Suppresses the scroll broadcast while WE are scrolling programmatically
+  /** Suppresses the scroll broadcast while we scroll programmatically
    *  (mirroring the peer or following playback) — otherwise the two panes
    *  ping-pong scroll events forever. */
   private programmaticScroll = false;
@@ -180,8 +178,8 @@ export class TimelineView {
       return;
     }
     // Probe once for a cleaned timeline (so the toggle only shows when there's
-    // something to switch to). Separate fetch with its OWN catch: a probe failure
-    // must never blow away the primary timeline that just loaded fine.
+    // something to switch to). Separate fetch with its own catch, so a probe
+    // failure can't blow away the primary timeline that just loaded fine.
     if (!this.probedCleaned) {
       this.probedCleaned = true;
       this.hasCleaned =
@@ -263,7 +261,7 @@ export class TimelineView {
       this.highlight(idx, false);
       this.broadcast("phoneme:timeline-seek", g.startMs);
     });
-    // Scroll sync: a USER scroll mirrors to the peer pane by time. Programmatic
+    // Scroll sync: a user scroll mirrors to the peer pane by time. Programmatic
     // scrolls (mirroring / follow) are flagged off so they don't echo.
     list?.addEventListener("scroll", () => {
       if (this.programmaticScroll || !this.syncGroup) return;

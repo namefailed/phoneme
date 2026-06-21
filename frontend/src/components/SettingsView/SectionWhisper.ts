@@ -11,10 +11,10 @@ const HELP =
 
 /** Whisper's prompt budget: the text decoder context is 448 tokens for every
  *  model size and the prompt is limited to `n_text_ctx/2 - 1 = 223`; OpenAI's
- *  API rounds this to 224. We cap the custom-vocabulary box at this many tokens
- *  (counted with Whisper's own GPT-2 / r50k BPE) rather than guessing from
- *  character count — dense jargon tokenizes at ~2.7 chars/token, far from the
- *  ~4 the old 900-char cap assumed. */
+ *  API rounds this to 224. The custom-vocabulary box is capped at this many
+ *  tokens (counted with Whisper's own GPT-2 / r50k BPE) rather than guessed from
+ *  character count, since dense jargon tokenizes at about 2.7 chars/token — far
+ *  from the ~4 a plain character cap would assume. */
 const VOCAB_MAX_TOKENS = 224;
 /** Coarse character ceiling applied before tokenizing, purely so a pathological
  *  paste can't hand the encoder a megabyte of text. The token cap above is the
@@ -35,12 +35,12 @@ function loadVocabTokenizer(): Promise<VocabTokenizer> {
 
 /** The port fields a `DaemonStatus` reply carries for the bundled whisper
  *  servers. The `preferred` ports are the configured `bundled_server_port`
- *  values; the `effective` ports are what the supervisors ACTUALLY bound —
- *  they fall back to a free port when a foreign app holds the preferred one —
- *  and are `null` while that server isn't running. Mirrors the daemon's
- *  `DaemonStatus` reply (crates/phoneme-ipc/src/schema.rs). All fields are
- *  optional so a partial/old reply, or a probe against a down daemon, simply
- *  yields "no fallback known" rather than throwing. */
+ *  values; the `effective` ports are what the supervisors really bound — they
+ *  fall back to a free port when a foreign app holds the preferred one — and are
+ *  `null` while that server isn't running. Mirrors the daemon's `DaemonStatus`
+ *  reply (crates/phoneme-ipc/src/schema.rs). Every field is optional so a
+ *  partial or old reply, or a probe against a down daemon, just yields "no
+ *  fallback known" rather than throwing. */
 export interface WhisperPortStatus {
   whisper_preferred_port?: number | null;
   whisper_effective_port?: number | null;
@@ -60,16 +60,16 @@ export interface EffectivePort {
 }
 
 /**
- * Decide which port to actually SHOW for a configured local-whisper port.
+ * Decide which port to display for a configured local-whisper port.
  *
- * Pure display logic — the editable config value never changes. Mirrors the
+ * Pure display logic; the editable config value never changes. Mirrors the
  * tray's `effective_local_whisper_url` (src-tauri/src/commands.rs): for either
  * supervised server (main or live-preview), when the configured port matches a
- * reported `preferred` port and the live `effective` port differs and is
- * known, the server fell back to a free port — return the effective port and a
- * note. Otherwise (no status, daemon down, ports equal, server not running, or
- * an unrelated port) returns `null`, so the caller keeps showing the
- * configured port unchanged.
+ * reported `preferred` port and the live `effective` port is known and differs,
+ * the server fell back to a free port, so return the effective port and a note.
+ * Otherwise (no status, daemon down, ports equal, server not running, or an
+ * unrelated port) returns `null`, so the caller keeps showing the configured
+ * port unchanged.
  */
 export function effectivePortFor(
   configuredPort: number,
@@ -451,10 +451,10 @@ export class SectionWhisper {
     `;
     bindFieldEvents(container, this.config);
 
-    // Live TOKEN counter for the custom-vocabulary box, counted with Whisper's
+    // Live token counter for the custom-vocabulary box, counted with Whisper's
     // own BPE so the limit matches reality (dense jargon tokenizes much denser
-    // than the old 900-char proxy assumed). Hard-capped at VOCAB_MAX_TOKENS: any
-    // edit/paste over the limit is trimmed back to the first 224 tokens.
+    // than a character count would suggest). Hard-capped at VOCAB_MAX_TOKENS: any
+    // edit or paste over the limit is trimmed back to the first 224 tokens.
     const vocabInput = container.querySelector<HTMLTextAreaElement>("#vocab-input");
     const vocabCount = container.querySelector<HTMLElement>("#vocab-count");
     let vocabTok: VocabTokenizer | null = null;
@@ -525,10 +525,10 @@ export class SectionWhisper {
     };
 
     // The provider/key/endpoint/Test UI is the shared connection block. It
-    // reads and writes the same `[whisper]` keys the old controls did —
-    // provider kind, api_url, api_key — so configs round-trip untouched. The
-    // local mode/port/external_url machinery stays out of its reach: the
-    // block only resolves the URL its Test button probes via testUrl().
+    // reads and writes the same `[whisper]` keys the section's own controls do
+    // (provider kind, api_url, api_key), so configs round-trip untouched. The
+    // local mode/port/external_url machinery stays out of its reach: the block
+    // only resolves the URL its Test button probes, via testUrl().
     const connHost = container.querySelector<HTMLElement>("#whisper-connection")!;
     mountConnectionField(connHost, {
       catalog: "stt",

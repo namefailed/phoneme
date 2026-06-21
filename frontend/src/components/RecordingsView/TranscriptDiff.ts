@@ -3,7 +3,7 @@ import { diffTextDetailed, type DiffOp, type DiffOpType, type DiffMode, type Dif
 import type { TranscriptVersion } from "../../services/ipc";
 
 /**
- * Read-only side-by-side-ish DIFF of a recording's transcript layers
+ * Read-only, roughly side-by-side diff of a recording's transcript layers
  * (roadmap v1.10 — "Compare transcript versions").
  *
  * Three layers can exist for a recording:
@@ -12,7 +12,7 @@ import type { TranscriptVersion } from "../../services/ipc";
  *   • current  — the live transcript (possibly hand-edited)
  *
  * The user picks any two of the three and gets an inline word- (or line-) level
- * diff with clear insertion/deletion highlighting. Everything is read-only — the
+ * diff with clear insertion/deletion highlighting. It's read-only — the
  * component never writes a transcript back. Layers that don't exist for this
  * recording (e.g. cleanup never ran) are still offered in the pickers but show a
  * clear "not available" state instead of rendering a broken/empty diff.
@@ -34,8 +34,9 @@ export interface TranscriptLayers {
   /** The current (possibly edited) transcript. */
   current: string | null;
   /** Compounding chain (PB-COMPOUND): raw ASR at idx 0, then each Transform
-   *  step's output. When more than one step ran, the chain REPLACES the single
-   *  "clean" layer in the picker so every intermediate step is comparable. */
+   *  step's output. When more than one step ran, the chain takes the place of
+   *  the single "clean" layer in the picker so every intermediate step is
+   *  comparable. */
   steps?: TranscriptVersion[];
 }
 
@@ -73,7 +74,7 @@ export class TranscriptDiff {
     const steps = layers.steps ?? [];
     if (steps.length > 1) {
       // Full compounding chain: original(raw)=idx0 → each step → current. The
-      // chain subsumes "clean" (the last step == the cleaned pre-edit text).
+      // chain subsumes "clean" — its last step is the cleaned pre-edit text.
       this.keys = [];
       for (const v of steps) {
         const key = `step:${v.idx}`;
@@ -135,9 +136,9 @@ export class TranscriptDiff {
   }
 
   private render() {
-    // Compute the (capped) diff once and feed BOTH the body and the stats from
-    // it — the two used to each run `diffTextDetailed` independently at the same
-    // granularity, doubling the LCS work on every render/refresh.
+    // Compute the (capped) diff once and feed both the body and the stats from
+    // it. They run at the same granularity, so sharing one `diffTextDetailed`
+    // call halves the LCS work on every render/refresh.
     const outcome = this.computeDiff();
     this.container.innerHTML = `
       <div class="tdiff">
@@ -233,7 +234,7 @@ export class TranscriptDiff {
 
     // Split the op stream into logical lines, tracking whether each line exists
     // in the old side (equal|delete) and/or the new side (equal|insert) so the
-    // two gutters advance correctly — even for blank lines with no segments.
+    // two gutters advance correctly, even for blank lines with no segments.
     const lines: Line[] = [];
     let segs: Seg[] = [];
     let hasOld = false;
@@ -333,8 +334,8 @@ export class TranscriptDiff {
     this.container.querySelector<HTMLButtonElement>(".tdiff-revert")?.addEventListener("click", () => {
       const idx = this.revertTarget();
       if (idx == null) return;
-      // Revert OVERWRITES the live (possibly hand-edited) transcript, and the
-      // default target on first open is the raw machine version — confirm first.
+      // Revert overwrites the live (possibly hand-edited) transcript, and the
+      // default target on first open is the raw machine version, so confirm first.
       const label = this.labels[`step:${idx}`] ?? "this version";
       if (
         !window.confirm(

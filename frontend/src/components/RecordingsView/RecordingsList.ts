@@ -21,7 +21,7 @@ import "./styles.css";
 
 /** A keyboard-navigable row: either a recording or a meeting group header. The
  *  cursor (j/k) lands on both, so a header can be focused and Enter/Space toggle
- *  its expand/collapse — previously j/k skipped over headers entirely. */
+ *  its expand/collapse. */
 type NavRow =
   | { kind: "rec"; rec: Recording }
   | { kind: "header"; meetingId: string; tracks: Recording[]; expanded: boolean };
@@ -45,9 +45,9 @@ function saveExpandedMeetings(set: Set<string>): void {
   }
 }
 
-/** Column widths, keyed by COLUMN NAME (per device). Stored here rather than in
- *  the synced config because the config array was positional and reset whenever
- *  a column was added/removed/reordered — a name-keyed map survives all three. */
+/** Column widths, keyed by column name (per device). Stored here rather than in
+ *  the synced config: the config array is positional, so it resets whenever a
+ *  column is added, removed, or reordered. A name-keyed map survives all three. */
 const LS_COL_WIDTHS = "phoneme.recordings.colWidths";
 function loadColWidths(): Record<string, string> {
   try {
@@ -97,9 +97,9 @@ function saveMeetingIcon(meetingId: string, icon: string): void {
   }
 }
 
-/** The list state, held in a Store OWNED BY RecordingsView (not here) so the
- *  view and its other panes share one source of truth for what's loaded and
- *  selected. This element is the only writer of `recordings`/`loading`/
+/** The list state, held in a Store that RecordingsView owns (not this element)
+ *  so the view and its other panes share one source of truth for what's loaded
+ *  and selected. This element is the only writer of `recordings`/`loading`/
  *  `error`; selection is written by both (clicks here, clears from the view). */
 export type RecordingsListState = {
   recordings: Recording[];
@@ -115,11 +115,12 @@ export type RecordingsListState = {
  * pills, and the semantic-relevance chip; infinite-scrolls in pages of 100.
  *
  * Data flow: subscribes to the shared `filterStore` and re-queries the daemon
- * on ANY filter change — `listRecordings` for normal/FTS lists,
+ * on every filter change — `listRecordings` for normal/FTS lists,
  * `semanticSearch` for ✨ queries, `moreLikeThis` in like-mode. Results land
  * in the shared state store (RecordingsView re-renders the other panes off
  * it). It listens for `config:saved` (column layout, 24h time), but daemon
- * events are NOT handled here — RecordingsView calls `refresh()`.
+ * events go to RecordingsView, which calls `refresh()` — they aren't handled
+ * here.
  *
  * Keyboard (its own `keydown`, when the table is focused): ↑/↓ + j/k move,
  * Enter opens (or folds/unfolds a meeting header), Shift+Enter on a header
@@ -130,7 +131,7 @@ export type RecordingsListState = {
  * off the top.
  *
  * Selection callbacks (`onSelectCb`, `onSelectionChangeCb`) are injected by
- * RecordingsView, which owns what selection MEANS (detail pane, bulk bar).
+ * RecordingsView, which owns what selection means (detail pane, bulk bar).
  */
 @customElement("ph-recordings-list")
 export class RecordingsListElement extends LitElement {
@@ -153,8 +154,8 @@ export class RecordingsListElement extends LitElement {
   @state() private editingIcon = DEFAULT_MEETING_ICON;
   @state() private iconPickerOpen = false;
   /** Viewport coords for the icon picker popover. It renders position:fixed so
-   *  it escapes the recordings list's overflow clipping (the old absolute
-   *  popover was clipped to the row and appeared to "not open" at all). */
+   *  it escapes the recordings list's overflow clipping — an absolute popover
+   *  gets clipped to the row, which looks like it never opens. */
   @state() private iconPickerPos: { x: number; y: number } | null = null;
   
   private offset = 0;
@@ -180,12 +181,12 @@ export class RecordingsListElement extends LitElement {
   /** Ids hidden by an in-flight undoable delete. They stay in the store (so the
    *  delete can be cancelled) but are filtered out of the rendered list until
    *  the undo window passes (committed → daemon refresh drops them) or is undone
-   *  (cleared → they reappear). Survives daemon-event refreshes by design. */
+   *  (cleared → they reappear). Deliberately survives daemon-event refreshes. */
   private pendingDelete = new Set<string>();
 
-  /** Recording ids we've already rendered — so a row's one-shot enter animation
-   *  fires once (a genuinely new recording / a freshly-loaded page) and never
-   *  re-fires on the frequent daemon-event re-renders. */
+  /** Recording ids we've already rendered, so a row's one-shot enter animation
+   *  fires once (a genuinely new recording or a freshly-loaded page) and doesn't
+   *  re-fire on the frequent daemon-event re-renders. */
   private seenIds = new Set<string>();
   /** This render's brand-new ids (recomputed each willUpdate); rows with these get
    *  the `rec-row-enter` class for their single fade-in. */
@@ -251,12 +252,12 @@ export class RecordingsListElement extends LitElement {
   }
 
   /**
-   * Client-side Library type-filter — a FALLBACK only. The kind/favorite
-   * choice rides in the wire filter (`toWireFilter`) and is applied in SQL
-   * before pagination; this re-filter is a no-op on those already-filtered
-   * pages. It still does real work for an older daemon that ignores the
-   * filter fields, and for the semantic/like result paths, which don't go
-   * through `listRecordings` at all.
+   * Client-side Library type-filter — a fallback only. The kind/favorite choice
+   * rides in the wire filter (`toWireFilter`) and is applied in SQL before
+   * pagination, so this re-filter is a no-op on those already-filtered pages. It
+   * still does real work for an older daemon that ignores the filter fields, and
+   * for the semantic/like result paths, which don't go through `listRecordings`
+   * at all.
    */
   private filterByKind(rows: Recording[], kind?: RecordingKind): Recording[] {
     if (!kind || kind === "all") return rows;
@@ -269,8 +270,8 @@ export class RecordingsListElement extends LitElement {
   /** Apply the sidebar tag filter (a single tag, or the Tagged/Untagged presence
    *  toggle) client-side. The plain list path already enforces these in SQL, but
    *  the semantic-search and "more like this" paths don't carry the filter to the
-   *  backend — so without this a sidebar tag is silently ignored whenever a
-   *  search/▸similar is active. No-op on the list path (server already filtered). */
+   *  backend, so without this a sidebar tag would be silently ignored whenever a
+   *  search or ▸similar is active. No-op on the list path (server already did it). */
   private filterByTag(rows: Recording[], f: UiFilter): Recording[] {
     let out = rows;
     if (f.tag_id != null) out = out.filter((r) => (r.tags ?? []).some((t) => t.id === f.tag_id));
@@ -283,7 +284,7 @@ export class RecordingsListElement extends LitElement {
   private async toggleFavorite(r: Recording) {
     const next = !r.favorite;
     r.favorite = next; // optimistic — reflect immediately
-    // One-shot star pop when turning a star ON; cleared after the animation so it
+    // One-shot star pop when turning a star on; cleared after the animation so it
     // doesn't replay on the next re-render.
     this.poppedFavId = next ? r.id : null;
     if (next) {
@@ -322,8 +323,8 @@ export class RecordingsListElement extends LitElement {
       if (f.like_id) {
         // "More like this": the list becomes the similarity ranking seeded by
         // that recording's stored vectors. Same result shape as a semantic
-        // query, so the relevance chips render identically; the header shows
-        // a `~similar:` pill whose ✕ clears like_id back to the normal list.
+        // query, so the relevance chips render identically; the header shows a
+        // `~similar:` pill whose ✕ clears `like_id` back to the normal list.
         const results = await moreLikeThis(f.like_id, this.pageSize);
         rows = results.map((r) => r.recording);
         for (const r of results) this.relevanceById.set(r.recording.id, r.score);
@@ -337,12 +338,12 @@ export class RecordingsListElement extends LitElement {
         this.reachedEnd = true;
       } else {
         // The kind/favorite filter goes server-side (SQL, pre-pagination) so
-        // every page is full of the chosen kind — see toWireFilter.
+        // every page is full of the chosen kind — see `toWireFilter`.
         rows = await listRecordings({ ...toWireFilter(f), limit: this.pageSize, offset: 0 });
         this.reachedEnd = rows.length < this.pageSize;
       }
       rows = this.filterByKind(rows, f.kind);
-      // Enforce the sidebar tag filter too — the semantic/like paths above don't
+      // Enforce the sidebar tag filter too: the semantic/like paths above don't
       // send it to the backend, so it'd otherwise be ignored mid-search.
       rows = this.filterByTag(rows, f);
       const ids = new Set(rows.map((r) => r.id));
@@ -354,9 +355,9 @@ export class RecordingsListElement extends LitElement {
       this.multiSelected = nextMulti;
       // refresh() is the one selection mutator that prunes silently. Every other
       // site fires onSelectionChangeCb to keep RecordingsView's mirror (which dd /
-      // Delete and the bulk bar read) in sync — so a row leaving the page (filter
-      // narrowed, deleted elsewhere) must do the same, or the mirror keeps a stale
-      // id that a later dd/Delete would wrongly act on.
+      // Delete and the bulk bar read) in sync, so a row leaving the page (filter
+      // narrowed, deleted elsewhere) has to do the same. Otherwise the mirror
+      // holds a stale id that a later dd/Delete would wrongly act on.
       if (nextMulti.size !== prevSelCount) this.onSelectionChangeCb(new Set(nextMulti));
       this.store.set({ ...this.store.get(), recordings: rows, loading: false });
     } catch (e) {
@@ -469,8 +470,8 @@ export class RecordingsListElement extends LitElement {
     this.editingMeetingId = null;
     const trimmed = value.trim();
     const finalValue = trimmed === "" ? null : trimmed;
-    // The icon is a per-device display pref (localStorage); the name is stored
-    // in the catalog via the daemon.
+    // The icon is a per-device display pref (localStorage); the name lives in the
+    // catalog, written through the daemon.
     saveMeetingIcon(meetingId, this.editingIcon);
     try {
       await updateMeetingName(meetingId, finalValue);
@@ -483,9 +484,9 @@ export class RecordingsListElement extends LitElement {
   }
 
   private handleKeyDown(e: KeyboardEvent, navRows: NavRow[]) {
-    // Don't hijack keys (especially Space) while the user is typing in an
-    // input — e.g. renaming a meeting. Otherwise Space would toggle the
-    // focused row's checkbox instead of inserting a space in the name.
+    // Don't hijack keys (especially Space) while the user is typing in an input,
+    // e.g. renaming a meeting. Otherwise Space would toggle the focused row's
+    // checkbox instead of inserting a space in the name.
     const tgt = e.target as HTMLElement | null;
     if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) {
       return;
@@ -506,8 +507,8 @@ export class RecordingsListElement extends LitElement {
     }
 
     // With vim navigation on, j / k are plain down / up within the list (no
-    // shift-extend — that stays on the arrow keys). They're inert otherwise so
-    // a stray keystroke on the focused list never moves the cursor for users
+    // shift-extend — that stays on the arrow keys). They do nothing otherwise,
+    // so a stray keystroke on the focused list never moves the cursor for users
     // who haven't opted in.
     const vim = !!this.config?.interface?.vim_nav;
     const arrowNav = !!this.config?.interface?.arrow_nav;
@@ -526,9 +527,9 @@ export class RecordingsListElement extends LitElement {
       this.scrollFocusedIntoView();
     } else if (key === "ArrowUp") {
       e.preventDefault();
-      // With vim OR arrow nav on, pressing up at the very top steps OUT of the
+      // With vim or arrow nav on, pressing up at the very top steps out of the
       // list into the header search box — ArrowDown / Esc there come back down.
-      // Shift+Up stays a range-select (never escapes the list mid-selection).
+      // Shift+Up stays a range-select (it never escapes the list mid-selection).
       if ((vim || arrowNav) && this.focusedIndex <= 0 && !e.shiftKey) {
         // Highlight (not focus) the search box so h/l can roam the header.
         window.dispatchEvent(new CustomEvent("phoneme:enter-header-nav"));
@@ -547,8 +548,8 @@ export class RecordingsListElement extends LitElement {
       if (!row) return;
       // On a meeting header: Enter expands/collapses it; Shift+Enter opens the
       // merged conversation view (same as clicking the header). On a recording,
-      // Enter opens it (single recordings have no merged view, so Shift is a
-      // no-op distinction there).
+      // Enter opens it — single recordings have no merged view, so Shift makes
+      // no difference there.
       if (row.kind === "header") {
         if (e.shiftKey) this.onSelectCb("session:" + row.meetingId);
         else this.toggleSession(row.meetingId);
@@ -619,8 +620,8 @@ export class RecordingsListElement extends LitElement {
   }
 
   /** The id of the recording under the keyboard cursor, or null when none is
-   *  focused (or the cursor is on a meeting header — `dd` shouldn't delete a
-   *  whole meeting). Used by `dd` to delete the row the cursor is on. */
+   *  focused or the cursor is on a meeting header (`dd` shouldn't delete a whole
+   *  meeting). Used by `dd` to delete the row the cursor is on. */
   getFocusedId(): string | null {
     if (this.focusedIndex < 0) return null;
     const row = this.lastNavRows[this.focusedIndex];
@@ -712,9 +713,9 @@ export class RecordingsListElement extends LitElement {
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
-      // Persist widths keyed by COLUMN NAME (localStorage) so they survive
-      // adding, removing, or reordering columns. The old positional config
-      // array misaligned on any column change, which forced a full reset.
+      // Persist widths keyed by column name (localStorage) so they survive
+      // adding, removing, or reordering columns. A positional array would
+      // misalign on any column change and force a full reset.
       if (this.currentWidths) {
         const map = loadColWidths();
         visibleCols.forEach((c, i) => {
@@ -744,8 +745,8 @@ export class RecordingsListElement extends LitElement {
       : s.recordings;
     if (recs.length === 0) {
       // Distinguish an empty library (onboarding) from a filter/search that
-      // simply hid everything — otherwise the onboarding copy wrongly implies
-      // you have no recordings when you do, just none matching.
+      // simply hid everything. Otherwise the onboarding copy wrongly implies you
+      // have no recordings when you do, just none matching.
       const f = filterStore.get();
       const filtered = !!(
         f.search ||
@@ -783,14 +784,14 @@ export class RecordingsListElement extends LitElement {
       "transcript",
     ];
     // The star/favorite column is always present (a quick affordance, not a data
-    // column you reorder) — inject it at the front when the saved column config
+    // column you reorder), so inject it at the front when the saved column config
     // doesn't already include it.
     if (!visibleCols.includes("favorite")) visibleCols = ["favorite", ...visibleCols];
-    // The transcript snippet is ALWAYS the last column — its read-more horizontal
-    // scroll requires it and any other position misbehaves (Settings pins it last
-    // too; this is the defensive guarantee). If a stale config had it elsewhere,
-    // moving it would misalign the positional column widths, so drop those and
-    // let the widths recompute in the corrected order.
+    // The transcript snippet is always the last column: its read-more horizontal
+    // scroll depends on it and any other position misbehaves (Settings pins it
+    // last too; this is the defensive guarantee). If a stale config has it
+    // elsewhere, moving it would misalign the positional column widths, so drop
+    // those and let the widths recompute in the corrected order.
     const tIdx = visibleCols.indexOf("transcript");
     const transcriptMoved = tIdx >= 0 && tIdx !== visibleCols.length - 1;
     if (transcriptMoved) {
@@ -822,7 +823,7 @@ export class RecordingsListElement extends LitElement {
         source: "84px",
         transcript: "1fr",
       };
-      // Widths are keyed by column NAME (localStorage), so each column keeps its
+      // Widths are keyed by column name (localStorage), so each column keeps its
       // size across add/remove/reorder; fall back to the per-column default.
       const saved = loadColWidths();
       activeWidths = visibleCols.map((c) => saved[c] || defaults[c] || "auto");
@@ -830,12 +831,12 @@ export class RecordingsListElement extends LitElement {
     }
 
     const checkboxColWidth = "28px";
-    // The transcript "read more by scrolling" behavior (Option A) applies ONLY
-    // when transcript is the LAST column: there it sizes to its content
+    // The transcript "read more by scrolling" behavior applies only when
+    // transcript is the last column: there it sizes to its content
     // (`max-content`, capped at 1200px via `.transcript-tail .rec-preview`) so the
     // row grows past the pane and you scroll to read more. Anywhere else (when
     // rearranged in Appearance settings) it's a normal, resizable, fixed-width
-    // column like the rest — never ballooning mid-row. A cell-less `minmax(0,1fr)`
+    // column like the rest, never ballooning mid-row. A cell-less `minmax(0,1fr)`
     // filler is appended only when no column is already flexible, so the row
     // always fills the pane to the splitter.
     const transcriptIsLast = visibleCols[visibleCols.length - 1] === "transcript";
@@ -922,9 +923,9 @@ export class RecordingsListElement extends LitElement {
     `;
 
     const grouped = groupRecordings(recs);
-    // Flatten into navigable rows: a header per meeting (always), followed by
-    // its tracks only when expanded. j/k step through this exact list, and the
-    // DOM is rendered from it in the same order so focusedIndex always aligns.
+    // Flatten into navigable rows: a header per meeting (always), followed by its
+    // tracks only when expanded. j/k step through this exact list, and the DOM is
+    // rendered from it in the same order so `focusedIndex` always aligns.
     const navRows: NavRow[] = [];
     for (const item of grouped) {
       if (item.kind === "single") {
@@ -986,8 +987,8 @@ export class RecordingsListElement extends LitElement {
     const searchTerm = filterStore.get().search ?? "";
 
     // Source: every recording reports its actual capture source in `track` —
-    // "system" (system-audio loopback) or "mic" (microphone); meeting tracks and
-    // single recordings alike. An older row with no track falls back to mic.
+    // "system" (system-audio loopback) or "mic" (microphone) — for meeting tracks
+    // and single recordings alike. A row with no track falls back to mic.
     const sourceIsSystem = track === "system";
     const sourceLabel = sourceIsSystem ? "System audio" : "Microphone";
     const sourceIcon = sourceIsSystem ? "🔊" : "🎤";
@@ -1002,7 +1003,7 @@ export class RecordingsListElement extends LitElement {
       : nothing;
 
     // Semantic-search relevance chip: only present when this row came from a
-    // semantic search (relevanceById is populated). Shows the calibrated 0..1
+    // semantic search (`relevanceById` is populated). Shows the calibrated 0..1
     // score as a percentage so the user sees how strong each match is.
     const relevance = this.relevanceById.get(r.id);
     const relevanceChip =
@@ -1035,10 +1036,10 @@ export class RecordingsListElement extends LitElement {
       user_edited: html`<span class="rec-check" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       diarized: html`<span class="rec-check" title=${r.diarized ? "Speaker diarization applied" : ""}>${r.diarized ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span></span>`,
-      // A titled recording gets the title as a bold first line of the
-      // transcript cell — but ONLY as a fallback when the dedicated Title column
-      // is off. With the Title column on, that column owns the title, so showing
-      // it here too would duplicate it. Untitled rows render exactly as before.
+      // A titled recording gets the title as a bold first line of the transcript
+      // cell, but only as a fallback when the dedicated Title column is off. With
+      // the Title column on, that column owns the title, so showing it here too
+      // would duplicate it.
       transcript: html`<span class="rec-preview">${
         r.title && !visibleCols.includes("title")
           ? html`<span class="rec-preview-title">${r.title}</span><span class="rec-preview-sep" aria-hidden="true">·</span>`
@@ -1196,12 +1197,12 @@ function truncatedError(r: Recording): string {
   return "(processing…)";
 }
 
-// Temporary vanilla wrapper to keep index.ts working without changes
-/** Imperative mount wrapper for `<ph-recordings-list>` — RecordingsView's
- *  handle on the list. Forwards the shared state store + selection callbacks
- *  in, and re-exposes the element's keyboard/selection API out (refresh,
- *  clear/selectAll, focusEdge, getFocusedId, setPendingDelete, ensureCursor,
- *  centerCursor) so the view never touches the element directly. */
+/** Plain-class mount wrapper for `<ph-recordings-list>`, so `index.ts` can use
+ *  it without touching the custom element. It's RecordingsView's handle on the
+ *  list: forwards the shared state store + selection callbacks in, and re-exposes
+ *  the element's keyboard/selection API out (refresh, clear/selectAll, focusEdge,
+ *  getFocusedId, setPendingDelete, ensureCursor, centerCursor) so the view never
+ *  touches the element directly. */
 export class RecordingsList {
   private element: RecordingsListElement;
   constructor(

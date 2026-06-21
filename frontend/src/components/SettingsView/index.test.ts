@@ -91,7 +91,7 @@ describe("SettingsView", () => {
     element.switchTab("appearance");
     await element.updateComplete;
     
-    // Check that SectionTray is NOT in the appearance tab
+    // SectionTray shouldn't show up in the appearance tab
     const headingsInAppearance = Array.from(element.querySelectorAll("h3")).map((h: any) => h.textContent);
     expect(headingsInAppearance).not.toContain("System");
     

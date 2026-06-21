@@ -29,9 +29,9 @@ const POS_LS = "phoneme.bulkBarPos";
  * dispatches `phoneme:open-split`), Delete (`phoneme:request-delete`, the
  * undoable flow), and ✕ Clear.
  *
- * State: the selection itself is OWNED by the list — this gets it as the
- * `selected` property on every change; its own state is just menu/busy/drag
- * bookkeeping. Keyboard: Shift+Enter in the list dispatches
+ * State: the list owns the selection itself — this gets it as the `selected`
+ * property on every change; its own state is just menu/busy/drag bookkeeping.
+ * Keyboard: Shift+Enter in the list dispatches
  * `phoneme:enter-bulk-bar`, which starts a roving h/l cursor over the
  * buttons (Enter activates, j/k/Esc return to the list); its Escape handler
  * runs capture-phase so an open menu closes without clearing the selection.
@@ -188,7 +188,7 @@ export class BulkActionBarElement extends LitElement {
         btns[this.navIndex]?.click();
         // After the action settles (one frame, so a modal/menu has mounted): if it
         // opened an in-bar dropdown (Tag/Export) or a modal (Re-run), those own the
-        // keyboard next — leave the cursor be. Otherwise the action closed the bar
+        // keyboard next, so leave the cursor be. Otherwise the action closed the bar
         // (Delete/Deselect clear the selection and unmount it), so hand the cursor
         // and its glow back to the list instead of stranding it on the removed
         // button.
@@ -308,7 +308,7 @@ export class BulkActionBarElement extends LitElement {
     this.callbacks.onRefresh();
   }
 
-  /** Open the two selected recordings in SPLIT mode (two full panes). Only
+  /** Open the two selected recordings in split mode (two full panes). Only
    *  meaningful with exactly two selected — the button only shows then, and the
    *  `\` shortcut is gated the same way. RecordingsView owns the panes. */
   private async openSideBySide() {
@@ -321,8 +321,7 @@ export class BulkActionBarElement extends LitElement {
    *  the same context-aware modal the detail Re-run and the header Quick
    *  Switcher use, so bulk and single Re-run are identical. "Run once" there
    *  re-runs each selected recording's whole pipeline; "Save as default"
-   *  persists the chosen models. (Replaces the old per-step RerunForm, which is
-   *  what had broken for the bulk surface.) */
+   *  persists the chosen models. */
   private async openBulkRerun() {
     if (this.busy) return;
     const ids = [...this.selected];

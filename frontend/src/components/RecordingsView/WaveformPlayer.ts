@@ -139,15 +139,15 @@ export class WaveformPlayerElement extends LitElement {
   }
 }
 
-/** Imperative mount wrapper: RecordingDetail constructs ONE per pane and
+/** Imperative mount wrapper: RecordingDetail constructs one per pane and
  *  re-`mount`s it on each render so the element (and its wavesurfer) is
  *  reused rather than rebuilt; callbacks adapt the element's CustomEvents. */
 export class WaveformPlayer {
   private element: WaveformPlayerElement;
   // The element is reused for the life of the host pane, so each setOn* call
-  // must drop its previous listener before adding a new one — otherwise every
-  // recording opened in the same pane stacks another callback on the SAME
-  // element and a single event fires all of them (remove-before-add).
+  // must drop its previous listener before adding a new one. Otherwise every
+  // recording opened in the same pane stacks another callback on the one
+  // element and a single event fires all of them — hence remove-before-add.
   private onPlayStateChange: ((e: Event) => void) | null = null;
   private onTimeUpdate: ((e: Event) => void) | null = null;
   constructor() {

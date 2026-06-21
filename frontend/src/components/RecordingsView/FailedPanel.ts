@@ -22,13 +22,13 @@ export type FailureStage = "transcribe" | "hook";
 type FailureDetail = { stage: FailureStage; error: string; at: number };
 
 /**
- * Session-level cache of failure details, keyed by recording id. The daemon now
+ * Session-level cache of failure details, keyed by recording id. The daemon
  * persists the reason on the row (`error_kind`/`error_message`), so the stored
  * value is authoritative and survives a restart — `failureMessage` prefers it.
- * This cache is the fallback for the window between a live
- * `transcription_failed` / `hook_failed` event and the next catalog refresh: the
- * always-mounted queue panel feeds it from its event subscription so a failure
- * that happens while the app is open shows its actual message immediately.
+ * This cache covers the window between a live `transcription_failed` /
+ * `hook_failed` event and the next catalog refresh: the always-mounted queue
+ * panel feeds it from its event subscription so a failure that happens while the
+ * app is open shows its actual message immediately.
  */
 const sessionFailures = new Map<string, FailureDetail>();
 
@@ -137,8 +137,8 @@ export class FailedPanelElement extends LitElement {
   /** True while the clear-failed request runs. */
   @state() private clearing = false;
   /** Inbox `failed/` quarantine depth — what Clear failed actually empties.
-   *  Distinct from `rows` (catalog statuses): clearing the quarantine does
-   *  NOT un-fail the recordings, and a retry doesn't shrink the quarantine. */
+   *  Distinct from `rows` (catalog statuses): clearing the quarantine does not
+   *  un-fail the recordings, and a retry doesn't shrink the quarantine. */
   @state() private inboxFailed = 0;
 
   private unsub: (() => void) | null = null;
@@ -231,8 +231,8 @@ export class FailedPanelElement extends LitElement {
     }
   }
 
-  /** Re-run the whole pipeline for one recording (the v1 retry) and drop the
-   *  row optimistically — the daemon marks it transcribing before returning. */
+  /** Re-run the whole pipeline for one recording and drop the row
+   *  optimistically — the daemon marks it transcribing before returning. */
   private async retry(id: string) {
     if (this.retrying.has(id) || this.retryAll !== null) return;
     this.retrying = new Set(this.retrying).add(id);

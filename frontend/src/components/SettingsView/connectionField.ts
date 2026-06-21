@@ -1,18 +1,18 @@
 import { escapeHtml as escHtml, escapeAttr as escAttr } from "../../utils/format";
 /**
  * The one connection block behind every provider picker: a grouped select of
- * NAMED providers (the brand the user knows — "On this computer" / "Cloud" /
+ * named providers (the brand the user knows — "On this computer" / "Cloud" /
  * "Advanced"), an API key row that appears only when the provider needs one,
  * a Test button that proves the connection inline, and the endpoint URL tucked
  * under a collapsed Advanced disclosure. Used by the Post-Processing, Summary,
  * Auto-Tag, Transcription and Live Preview settings plus the Models modal.
  *
- * The block reads and writes the EXISTING config shape — the wire `provider`
+ * The block reads and writes the config shape directly — the wire `provider`
  * kind plus `api_url` — through the caller's getters/setters. Picking a named
- * provider writes that provider's kind + default endpoint (what the old quick
- * presets did); the current selection is DERIVED back from (kind, api_url) via
- * the catalog matchers, so saved configs round-trip with zero migration and a
- * hand-edited TOML that matches nothing simply displays as Custom.
+ * provider writes that provider's kind and default endpoint; the current
+ * selection is derived back from (kind, api_url) via the catalog matchers, so
+ * saved configs round-trip with zero migration and a hand-edited TOML that
+ * matches nothing simply displays as Custom.
  *
  * Pure vanilla DOM so it drops into innerHTML-based settings sections and the
  * Lit-rendered Models modal alike. Mounting onto the same host supersedes the
@@ -27,7 +27,7 @@ import { errText } from "../../utils/error";
  *  catalog to offer, and live getters/setters onto its config shape. */
 export interface ConnectionFieldOpts {
   catalog: "llm" | "stt";
-  // Each reads/writes the LIVE config shape for the step:
+  // Each reads/writes the live config shape for the step:
   getKind(): string;
   setKind(k: string): void; // wire provider
   getApiUrl(): string;

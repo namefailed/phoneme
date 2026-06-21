@@ -4,12 +4,12 @@
  *
  * Users can always type any model id by hand (every model input keeps an
  * "Other… (type a model id)" escape hatch). This catalog just lets the UI
- * *suggest* sensible, current options per provider so a non-technical user
+ * suggest sensible, current options per provider so a non-technical user
  * doesn't have to memorise exact model strings. It is surfaced as the dropdown
  * list in the shared model picker (`SettingsView/modelField.ts`), the curated
  * STT/LLM lists, and the first-run wizard.
  *
- * FRONTEND-ONLY. The `id` of each entry is the exact string written to
+ * This is frontend-only. The `id` of each entry is the exact string written to
  * `config.toml` — `config.whisper.model` / `config.whisper.model_path` for
  * transcription, `config.llm_post_process.model` (and `config.summary.model`)
  * for cleanup. Nothing here changes the daemon or the config schema.

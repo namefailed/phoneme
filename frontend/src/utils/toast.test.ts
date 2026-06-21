@@ -115,8 +115,8 @@ describe("showToast", () => {
   });
 
   it("error toast auto-dismisses after its long window (10s)", () => {
-    // Errors used to persist forever; now they time out like everything else
-    // (hover pausing the clock is what protects "I was reading it").
+    // Errors time out like everything else; hover-pausing the clock is what
+    // protects "I was still reading it".
     vi.useFakeTimers();
     showToast("expires", "error");
     const toast = document.querySelector(".toast")!;

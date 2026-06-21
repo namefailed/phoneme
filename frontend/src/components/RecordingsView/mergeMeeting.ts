@@ -41,7 +41,7 @@ export function speakerDisplayName(
  * Apply a recording's custom speaker names to a raw transcript for copy/export,
  * rewriting each `[Speaker N]:` turn marker to `Name:` when a custom name is set
  * for that label (markers with no custom name are left as `Speaker N:`). This is
- * a DISPLAY/EXPORT transform only — the stored transcript is unchanged — so the
+ * a display/export transform only — the stored transcript is unchanged — so the
  * single-recording copy/export carries renamed speakers, mirroring the merged
  * view's `mergedPlainText`. Returns the input unchanged when no names are set.
  */
@@ -77,10 +77,10 @@ export function speakerLabelsIn(transcript: string | null | undefined): number[]
 
 /**
  * Every speaker the rename UI should offer for a recording: the labels still
- * present as `[Speaker N]` markers PLUS any that have already been renamed
+ * present as `[Speaker N]` markers, plus any that have already been renamed
  * (their markers are gone from the baked text, but the names map remembers
- * them). This is what keeps a speaker renamable AFTER the first rename — the
- * marker-only `speakerLabelsIn` would drop it once its name is baked in.
+ * them). This is what keeps a speaker renamable once it's been renamed — the
+ * marker-only `speakerLabelsIn` would drop it as soon as its name is baked in.
  */
 export function speakersForRename(
   transcript: string | null | undefined,
@@ -92,8 +92,8 @@ export function speakersForRename(
 }
 
 /**
- * Rewrite a transcript so speaker `label` reads as `newName`, replacing BOTH its
- * canonical `[Speaker N]:` marker AND a previously-baked `oldName:` turn label —
+ * Rewrite a transcript so speaker `label` reads as `newName`, replacing both its
+ * canonical `[Speaker N]:` marker and a previously-baked `oldName:` turn label,
  * so renaming works the first time and every time after. An empty `newName`
  * restores the `[Speaker N]:` marker so the speaker stays trackable/renamable.
  *

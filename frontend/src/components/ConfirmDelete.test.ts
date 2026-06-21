@@ -228,7 +228,7 @@ describe("confirmRecordingDelete — delete modes", () => {
   });
 
   it("skip pref NEVER silently replays keep-audio — resolves 'everything' and clears the stale mode", async () => {
-    // A user who once hit the old footgun has skip=true + a stale keep_audio mode.
+    // skip=true plus a stale keep_audio mode left in storage.
     localStorage.setItem("phoneme_skip_delete_confirm", "true");
     localStorage.setItem("phoneme_delete_mode", "keep_audio");
     const result = await confirmRecordingDelete();

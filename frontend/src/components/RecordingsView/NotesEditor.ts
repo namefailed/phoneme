@@ -21,7 +21,7 @@ const CHECK_SVG =
  *
  * Mirrors TranscriptEditor but:
  *  - saves via `updateNotes` (not `updateTranscript`)
- *  - saves ONLY on an explicit action — the "Save Changes" button, Ctrl+S, or a
+ *  - saves only on an explicit action — the "Save Changes" button, Ctrl+S, or a
  *    vim `:w` / `:wq`. No auto-save on change or blur (it felt like the box was
  *    silently committing); unsaved edits are surfaced via the Save button and an
  *    `onDirtyChange` callback so the pane can prompt before they're abandoned.
@@ -43,7 +43,7 @@ export class NotesEditor {
   private copyBtn: HTMLButtonElement | null = null;
   private onDirtyChange?: (dirty: boolean) => void;
   private vimSaveHandler = () => {
-    // Save when focus is in the content OR this editor's `:` dialog (the dialog
+    // Save when focus is in the content or this editor's `:` dialog (the dialog
     // holds focus while `:w` runs, so `hasFocus` alone would miss it).
     if (editorOwnsFocus(this.view)) void this.save();
   };
@@ -240,8 +240,8 @@ export class NotesEditor {
 
     document.addEventListener(VIM_SAVE_EVENT, this.vimSaveHandler);
 
-    // Reflect the REAL vim mode in the badge via the editor's own mode-change
-    // events, not a keystroke heuristic. (No-op when vim mode is off.)
+    // Drive the badge from the editor's own mode-change events — the actual vim
+    // mode, not a keystroke heuristic. (No-op when vim mode is off.)
     if (vimMode) {
       const cm = getCM(this.view);
       cm?.on("vim-mode-change", (e: { mode?: string; subMode?: string }) => {

@@ -8,12 +8,12 @@
  * names and payload shapes therefore mirror commands.rs, which in turn
  * mirrors the wire schema in crates/phoneme-ipc/src/schema.rs.
  *
- * Error behavior: every function REJECTS on failure with the structured
+ * Error behavior: every function rejects on failure with the structured
  * `{ kind, message }` command error (see utils/error.ts). Nothing here
  * toasts — callers decide how to surface failures.
  *
  * House rules for adding a call: argument keys are camelCase (Tauri converts
- * the top-level keys to the command's snake_case parameters — but NOT keys
+ * the top-level keys to the command's snake_case parameters, but not the keys
  * nested inside object values, so wire-shaped objects like `ListFilter` and
  * `RerunAllOverrides` keep snake_case fields), and mutations that change
  * catalog state come back to the UI as daemon events, not return values.
@@ -433,15 +433,15 @@ export async function updateMeetingName(meetingId: string, name: string | null):
   await tauriInvoke("update_meeting_name", { meetingId, name });
 }
 
-/** Abort the active recording and DISCARD its audio — nothing is transcribed
- *  and no catalog row survives (`recording_cancelled` fires). */
+/** Abort the active recording and discard its audio: nothing is transcribed and
+ *  no catalog row survives (`recording_cancelled` fires). */
 export async function recordCancel(): Promise<void> {
   await tauriInvoke("record_cancel");
 }
 
 /**
  * Meeting Mode (v1.6): start a dual-track recording. The daemon captures the
- * microphone AND the system audio (WASAPI loopback) concurrently as two
+ * microphone and the system audio (WASAPI loopback) concurrently as two
  * separate recordings linked by a shared `meeting_id`. Returns the session id.
  */
 export async function startMeeting(): Promise<{ meeting_id: string }> {
@@ -530,8 +530,8 @@ export async function refireHook(id: string, command: string | null = null): Pro
 }
 
 /**
- * Re-run ONLY the LLM post-processing ("cleanup") step on a recording's stored
- * transcript — without re-transcribing the audio. The preserved original
+ * Re-run only the LLM post-processing ("cleanup") step on a recording's stored
+ * transcript, without re-transcribing the audio. The preserved original
  * (machine) transcript is used as the input, so the original is never lost.
  * Each override applies to this run only and is never written back to config;
  * `null` falls back to the configured `[llm_post_process]` value. Supplying a
@@ -618,9 +618,9 @@ export async function clearFailed(): Promise<number> {
   return r.removed;
 }
 
-/** Dismiss ONE item from the inbox `failed/` quarantine by id (the per-item
+/** Dismiss a single item from the inbox `failed/` quarantine by id (the per-item
  *  counterpart to {@link clearFailed}). Returns whether a file was removed.
- *  The catalog row keeps its failed status — only the inbox file is removed. */
+ *  The catalog row keeps its failed status; only the inbox file is removed. */
 export async function dismissFailed(id: string): Promise<boolean> {
   const r = await tauriInvoke<{ removed: boolean }>("dismiss_failed", { id });
   return r.removed;
@@ -657,7 +657,7 @@ export async function tailLog(name: string, maxLines = 200): Promise<string> {
   return await tauriInvoke<string>("tail_log", { name, maxLines });
 }
 
-/** Remove ALL still-pending items from the queue. Returns how many were removed. */
+/** Remove every still-pending item from the queue. Returns how many were removed. */
 export async function cancelAllQueued(): Promise<number> {
   const r = await tauriInvoke<{ removed: number }>("cancel_all_queued");
   return r.removed;
@@ -872,7 +872,7 @@ export async function forgetNamedVoice(id: string): Promise<boolean> {
   return r.removed;
 }
 
-/** Whether the daemon process is running, and its pid. Answered by the TRAY
+/** Whether the daemon process is running, and its pid. The tray answers this
  *  (it owns the daemon process), so it works even when the daemon is down —
  *  the Doctor surfaces use it as the "is anything alive" check. */
 export async function daemonStatus(): Promise<{ running: boolean; pid: number }> {
@@ -891,7 +891,7 @@ export async function listTags(): Promise<Tag[]> {
   return await tauriInvoke<Tag[]>("list_tags");
 }
 
-/** Returns ALL tags including orphaned ones — used by the Tag Manager. */
+/** Returns every tag, orphaned ones included — used by the Tag Manager. */
 export async function listAllTags(): Promise<Tag[]> {
   return await tauriInvoke<Tag[]>("list_all_tags");
 }

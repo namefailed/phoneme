@@ -18,9 +18,9 @@ const AUTO_DISMISS_MS: Record<ToastType, number> = {
   success: 3000,
   info: 3500,
   warning: 6000,
-  // Errors used to persist forever; now they get a long-but-finite window.
-  // Hovering pauses the clock (see below), so "I was reading it" never loses
-  // the message — and callers can still pass duration 0 for a sticky toast.
+  // Errors get a long-but-finite window. Hovering pauses the clock (see below)
+  // so reading one can't lose the message, and a caller can still pass
+  // duration 0 for a sticky toast.
   error: 10000,
 };
 
@@ -93,11 +93,11 @@ export function showToast(
 }
 
 /**
- * Auto-dismiss `el` after `totalMs`, but PAUSE the clock while the pointer is
- * over it — reading or aiming for a button must never race the timeout. The
+ * Auto-dismiss `el` after `totalMs`, but pause the clock while the pointer is
+ * over it, so reading or aiming for a button never races the timeout. The
  * countdown bar pauses in sync via CSS (`.toast:hover .toast-countdown`).
- * Resuming always grants a small grace so the toast can't vanish the instant
- * the pointer leaves.
+ * Resuming grants a small grace so the toast can't vanish the instant the
+ * pointer leaves.
  */
 function attachPausableTimer(el: HTMLElement, totalMs: number, onExpire: () => void) {
   let remaining = totalMs;
@@ -121,7 +121,7 @@ function attachPausableTimer(el: HTMLElement, totalMs: number, onExpire: () => v
  * Show a toast with an action button (e.g. "Undo") plus a thin countdown bar.
  *
  * Three exits, each fires exactly one callback:
- *   • the action button  → `onAction`  (and NOT onExpire)
+ *   • the action button    → `onAction` (never `onExpire`)
  *   • the × / auto-timeout → `onExpire`
  * Used by the undoable-delete flow: the row is hidden immediately, the real
  * delete is deferred to `onExpire`, and `onAction` cancels it.

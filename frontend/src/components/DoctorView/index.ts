@@ -26,8 +26,8 @@ const FIX_ALL = "__all__";
  * overlay, so it can be linked to and survives longer triage sessions.
  *
  * One difference from the modal: it assembles checks from three sources
- * itself — its own `daemon_status` probe (the daemon row must work when the
- * daemon is DOWN) plus the tray's `doctor_local_checks` and
+ * itself — its own `daemon_status` probe (the daemon row has to work even when
+ * the daemon is down) plus the tray's `doctor_local_checks` and
  * `doctor_backend_checks` commands — where the modal uses the aggregate
  * `runDoctor()`. Mounted by App via the `DoctorView` wrapper; `onClose`
  * routes back to the library.
@@ -202,8 +202,8 @@ export class DoctorViewElement extends LitElement {
         break;
       }
       case "open_hooks_folder": {
-        // Resolves the real per-user hooks dir daemon-side and opens it.
-        // (The old env-var string path was never expanded, so it failed.)
+        // Resolve the real per-user hooks dir daemon-side (env vars expanded)
+        // and open it.
         await invoke("open_hooks_folder").catch(() => {});
         break;
       }

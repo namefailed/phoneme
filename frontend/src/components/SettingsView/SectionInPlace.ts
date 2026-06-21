@@ -28,9 +28,9 @@ function prettyModel(path: string): string {
 /** How `[in_place].stt` is being edited: absent = Automatic (the daemon falls
  *  back preview → main `[whisper]`), present = a pinned custom provider. */
 type SttMode = "auto" | "custom";
-/** Which whisper server a custom LOCAL config uses: an already-running one
+/** Which whisper server a custom local config uses: an already-running one
  *  (`main` / `preview`), or a `dedicated` third server the daemon supervises
- *  just for dictation (the power-user opt-in — uses extra RAM). */
+ *  just for dictation (the power-user opt-in, which uses extra RAM). */
 type LocalServer = "main" | "preview" | "dedicated";
 
 /**
@@ -43,10 +43,10 @@ type LocalServer = "main" | "preview" | "dedicated";
  * `in_place.stt` is the same optional-table shape as the Live Preview's
  * `preview_whisper`, so the Automatic↔Custom toggle here mirrors that
  * section's create/clear semantics exactly. One dictation-specific wrinkle:
- * the daemon never supervises a third whisper-server, so a custom LOCAL
- * config can only point at a server that's already running (the main one or
- * the preview's) — `in_place_provider_config()` mints a provider straight
- * from this table and local resolves via `server_base_url()`.
+ * by default the daemon won't supervise a third whisper-server, so a custom
+ * local config usually points at one that's already running (the main one or
+ * the preview's). `in_place_provider_config()` mints a provider straight from
+ * this table, and local resolves via `server_base_url()`.
  */
 export class SectionInPlace {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -158,8 +158,8 @@ export class SectionInPlace {
    *                  server. Clears the opt-in flag.
    *  - "preview"   — pins the preview server's port/model, reusing it. Clears
    *                  the flag.
-   *  - "dedicated" — the power-user opt-in: a DISTINCT port (main+2) + its own
-   *                  model + `use_own_bundled_server = true`, so the daemon
+   *  - "dedicated" — the power-user opt-in: its own port (main+2), its own
+   *                  model, and `use_own_bundled_server = true`, so the daemon
    *                  supervises a third server and dictation actually dials it.
    *                  Uses extra RAM. */
   private setSttLocal(server: LocalServer) {
@@ -624,7 +624,7 @@ export class SectionInPlace {
       const previewServerRuns =
         !!this.config.recording?.streaming_preview &&
         this.config.preview_whisper?.provider === "local";
-      // Show the port the server ACTUALLY bound when the daemon reports a
+      // Show the port the server really bound when the daemon reports a
       // fallback; the configured port stays the editable value. The note is
       // empty for external configs or when no fallback is known.
       const hint = effectiveLocalWhisperHint(this.sttLocalUrl(stt), this.portStatus);
@@ -746,9 +746,9 @@ export class SectionInPlace {
   /** Render the dedicated-server model picker as a dropdown of downloaded
    *  models (mirrors SectionPreview's `src === "local"` branch): an <option>
    *  per downloaded model with the current `model_path` pre-selected (matched
-   *  on the normalized filename), writing the FULL path on change. Fetches the
+   *  on the normalized filename), writing the full path on change. Fetches the
    *  list lazily the first time and re-renders on resolve; shows an empty-state
-   *  with a pointer to the Whisper section when nothing is downloaded. */
+   *  pointing at the Whisper section when nothing is downloaded. */
   private renderDedicatedModelSelect(host: HTMLElement) {
     if (!this.config.in_place?.stt) return;
     const current = this.config.in_place.stt.model_path ?? "";

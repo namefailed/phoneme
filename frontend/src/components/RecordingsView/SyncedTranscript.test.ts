@@ -86,7 +86,7 @@ describe("SyncedTranscript", () => {
 
   it("marks only words scored below LOW_CONFIDENCE, leaving unscored ones plain", async () => {
     // Provider confidence: 0.97 (high), null (unscored), 0.3 (low), 0.8 (high).
-    // Only the 0.3 word should get the squiggle; null must NOT be flagged.
+    // Only the 0.3 word should get the squiggle; the null one stays unflagged.
     vi.mocked(getWords).mockResolvedValue([
       { idx: 0, start_ms: 0, end_ms: 500, text: "clear", speaker: "1", confidence: 0.97 },
       { idx: 1, start_ms: 500, end_ms: 1000, text: "unscored", speaker: "1", confidence: null },

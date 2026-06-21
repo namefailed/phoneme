@@ -34,7 +34,7 @@ type PreviewSource = "same" | "local" | "api";
  * Live-preview configuration. The preview can run on its own provider so it
  * never contends with the (heavy) final model:
  *   • Same as final — reuse the main provider/server (default).
- *   • Dedicated local model — a small model on its OWN bundled server.
+ *   • Dedicated local model — a small model on its own bundled server.
  *   • Cloud API — a fast API (e.g. Groq).
  * Writes `config.recording.streaming_preview` + `config.preview_whisper`; the
  * global Settings Save persists via write_config. The daemon spins up / tears
@@ -76,9 +76,9 @@ export class SectionPreview {
     return (this.config.whisper?.bundled_server_port ?? 5809) as number;
   }
 
-  /** True when the FINAL transcription model is a heavy local model (medium /
+  /** True when the final transcription model is a heavy local model (medium /
    *  large). Sharing it for the preview ("same as final") is what makes the live
-   *  text lag on a modest machine — so we nudge toward a dedicated tiny model.
+   *  text lag on a modest machine, so we nudge toward a dedicated tiny model.
    *  A cloud final model has no local CPU cost to share, so it's never "heavy"
    *  here. */
   private mainModelIsHeavy(): boolean {

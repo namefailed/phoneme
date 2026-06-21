@@ -46,17 +46,17 @@ import { SyncedTranscript } from "./SyncedTranscript";
  * mode) and drives it imperatively — `show(id)` loads + renders, `clear()`
  * empties, `showTimeline()`/`setSyncGroup()` serve the dual-timeline split,
  * `hasDirtyEdits()` backs the view's unsaved-edits guards, `togglePlay()`
- * forwards to the player. Refreshes for the SAME recording update text in
+ * forwards to the player. A refresh for the same recording updates text in
  * place instead of remounting, so the waveform never flickers; `onRefresh`
  * (injected) asks the view to re-query the list after mutations.
  *
  * Keyboard: the open-recording keys (p/c/e/r…) arrive at the embedded
  * ActionRow via `phoneme:action`; the vim layer's detail-pane grid is driven
- * by RecordingsView, which walks THIS pane's buttons/editors as grid cells.
+ * by RecordingsView, which walks this pane's buttons/editors as grid cells.
  * Dispatches `phoneme:toggle-focus-mode` (⛶) and `phoneme:close-detail` (✕).
  */
 /** The app-wide dropdown chevron (matches the header split buttons), for the
- *  Views/Versions triggers — instead of a stray "▾" glyph. */
+ *  Views/Versions triggers, rather than a stray "▾" glyph. */
 const CHEVRON_SVG =
   '<svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>';
 
@@ -83,32 +83,33 @@ export class RecordingDetail {
   /** Opens the timeline peek for the currently rendered recording; assigned in
    *  renderRecording where the peek wiring lives. */
   private openTimelinePeek: (() => void) | null = null;
-  /** Identity of what is currently rendered, so refreshes that don't change the
-   *  recording or its audio file can update text in place instead of tearing
-   *  down and remounting the waveform (which caused it to flicker/clear). */
+  /** Identity of what is currently rendered, so a refresh that doesn't change the
+   *  recording or its audio file can update text in place instead of tearing down
+   *  and remounting the waveform (a remount flickers and clears it). */
   private renderedId: string | null = null;
   private renderedAudioPath: string | null = null;
   /** Whether the summary "peek" is currently hijacking the transcript box. */
   private summaryPeeking = false;
   /** Generation token for the summary-generation poll loop. Each requestSummary
    *  call bumps it and captures the new value; a running tick bails the moment
-   *  its generation is stale, so a regenerate-while-polling retires the old poll
-   *  and starts a fresh one (instead of the old early-return dropping it). */
+   *  its generation is stale. So a regenerate-while-polling retires the old poll
+   *  and starts a fresh one. */
   private summaryPollGen = 0;
   /** The 24-hour-time setting, for the header date (K). Loaded from config and
    *  kept current via the config:saved event. */
   private use24h = false;
   /** Serializes speaker-rename commits. Each commit reads `this.recording.
-   *  transcript`, rewrites it, and writes it back across two awaits; tabbing
-   *  through the speakers modal can fire several blur commits at once, so without
-   *  this chain two concurrent renames would each rewrite from a pre-other-write
-   *  transcript and the later writer would clobber the earlier one's change (DB
-   *  + memory). Chaining makes each commit read-then-write atomically. */
+   *  transcript`, rewrites it, and writes it back across two awaits. Tabbing
+   *  through the speakers modal can fire several blur commits at once; without
+   *  this chain, two concurrent renames each rewrite from the transcript as it
+   *  was before the other's write, and the later writer clobbers the earlier
+   *  one's change (in the DB and in memory). Chaining makes each commit
+   *  read-then-write atomically. */
   private speakerCommitChain: Promise<void> = Promise.resolve();
   /** Close fn of the currently-open modal (Compare / Speakers), if any. These
    *  modals append to document.body and add a document-level keydown listener,
-   *  so navigating to another recording (renderRecording/clear) must close the
-   *  open one — otherwise it stays visible over the new recording AND keeps
+   *  so navigating to another recording (renderRecording/clear) has to close the
+   *  open one. Otherwise it stays visible over the new recording and keeps
    *  intercepting Escape. Set when a modal opens, cleared by its own close(). */
   private activeModalClose: (() => void) | null = null;
 
@@ -154,7 +155,7 @@ export class RecordingDetail {
       statusEl.textContent = statusLabel(r.status);
     }
 
-    // The title can change underneath us (the title editor's own save, an
+    // The title can change underneath us (the title editor's own save, or an
     // auto title landing after transcription) — but never clobber an edit in
     // progress.
     const titleHost = this.container.querySelector<HTMLElement>("#detail-title");
@@ -174,10 +175,10 @@ export class RecordingDetail {
     const statsEl = this.container.querySelector<HTMLElement>("#detail-stats");
     if (statsEl) statsEl.textContent = wordCountSummary(r.transcript ?? "");
 
-    // Only rebuild the transcript editor if the text changed and the user has
-    // no unsaved edits — avoids clobbering in-progress typing. (Speaker renames
-    // are baked into the stored transcript on rename, so the text already has
-    // the names — no display overlay needed here.)
+    // Only rebuild the transcript editor if the text changed and the user has no
+    // unsaved edits, so in-progress typing isn't clobbered. (Speaker renames are
+    // baked into the stored transcript on rename, so the text already carries the
+    // names — no display overlay needed here.)
     if (!this.dirty) {
       const newText = r.transcript ?? "";
       const currentText = this.editor?.getText() ?? "";
@@ -193,7 +194,7 @@ export class RecordingDetail {
     }
 
     // Refresh the Speakers panel (labels and custom names may have changed), but
-    // not while the user is mid-rename — re-rendering would steal focus.
+    // not while the user is mid-rename, since re-rendering would steal focus.
     const editingSpeaker = !!this.container
       .querySelector<HTMLElement>("#speakers-block")
       ?.contains(document.activeElement);
@@ -259,13 +260,13 @@ export class RecordingDetail {
 
   private renderRecording() {
     if (!this.recording) return;
-    // A body-level modal (Compare / Speakers) opened for the PREVIOUS recording
-    // outlives this.container, so close it before mounting the new one —
-    // otherwise it floats over the fresh recording and keeps eating Escape.
+    // A body-level modal (Compare / Speakers) opened for an earlier recording
+    // outlives this.container, so close it before mounting the new one. Otherwise
+    // it floats over the fresh recording and keeps eating Escape.
     this.activeModalClose?.();
-    // The previous render's timeline (if any) lives in DOM this rewrite is
-    // about to replace — drop its window listeners. `pendingTimeline` is left
-    // alone: it may have been set for THIS render.
+    // The previous render's timeline (if any) lives in DOM this rewrite is about
+    // to replace, so drop its window listeners. `pendingTimeline` is left alone:
+    // it may have been set for this render.
     this.timeline?.dispose();
     this.timeline = null;
     this.synced?.dispose();
@@ -273,8 +274,8 @@ export class RecordingDetail {
     this.openTimelinePeek = null;
     const r = this.recording;
     const stats = wordCountSummary(r.transcript ?? "");
-    // Crisp corner-bracket icons (maximize / minimize) for the focus toggle —
-    // sharper than a font glyph and they swap to signal the current state.
+    // Crisp corner-bracket icons (maximize / minimize) for the focus toggle:
+    // sharper than a font glyph, and they swap to signal the current state.
     const EXPAND_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>`;
     const CONTRACT_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>`;
     // Right-arrow: dismiss the detail pane back to the recordings list (the mouse
@@ -380,8 +381,8 @@ export class RecordingDetail {
     }
 
     // Transcript history: "peek" an earlier version by temporarily hijacking the
-    // transcript box — hide the editor and show the read-only version in the same
-    // slot — rather than opening a separate panel. Three peeks are available:
+    // transcript box (hide the editor, show the read-only version in the same
+    // slot) rather than opening a separate panel. Three peeks are available:
     //   • original  — raw machine transcript, before AI cleanup
     //   • unedited   — transcribed + cleaned, before the user's hand edits
     //   • summary    — AI summary (generated on demand if absent)
@@ -483,7 +484,7 @@ export class RecordingDetail {
     });
 
     // Summary peek: shows the stored AI summary. If none exists yet, generates
-    // one on demand (RerunSummary) and shows a pending state — `requestSummary`
+    // one on demand (RerunSummary) and shows a pending state; `requestSummary`
     // polls for the result and fills the peek in place.
     peeks.summary.btn?.addEventListener("click", async () => {
       if (activePeek === "summary") return resetPeek();
@@ -499,7 +500,7 @@ export class RecordingDetail {
     });
 
     // Timeline peek: the machine segments as a clickable, time-coded list.
-    // Click a line → seek THIS pane's waveform; in a dual-timeline split the
+    // Click a line to seek this pane's waveform; in a dual-timeline split the
     // views share a sync group and mirror seeks/scrolling across panes.
     const mountTimeline = () => {
       if (!this.timeline) {
@@ -517,9 +518,9 @@ export class RecordingDetail {
     });
     this.openTimelinePeek = mountTimeline;
 
-    // Synced-transcript peek: the MACHINE transcript as clickable word spans.
-    // Read-only and entirely separate from the editor — click a word → seek
-    // THIS pane's waveform to that word; the playhead highlights the live word.
+    // Synced-transcript peek: the machine transcript as clickable word spans.
+    // Read-only and entirely separate from the editor — click a word to seek
+    // this pane's waveform to that word; the playhead highlights the live word.
     const mountSynced = () => {
       if (!this.synced) {
         this.synced = new SyncedTranscript(peeks.synced.el!, r.id, {
@@ -545,8 +546,8 @@ export class RecordingDetail {
       mountTimeline();
     }
 
-    // Compare versions: opens a roomy, full-feature diff modal (a peek box was
-    // far too cramped for a real side-by-side diff).
+    // Compare versions: opens a roomy, full-feature diff modal. A peek box is far
+    // too cramped for a real side-by-side diff.
     this.container
       .querySelector<HTMLButtonElement>("#view-compare")
       ?.addEventListener("click", () => this.openCompareModal(r));
@@ -554,7 +555,7 @@ export class RecordingDetail {
     // ── Views / Versions dropdowns ───────────────────────────────────────────
     // Collapse the six peek buttons into two menus: Views (Summary/Timeline/
     // Synced) and Versions (Compare/Original/Unedited). The per-view buttons
-    // above keep their handlers; these triggers just open/close the menus and,
+    // above keep their handlers; these triggers only open/close the menus and,
     // when a peek in the group is active, turn into a "← <view>" close button.
     {
       const viewsTrigger = this.container.querySelector<HTMLButtonElement>("#views-trigger");
@@ -569,17 +570,17 @@ export class RecordingDetail {
       const onDocClick = (e: MouseEvent) => {
         if (!historyRow?.contains(e.target as Node)) closeMenus();
       };
-      // Escape closes an OPEN Views/Versions menu here — capture-phase +
+      // Escape closes an open Views/Versions menu here, in the capture phase with
       // stopPropagation so it never bubbles up to the global handler (which would
-      // close the whole recording → "sends you back to the library"). Also clear
+      // close the whole recording and send you back to the library). Also clear
       // any keyboard capture so vim nav resumes (a no-op when mouse-opened).
       const onEscKey = (e: KeyboardEvent) => {
         if (e.key !== "Escape") return;
         // If the keyboard layer is driving this menu (an item is keyboard-
         // highlighted), let Escape fall through to the detail-grid dropdown layer
-        // (keyboard.ts → closeDetailSub) so it returns the roving cursor AND its
-        // glow to the trigger. Handling it here (capture-phase + stopPropagation)
-        // would close the menu but strand the glow over the option, because the
+        // (keyboard.ts → closeDetailSub) so it returns both the roving cursor and
+        // its glow to the trigger. Handling it here (capture-phase + stopPropagation)
+        // would close the menu but strand the glow over the option, since the
         // bubble-phase grid handler never runs.
         if (viewsMenu?.querySelector(".kbd-cursor") || versionsMenu?.querySelector(".kbd-cursor")) return;
         e.preventDefault();
@@ -587,9 +588,9 @@ export class RecordingDetail {
         closeMenus();
         window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: null }));
       };
-      // Close on any scroll while a menu is open — a fixed-position popover
-      // doesn't follow the trigger when the pane scrolls, so dismiss instead of
-      // letting it float detached.
+      // Close on any scroll while a menu is open: a fixed-position popover
+      // doesn't follow the trigger when the pane scrolls, so dismiss it rather
+      // than let it float detached.
       const onScroll = () => closeMenus();
       const resetMenu = (m: HTMLElement | null) => {
         if (!m) return;
@@ -615,12 +616,12 @@ export class RecordingDetail {
         if (wasHidden) {
           menu.removeAttribute("hidden");
           trigger.setAttribute("aria-expanded", "true");
-          // Position as a FIXED popover anchored under the trigger. These
+          // Position as a fixed popover anchored under the trigger. These
           // triggers sit at the bottom of the transcript pane, whose
-          // `overflow-y:auto` would clip a normal absolute menu (the "it crushes
-          // the pane" bug); `fixed` escapes every overflow ancestor and overlays
-          // the app, opening downward. Clamp to the viewport so the rightmost
-          // (Versions) menu can't spill off the right edge.
+          // `overflow-y:auto` would clip a normal absolute menu; `fixed` escapes
+          // every overflow ancestor and overlays the app, opening downward. Clamp
+          // to the viewport so the rightmost (Versions) menu can't spill off the
+          // right edge.
           const r = trigger.getBoundingClientRect();
           const w = menu.offsetWidth || 160;
           const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
@@ -675,8 +676,8 @@ export class RecordingDetail {
     }
 
     // Focus-mode toggle in the header: hide the recordings list so the detail
-    // (and the editor) take the full width. RecordingsView owns the layout; we
-    // just toggle it and mirror the active state on the button.
+    // (and the editor) take the full width. RecordingsView owns the layout; here
+    // we only toggle it and mirror the active state on the button.
     const focusBtn = this.container.querySelector<HTMLButtonElement>("#detail-focus");
     if (focusBtn) {
       const sync = () => {
@@ -701,14 +702,13 @@ export class RecordingDetail {
       closeBtn.onclick = () => window.dispatchEvent(new CustomEvent("phoneme:close-detail"));
     }
 
-    // ✨ Similar — in the title bar (Delete moved back to the action row).
+    // ✨ Similar lives in the title bar; Delete is on the action row.
     this.container
       .querySelector<HTMLButtonElement>("#detail-similar")
       ?.addEventListener("click", () => applyMoreLikeThis(r.id, r.title ?? null));
 
 
-    // The footer file path is clickable — reveal it in the OS file explorer
-    // (replaces the old Reveal action-row button).
+    // The footer file path is clickable: reveal it in the OS file explorer.
     const revealPath = this.container.querySelector<HTMLElement>("#detail-reveal-path");
     const reveal = async () => {
       try {
@@ -733,8 +733,8 @@ export class RecordingDetail {
     this.renderSpeakers(r);
   }
 
-  /** Wire the footer "⛓ Pipeline" button → popover (G). Toggles the popover and
-   *  closes it on an outside click; the document listener is added only while
+  /** Wire the footer "⛓ Pipeline" button to its popover (G). Toggles the popover
+   *  and closes it on an outside click; the document listener is added only while
    *  open and removed on close, so re-renders don't accumulate listeners. */
   private wirePipeline() {
     const btn = this.container.querySelector<HTMLButtonElement>("#detail-pipeline-btn");
@@ -764,9 +764,9 @@ export class RecordingDetail {
       if (!pop.contains(e.target as Node) && e.target !== btn) close();
     };
     // Escape is handled by the detail-grid dropdown layer (this is a `detailSub`):
-    // closeDetailSub() dismisses the popover AND returns the roving cursor to this
-    // button. Adding our own capture-phase Escape here intercepted that and left
-    // the cursor stranded on the highlighted row — so we deliberately don't.
+    // closeDetailSub() dismisses the popover and returns the roving cursor to this
+    // button. A capture-phase Escape here would intercept that and strand the
+    // cursor on the highlighted row, so we deliberately don't add one.
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       if (pop.hasAttribute("hidden")) {
@@ -816,7 +816,7 @@ export class RecordingDetail {
     const save = async () => {
       if (settled) return;
       const value = input.value.trim();
-      // Nothing changed — just put the header back.
+      // Nothing changed — put the header back.
       if (value === (r.title ?? "")) return closeEditor();
       settled = true;
       try {
@@ -841,9 +841,9 @@ export class RecordingDetail {
   }
 
   /** Open the full "Compare versions" modal — a roomy diff of any two of the
-   *  three transcript layers (a peek box was too cramped for a real diff). The
+   *  three transcript layers (a peek box is too cramped for a real diff). The
    *  raw/clean layers are fetched on demand; `current` comes from the recording.
-   *  Read-only; TranscriptDiff owns the picker/swap/mode/stats UI + the diff. */
+   *  Read-only; TranscriptDiff owns the picker/swap/mode/stats UI and the diff. */
   private async openCompareModal(r: Recording) {
     const overlay = document.createElement("div");
     overlay.className = "tdiff-modal-overlay";
@@ -881,9 +881,9 @@ export class RecordingDetail {
       listTranscriptVersions(r.id).catch(() => []),
     ]);
     // Bail if the modal was closed or the selection changed while loading. The
-    // closing-class check matters now that close() animates out: the overlay
-    // stays connected for the exit window, so isConnected alone would let late
-    // content paint into a modal that's fading away.
+    // closing-class check matters because close() animates out: the overlay stays
+    // connected for the exit window, so isConnected alone would let late content
+    // paint into a modal that's fading away.
     if (
       !overlay.isConnected ||
       overlay.classList.contains("modal-overlay--closing") ||
@@ -897,14 +897,14 @@ export class RecordingDetail {
         body,
         { original, clean, current: r.transcript ?? "", steps },
         {
-          // Revert the live transcript to the selected step version (PB-COMPOUND);
-          // the daemon re-flows timing + re-embeds and emits TranscriptUpdated,
+          // Revert the live transcript to the selected step version (PB-COMPOUND).
+          // The daemon re-flows timing, re-embeds, and emits TranscriptUpdated,
           // which refreshes the detail. Close the modal on success.
           onRevert: (idx) => {
             void revertToVersion(r.id, idx)
               .then(() => {
                 showToast("Transcript reverted to the selected version.", "success");
-                // Close THIS modal via its own handle — not the shared
+                // Close this modal via its own handle, not the shared
                 // activeModalClose slot, which a later-opened modal may have
                 // overwritten by the time the IPC resolves.
                 close();
@@ -917,13 +917,13 @@ export class RecordingDetail {
   }
 
   /** Show the "Rename speakers" button when this recording is diarized (carries
-   *  at least one `[Speaker N]` marker) and wire it to open the rename modal —
-   *  a modal rather than an inline panel so it never stretches the detail pane. */
+   *  at least one `[Speaker N]` marker) and wire it to open the rename modal — a
+   *  modal rather than an inline panel so it never stretches the detail pane. */
   private renderSpeakers(r: Recording) {
     const btn = this.container.querySelector<HTMLButtonElement>("#rename-speakers");
     if (!btn) return;
     // Include already-renamed speakers (from the names map), not just the ones
-    // still carrying a [Speaker N] marker — so they stay renamable.
+    // still carrying a `[Speaker N]` marker, so they stay renamable.
     const labels = speakersForRename(r.transcript, r.speaker_names);
     if (labels.length === 0) {
       btn.style.display = "none";
@@ -934,10 +934,10 @@ export class RecordingDetail {
     btn.onclick = () => this.openSpeakersModal(r, labels);
   }
 
-  /** Modal to rename the diarized speakers. Each row maps `Speaker N` → a name
-   *  (blank clears it, reverting to "Speaker N"); the stored transcript keeps
-   *  its `[Speaker N]` markers, so renames are reversible and never rewrite the
-   *  text. Commits on Enter/blur. */
+  /** Modal to rename the diarized speakers. Each row maps `Speaker N` to a name
+   *  (blank clears it, reverting to "Speaker N"); the stored transcript keeps its
+   *  `[Speaker N]` markers, so renames are reversible and never rewrite the text.
+   *  Commits on Enter/blur. */
   private openSpeakersModal(r: Recording, labels: number[]) {
     const rows = labels
       .map((label) => {
@@ -1001,8 +1001,8 @@ export class RecordingDetail {
           e.preventDefault();
           input.blur();
         } else if (e.key === "Escape") {
-          // Revert this field; the bubbling Escape then closes the modal (the
-          // reverted value re-commits as a no-op via the blur guard).
+          // Revert this field; the bubbling Escape then closes the modal. The
+          // reverted value re-commits as a no-op via the blur guard.
           e.preventDefault();
           input.value = input.defaultValue;
           input.blur();
@@ -1018,9 +1018,10 @@ export class RecordingDetail {
     overlay.querySelector<HTMLInputElement>(".speaker-name-input")?.focus();
 
     // Named-speaker recognition (#9): offer a recognized name for any still-
-    // unnamed speaker whose voiceprint matched a known voice. Async + best-effort
-    // — the modal is usable whether or not recognition returns anything (and it
-    // returns nothing when recognition is off or on cloud-diarized recordings).
+    // unnamed speaker whose voiceprint matched a known voice. Async and best-
+    // effort — the modal is usable whether or not recognition returns anything,
+    // and it returns nothing when recognition is off or on cloud-diarized
+    // recordings.
     void recognizeSpeakers(r.id)
       .then((suggestions) => {
         for (const s of suggestions) {
@@ -1060,10 +1061,10 @@ export class RecordingDetail {
       });
   }
 
-  /** Persist a speaker rename for the current recording and REWRITE the stored
-   *  transcript so the name actually replaces `[Speaker N]` in the text (it
-   *  sticks — not just a display overlay). An empty value clears the saved name
-   *  but can't un-bake text that was already replaced. */
+  /** Persist a speaker rename for the current recording and rewrite the stored
+   *  transcript so the name actually replaces `[Speaker N]` in the text — it
+   *  sticks, not just a display overlay. An empty value clears the saved name but
+   *  can't un-bake text that was already replaced. */
   private commitSpeakerName(
     id: string,
     label: number,
@@ -1072,12 +1073,13 @@ export class RecordingDetail {
   ): Promise<void> {
     if (value.trim() === previous.trim()) return Promise.resolve(); // nothing changed
     // Run on the serialization chain so concurrent blur commits (tabbing through
-    // the modal) can't each rewrite the transcript from a pre-other-write copy
-    // and clobber one another — each commit reads-then-writes after the previous
-    // one has fully landed. A failed commit doesn't break the chain for the next.
+    // the modal) can't each rewrite the transcript from a copy taken before the
+    // other's write and clobber one another. Each commit reads-then-writes after
+    // the previous one has fully landed. A failed commit doesn't break the chain
+    // for the next.
     const run = async () => {
       try {
-        // The speaker's CURRENT display name (before this rename) — needed to find
+        // The speaker's current display name (before this rename), needed to find
         // an already-baked label in the text on the 2nd/3rd rename.
         const oldName = speakerDisplayName(this.recording?.speaker_names, label);
         await setSpeakerName(id, label, value.trim());
@@ -1087,10 +1089,11 @@ export class RecordingDetail {
           );
           if (value.trim()) names.push({ speaker_label: label, name: value.trim() });
           this.recording.speaker_names = names;
-          // Bake the name into the transcript text so it sticks AND stays
-          // renamable: replace the [Speaker N] marker OR a previously-baked name.
-          // Skip meeting tracks — the merged view splits turns on the markers, so
-          // baking would break it (it shows names from the map there instead).
+          // Bake the name into the transcript text so it sticks and stays
+          // renamable: replace the `[Speaker N]` marker or a previously-baked
+          // name. Skip meeting tracks — the merged view splits turns on the
+          // markers, so baking would break it (it shows names from the map there
+          // instead).
           if (this.recording.transcript && !this.recording.meeting_id) {
             const rewritten = renameSpeakerInTranscript(this.recording.transcript, label, oldName, value);
             if (rewritten !== this.recording.transcript) {
@@ -1105,8 +1108,8 @@ export class RecordingDetail {
         showToast(`Couldn't rename speaker: ${errText(e)}`, "error");
       }
     };
-    // Capture THIS commit's slot on the chain so the returned promise resolves
-    // when this commit lands — not when whatever later commit happens to be the
+    // Capture this commit's slot on the chain so the returned promise resolves
+    // when this commit lands, not when whatever later commit happens to be the
     // chain tail at await-time does. A blur's `await` must track its own write.
     const slot = this.speakerCommitChain.then(run, run);
     this.speakerCommitChain = slot;
@@ -1136,10 +1139,10 @@ export class RecordingDetail {
    *  (RerunSummary spawns a task and emits SummaryUpdated), so polling keeps the
    *  flow self-contained without depending on event re-renders. */
   async requestSummary(id: string, model: string | null = null, prompt: string | null = null) {
-    // Re-baseline against the CURRENT summary on every call: a regenerate must
-    // wait for a summary that differs from what's shown now, not from the value
-    // captured before some earlier job (which a still-running poll could satisfy
-    // with the first job's result and stop early).
+    // Re-baseline against the current summary on every call: a regenerate has to
+    // wait for a summary that differs from what's shown now, not from a value
+    // captured before some earlier job — otherwise a still-running poll could
+    // satisfy this call with the first job's result and stop early.
     const prev = this.recording?.summary ?? null;
     try {
       await rerunSummary(id, model, prompt);
@@ -1152,8 +1155,8 @@ export class RecordingDetail {
       return;
     }
     // Bump the generation so any poll started by an earlier call retires itself
-    // on its next tick, and this call owns the fresh loop (handles a regenerate
-    // fired while a previous poll is still in flight).
+    // on its next tick, and this call owns the fresh loop. This is what handles a
+    // regenerate fired while a previous poll is still in flight.
     const gen = ++this.summaryPollGen;
     const deadline = Date.now() + 90_000;
     const tick = async () => {
@@ -1199,13 +1202,14 @@ function formatDate(iso: string, use24h: boolean): string {
   return `${dateObj} at ${timeObj}`;
 }
 
-/** Per-file pipeline provenance for the detail footer: every stage that actually
- *  touched THIS recording, in the order the daemon ran them (see pipeline.rs):
- *  capture → transcription (+ diarization) → LLM cleanup → auto-title → hook →
- *  auto-summary → auto-tags. Steps that didn't run are omitted. Each step names
- *  its model when the daemon recorded one per-recording — transcription,
- *  cleanup, and summary always do; diarization/title/tag models fill in once the
- *  daemon persists them (until then those steps show the bare action). */
+/** Per-recording pipeline provenance for the detail footer: every stage that
+ *  actually touched this recording, in the order the daemon ran them (see
+ *  pipeline.rs): capture → transcription (+ diarization) → LLM cleanup →
+ *  auto-title → hook → auto-summary → auto-tags. Steps that didn't run are
+ *  omitted. Each step names its model when the daemon recorded one per-recording:
+ *  transcription, cleanup, and summary always do; diarization/title/tag models
+ *  fill in once the daemon persists them, and until then those steps show the
+ *  bare action. */
 /** One row in the pipeline-provenance popover: an icon, a plain-English step
  *  name, and its detail (model name, status, or source). `value` may contain
  *  escaped HTML (model names run through escapeHtml); labels/icons are static. */
@@ -1229,8 +1233,8 @@ function modelsSteps(r: Recording): PipelineStep[] {
   // 3. LLM cleanup.
   if (r.cleanup_model) steps.push({ icon: "✨", label: "Cleaned up", value: escapeHtml(r.cleanup_model) });
 
-  // 4. Auto-title — only a pipeline-generated title is a step (a user-set title
-  //    isn't). Names the model once persisted; otherwise the bare action.
+  // 4. Auto-title — only a pipeline-generated title counts as a step, not a
+  //    user-set one. Names the model once persisted; otherwise the bare action.
   if (r.title_model) steps.push({ icon: "🔖", label: "Titled", value: escapeHtml(r.title_model) });
   else if (r.title_is_auto && r.title) steps.push({ icon: "🔖", label: "Titled", value: "Auto-generated" });
 
@@ -1253,7 +1257,7 @@ function modelsSteps(r: Recording): PipelineStep[] {
 /** The pipeline-provenance footer control (G): a compact "⛓ Pipeline" button
  *  that opens a popover spelling out, in order, each step the recording went
  *  through and the model/detail behind it. Returns "" when no steps ran. Values
- *  are pre-escaped in modelsSteps; labels/icons are static. */
+ *  are pre-escaped in modelsSteps; labels and icons are static. */
 function pipelineHtml(r: Recording): string {
   const steps = modelsSteps(r);
   if (!steps.length) return "";

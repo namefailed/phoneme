@@ -2,10 +2,10 @@
  * Lightweight client-side fuzzy matching for filtering small in-memory lists
  * (tag names, settings fields, etc.).
  *
- * NOTE: this is intentionally NOT the same machinery as the main transcript
- * search. That runs as SQLite FTS5 *in the database* over recording text;
- * these helpers run in the browser over arrays already in memory, where a tiny
- * subsequence matcher is the right tool.
+ * Deliberately separate from the main transcript search, which runs as SQLite
+ * FTS5 inside the database over recording text. These helpers run in the
+ * browser over arrays already in memory, where a tiny subsequence matcher is
+ * the right tool.
  */
 
 /**

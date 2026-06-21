@@ -8,8 +8,8 @@ import './SettingsView/SectionTags'; // Make sure the custom element is register
 
 /**
  * The quick Tag Manager modal (`g T` / Shift+T, or the chips' Manage
- * button): a thin `.modal-overlay` shell around `<ph-section-tags bare>` —
- * the SAME element as Settings → Managers → Tags, in its lightweight "bare"
+ * button): a thin `.modal-overlay` shell around `<ph-section-tags bare>`, the
+ * very same element as Settings → Managers → Tags, in its lightweight "bare"
  * mode (quick CRUD without the stats/merge toolbar). All tag behavior lives
  * in SectionTags; this owns only the dialog chrome, Escape/overlay-click
  * dismissal, and focusing the name box on open.

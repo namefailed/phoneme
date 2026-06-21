@@ -14,7 +14,7 @@ const COPY_ICON = html`<svg viewBox="0 0 24 24" width="12" height="12" fill="non
   stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 
 /** One AI-activity session: a single (recording, stage) run with its streamed
- *  prompt + response. Each prompt-start begins a NEW entry, so re-runs of the
+ *  prompt + response. Each prompt-start begins a fresh entry, so re-runs of the
  *  same stage are kept as separate log lines rather than overwriting. */
 type ActivityEntry = {
   id: string;
@@ -29,7 +29,7 @@ type ActivityEntry = {
 /**
  * A floating, resizable popout showing a running log of AI activity — the live
  * transcription/cleanup/summary stream (exact prompt + streamed response) for
- * every recording, PLUS the recent persisted sessions loaded on open so the log
+ * every recording, plus the recent persisted sessions loaded on open so the log
  * survives app restarts (`list_ai_activity`). The 🧠 button is drag-to-move (and
  * pulses while anything is live); the panel anchors to it and can be resized
  * (size + position are remembered).
@@ -73,15 +73,15 @@ export class ThinkingPopoutElement extends LitElement {
   private onSidebarChange = () => {
     if (this.fabPos) return;
     this.fabMoving = true; // fade out at the current spot
-    // The open panel re-anchors to the FAB too — but ONLY when it's at its default
+    // The open panel re-anchors to the FAB too, but only when it's at its default
     // position (no saved geometry). A user-dragged/resized panel stays put, so it
     // doesn't move and mustn't fade.
     if (this.open && !this.geom) this.panelMoving = true;
     // The sidebar dispatches this twice (immediately + after its ~300ms slide).
-    // Arm ONE timer on the first and let it ride (don't reset) so the fade-in
-    // fires once, ~400ms later — past both events, by which point the sidebar has
-    // settled and the re-render below reads its final edge. (Resetting per-event,
-    // or a shorter delay, fires a premature fade-in between the two events.)
+    // Arm a single timer on the first and let it ride (don't reset) so the
+    // fade-in fires once, ~400ms later — past both events, by which point the
+    // sidebar has settled and the re-render below reads its final edge. Resetting
+    // per-event, or a shorter delay, fires a premature fade-in between the two.
     if (this.fabMoveTimer === null) {
       this.fabMoveTimer = window.setTimeout(() => {
         this.fabMoveTimer = null;
@@ -240,7 +240,7 @@ export class ThinkingPopoutElement extends LitElement {
   private fabXY(): { x: number; y: number } {
     // No custom position → the sidebar-anchored default (recomputed each render
     // so it follows the drawer). Otherwise re-clamp the saved position to the
-    // CURRENT viewport so a smaller window can't strand it off-screen.
+    // current viewport so a smaller window can't strand it off-screen.
     if (!this.fabPos) return this.defaultFabXY();
     return {
       x: Math.max(8, Math.min(window.innerWidth - 48, this.fabPos.x)),
@@ -289,13 +289,13 @@ export class ThinkingPopoutElement extends LitElement {
   }
 
   /** Default placement (used until the user resizes and a geometry is saved):
-   *  the panel pops out DIAGONALLY from the button toward the side with the most
+   *  the panel pops out diagonally from the button toward the side with the most
    *  room — for the default bottom-right button, up and to the left — so the
    *  button sits just off the panel's corner and is never covered. Clamped to the
    *  viewport so nothing is cut off. Applied per-property so a later resize
    *  survives re-renders. The FAB is 40px square. */
   private applyPosition(panel: HTMLElement) {
-    const { x, y } = this.fabXY(); // the FAB's CURRENT top-left (recomputed each
+    const { x, y } = this.fabXY(); // the FAB's current top-left (recomputed each
     // render, so this re-anchors when the sidebar toggle moves the default button)
     const fab = 40; // the FAB is 40px square
     const r = fab / 2;
@@ -307,10 +307,10 @@ export class ThinkingPopoutElement extends LitElement {
     const cx = x + r;
     const cy = y + r;
 
-    // Unfold the panel DIAGONALLY off the FAB with a gap — never overlapping it.
-    // Its near corner sits just BEYOND the button's edge along the diagonal, so the
-    // panel floats off the button at an angle (the button stays fully visible at
-    // the origin). Grows toward whichever side has room — default button
+    // Unfold the panel diagonally off the FAB with a gap, never overlapping it.
+    // Its near corner sits just beyond the button's edge along the diagonal, so
+    // the panel floats off the button at an angle (the button stays fully visible
+    // at the origin). Grows toward whichever side has room — default button
     // (bottom-left of the list area) → panel up-and-right. Re-derived from the live
     // FAB position, so closing the sidebar (which slides the default button)
     // re-anchors the open panel.

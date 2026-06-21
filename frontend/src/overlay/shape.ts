@@ -3,9 +3,10 @@
 // "single": one caption line (single recordings, meeting "toggle" mode, the
 // Settings dummy preview). "both": one labeled row per meeting track. The window
 // height is mode-driven (one tight line vs two stacked rows). This module owns
-// what used to be a cluster of overlay-wide globals — the current shape, whether
-// the capture is a meeting, the active tracks, the active "toggle" track, and the
-// caption elements — and the 🎤/🔊 source-switch button.
+// the overlay-wide state that the rest of the overlay would otherwise reach for
+// as globals — the current shape, whether the capture is a meeting, the active
+// tracks, the active "toggle" track, and the caption elements — plus the 🎤/🔊
+// source-switch button.
 
 import type { Window } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
@@ -52,8 +53,8 @@ export class CaptionShape {
       void invoke("set_preview_source", { track: other })
         .then(() => {
           // Re-enable so the button isn't stranded disabled if the daemon no-op'd
-          // (already on that track) and emitted no PreviewSourceChanged. The icon
-          // is NOT touched here — PreviewSourceChanged stays authoritative.
+          // (already on that track) and emitted no PreviewSourceChanged. Leave the
+          // icon alone here — PreviewSourceChanged stays authoritative for it.
           this.srcBtn.disabled = false;
         })
         .catch(() => {
@@ -156,7 +157,7 @@ export class CaptionShape {
     void this.resizeForShape(next);
   }
 
-  /** The 🎤/🔊 source button: visible only for a MEETING in toggle mode. Shows
+  /** The 🎤/🔊 source button: visible only for a meeting in toggle mode. Shows
    *  the followed track; clicking switches. When hidden it's fully reset so no
    *  stale state leaks into a later single recording. */
   private updateSrcButton(): void {

@@ -1,15 +1,14 @@
 // Manual window dragging for the overlay card.
 //
-// The card used to be a `data-tauri-drag-region`, which calls the OS
-// `startDragging` and enters Windows' modal move-loop. For a transparent,
-// always-on-top, frameless WebView2 window that move-loop blocks the shared
-// Tauri event loop and freezes the WHOLE app (the main window included) until
-// the drag ends — and on a transparent window it can wedge permanently, which is
-// the "live preview hangs the app when I move it" crash. Instead we drag
-// manually: track the pointer and reposition with `setPosition`, which never
-// enters the move-loop. Repositions are coalesced to one per animation frame so a
-// fast drag can't flood the IPC channel. All the drag state lives in this
-// closure instead of as overlay-wide globals.
+// We don't use a `data-tauri-drag-region` here. That calls the OS `startDragging`
+// and enters Windows' modal move-loop, which for a transparent, always-on-top,
+// frameless WebView2 window blocks the shared Tauri event loop and freezes the
+// whole app (the main window included) until the drag ends — and on a transparent
+// window it can wedge permanently. So we drag by hand instead: track the pointer
+// and reposition with `setPosition`, which never enters the move-loop. Repositions
+// are coalesced to one per animation frame so a fast drag can't flood the IPC
+// channel. All the drag state lives in this closure rather than in overlay-wide
+// globals.
 
 import type { Window } from "@tauri-apps/api/window";
 import { LogicalPosition } from "@tauri-apps/api/dpi";

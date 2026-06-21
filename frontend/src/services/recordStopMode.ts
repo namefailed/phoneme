@@ -12,9 +12,9 @@
  *                              window (or the max-duration ceiling).
  *   duration → "duration:N"  — stops after exactly N seconds.
  *
- * Push-to-talk hold is deliberately NOT offered here — a mouse click can't be
- * "held", so that flavor only exists on the global hotkey. The wire-level
- * Hold mode is still what the Toggle choice sends.
+ * Push-to-talk hold isn't offered here: a mouse click can't be "held", so that
+ * flavor only exists on the global hotkey. The wire-level Hold mode is still
+ * what the Toggle choice sends.
  */
 import type { RecordMode } from "./ipc";
 

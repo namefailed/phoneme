@@ -14,7 +14,7 @@
 export type Subscriber<T> = (value: T) => void;
 
 /**
- * An observable value. Change detection is by IDENTITY (`===`), so state must
+ * An observable value. Change detection is by identity (`===`), so state has to
  * be updated immutably — `set({ ...store.get(), field: x })`, never mutation
  * of the held object (a mutated object compares equal to itself and notifies
  * nobody). Subscribers run synchronously, in insertion order, inside `set`.
@@ -48,7 +48,7 @@ export class Store<T> {
   /**
    * Register `sub` and immediately invoke it with the current value (so a
    * fresh subscriber renders without waiting for the next change). Returns
-   * the unsubscribe function — every subscriber MUST call it on teardown or
+   * the unsubscribe function; every subscriber has to call it on teardown or
    * the store keeps the callback (and whatever it closes over) alive.
    */
   subscribe(sub: Subscriber<T>): () => void {

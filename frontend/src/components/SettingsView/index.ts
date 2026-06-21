@@ -32,8 +32,6 @@ import "./styles.css";
 
 // ── Settings-search helpers ────────────────────────────────────────────────
 
-/** Escape text for safe innerHTML insertion. */
-
 /** Wrap the first contiguous, case-insensitive run of `query` in `original` with
  *  a <mark>. Returns the escaped original unchanged when there's no contiguous
  *  run (e.g. a fuzzy- or keyword-only match), so a highlight never lies about
@@ -123,7 +121,7 @@ function resolveTab(rawTab: string): string {
  * the header button was, via shared/settingsAnchor).
  *
  * The config-editing contract every section participates in: this view loads
- * ONE mutable `config` object (`read_config`) and hands the SAME reference to
+ * one mutable `config` object (`read_config`) and hands the same reference to
  * each section it mounts; sections bind their inputs to dotted config paths
  * (see form.ts) and mutate that object in place as the user types. Nothing
  * persists until Save, which `write_config`s the whole object, dispatches
@@ -131,7 +129,7 @@ function resolveTab(rawTab: string): string {
  * keyboard, list columns, sections re-mount), and closes the view.
  *
  * Unsaved-edits guard: `confirmClose()` (themed dialog) compares the JSON
- * snapshot taken at load — EVERY leave path App controls funnels through it.
+ * snapshot taken at load. Every leave path App controls funnels through it.
  * Deep links: `activeTab` may arrive from openers ("post_processing",
  * "managers/profiles", …) via the `phoneme:navigate` event's section field.
  * Mounted by App via the `SettingsView` wrapper; the header bar is hidden
@@ -191,9 +189,9 @@ export class SettingsViewElement extends LitElement {
 
   /** Escape leaves the Settings panel (with the unsaved-edits guard). Inner
    *  contexts that own Escape — the search box, open dropdowns, a layered modal
-   *  like the unsaved-changes confirm — consume it first (stopPropagation / the
+   *  like the unsaved-changes confirm — consume it first (stopPropagation, or the
    *  `.modal-overlay` check below), so this only fires for a bare Escape in the
-   *  panel. Keyboard nav INSIDE Settings is intentionally not wired yet; this is
+   *  panel. Keyboard nav within Settings is intentionally not wired yet; this is
    *  just the way out. */
   private onEscapeKey = (e: KeyboardEvent) => {
     if (e.key !== "Escape") return;
@@ -201,7 +199,7 @@ export class SettingsViewElement extends LitElement {
     // A modal layered above Settings owns Escape (e.g. a model picker, the
     // unsaved-changes dialog). Don't close the panel out from under it.
     if (document.querySelector('[class*="modal-overlay"]')) return;
-    // Escape inside an active field deselects/blurs THAT control — it must not
+    // Escape inside an active field deselects/blurs that control; it must not
     // boot the user out of Settings mid-edit (only the search box stops its own
     // Escape; every other section field bubbles here). A second Escape, now off
     // the field, then leaves the panel as usual.
@@ -221,9 +219,9 @@ export class SettingsViewElement extends LitElement {
     const wasSearching = prevQuery.trim().length > 0;
     const isSearching = this.searchQuery.trim().length > 0;
 
-    // Full (re)mount only when the tab or config changes, or when we ENTER/EXIT
-    // search mode. While already searching, a query change just re-filters the
-    // already-mounted sections in place — no teardown/rebuild — so typing is
+    // Full (re)mount only when the tab or config changes, or when search mode
+    // turns on or off. While already searching, a query change just re-filters
+    // the already-mounted sections in place — no teardown/rebuild — so typing is
     // instant and doesn't flash between the previous tab and the results.
     if (
       changedProperties.has('activeTab') ||
@@ -292,8 +290,8 @@ export class SettingsViewElement extends LitElement {
 
   /** Inline position for the app-health pill: the far-right-most control, pinned
    *  14px from the window's right edge and vertically aligned to the captured
-   *  ⚙-button band — the SAME screen spot (and the same button→pill / pill→edge
-   *  gaps) as the header's pill, so the two views are identical. */
+   *  ⚙-button band — the same screen spot (and the same button→pill / pill→edge
+   *  gaps) as the header's pill, so the two views line up exactly. */
   private healthPillStyle(): string {
     const a = getSettingsAnchor();
     return a
@@ -349,7 +347,7 @@ export class SettingsViewElement extends LitElement {
     };
 
     if (isSearching) {
-      // Search mounts EVERY section once, each in its own tab-tagged host so a
+      // Search mounts every section once, each in its own tab-tagged host so a
       // result can show which tab it lives in and offer a jump there. Later
       // keystrokes only re-filter in place (see updated()), so typing stays
       // instant and flicker-free.
@@ -380,8 +378,8 @@ export class SettingsViewElement extends LitElement {
    *  belongs to (see {@link SETTINGS_TABS} for the tab order/labels). Drives
    *  both the search index (all sections mounted at once) and per-tab rendering
    *  (filtered by `tab`). `label` is the breadcrumb tab name shown on a search
-   *  result. Managers' three sections are listed here so they're individually
-   *  searchable, but the Managers TAB renders its own sub-tab strip instead. */
+   *  result. The managers' sections are listed here so they're individually
+   *  searchable, while the Managers tab renders its own sub-tab strip instead. */
   private sectionRegistry(): { tab: string; label: string; mount: (h: HTMLElement) => void }[] {
     const c = this.config;
     return [
@@ -722,7 +720,7 @@ export class SettingsViewElement extends LitElement {
           </div>
           <!-- The app-health pill, placed at the exact same screen spot as the
                header's far-right one: pinned 14px from the window edge, aligned to
-               the captured ⚙-button band — so both views look identical. Kept OUT
+               the captured ⚙-button band, so both views look identical. Kept out
                of the float group so it never shifts the ⚙ button off its anchor. -->
           <ph-health-pill class="sv-health" style=${this.healthPillStyle()}></ph-health-pill>
           <div class="settings-body" id="settings-body"></div>

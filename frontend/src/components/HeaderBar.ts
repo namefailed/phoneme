@@ -92,14 +92,14 @@ export class HeaderBarElement extends LitElement {
   @state() private filterState: UiFilter = filterStore.get();
   // Coalescing throttle for partials. The daemon emits a fresh re-transcription
   // of the trailing audio window every ~1-2s, and a stalled tick can let two
-  // arrive nearly back-to-back. The old code used a 100ms debounce that *reset*
-  // on every event — since events are ~1s apart it never actually coalesced and
-  // only added a fixed 100ms of lag. Instead we throttle: render at most once
-  // per PREVIEW_RENDER_MS, always with the LATEST text, so the ticker advances
-  // at a steady cadence (no jump per event, no wasted lag on a lone partial).
+  // arrive nearly back-to-back. A debounce that resets on every event wouldn't
+  // help here: events are ~1s apart, so it would never coalesce and would only
+  // add a fixed lag. So we throttle instead — render at most once per
+  // PREVIEW_RENDER_MS, always with the latest text, so the ticker advances at a
+  // steady cadence (no jump per event, no wasted lag on a lone partial).
   private static readonly PREVIEW_RENDER_MS = 150;
   // Cap the displayed preview so an unexpectedly long trailing-window transcript
-  // can't blow up layout; we keep the tail (newest words) since that's what the
+  // can't blow up layout; keep the tail (newest words) since that's what the
   // overlay/ticker shows. The daemon already bounds the audio window, so this is
   // just a defensive ceiling on text length.
   private static readonly PREVIEW_MAX_CHARS = 600;
@@ -187,7 +187,7 @@ export class HeaderBarElement extends LitElement {
         if (this.isRecording || this.isMeeting) {
           const t = typeof p.text === "string" ? p.text.trim() : "";
           // Coalesce partials to a steady cadence (queuePreview), keeping only
-          // the tail so a long window can't blow up layout — the single-line
+          // the tail so a long window can't blow up layout. The single-line
           // ticker is anchored to the newest words anyway.
           this.queuePreview(t ? t.slice(-HeaderBarElement.PREVIEW_MAX_CHARS) : null);
         }
@@ -321,11 +321,10 @@ export class HeaderBarElement extends LitElement {
   }
 
   /**
-   * Coalesce an incoming partial into a steady render cadence. We always show
-   * the latest text but commit it at most once per PREVIEW_RENDER_MS, so bursts
-   * of partials don't each trigger their own re-render/layout pass (the jank the
-   * old per-event swap caused). A trailing timer flushes the final partial so we
-   * never drop the newest text.
+   * Coalesce an incoming partial into a steady render cadence. Always show the
+   * latest text, but commit it at most once per PREVIEW_RENDER_MS so a burst of
+   * partials doesn't each trigger its own re-render/layout pass. A trailing
+   * timer flushes the final partial so the newest text is never dropped.
    */
   private queuePreview(text: string | null) {
     // The desktop overlay already shows the live preview — don't double it up in

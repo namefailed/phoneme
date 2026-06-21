@@ -4,9 +4,9 @@
 /**
  * Renders a drag handle into `container` and reports the left pane's share
  * as a percentage, clamped 20–80, via `onChange` on every mouse move while
- * dragging — the OWNER applies it to the layout (and persists it). Listens
+ * dragging — the owner applies it to the layout (and persists it). Listens
  * on `document` so dragging keeps tracking outside the handle; the owning
- * view MUST call `dispose()` on teardown or each remount leaks listeners.
+ * view has to call `dispose()` on teardown or each remount leaks listeners.
  */
 export class Splitter {
   private container: HTMLElement;

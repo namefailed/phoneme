@@ -4,7 +4,7 @@
 // Backed by the catalog (the daemon's SQLite) so they survive a reinstall and
 // can ride catalog sync later. An in-memory cache keeps the component API
 // synchronous: reads return the cache; mutations update the cache immediately
-// AND write through to the catalog. The cache is filled once by
+// and write through to the catalog. The cache is filled once by
 // `initSavedSearches()` (kicked off lazily on first read), and every change
 // dispatches `phoneme:saved-searches-changed` so open menus re-read. Applying a
 // saved search just re-sets the shared `filterStore`, which the recordings list
@@ -121,10 +121,11 @@ export function initSavedSearches(): Promise<void> {
         }
       }
       const fresh = rows.map(parseRow).filter((s): s is SavedSearch => s !== null);
-      // Preserve any entry added to the cache DURING this load: a save issued
-      // before the catalog read returned would otherwise be clobbered here and
-      // vanish from the menu until the next reload (its write does survive in the
-      // catalog). Merge by id — fresh (catalog truth) plus cache-only pending.
+      // Preserve any entry added to the cache while this load was in flight: a
+      // save issued before the catalog read returned would otherwise be clobbered
+      // here and vanish from the menu until the next reload (its write does
+      // survive in the catalog). Merge by id — fresh (catalog truth) plus the
+      // cache-only pending entries.
       const freshIds = new Set(fresh.map((s) => s.id));
       const pending = cache.filter((s) => !freshIds.has(s.id));
       cache = [...fresh, ...pending];
@@ -204,11 +205,11 @@ export type RenameResult = { list: SavedSearch[]; conflict: SavedSearch | null }
 
 /**
  * Rename a saved search in place (no-op on a blank name or unknown id).
- * Names are unique case-insensitively (`addSavedSearch` upserts by name), so
- * a rename that collides with a DIFFERENT entry is refused and the blocking
- * entry returned via `conflict` — silently letting two searches share a name
- * would make the next same-name save overwrite whichever one happens to sit
- * first. Renaming an entry to its own name (e.g. a casing change) is allowed.
+ * Names are unique case-insensitively (`addSavedSearch` upserts by name), so a
+ * rename that collides with a different entry is refused and the blocking entry
+ * returned via `conflict`. Letting two searches share a name would make the next
+ * same-name save overwrite whichever one happens to sit first. Renaming an entry
+ * to its own name (e.g. a casing change) is allowed.
  */
 export function renameSavedSearch(id: string, name: string): RenameResult {
   const trimmed = name.trim();

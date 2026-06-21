@@ -1,17 +1,15 @@
 /**
- * Shared modal/overlay exit animation.
+ * Shared modal/overlay exit animation. Every dialog animates in (modal.css
+ * `modal-fade-in` / `modal-slide-in`); this gives them a matching exit so they
+ * don't just snap away. It adds the `.modal-overlay--closing` class (which plays
+ * the paired `modal-fade-out` / `modal-slide-out` keyframes), waits for the
+ * animation, then runs `done` — the caller's teardown (remove the node, resolve
+ * a promise, restore focus).
  *
- * Every dialog in the app animates *in* (modal.css `modal-fade-in` /
- * `modal-slide-in`) but historically snapped *out* — the close path just called
- * `overlay.remove()`. `closeModalOverlay` gives them a matching exit: it adds the
- * `.modal-overlay--closing` class (which plays the paired `modal-fade-out` /
- * `modal-slide-out` keyframes), waits for the animation, then runs `done` — the
- * caller's original teardown (remove the node, resolve a promise, restore focus).
- *
- * It honors the master `--ui-motion` knob: when motion is off or the OS prefers
+ * Honors the master `--ui-motion` knob: when motion is off, or the OS prefers
  * reduced motion, the duration is 0, so it skips the animation and runs `done`
- * synchronously — identical behavior to the old instant close. Idempotent per
- * overlay: a second call while one is already closing is ignored.
+ * synchronously (an instant close). Idempotent per overlay — a second call while
+ * one is already closing is ignored.
  */
 export function closeModalOverlay(overlay: HTMLElement, done: () => void): void {
   const o = overlay as HTMLElement & { __phClosing?: boolean };

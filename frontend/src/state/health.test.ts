@@ -1,6 +1,6 @@
-// The app-health polling contract used to live on the header bar; it now lives in
-// this shared store (so the pill stays live in Settings, where the bar is hidden).
-// This suite pins that contract: one poll on start, every 30s while visible, no
+// The app-health polling contract lives in this shared store (rather than on the
+// header bar) so the pill stays live in Settings, where the bar is hidden. This
+// suite pins that contract: one poll on start, every 30s while visible, no
 // probing while hidden, the deferred check runs on re-show, and start is idempotent
 // (a single poll no matter how many consumers call it). jsdom env (vite.config.ts).
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";

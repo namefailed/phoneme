@@ -1,13 +1,13 @@
 /**
- * The word-synced transcript: the MACHINE transcript rendered as a flow of
+ * The word-synced transcript: the machine transcript rendered as a flow of
  * clickable, time-coded word spans (the "Synced" peek in the detail pane).
  *
- * This is a READ-ONLY view, entirely separate from the editable
+ * This is a read-only view, entirely separate from the editable
  * TranscriptEditor. It renders machine truth — the per-word timings captured at
  * transcription time (`getWords`) — so every word maps exactly to a moment in
- * the audio. The editable transcript is LLM-cleaned + hand-edited + has speaker
- * names baked in, so its characters no longer line up with these timings; this
- * view never touches it, and nothing here edits.
+ * the audio. The editable transcript is LLM-cleaned, hand-edited, and has
+ * speaker names baked in, so its characters no longer line up with these
+ * timings; this view never touches it, and nothing here edits.
  *
  * Clicking a word seeks the host pane's waveform to that word's start (the same
  * `onSeek(seconds)` callback the Timeline peek uses → `WaveformPlayer.seekTo`).
@@ -107,9 +107,9 @@ export class SyncedTranscript {
       }
       return;
     }
-    // Probe once for a cleaned timing variant (drives the toggle). This is a
-    // separate fetch with its OWN catch: a probe failure must never blow away the
-    // primary view that just loaded fine — degrade to "no cleaned variant".
+    // Probe once for a cleaned timing variant (drives the toggle). Separate
+    // fetch with its own catch, so a probe failure can't blow away the primary
+    // view that just loaded fine — degrade to "no cleaned variant" instead.
     if (!this.probedCleaned) {
       this.probedCleaned = true;
       this.hasCleaned =

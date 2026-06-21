@@ -2,7 +2,7 @@
  * Header (top bar) show/hide with the shared pane animation.
  *
  * The bar collapses via max-height on the same curve/duration as the panes
- * (--pane-anim). Clipping is applied ONLY while hidden or mid-animation
+ * (--pane-anim). Clipping applies only while hidden or mid-animation
  * (body.phoneme-header-anim): a permanent overflow:hidden on ph-header-bar
  * would clip its own dropdown menus (Settings, record-mode), which hang below
  * the bar's box. Used by Ctrl+/ (keyboard.ts) and the zen/focus modes
@@ -19,14 +19,15 @@ export function setHeaderHidden(hide: boolean) {
     body.classList.toggle("phoneme-hide-header", hide);
     return;
   }
-  // Animate max-height over the bar's REAL (measured) height in BOTH directions.
-  // A fixed `max-height: 160px` cap only *looks* animated while max-height crosses
-  // the actual content height (~one row), so SHOW (0 → 160) finished its visible
-  // reveal in the first third of the duration and read as an instant snap, while
-  // HIDE (160 → 0) looked fine. Driving max-height between 0 and `scrollHeight`
-  // (the unclipped content height — correct even while collapsed) makes the whole
-  // eased curve visible and symmetric on/off. The inline value is released after
-  // the transition so the CSS cap (or the collapsed rule) resumes.
+  // Animate max-height over the bar's measured height in both directions.
+  // A fixed `max-height: 160px` cap only reads as animated while max-height is
+  // crossing the actual content height (~one row): show (0 → 160) would finish
+  // its visible reveal in the first third of the duration and look like an
+  // instant snap, even though hide (160 → 0) looks fine. Driving max-height
+  // between 0 and `scrollHeight` (the unclipped content height, which is correct
+  // even while collapsed) keeps the whole eased curve visible and symmetric on
+  // and off. The inline value is released after the transition so the CSS cap
+  // (or the collapsed rule) resumes.
   body.classList.add("phoneme-header-anim");
   const full = bar.scrollHeight;
   if (hide) {

@@ -1,33 +1,33 @@
 /**
- * Global keyboard shortcuts + a "?" cheat-sheet overlay.
+ * Global keyboard shortcuts plus a "?" cheat-sheet overlay.
  *
  * A single document-level keydown listener dispatches a small, curated set of
- * global shortcuts. It NEVER hijacks keys while the user is typing in an
+ * global shortcuts. It never hijacks keys while the user is typing in an
  * input/textarea/select (so "/", "?", "g" stay literal there), and it stands
  * down while a modal is open. The recordings list keeps its own arrow / Enter /
  * Space navigation when focused — those are documented in the overlay so the
  * whole app is keyboard-navigable and discoverable.
  *
- * KEYMAP TIERS — keep this boundary clean:
- *   1. NORMAL (always on, for everyone): search "/" + help "?"; the Ctrl chrome
+ * The keymap splits into three tiers; keeping that boundary clean matters:
+ *   1. Normal (always on, for everyone): search "/" and help "?"; the Ctrl chrome
  *      toggles; the `g`-leader "go to a place" chords (g l/s/d/D/A/T/P/S/b/1/2 + g /);
  *      the recordings list's arrow / Enter / Space / \ nav; Tab / Shift+Tab to move
  *      between controls and panes; and the open-recording actions p/c/e/r/f/t/T.
  *      No vim knowledge required.
- *   2. VIM nav (`interface.vim_nav`, opt-in): the bare-letter MOTION layer layered
- *      on top — h/l between panes, j/k/gg/G motions, header roving, zz, dd, i, the
+ *   2. Vim nav (`interface.vim_nav`, opt-in): the bare-letter motion layer on top
+ *      — h/l between panes, j/k/gg/G motions, header roving, zz, dd, i, the
  *      `x` leader (x b / x /), and the waveform / dropdown sub-modes. A non-vim user
  *      pressing a bare `h`/`j`/`G` gets nothing; that's the contract.
- *   3. EDITOR vim (`editor.vim_mode`): a SEPARATE axis — CodeMirror's own vim inside
+ *   3. Editor vim (`editor.vim_mode`): a separate axis — CodeMirror's own vim inside
  *      the transcript / notes editors. Unrelated to tier 2.
  *
- * When `interface.vim_nav` is enabled, a system-wide vim navigation layer turns
+ * With `interface.vim_nav` enabled, a system-wide vim navigation layer turns
  * on: `h` / `l` move focus between the sidebar, list, and detail panes (the
  * active pane gets a focus ring); `j` / `k` / `gg` / `G` move within the
  * recordings list; `i` / `Enter` focus the transcript editor when the detail
  * pane is active; `dd` deletes the focused recording; `Esc` steps back out.
- * This is distinct from the transcript editor's OWN vim mode (`editor.vim_mode`).
- * The pane-level actions are emitted as `phoneme:vim` CustomEvents that
+ * That's distinct from the transcript editor's own vim mode (`editor.vim_mode`).
+ * The pane-level actions go out as `phoneme:vim` CustomEvents that
  * RecordingsView acts on (it owns the pane DOM); this module only owns the gate,
  * the key sequencing, and the help sheet.
  */
@@ -171,7 +171,7 @@ const ARROW_HELP_GROUP: HelpGroup = {
 
 function helpGroups(): HelpGroup[] {
   // Surface the active nav layer(s) right after "Global" so they're the first
-  // thing the user sees; hide them entirely when off (the keys are inert).
+  // thing the user sees; hide them entirely when off, since the keys are inert.
   const layers: HelpGroup[] = [];
   if (arrowNav) layers.push(ARROW_HELP_GROUP);
   if (vimNav) layers.push(VIM_HELP_GROUP);
@@ -198,7 +198,7 @@ let arrowNav = false;
 /** When the detail pane has "captured" the keys for an open dropdown ("sub"), the
  *  waveform scrub mode ("wave"), or a tag-suggestion chip's ✓/× sub-step
  *  ("suggest"), route j/k/h/l/H/L/Enter/Esc to that instead of the normal grid
- *  nav. RecordingsView owns the state and announces it via the
+ *  nav. RecordingsView owns the state and announces it through the
  *  `phoneme:detail-capture` event (detail = "sub" | "wave" | "suggest" | null). */
 let detailCapture: "sub" | "wave" | "suggest" | null = null;
 
@@ -212,9 +212,9 @@ function isTypingTarget(el: Element | null): boolean {
 function focusSearch() {
   const el = document.querySelector<HTMLInputElement>(".headerbar input.search");
   if (!el) return;
-  // With the top bar hidden (Ctrl+/ or a zen mode), `/` PEEKS it: reveal just
+  // With the top bar hidden (Ctrl+/ or a zen mode), `/` peeks it: reveal just
   // long enough to type, re-hide when the search box loses focus. The stored
-  // preference and zen state are untouched — this is a transient reveal.
+  // preference and zen state stay untouched — this is a transient reveal.
   if (document.body.classList.contains("phoneme-hide-header")) {
     setHeaderHidden(false);
     const reHide = () => {
@@ -307,8 +307,8 @@ function highlightHeaderSub() {
     headerSub.opener.classList.add("kbd-cursor");
   } else {
     // A native <select> can't pop its options from JS, so signal "you're now
-    // cycling this" with a bolder border (.kbd-cycle) AND render our own option
-    // list beside it so you can see the choices and where you are.
+    // cycling this" with a bolder border (.kbd-cycle) and render our own option
+    // list beside it, so you can see the choices and where you are.
     headerSub.el.classList.add("kbd-cursor", "kbd-cycle");
     renderStatusOverlay(headerSub.el);
   }
@@ -324,8 +324,8 @@ function closeHeaderSub(closeMenu: boolean) {
 }
 
 /** A native <select>'s option list can't be popped open from JS, so while you
- *  cycle it with j/k we render our OWN little list beside it — highlighting the
- *  current option — so you can see the choices, their order, and where you are. */
+ *  cycle it with j/k we render our own little list beside it, highlighting the
+ *  current option, so you can see the choices, their order, and where you are. */
 let statusOverlay: HTMLElement | null = null;
 function renderStatusOverlay(sel: HTMLSelectElement) {
   if (!statusOverlay) {
@@ -351,9 +351,9 @@ function removeStatusOverlay() {
   statusOverlay = null;
 }
 
-/** The header control the cursor currently sits on, tracked by IDENTITY (not just
- *  index) so we can re-find it after the header re-renders — starting a recording
- *  reveals Pause/Cancel and relabels Record, which shifts the control's index. */
+/** The header control the cursor currently sits on, tracked by identity rather
+ *  than index so we can re-find it after the header re-renders — starting a
+ *  recording reveals Pause/Cancel and relabels Record, which shifts the index. */
 let headerCurrentEl: HTMLElement | null = null;
 
 function highlightHeaderCursor() {
@@ -372,9 +372,9 @@ function highlightHeaderCursor() {
 /** Re-assert the header roving cursor after the header re-renders. Lit rewrites
  *  the Record button's `class` on a state change (clobbering the `.kbd-cursor` it
  *  doesn't know about), and revealing Pause/Cancel shifts the button sideways and
- *  resizes it — so without this the cursor's glow is stranded at the old box. We
- *  re-find the SAME control by identity and re-paint it, which also re-fits the
- *  glow to its new size/position. No-op unless we're actually roving the header. */
+ *  resizes it, which would strand the cursor's glow at the old box. Re-find the
+ *  same control by identity and re-paint it, which also re-fits the glow to its
+ *  new size and position. No-op unless we're actually roving the header. */
 export function refreshHeaderCursor() {
   if (headerCursor < 0) return;
   if (headerSub) { highlightHeaderSub(); return; }
@@ -397,15 +397,15 @@ function exitHeaderNav() {
   headerCurrentEl = null;
 }
 
-/** Enter "header nav": HIGHLIGHT (not focus) the search box so h/l can roam the
- *  header controls without the text box swallowing keystrokes. The user commits
- *  with Enter/i (focus the box to type, or activate a button) or j/Esc (back to
- *  the list). Focus goes to the bar container, which isn't a typing target, so
- *  the global key handler keeps routing the keys. */
+/** Enter "header nav": highlight (rather than focus) the search box so h/l can
+ *  roam the header controls without the text box swallowing keystrokes. The user
+ *  commits with Enter/i (focus the box to type, or activate a button) or j/Esc
+ *  (back to the list). Focus goes to the bar container, which isn't a typing
+ *  target, so the global key handler keeps routing the keys. */
 function enterHeaderNav(opts?: { restore?: boolean; reveal?: boolean }) {
   const bar = document.querySelector<HTMLElement>(".headerbar");
   if (!bar) return;
-  // A hidden top bar (Ctrl+/, zen, focus mode) can't be roamed PASSIVELY — k at
+  // A hidden top bar (Ctrl+/, zen, focus mode) can't be roamed passively — k at
   // the top of a pane would strand a cursor on an invisible bar. The deliberate
   // `g /` jump (reveal:true) forces it open first; `/` peeks it to type.
   if (document.body.classList.contains("phoneme-hide-header")) {
@@ -510,14 +510,14 @@ function closeHelp() {
 }
 
 /// Handle a `g`-prefix chord (gl/gs/gd/gD/gA/gT/gP/gS/g1/g2/g//gb/gg). These are
-/// the "go to a place" destination chords and are part of the NORMAL (non-vim)
+/// the "go to a place" destination chords and belong to the normal (non-vim)
 /// keymap — they all fire regardless of `vim_nav`. The sole exception is `g g`
-/// (jump-to-top), a vim MOTION (the partner of `G`), which stays gated. A bare
+/// (jump-to-top), a vim motion (the partner of `G`), which stays gated. A bare
 /// modifier keydown is ignored so the prefix survives until the real letter; any
-/// other key clears the prefix. Extracted from onKeyDown.
+/// other key clears the prefix.
 function handleGChord(e: KeyboardEvent) {
-    // A bare modifier keydown (the Shift that PRECEDES a capital chord letter —
-    // pressing g then Shift+D fires keydown for "Shift" first) must NOT consume
+    // A bare modifier keydown (the Shift that precedes a capital chord letter —
+    // pressing g then Shift+D fires keydown for "Shift" first) must not consume
     // the prefix, or g D / g T / g P / g S never fire. Keep pending-g armed and
     // wait for the real letter.
     if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
@@ -554,7 +554,7 @@ function handleGChord(e: KeyboardEvent) {
       dispatchVim(e.key === "1" ? "pane-1" : "pane-2");
       return;
     }
-    // g / — HIGHLIGHT the search bar (roving header cursor, like k at the top of
+    // g / — highlight the search bar (roving header cursor, like k at the top of
     // the list) rather than focusing it to type like plain `/` does.
     if (e.key === "/") { e.preventDefault(); enterHeaderNav({ reveal: true }); return; }
     // g b — go to / reveal the sidebar. A "go to a place" destination chord, so
@@ -582,13 +582,13 @@ function handleTypingTargetKeys(e: KeyboardEvent) {
     const isSearch = active.classList.contains("search");
     if (e.key === "Escape") {
       // Escape backs out of a header input (search box, the date filters). With
-      // vim nav on, return the roving cursor TO that control so you can keep
+      // vim nav on, return the roving cursor to that control so you can keep
       // roaming the header — you just left a field, not the whole bar (a second
       // Esc from roving then drops to the list). Without vim nav, blur straight
-      // to the list as before.
+      // to the list.
       if (active.closest(".headerbar")) {
         // Stop the browser's native clear-on-Escape for `<input type="search">`
-        // so leaving the box KEEPS your query (and the live filter) intact.
+        // so leaving the box keeps your query (and the live filter) intact.
         if (isSearch) e.preventDefault();
         const fromCtrl = active as HTMLElement;
         active.blur();
@@ -605,7 +605,7 @@ function handleTypingTargetKeys(e: KeyboardEvent) {
     }
     // Enter in the search box commits the query (the filter is already live on
     // every keystroke) and hands focus to the list, so you can browse the results
-    // with the text still in place — the keyboard way to leave the box WITHOUT
+    // with the text still in place — the keyboard way to leave the box without
     // clearing it.
     if (isSearch && e.key === "Enter") {
       e.preventDefault();
@@ -653,8 +653,8 @@ function handleTypingTargetKeys(e: KeyboardEvent) {
   }
 
 /// Global single-key shortcuts that fire in any pane (vim-nav or not), tried
-/// AFTER the vim-nav layer: / search, ? help, g/x chord arming, and the
-/// open-recording actions p/c/e/r/f/t/T. Extracted from onKeyDown.
+/// after the vim-nav layer: / search, ? help, g/x chord arming, and the
+/// open-recording actions p/c/e/r/f/t/T.
 function handleGlobalKeys(e: KeyboardEvent) {
   switch (e.key) {
     case "/":
@@ -692,21 +692,20 @@ function handleGlobalKeys(e: KeyboardEvent) {
   }
 }
 
-/// System-wide vim navigation layer (extracted from `onKeyDown`). Returns `true`
-/// when it consumed the key — the caller then stops — and `false` to fall through
-/// to the global single-key shortcuts. Runs when EITHER `vim_nav` or `arrow_nav`
-/// is on. The trigger key is normalized up front into a canonical motion token
-/// (`nav`): arrow keys map to h/l/j/k when either layer is on, bare vim letters
-/// only when `vim_nav` is on, and Enter/Escape/Space are shared. Every switch
-/// below reads `nav`, so one engine drives both the vim and arrow-key audiences;
-/// keys no active layer owns become `""` and fall through harmlessly. Pane
-/// movement works from anywhere; the list/edit/delete keys require the relevant
-/// pane to hold focus.
+/// System-wide vim navigation layer. Returns `true` when it consumed the key —
+/// the caller then stops — and `false` to fall through to the global single-key
+/// shortcuts. Runs whenever either `vim_nav` or `arrow_nav` is on. The trigger
+/// key is normalized up front into a canonical motion token (`nav`): arrow keys
+/// map to h/l/j/k when either layer is on, bare vim letters only when `vim_nav`
+/// is on, and Enter/Escape/Space are shared. Every switch below reads `nav`, so
+/// one engine drives both the vim and arrow-key audiences; keys no active layer
+/// owns become `""` and fall through harmlessly. Pane movement works from
+/// anywhere; the list/edit/delete keys require the relevant pane to hold focus.
 /// Normalize a key event into a canonical motion token shared by the vim/arrow
-/// nav engine AND the modal driver: arrow keys map to h/l/j/k when EITHER layer is
-/// on; the bare vim letters (h/j/k/l/H/L/G/i/d/z) only when vim_nav is on;
-/// Enter/Escape/Space (and anything else) pass through as-is. An inert key — a bare
-/// letter with vim_nav off — collapses to "" so no handler matches it.
+/// nav engine and the modal driver: arrow keys map to h/l/j/k when either layer
+/// is on; the bare vim letters (h/j/k/l/H/L/G/i/d/z) only when vim_nav is on;
+/// Enter/Escape/Space (and anything else) pass through as-is. An inert key — a
+/// bare letter with vim_nav off — collapses to "" so no handler matches it.
 function motionToken(e: KeyboardEvent): string {
   const ARROW_TO_MOTION: Record<string, string> = {
     ArrowLeft: "h", ArrowRight: "l", ArrowUp: "k", ArrowDown: "j",
@@ -714,7 +713,7 @@ function motionToken(e: KeyboardEvent): string {
   const VIM_LETTERS = "hjklHLGidz";
   if (e.key in ARROW_TO_MOTION) return vimNav || arrowNav ? ARROW_TO_MOTION[e.key] : "";
   if (e.key.length === 1 && VIM_LETTERS.includes(e.key)) return vimNav ? e.key : "";
-  return e.key; // Enter / Escape / " " and the like — shared by both layers
+  return e.key; // Enter / Escape / " " and the like, shared by both layers
 }
 
 function handleVimNav(e: KeyboardEvent): boolean {
@@ -724,7 +723,7 @@ function handleVimNav(e: KeyboardEvent): boolean {
   // matches it, so it's swallowed in a capture block or falls through at top level.
   const nav = motionToken(e);
 
-  // Detail pane has captured the keys for an open dropdown or the waveform
+  // The detail pane has captured the keys for an open dropdown or the waveform
   // scrub mode — route the relevant keys there before normal grid nav. (The
   // detail pane holds focus throughout, so editors aren't affected: typing
   // targets already returned above.)
@@ -919,15 +918,13 @@ function handleVimNav(e: KeyboardEvent): boolean {
           });
           return true;
         }
-        // The search box focuses to type (leaving roving nav). EVERY other
-        // control just FIRES but keeps the roving cursor on it, so after
-        // sorting / toggling the sidebar / opening a popup you keep roaming the
-        // header with h/l instead of being dumped to the list. Re-highlight
-        // after the click (the action may re-render the header).
-        // Inputs (the search box AND the date filters) focus to type/pick,
+        // Inputs (the search box and the date filters) focus to type/pick,
         // leaving roving nav — Esc returns the cursor to them. A date input
-        // also pops its native calendar via showPicker(). Every OTHER control
-        // just fires but keeps the cursor on it.
+        // also pops its native calendar via showPicker(). Every other control
+        // just fires but keeps the roving cursor on it, so after sorting /
+        // toggling the sidebar / opening a popup you keep roaming the header
+        // with h/l instead of being dumped to the list; re-highlight after the
+        // click, since the action may re-render the header.
         if (el.tagName === "INPUT") {
           exitHeaderNav();
           el.focus();
@@ -947,9 +944,9 @@ function handleVimNav(e: KeyboardEvent): boolean {
   switch (nav) {
     case "h":
       e.preventDefault();
-      // In the detail pane (and the sidebar), h walks LEFT through the focused
+      // In the detail pane (and the sidebar), h walks left through the focused
       // row's items; elsewhere it switches pane. The sidebar steps out to the
-      // list on l past its rightmost cell (it's the leftmost pane).
+      // list on l past its rightmost cell, since it's the leftmost pane.
       if (activeWithin(".rv-detail")) dispatchVim("detail-left");
       else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-left");
       else dispatchVim("pane-left");
@@ -1025,13 +1022,13 @@ function handleVimNav(e: KeyboardEvent): boolean {
 
 // ── Generic modal / popup keyboard navigation ──────────────────────────────
 // A modal makes the background nav layer stand down (onKeyDown returns), but with
-// vim_nav or arrow_nav on we drive a roving cursor over the modal's OWN controls
+// vim_nav or arrow_nav on we drive a roving cursor over the modal's own controls
 // — the same `.kbd-cursor` idiom used in the detail grid, header, and tag popover
-// — so every modal is keyboard-drivable the same way, no per-modal wiring.
+// — so every modal is keyboard-drivable the same way, with no per-modal wiring.
 
 /** The topmost open overlay, matching the `.modal-overlay` convention plus the
  *  `*-modal-overlay` variants (the compare / speakers overlays). Later in the DOM
- *  = on top (openers append to <body>). null when none is open. */
+ *  means on top, since openers append to <body>. null when none is open. */
 function topmostModalOverlay(): HTMLElement | null {
   const all = document.querySelectorAll<HTMLElement>('[class*="modal-overlay"]');
   return all.length ? all[all.length - 1] : null;
@@ -1087,7 +1084,7 @@ function activateModalControl(el: HTMLElement, overlay: HTMLElement) {
     if (topmostModalOverlay() !== overlay) return; // the click closed / replaced it
     const ctrls = modalControls(overlay);
     if (!ctrls.length) return;
-    // Keep the cursor on the SAME control across the re-render if it survived
+    // Keep the cursor on the same control across the re-render if it survived
     // (Lit patches in place, so it usually does); only fall back to a clamped
     // index when the clicked control is gone (e.g. a Doctor row that got fixed).
     const i = ctrls.indexOf(el);
@@ -1193,7 +1190,7 @@ function handleModalNav(e: KeyboardEvent, overlay: HTMLElement): boolean {
 }
 
 /** Drop the roving cursor onto a modal the moment it opens, so the keyboard
- *  cursor (and its glow) is already INSIDE the dialog without needing a first
+ *  cursor (and its glow) is already inside the dialog without needing a first
  *  keypress — e.g. the Re-run / Models picker, Doctor. Prefers the control the
  *  modal itself focused (so a destructive confirm still starts on Cancel), and
  *  bows out for modals that put focus straight into a text field to type. */
@@ -1214,10 +1211,10 @@ function seedModalCursor(overlay: HTMLElement) {
   highlightModalCursor(controls);
 }
 
-/** Focus trap: keep Tab / Shift+Tab INSIDE an open dialog. Without this, native
- *  Tab walks focus out to the controls behind the overlay (you could tab out of
- *  a popup). We always preventDefault and move focus to the next/prev focusable
- *  WITHIN the overlay, wrapping at the ends — so focus can never leave. Works for
+/** Focus trap: keep Tab / Shift+Tab inside an open dialog. Without it, native Tab
+ *  walks focus out to the controls behind the overlay (you could tab out of a
+ *  popup). Always preventDefault and move focus to the next/prev focusable within
+ *  the overlay, wrapping at the ends, so focus can never leave. Works for
  *  everyone: typing in a field tabs to the next field, buttons cycle, and it
  *  needs no nav layer. When vim/arrow nav is on we also sync the roving cursor so
  *  there's a single highlight, not a native ring fighting the glow. */
@@ -1263,7 +1260,7 @@ function onKeyDown(e: KeyboardEvent) {
 
   // While typing, never hijack keys — except Esc from the search box, which
   // blurs it and hands focus to the list so arrow-nav can take over. The
-  // transcript editor's own vim mode (when focused) keeps Esc too, by virtue of
+  // transcript editor's own vim mode (when focused) keeps Esc too, thanks to
   // this early return — the system-wide layer never steals it.
   if (isTypingTarget(document.activeElement)) {
     handleTypingTargetKeys(e);
@@ -1274,9 +1271,9 @@ function onKeyDown(e: KeyboardEvent) {
   // capture-phase Enter/Esc, like the confirm dialog, are honoured here first).
   if (e.defaultPrevented) return;
   // A modal is open: the background nav layer always stands down, but with vim /
-  // arrow nav on we drive a roving cursor over the modal's OWN controls. Either
-  // way we return — the layer below (chords, vim nav, single-letter actions) must
-  // never run against the recordings behind an open modal.
+  // arrow nav on we drive a roving cursor over the modal's own controls. Either
+  // way we return, so the layer below (chords, vim nav, single-letter actions)
+  // never runs against the recordings behind an open modal.
   const modalOverlay = topmostModalOverlay();
   if (modalOverlay) {
     if (vimNav || arrowNav) handleModalNav(e, modalOverlay);
@@ -1342,7 +1339,7 @@ function onKeyDown(e: KeyboardEvent) {
     if (vimNav && e.key === "/") { e.preventDefault(); toggleHeaderBar(); return; }
   }
 
-  // System-wide motion layer — runs when EITHER vim nav or arrow nav is on. The
+  // System-wide motion layer — runs when either vim nav or arrow nav is on. The
   // engine normalizes the trigger key (arrows under arrow_nav, bare letters under
   // vim_nav) so one code path serves both audiences (see handleVimNav).
   if (vimNav || arrowNav) {
@@ -1362,7 +1359,7 @@ export function initKeyboard() {
   // Focus-follows-click for the header strip: clicking a header control puts the
   // roving header cursor on it, so h/l (or the arrow keys) roam from where you
   // clicked — parity with the list / detail / sidebar panes, which already do this
-  // under EITHER layer (see onPaneClick). The search box is a typing target, so
+  // under either layer (see onPaneClick). The search box is a typing target, so
   // clicking it focuses to type (just drop any stale roving cursor). Capture phase
   // so we read the pre-click control set; we never preventDefault, so the control's
   // own click still fires.
@@ -1379,8 +1376,8 @@ export function initKeyboard() {
       if (!target.closest(".headerbar")) {
         // Clicking into the rest of the app drops the roving header cursor so its
         // highlight doesn't linger. The keydown clear (onKeyDown) only fires on a
-        // key press, so a mouse click away used to leave header/search controls
-        // stuck highlighted.
+        // key press, so without this a mouse click away would leave header/search
+        // controls stuck highlighted.
         if (headerCursor >= 0) exitHeaderNav();
         return;
       }
@@ -1420,14 +1417,14 @@ export function initKeyboard() {
     lastAnimCfg = cfg;
     vimNav = !!cfg?.interface?.vim_nav;
     arrowNav = !!cfg?.interface?.arrow_nav;
-    // Pane show/hide animation speed (sidebar / detail / focus toggles) AND the
+    // Pane show/hide animation speed (sidebar / detail / focus toggles) and the
     // app-wide micro-animations (list/tag/queue enter-leave, state cross-fades,
-    // modal/dropdown enter+exit — the animation overhaul) share one knob: the
-    // setting becomes a CSS duration var the transitions/keyframes read. "off"
-    // (0ms) short-circuits them all. OS reduced-motion forces 0ms regardless of
-    // the setting — and it must be applied to the inline var here, because an
-    // inline var on <html> would otherwise beat the @media (prefers-reduced-
-    // motion) rule in shared/styles.css and silently defeat it.
+    // modal/dropdown enter+exit) share one knob: the setting becomes a CSS
+    // duration var the transitions/keyframes read. "off" (0ms) short-circuits
+    // them all. OS reduced-motion forces 0ms regardless of the setting, and that
+    // has to be applied to the inline var here: an inline var on <html> would
+    // otherwise win out over the @media (prefers-reduced-motion) rule in
+    // shared/styles.css and silently defeat it.
     const speeds: Record<string, string> = { off: "0ms", fast: "110ms", normal: "200ms", slow: "320ms" };
     const dur = speeds[String(cfg?.interface?.animation_speed ?? "normal")] ?? "200ms";
     const motionDur = prefersReducedMotion() ? "0ms" : dur;
@@ -1440,14 +1437,14 @@ export function initKeyboard() {
     const font = String(cfg?.interface?.ui_font ?? "").trim().replace(/["';]/g, "");
     if (font) rootStyle.setProperty("--ui-font", `"${font}", ${UI_FONT_FALLBACK}`);
     else rootStyle.removeProperty("--ui-font");
-    // UI size = a REAL root font-size (px): `rem` and every inheriting text
-    // element scale from it. NOT a zoom of the whole canvas — that magnified
-    // spacing/boxes and could shove the layout off-window. 14px is the 1.0
-    // baseline; reset.css reads --ui-font-size on the root.
+    // UI size is a real root font-size in px: `rem` and every inheriting text
+    // element scale from it. It's deliberately not a zoom of the whole canvas —
+    // that magnifies spacing and boxes and can shove the layout off-window. 14px
+    // is the 1.0 baseline; reset.css reads --ui-font-size on the root.
     const size = Number(cfg?.interface?.ui_font_size);
     const px = Number.isFinite(size) && size >= 10 && size <= 24 ? Math.round(size) : 14;
     rootStyle.setProperty("--ui-font-size", `${px}px`);
-    rootStyle.removeProperty("--ui-zoom"); // legacy zoom scale — no longer used
+    rootStyle.removeProperty("--ui-zoom"); // clear the old whole-canvas zoom var
     // Step-completion toasts (errors always show regardless).
     setStepNotifications(cfg?.interface?.step_notifications ?? true);
   };
@@ -1466,10 +1463,10 @@ export function initKeyboard() {
   // The list dispatches this when k is pressed at the top — highlight the search
   // box (don't focus it) so h/l can roam the header without typing.
   window.addEventListener("phoneme:enter-header-nav", () => enterHeaderNav({ restore: true }));
-  // Whenever focus moves INTO the header — by keyboard (enterHeaderNav focuses the
+  // Whenever focus moves into the header — by keyboard (enterHeaderNav focuses the
   // bar) or by mouse (clicking a control) — drop any lingering pane cursor so only
   // the header shows a highlight. The pane's remembered position lives in
-  // RecordingsView state (sidebarRow / detailRow), NOT the `.kbd-cursor` class, so
+  // RecordingsView state (sidebarRow / detailRow), not the `.kbd-cursor` class, so
   // clearing the class keeps "return to where I was" working. The list keeps its
   // own persistent (dimmed) cursor by design, so it's left alone.
   document.addEventListener("focusin", (e) => {
@@ -1480,7 +1477,7 @@ export function initKeyboard() {
         .forEach((el) => el.classList.remove("kbd-cursor"));
     }
   });
-  // Seed the roving cursor INTO a modal the moment it opens, so the keyboard
+  // Seed the roving cursor into a modal the moment it opens, so the keyboard
   // cursor is already inside it (no first keypress needed) and the cursor glow
   // follows it in. Deferred a frame so the dialog's controls have rendered.
   new MutationObserver((records) => {

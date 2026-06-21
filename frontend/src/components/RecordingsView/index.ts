@@ -9,14 +9,14 @@
 //  * Layout: splitter positions, sidebar width/visibility, list zoom, focus
 //    mode and list zen — each persisted per device (the phoneme.layout.* keys
 //    below) except the session-only zen states.
-//  * Live updates: ONE daemon-event subscription that refreshes the list and
-//    the open detail as recordings change (see subscribeToEvents) — panes
+//  * Live updates: a single daemon-event subscription that refreshes the list
+//    and the open detail as recordings change (see subscribeToEvents) — panes
 //    don't poll, and most don't subscribe themselves.
 //  * Selection: single select (detail pane, `phoneme.layout.selectedId`
 //    restore-on-reload), multi-select (bulk bar), and the merged-meeting
 //    selection (`session:<meeting_id>`).
 //  * Keyboard: the list's own arrow/Enter/Space handling lives in
-//    RecordingsList; THIS class handles the pane-level vim layer by acting on
+//    RecordingsList; this class handles the pane-level vim layer by acting on
 //    `phoneme:vim` actions dispatched by services/keyboard.ts (h/l pane
 //    moves, the sidebar/detail 2D grids, dd delete, zz center), tracking the
 //    focused pane + grid cursors itself.
@@ -31,12 +31,12 @@ import { Store } from "../../state/store";
 import { setOpenRecordingId } from "../../state/openRecording";
 import { RecordingsList, type RecordingsListState } from "./RecordingsList";
 import { RecordingDetail } from "./RecordingDetail";
-// Side-effect import is REQUIRED. `MergedConversationDetail` below is referenced
-// ONLY as a type (annotation + `as` cast), so a plain named import gets elided
-// by esbuild/Vite — which means the `@customElement("ph-merged-conversation-detail")`
-// registration never runs and the meeting (merged) detail renders as an empty,
+// The side-effect import is load-bearing. `MergedConversationDetail` below is
+// used only as a type (annotation + `as` cast), so a plain named import gets
+// elided by esbuild/Vite — and then the `@customElement("ph-merged-conversation-detail")`
+// registration never runs, leaving the merged meeting detail an empty,
 // un-upgraded element. The bare import forces the module to run; the `import type`
-// keeps the type available and makes the intent explicit so this can't regress.
+// keeps the type available and spells out the intent so this can't regress.
 import "./MergedConversationDetail";
 import type { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
@@ -49,8 +49,8 @@ import "./Sidebar";
 import "./ThinkingPopout";
 import "./styles.css";
 
-// Per-device UI layout prefs persisted in localStorage (NOT config.toml — these
-// are window-layout preferences, like the record-mode dropdown's key).
+// Per-device UI layout prefs persisted in localStorage, not config.toml — these
+// are window-layout preferences, like the record-mode dropdown's key.
 const LS_SPLIT = "phoneme.layout.splitPercent";
 const LS_SIDEBAR = "phoneme.layout.sidebarOpen";
 const LS_SIDEBAR_WIDTH = "phoneme.layout.sidebarWidth";
@@ -89,18 +89,18 @@ function readStoredSidebar(): boolean {
 }
 
 /** One keyboard-navigable target in the detail pane's 2D grid. `button` clicks
- *  on Enter; `tags` focuses the add-tag input (Shift+Enter → Tag Manager);
- *  `editor` focuses the editable area inside its block (transcript / notes);
- *  `suggestion` is a whole AI tag-suggestion chip — Enter drops into a sub-step
- *  where h/l pick its ✓ (approve) / × (dismiss). */
+ *  on Enter; `tags` focuses the add-tag input (Shift+Enter opens the Tag
+ *  Manager); `editor` focuses the editable area inside its block (transcript /
+ *  notes); `suggestion` is a whole AI tag-suggestion chip — Enter drops into a
+ *  sub-step where h/l pick its ✓ (approve) / × (dismiss). */
 type DetailCell = { el: HTMLElement; kind: "button" | "tags" | "editor" | "waveform" | "suggestion" };
 
 /** Group detail-pane cells into grid rows by their on-screen vertical position so
- *  navigation follows the VISIBLE layout — a button row that wraps at a narrow
- *  pane width becomes several grid rows automatically. Buckets by each cell's TOP
- *  edge (within a tolerance), NOT by vertical range overlap: a tall block like the
- *  transcript box must stay its own row while the buttons nested at its bottom
- *  (Speakers · Views · Versions) fall to the next row — overlap-grouping would
+ *  navigation follows the visible layout — a button row that wraps at a narrow
+ *  pane width becomes several grid rows automatically. Buckets by each cell's top
+ *  edge (within a tolerance), not by vertical range overlap: a tall block like the
+ *  transcript box needs to stay its own row while the buttons nested at its bottom
+ *  (Speakers · Views · Versions) fall to the next row, and overlap-grouping would
  *  wrongly merge them. Within a row, cells are ordered left→right. */
 function bucketCellsByRow(cells: DetailCell[]): DetailCell[][] {
   const TOL = 10; // px; same-line cells share a top within this, a wrap exceeds it
@@ -152,8 +152,8 @@ function nearestColTo(row: DetailCell[], x: number): number {
 /** The home view (see the file-top comment for the full picture). Public
  *  surface: `refresh()` re-queries the list; `toggleSidebar()` /
  *  `toggleDetail()` / `toggleFocusMode()` drive the chrome (header button,
- *  keyboard shortcuts); `openSplit`/`closeSplit` manage the second pane;
- *  `dispose()` MUST be called on unmount (App does) — it detaches the
+ *  keyboard shortcuts); `openSplit`/`closeSplit` manage the second pane.
+ *  `dispose()` has to run on unmount (App handles it) — it detaches the
  *  document/window listeners and the daemon-event subscription. */
 export class RecordingsView {
   private container: HTMLElement;
@@ -180,7 +180,7 @@ export class RecordingsView {
    *  appears for non-vim users. */
   private focusedPane: "sidebar" | "list" | "detail" | "detail2" | null = null;
   /** Cached `interface.vim_nav` (initial read + config:saved) so the pane-click
-   *  follower (P) is cheap and reacts to the setting being toggled live. */
+   *  follower (P) is cheap and reacts to the setting being toggled at runtime. */
   private vimNav = false;
   /** Cached `interface.arrow_nav` — the non-vim arrow-key navigation layer. Shares
    *  the same pane/grid cursor, so the click-follower applies to it as well. */
@@ -200,8 +200,8 @@ export class RecordingsView {
    *  Seeded from the current cell on the first vertical move of a run and kept
    *  across the run; h/l (or a fresh entry / click) clears it so it re-seeds. */
   private detailDesiredX: number | null = null;
-  /** Where the detail cursor was when you last stepped OUT to the list (tagged
-   *  with the recording id). Re-entering the SAME recording's detail restores it
+  /** Where the detail cursor was when you last stepped out to the list (tagged
+   *  with the recording id). Re-entering that same recording's detail restores it
    *  (h→list then l back, or g d), so a round-trip remembers where you were;
    *  opening a different recording falls back to the transcript. */
   private lastDetailPos: { row: number; col: number; id: string | null } | null = null;
@@ -224,10 +224,10 @@ export class RecordingsView {
   /** Chrome visibility captured when ENTERING any zen state, restored on full
    *  exit — so zen never clobbers the user's own sidebar/top-bar choices. */
   private zenSnapshot: { sidebar: boolean; header: boolean } | null = null;
-  /** Set when recording focus mode was entered FROM list zen (Enter on a row):
+  /** Set when recording focus mode was entered from list zen (Enter on a row):
    *  Esc then steps back to list zen instead of the normal layout. */
   private zenChained = false;
-  /** Split mode: the recording open in the SECOND pane (null = no split).
+  /** Split mode: the recording open in the second pane (null = no split).
    *  The first pane keeps showing the normal selection. */
   private splitId: string | null = null;
   /** Where Esc/✕ should land after leaving split mode: the merged meeting view
@@ -398,10 +398,10 @@ export class RecordingsView {
     window.addEventListener("phoneme:open-split", this.openSplitHandler);
 
     // P: the keyboard cursor follows the mouse across panes. Cache vim_nav (so
-    // the click follower is cheap and tracks the setting being toggled live),
-    // then watch pointerdown in the capture phase — a click that lands in a
-    // DIFFERENT pane moves the focus ring there, so j/k/h/l continue from where
-    // the mouse just went. Clicks WITHIN the active pane are left untouched.
+    // the click follower is cheap and tracks the setting being toggled at
+    // runtime), then watch pointerdown in the capture phase — a click that lands
+    // in a different pane moves the focus ring there, so j/k/h/l continue from
+    // where the mouse just went. Clicks inside the active pane are left untouched.
     void import("@tauri-apps/api/core").then(({ invoke }) =>
       invoke<any>("read_config").then((c) => {
         this.vimNav = !!c?.interface?.vim_nav;
@@ -473,7 +473,7 @@ export class RecordingsView {
         if (this.mergedDetail.meetingId === mid) {
           // Same meeting already shown: reassigning meetingId won't re-run the
           // component's `updated`, so reload its tracks explicitly to pick up a
-          // freshly-finished transcript.
+          // transcript that just finished.
           void this.mergedDetail.reload();
         } else {
           this.mergedDetail.meetingId = mid;
@@ -549,7 +549,7 @@ export class RecordingsView {
   }
 
   /** `f` is contextual: with a recording open it's recording focus mode; with
-   *  nothing open it's LIST ZEN — sidebar and top bar slide away and the list
+   *  nothing open it's list zen — sidebar and top bar slide away and the list
    *  takes the whole window. Both snapshot the chrome and restore it on exit. */
   toggleFocusMode() {
     if (!this.detailVisible && !this.focusMode) {
@@ -583,7 +583,7 @@ export class RecordingsView {
     }
   }
 
-  /** Full-window recordings list: hide the sidebar + top bar (snapshotted),
+  /** Full-window recordings list: hide the sidebar and top bar (snapshotted),
    *  keep the list and all its navigation. `f` or Esc exits. */
   private toggleListZen() {
     this.listZen = !this.listZen;
@@ -641,8 +641,8 @@ export class RecordingsView {
   /** Panes that currently exist, left-to-right. Hidden panes are skipped so
    *  h/l never lands focus on a collapsed sidebar or an absent detail pane. */
   private panesInOrder(): Array<"sidebar" | "list" | "detail" | "detail2"> {
-    // Split mode: the two recording panes ARE the layout (list + sidebar are
-    // collapsed), so h/l walks pane A <-> pane B.
+    // Split mode: the two recording panes are the whole layout (list + sidebar
+    // are collapsed), so h/l walks pane A <-> pane B.
     if (this.splitId) return ["detail", "detail2"];
     const panes: Array<"sidebar" | "list" | "detail" | "detail2"> = [];
     if (this.sidebarVisible && !this.focusMode) panes.push("sidebar");
@@ -671,7 +671,7 @@ export class RecordingsView {
     return null;
   }
 
-  /** P: a mouse click moves the vim keyboard cursor to land on the EXACT control
+  /** P: a mouse click moves the vim keyboard cursor to land on the exact control
    *  it hit — click the Speed button and the cursor sits on Speed; click a
    *  sidebar filter/tag/queue row and the cursor sits there — so j/k/h/l carry on
    *  from precisely where the mouse went, not the pane's default entry cell. Only
@@ -683,7 +683,7 @@ export class RecordingsView {
     const target = e.target as HTMLElement | null;
     if (!target) return;
     // Clicking an option inside a transient dropdown (Views / Versions / Speed /
-    // Export / Pipeline) is a SELECTION, not navigation — and the menu closes on
+    // Export / Pipeline) is a selection, not navigation — and the menu closes on
     // click, removing the option node. Moving the roving cursor onto it would
     // strand the glow on the gone node. Leave the cursor on the trigger, exactly
     // as keyboard mode does (the glow stays on the parent control).
@@ -712,7 +712,7 @@ export class RecordingsView {
 
   /** The (row, col) of the sidebar nav cell the clicked node lives in, or null
    *  when the click wasn't on a navigable cell (so the cursor is left as-is).
-   *  Matches the NEAREST cell ancestor so a click on a control inside a larger
+   *  Matches the nearest cell ancestor so a click on a control inside a larger
    *  cell lands on the control, not the enclosing cell. */
   private sidebarCellAt(target: HTMLElement): { row: number; col: number } | null {
     const grid = this.sidebarGrid();
@@ -728,8 +728,8 @@ export class RecordingsView {
 
   /** The (row, col) of the detail-pane nav cell the clicked node lives in (built
    *  for the currently-focused recording pane), or null when off any cell. Walks
-   *  up from the clicked node to the NEAREST cell, so clicking the Speakers /
-   *  Views / Versions buttons (which sit INSIDE the .transcript-block) lands on
+   *  up from the clicked node to the nearest cell, so clicking the Speakers /
+   *  Views / Versions buttons (which sit inside the `.transcript-block`) lands on
    *  those buttons, not the whole transcript cell. */
   private detailCellAt(target: HTMLElement): { row: number; col: number } | null {
     const grid = this.detailGrid();
@@ -758,10 +758,10 @@ export class RecordingsView {
     const panes = this.panesInOrder();
     if (!panes.includes(pane)) pane = panes[0];
     const isDetail = pane === "detail" || pane === "detail2";
-    // Clear the visible cursors when pane focus changes, but KEEP the sidebar's
+    // Clear the visible cursors when pane focus changes, but keep the sidebar's
     // row/col so returning to it lands where you left (the list and detail panes
     // already remember their spot). The very first sidebar entry — row still -1 —
-    // lands on the top row; subsequent returns restore the remembered cell.
+    // lands on the top row; later returns restore the remembered cell.
     this.clearSidebarCursorHighlight();
     this.container.querySelectorAll(".rv-detail .kbd-cursor").forEach((i) => i.classList.remove("kbd-cursor"));
     // Leaving (or switching) recording panes drops the grid cursor; arriving
@@ -772,7 +772,7 @@ export class RecordingsView {
       this.paneEl(p)?.classList.toggle("rv-pane-focused", p === pane);
     }
     // Keep the shared "open recording" pointing at the pane the keyboard is
-    // in, so global shortcuts (p/c/e/r) and Run-once target THIS pane.
+    // in, so global shortcuts (p/c/e/r) and Run-once target this pane.
     if (pane === "detail2" && this.splitId) {
       setOpenRecordingId(this.splitId);
     } else if (pane === "detail") {
@@ -787,10 +787,10 @@ export class RecordingsView {
       // Land a visible cursor immediately so it's obvious what j/k will move.
       this.list.ensureCursor();
       // Seed the glow onto the list cursor. Returning to the list from the bulk
-      // bar (Esc) never changed the list's .kbd-focused or the pane's
-      // rv-pane-focused (the bulk bar runs alongside, focusedPane stayed "list"),
-      // so the glow's class-change observer wouldn't move it — it'd stay stranded
-      // on the bulk bar. Seed explicitly so it glides back with the focus.
+      // bar (Esc) never changes the list's `.kbd-focused` or the pane's
+      // `rv-pane-focused` (the bulk bar runs alongside, so focusedPane stayed
+      // "list"), so the glow's class-change observer wouldn't move it — it'd stay
+      // stranded on the bulk bar. Seed it explicitly so it glides back with focus.
       requestAnimationFrame(() => {
         const cur = el.querySelector<HTMLElement>(".kbd-focused, .kbd-cursor");
         if (cur) seedCursorGlow(cur);
@@ -819,9 +819,9 @@ export class RecordingsView {
     if (!panes.length) return;
     let idx = this.focusedPane ? panes.indexOf(this.focusedPane) : -1;
     // First-ever move (or the remembered pane is now hidden): start from the
-    // list (the central pane) so h goes left and l goes right — matching the
-    // direction the keys imply. (Wrapping in from the far edge made the first
-    // h after a reload jump *right* and the first l jump *left* — swapped.)
+    // list (the central pane) so h goes left and l goes right, matching the
+    // direction the keys imply. Wrapping in from the far edge would swap them —
+    // the first h after a reload jumps right and the first l jumps left.
     if (idx < 0) idx = panes.indexOf("list");
     const next = Math.max(0, Math.min(panes.length - 1, idx + (dir === "right" ? 1 : -1)));
     this.focusPane(panes[next]);
@@ -834,7 +834,7 @@ export class RecordingsView {
       case "list-top": this.list.focusEdge("top"); this.focusPane("list"); break;
       case "list-bottom": this.list.focusEdge("bottom"); this.focusPane("list"); break;
       // l from the list: with a detail pane already open, step focus into it
-      // (normal pane move); with none open, OPEN the cursor recording — same as
+      // (normal pane move); with none open, open the cursor recording — same as
       // pressing Enter on it. A meeting-header row has no single id, so it's left
       // to Enter (which expands it) and l is a no-op there.
       case "list-right": {
@@ -843,7 +843,7 @@ export class RecordingsView {
         if (id) this.onSelect(id);
         break;
       }
-      // gg/G inside the sidebar — jump to the top/bottom of the CURRENT section
+      // gg/G inside the sidebar — jump to the top/bottom of the current section
       // (Library filters · Tags · the Queue), not the whole sidebar, so a long
       // tag list or queue stays put under your cursor.
       case "sidebar-top": { const s = this.sidebarSectionBounds(); this.sidebarRow = s.top; this.sidebarCol = 0; this.highlightSidebar(); break; }
@@ -907,7 +907,7 @@ export class RecordingsView {
       // collapsed so the chord always gets you there; no-op in focus mode (no
       // sidebar to land on).
       case "focus-sidebar": {
-        // g b is a deliberate "go to the sidebar" jump, so it FORCES a collapsed
+        // g b is a deliberate "go to the sidebar" jump, so it forces a collapsed
         // sidebar open then lands on it (unlike passive h/l, which skip a hidden
         // pane). No-op in focus mode, where the sidebar is intentionally gone.
         if (this.focusMode) break;
@@ -1003,12 +1003,12 @@ export class RecordingsView {
   }
 
   /** The sidebar as a vertical stack of rows, each a horizontal list of
-   *  interactive cells (the detail pane's grid model). Visual order top→bottom:
-   *  Library header · kind filters · Tags header · tag filters · the queue's
-   *  pending items (furthest-out first) · the pinned active item(s) · the queue
-   *  header (the panel is column-reverse, so its header renders at the bottom).
-   *  Most rows are one cell; queue rows expose their buttons to h/l. Computed
-   *  fresh per keypress — the queue re-renders on daemon events. */
+   *  interactive cells (same grid model as the detail pane). Visual order
+   *  top→bottom: Library header · kind filters · Tags header · tag filters · the
+   *  queue's pending items (furthest-out first) · the pinned active item(s) · the
+   *  queue header (the panel is column-reverse, so its header renders at the
+   *  bottom). Most rows are one cell; queue rows expose their buttons to h/l.
+   *  Computed fresh per keypress, since the queue re-renders on daemon events. */
   private sidebarGrid(): HTMLElement[][] {
     const sb = this.container.querySelector<HTMLElement>("ph-sidebar");
     if (!sb) return [];
@@ -1049,7 +1049,7 @@ export class RecordingsView {
 
   /** First landing in the sidebar: always start on the very first row (the
    *  Library section header) so `h` lands at the top of the list, not on the
-   *  active filter (T — user preference). */
+   *  active filter (a deliberate user preference). */
   private enterSidebarNav() {
     const rows = this.sidebarGrid();
     if (!rows.length) return;
@@ -1093,7 +1093,7 @@ export class RecordingsView {
     const rows = this.sidebarGrid();
     if (!rows.length) return;
     if (this.sidebarRow < 0) { this.enterSidebarNav(); return; }
-    // Queue cells keep their COLUMN when stepping rows: the ▲/▼ arrows walk as a
+    // Queue cells keep their column when stepping rows: the ▲/▼ arrows walk as a
     // single vertical list (both arrows of an item, then the next item's arrows),
     // and ✕ walks the cancels — j/k never default to the queue title. Only the
     // main column (and non-queue rows) fall through to the plain row move below.
@@ -1126,14 +1126,14 @@ export class RecordingsView {
       return; // no same-column cell that way — stay put, don't drop to the title
     }
     const next = this.sidebarRow + delta;
-    // Up past the very top row → HIGHLIGHT the header search bar (roving mode),
+    // Up past the very top row → highlight the header search bar (roving mode),
     // exactly like k at the top of the list or detail pane. Release the sidebar
     // first so the header owns the cursor.
     if (next < 0) {
       // The top bar is hidden — there's nowhere up to go. Stay on the top row
       // rather than stranding focus on an invisible header.
       if (isHeaderHidden()) { this.highlightSidebar(); return; }
-      // Hand the cursor to the header, but KEEP sidebarRow/Col so returning to the
+      // Hand the cursor to the header, but keep sidebarRow/Col so returning to the
       // sidebar lands back on this cell (the header-entry clears only the visible
       // highlight, not the remembered position).
       this.clearSidebarCursorHighlight();
@@ -1149,16 +1149,16 @@ export class RecordingsView {
 
   /** h/l within the sidebar walk the focused row's cells (queue buttons). The
    *  sidebar is the leftmost pane, so h at the left edge stays put; l past the
-   *  rightmost cell moves on to the list pane (single-cell rows step out on the
-   *  first l — the old pane-switch behavior). */
+   *  rightmost cell moves on to the list pane (a single-cell row steps out on the
+   *  first l, the plain pane-switch). */
   private moveSidebarCol(delta: number) {
     const rows = this.sidebarGrid();
     if (!rows.length) return;
     if (this.sidebarRow < 0) { this.enterSidebarNav(); return; }
     const row = rows[Math.min(this.sidebarRow, rows.length - 1)];
     let next = this.sidebarCol + delta;
-    // Skip the SECOND queue ▲/▼ button so h/l stops on the move pair once (j/k
-    // then pick up vs down) — the pair reads as a single horizontal stop.
+    // Skip the second queue ▲/▼ button so h/l stops on the move pair once (j/k
+    // then picks up vs down) — the pair reads as a single horizontal stop.
     while (next >= 0 && next < row.length) {
       const cell = row[next];
       if (cell.classList.contains("queue-move")) {
@@ -1200,9 +1200,9 @@ export class RecordingsView {
     };
     const root = this.detailRootSel();
 
-    // Collect every navigable cell with its `kind`, ORDER-INDEPENDENT — the
+    // Collect every navigable cell with its `kind`, order-independent — the
     // geometry pass below sorts them into rows/columns by where they actually sit
-    // on screen, so a row that WRAPS at a narrow width becomes multiple grid rows
+    // on screen, so a row that wraps at a narrow width becomes multiple grid rows
     // and j/k/h/l always follow the visible layout instead of a hardcoded grouping.
     const cells: DetailCell[] = [];
     const add = (el: HTMLElement | null, kind: DetailCell["kind"]) => { if (el) cells.push({ el, kind }); };
@@ -1216,7 +1216,7 @@ export class RecordingsView {
     // Action buttons (Play · Speed · Re-run · Export · Delete).
     addAll(`${root} #actions button`, "button");
     // Tags: applied chips, the add-tag input + its controls, and the pending AI
-    // suggestions. Each SUGGESTION is one cell (the whole chip) — Enter drops into
+    // suggestions. Each suggestion is one cell (the whole chip) — Enter drops into
     // its ✓/× sub-step (see activateDetail) instead of tabbing the tiny buttons.
     addAll(`${root} #tags .tags-applied .tag-chip`, "button");
     add(q1(`${root} #tags .tag-add`), "tags");
@@ -1224,11 +1224,11 @@ export class RecordingsView {
     addAll(`${root} #tags .tags-suggest-row .tag-chip--suggested`, "suggestion");
     // Transcript editor.
     add(q1(`${root} .transcript-block`), "editor");
-    // When a Views/Versions "peek" (Original/Unedited/Summary) hijacks the editor,
-    // the .transcript-block is hidden — surface the VISIBLE peek's buttons (e.g.
-    // "Restore raw transcript") so they're keyboard-reachable.
+    // When a Views/Versions "peek" (Original/Unedited/Summary) takes over the
+    // editor, the `.transcript-block` is hidden — surface the visible peek's
+    // buttons (e.g. "Restore raw transcript") so they're keyboard-reachable.
     addAll(`${root} #original-peek button, ${root} #unedited-peek button, ${root} #summary-peek button`, "button");
-    // Buttons INSIDE the transcript box (Speakers · Views · Versions).
+    // Buttons inside the transcript box (Speakers · Views · Versions).
     addAll(`${root} .transcript-history button`, "button");
     // Notes editor.
     add(q1(`${root} .notes-block`), "editor");
@@ -1273,7 +1273,7 @@ export class RecordingsView {
     const rows = this.detailGrid();
     if (!rows.length) return;
     this.detailDesiredX = null; // fresh entry — re-seed sticky-x on the next j/k
-    // Returning to the SAME recording's detail? Restore where you stepped out
+    // Returning to the same recording's detail? Restore where you stepped out
     // from (h→list then back), if that cell still exists. Otherwise land on the
     // transcript — the natural entry point.
     const saved = this.lastDetailPos;
@@ -1307,8 +1307,8 @@ export class RecordingsView {
     }
     const next = this.detailRow + delta;
     if (next < 0) {
-      // Up past the top row → the header search bar in ROVING (highlight) mode —
-      // exactly like k at the top of the list, NOT focused for typing. Release
+      // Up past the top row → the header search bar in roving (highlight) mode —
+      // exactly like k at the top of the list, not focused for typing. Release
       // the detail pane first. (When the top bar is hidden there's nowhere up to
       // go, so stay on the top row instead of stranding focus on it.)
       if (isHeaderHidden()) { this.highlightDetail(); return; }
@@ -1372,12 +1372,12 @@ export class RecordingsView {
       if (this.isDropdownTrigger(cell.el)) {
         this.openDetailSub(cell.el);
       } else if (cell.el.classList.contains("tag-chip")) {
-        // A tag chip opens its inline editor popover, which seeds its OWN roving
+        // A tag chip opens its inline editor popover, which seeds its own roving
         // cursor on the name field and takes focus. Re-highlighting the grid here
-        // (highlightDetail strips every .kbd-cursor in the detail pane, including
-        // the popover's) would yank the cursor back onto the chip — so just open
-        // it and let the popover own the cursor. Esc/Save hand focus back via the
-        // `focus-detail` vim event.
+        // (highlightDetail strips every `.kbd-cursor` in the detail pane, the
+        // popover's included) would yank the cursor back onto the chip — so just
+        // open it and let the popover own the cursor. Esc/Save hand focus back via
+        // the `focus-detail` vim event.
         cell.el.click();
       } else {
         cell.el.click();
@@ -1396,7 +1396,7 @@ export class RecordingsView {
         cell.el.querySelector<HTMLElement>("textarea") ??
         cell.el.querySelector<HTMLElement>('[contenteditable="true"]');
       // preventScroll: focusing the editor shouldn't re-center the transcript in
-      // the pane (that abrupt jump was the "jarring" part); the grid cursor is
+      // the pane (that abrupt jump is the jarring part); the grid cursor is
       // already here, and the editor stays scrollable.
       ed?.focus({ preventScroll: true });
     }
@@ -1418,11 +1418,11 @@ export class RecordingsView {
    *  detail pane), for j/k cycling. */
   private detailSubItems(trigger: HTMLElement): HTMLElement[] {
     const root = this.detailRootSel();
-    // Visibility via getClientRects, NOT offsetParent: the Pipeline pop is
+    // Visibility via getClientRects, not offsetParent: the Pipeline pop is
     // position:fixed, and offsetParent is unreliable inside a fixed subtree — it
-    // could read its rows as hidden, so the pop never registered as a captured
-    // sub-dropdown and Escape didn't close it. getClientRects is 0 only for
-    // genuinely unrendered (display:none) elements, fixed or not.
+    // can read the rows as hidden, in which case the pop never registers as a
+    // captured sub-dropdown and Escape won't close it. getClientRects is 0 only
+    // for genuinely unrendered (display:none) elements, fixed or not.
     const pick = (sel: string) =>
       [...this.container.querySelectorAll<HTMLElement>(`${root} ${sel}`)].filter((el) => el.getClientRects().length > 0);
     if (trigger.classList.contains("speed-trigger")) return pick(".speed-dropdown .th-menu-item");
@@ -1463,12 +1463,12 @@ export class RecordingsView {
       el.classList.add("kbd-cursor");
       el.scrollIntoView({ block: "nearest" });
     }
-    // Keep the cursor GLOW on the trigger button, not the highlighted option: the
+    // Keep the cursor glow on the trigger button, not the highlighted option: the
     // option shows the selection with its own `.kbd-cursor` border, but the glow
     // stays on the parent (matching the header Record/Settings dropdowns the user
-    // prefers). The glow follows whichever element GAINED `.kbd-cursor` last in the
+    // prefers). The glow follows whichever element gained `.kbd-cursor` last in the
     // mutation batch, so re-adding it to the trigger here makes the trigger the
-    // target — and means the glow is never left stranded over a popout on Escape.
+    // target — and keeps the glow from being stranded over a popout on Escape.
     sub.trigger.classList.remove("kbd-cursor");
     sub.trigger.classList.add("kbd-cursor");
   }
@@ -1497,16 +1497,16 @@ export class RecordingsView {
       if (this.detailSubItems(sub.trigger).length) sub.trigger.click();
       this.highlightDetail();
       // Pull the cursor glow back onto the trigger. highlightDetail re-adds
-      // .kbd-cursor to the trigger cell, but if it already had it (it was the
-      // highlighted grid cell before the dropdown opened) the glow's class-change
-      // observer can't see the re-add, so the glow would stay stranded over the
-      // closed dropdown's items. Seed it explicitly.
+      // `.kbd-cursor` to the trigger cell, but if the trigger already had it (it
+      // was the highlighted grid cell before the dropdown opened) the glow's
+      // class-change observer can't see the re-add, so the glow would stay
+      // stranded over the closed dropdown's items. Seed it explicitly.
       seedCursorGlow(sub.trigger);
     });
   }
 
   /** Enter a tag-suggestion chip's approve/dismiss sub-step (Enter on a
-   *  `suggestion` cell). The roving cursor + glow move ONTO the armed ✓/× button
+   *  `suggestion` cell). The roving cursor + glow move onto the armed ✓/× button
    *  (the chip hands off its cursor for the duration), starting on ✓ (approve).
    *  h/l/Enter/Esc route here via `detail-capture`. */
   private enterSuggestSub(chip: HTMLElement) {
@@ -1519,9 +1519,9 @@ export class RecordingsView {
     window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: "suggest" }));
   }
 
-  /** Move the roving cursor + glow ONTO the armed ✓/× inside the active chip, and
+  /** Move the roving cursor + glow onto the armed ✓/× inside the active chip, and
    *  off the chip itself — so the small action you're choosing is the clear focus
-   *  (the chip-plus-button double highlight was hard to read). `.suggest-focus`
+   *  (the chip-plus-button double highlight reads as muddy). `.suggest-focus`
    *  adds a matching fill; `.kbd-cursor` brings the ring + animated glow. */
   private highlightSuggestSub() {
     const sub = this.suggestSub;
@@ -1591,7 +1591,7 @@ export class RecordingsView {
   /** Drop into the transcript editor (CodeMirror's editable) in the detail pane.
    *  `preventScroll` so focusing doesn't yank the transcript to the middle of the
    *  pane — the keyboard cursor already lives on the editor cell, and the abrupt
-   *  re-center on focus was jarring. The user keeps the focus; just not the jump. */
+   *  re-center on focus is jarring. Focus still lands; the jump doesn't. */
   private focusEditor() {
     const ed =
       this.container.querySelector<HTMLElement>(`${this.detailRootSel()} .cm-content`) ??
@@ -1682,9 +1682,9 @@ export class RecordingsView {
             failed.push(id);
           }
         }
-        // Reconcile the store FIRST — the re-fetch drops the now-deleted rows
+        // Reconcile the store first — the re-fetch drops the now-deleted rows
         // (the daemon removes the catalog row before `deleteRecording` resolves,
-        // so they're already gone). Only THEN clear the hide set. Clearing it
+        // so they're already gone). Only then clear the hide set. Clearing it
         // before the refresh lands would briefly un-hide rows that are still in
         // the store, flashing them back onto the list right before they vanish.
         await this.refresh();
@@ -1755,7 +1755,7 @@ export class RecordingsView {
   /** Tear down on view unmount: unhook every document/window listener, the
    *  daemon-event subscription, and the splitters' drag listeners; restore
    *  the header if a zen mode had hidden it. Skipping this leaks listeners
-   *  that act on a dead view (App always calls it from mount()). */
+   *  that act on a dead view (App calls it from mount()). */
   dispose() {
     this.disposed = true;
     // Don't leave the header hidden if we're torn down while in focus mode
@@ -1777,8 +1777,8 @@ export class RecordingsView {
     if (this.closeDetailHandler) window.removeEventListener("phoneme:close-detail", this.closeDetailHandler);
     if (this.openSplitHandler) window.removeEventListener("phoneme:open-split", this.openSplitHandler);
     if (this.configSavedHandler) window.removeEventListener("config:saved", this.configSavedHandler);
-    // The pane-click follower is on this.container (reused by App across views),
-    // so it must be detached explicitly or it would leak onto the next view.
+    // The pane-click follower is on this.container (which App reuses across
+    // views), so it has to be detached explicitly or it leaks onto the next view.
     if (this.paneClickHandler) this.container.removeEventListener("pointerdown", this.paneClickHandler, true);
   }
 
@@ -1796,9 +1796,9 @@ export class RecordingsView {
       ?.classList.toggle("visible", this.listZen || this.focusMode);
 
     // Keep the sidebar clipped at all times so the grid-column width animation
-    // reads as a smooth slide/collapse. Don't toggle `visibility` — that would
-    // pop the content away instantly instead of letting it animate out with the
-    // shrinking column.
+    // reads as a smooth slide/collapse. Don't toggle `visibility` — that pops the
+    // content away instantly instead of letting it animate out with the shrinking
+    // column.
     const sidebar = this.container.querySelector<HTMLElement>("ph-sidebar");
     if (sidebar) {
       sidebar.style.overflow = "hidden";
@@ -1812,12 +1812,12 @@ export class RecordingsView {
     // column animates to/from 0 — the slide clips it instead of squishing it.
     shell.style.setProperty("--sidebar-w", `${this.sidebarWidth}px`);
     const resizer = this.container.querySelector<HTMLElement>("#rv-sidebar-resize");
-    // IMPORTANT: never `display:none` the resizer. The grid has five explicit
-    // column tracks (sidebar, resizer, list, splitter, detail); removing the
-    // resizer from flow shifts the list/splitter/detail one track to the left,
-    // dropping the list into the 0px track and the detail into the 3px track —
-    // i.e. the entire content area collapses to nothing when the sidebar is
-    // hidden. Keep it in the grid and just give it a 0px-wide track instead.
+    // Never `display:none` the resizer. The grid has five explicit column tracks
+    // (sidebar, resizer, list, splitter, detail); removing the resizer from flow
+    // shifts the list/splitter/detail one track to the left, dropping the list
+    // into the 0px track and the detail into the 3px track — so the whole content
+    // area collapses to nothing when the sidebar is hidden. Keep it in the grid
+    // and just give it a 0px-wide track instead.
     if (resizer) resizer.style.display = "";
 
     // Seven tracks: sidebar · resizer · list · splitter · detail · splitter2 ·
@@ -1828,9 +1828,9 @@ export class RecordingsView {
       // ratio persisted); list and sidebar collapse, chrome is hidden by
       // openSplit via the zen snapshot.
       // minmax(0, …fr) — a bare `fr` track keeps its content's min-content width,
-      // so a pane with longer transcript lines would grow past its share and the
-      // split wouldn't be a true 50/50. minmax(0, …) lets both panes shrink to the
-      // exact ratio (content scrolls instead).
+      // so a pane with longer transcript lines grows past its share and the split
+      // stops being a true 50/50. minmax(0, …) lets both panes shrink to the exact
+      // ratio (content scrolls instead).
       shell.style.gridTemplateColumns = `0px 0px 0 0 minmax(0, ${this.splitRatio}fr) 6px minmax(0, ${100 - this.splitRatio}fr)`;
     } else if (this.detailVisible && this.focusMode) {
       // Focus mode: collapse the sidebar, resizer, list, and splitter so the
@@ -1847,7 +1847,7 @@ export class RecordingsView {
     }
   }
 
-  /** Open `id` in the SECOND pane (split mode). The current selection stays in
+  /** Open `id` in the second pane (split mode). The current selection stays in
    *  the first pane; sidebar + top bar hide via the zen snapshot so both panes
    *  get the whole window. Refuses sessions and duplicate ids with a toast. */
   openSplit(id: string, opts: { timeline?: boolean; returnTo?: string | null } = {}) {
@@ -1929,8 +1929,8 @@ export class RecordingsView {
    *  transcription-detail pane (and nothing else). The scrollers inside these
    *  hosts — `.rec-table` for the list, `.detail` for a recording — are torn
    *  down and rebuilt on every re-render, so we can't pin a listener to them.
-   *  Instead the button + a capture-phase scroll listener live on the STABLE
-   *  pane host; capture catches scroll from the (current) descendant scroller,
+   *  Instead the button + a capture-phase scroll listener live on the stable
+   *  pane host; capture catches scroll from the current descendant scroller,
    *  and a MutationObserver re-evaluates visibility after re-renders reset the
    *  scroll position. */
   private setupBackToTop() {
@@ -1945,7 +1945,7 @@ export class RecordingsView {
       if (!host) continue;
       const btn = document.createElement("button");
       btn.type = "button";
-      // The detail/transcript panes show it at the TOP-center (the list keeps the
+      // The detail/transcript panes show it at top-center (the list keeps the
       // familiar bottom-center placement).
       btn.className = hostId === "rv-list" ? "back-to-top" : "back-to-top back-to-top--top";
       btn.title = "Back to top";
@@ -2029,7 +2029,7 @@ export class RecordingsView {
   private onSelect(id: string) {
     const currentId = this.state.get().selectedId;
     // Switching away from a recording with unsaved transcript/notes edits would
-    // lose them (the editors no longer auto-save) — confirm first.
+    // lose them (the editors don't auto-save) — confirm first.
     if (currentId && currentId !== id && this.detail.hasDirtyEdits()) {
       void this.confirmLeaveUnsaved().then((discard) => { if (discard) this.applySelect(id); });
       return;
@@ -2076,7 +2076,7 @@ export class RecordingsView {
     // when nothing is selected, giving the list the full width).
     if (!this.detailVisible) {
       this.detailVisible = true;
-      // Opening from LIST ZEN zooms straight into recording focus mode — one
+      // Opening from list zen zooms straight into recording focus mode — one
       // coherent transition, chrome stays hidden (the zen snapshot carries
       // over) and Esc steps back to list zen.
       if (this.listZen) {
@@ -2113,7 +2113,7 @@ export class RecordingsView {
     // multiple <ph-bulk-action-bar> elements on top of each other.
     root.innerHTML = "";
 
-    // Re-mount the BulkActionBar into the root element.
+    // Mount a fresh BulkActionBar into the root element.
     new BulkActionBar(root, this.multiSelected, this.state.get().recordings, {
       onRefresh: () => { void this.refresh(); },
       onClear: () => {
@@ -2165,22 +2165,22 @@ export class RecordingsView {
     const target = e.target as HTMLElement;
     if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
 
-    // A modal/popup is open: it owns the keyboard (Escape closes IT, not the
-    // recording). This view-level handler runs before the modal's own listener,
-    // so the overlay is still in the DOM here — bail and let the modal handle it.
-    // Matches the `*-modal-overlay` variants (compare / speakers) too, so their
-    // keys never leak to the detail pane behind them.
+    // A modal/popup is open: it owns the keyboard (Escape closes the modal, not
+    // the recording). This view-level handler runs before the modal's own
+    // listener, so the overlay is still in the DOM here — bail and let the modal
+    // handle it. The selector matches the `*-modal-overlay` variants (compare /
+    // speakers) too, so their keys never leak to the detail pane behind them.
     if (document.querySelector('[class*="modal-overlay"]')) return;
 
     // The header bar owns its own keyboard nav while focused (roving cursor +
     // the status-select / Record / Settings dropdown cycling). Don't let this
-    // view act on those keys — e.g. Escape leaving the status cycle must NOT
+    // view act on those keys — e.g. Escape leaving the status cycle shouldn't
     // also close the open recording. Also stand down if someone already handled
     // the key (keyboard.ts preventDefaults the keys it owns).
     if (document.activeElement?.closest(".headerbar")) return;
     if (e.defaultPrevented) return;
 
-    // Ctrl+Shift+= / Ctrl+Shift+- bump the GLOBAL UI text size
+    // Ctrl+Shift+= / Ctrl+Shift+- bump the global UI text size
     // (interface.ui_font_size) — distinct from Ctrl+=/- which zoom the list pane.
     // Shift turns "=" into "+" and "-" into "_" on most layouts; accept both.
     if (e.ctrlKey && e.shiftKey && !e.altKey) {
@@ -2207,7 +2207,7 @@ export class RecordingsView {
       if (this.focusMode) {
         e.preventDefault();
         if (this.zenChained) {
-          // This focus mode began in LIST ZEN — Esc steps back there: close
+          // This focus mode began in list zen — Esc steps back there: close
           // the recording, keep the full-window list (snapshot stays armed).
           this.zenChained = false;
           this.focusMode = false;
@@ -2248,7 +2248,7 @@ export class RecordingsView {
     }
 
     if (e.key === "\\" && !e.ctrlKey && !target.isContentEditable) {
-      // \ on an open MERGED MEETING view → explode it into the dual-timeline
+      // \ on an open merged meeting view → explode it into the dual-timeline
       // split (both tracks side by side as synced timelines; Esc returns to
       // the merged view). Keyboard twin of the view's Dual-timeline button.
       const sel = this.state.get().selectedId;

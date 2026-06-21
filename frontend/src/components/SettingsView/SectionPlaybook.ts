@@ -8,7 +8,7 @@ import type { PlaybookEntry, PlaybookKind, PlaybookRecipe } from "../../services
  * pipeline and (later) Custom Hotkey chains. Two cards on the shared config:
  *
  *  1. "Entries" — a CRUD list over `config.playbook`, grouped by kind:
- *     • Transform   — an LLM step that REWRITES the running transcript text.
+ *     • Transform   — an LLM step that rewrites the running transcript text.
  *     • Enrichment  — an LLM step that writes a named field (title / summary /
  *       tags / a custom:<key> of your own).
  *     • Hook        — a shell command or webhook fired with the recording JSON.
@@ -190,10 +190,10 @@ export class SectionPlaybook {
     const clone = { ...structuredClone(src), id: newId, name, builtin: false };
     // Blank the clone's API key. The on-disk source key is masked before it ever
     // reaches the WebView, so a key-bearing source carries only the mask here —
-    // saving the clone with that mask would unmask-by-NEW-id, find no match, and
-    // silently drop the key. Blanking makes the clone explicitly INHERIT the
-    // default Post-Processing connection rather than appearing to keep a key it
-    // can't actually use.
+    // saving the clone with that mask would try to unmask under the clone's new
+    // id, find no match, and silently drop the key. Blanking makes the clone
+    // explicitly inherit the default Post-Processing connection rather than
+    // appearing to keep a key it can't actually use.
     clone.llm = { ...clone.llm, api_key: "" };
     this.entries.push(clone);
     this.expanded.add(newId);
@@ -298,7 +298,7 @@ export class SectionPlaybook {
         </div>`;
     }
 
-    // transform / enrichment → full provider + model selection (the SAME shared
+    // transform / enrichment → full provider + model selection (the same shared
     // connection/model pickers Post-Processing uses), so an entry can pick any
     // provider, key, endpoint, and a curated model — or inherit the default.
     const targetRow = e.kind === "enrichment" ? this.targetRow(e) : "";
@@ -398,11 +398,11 @@ export class SectionPlaybook {
     card.querySelector<HTMLInputElement>(".pb-hook-required")?.addEventListener("change", (ev) => { e.hook.required = (ev.target as HTMLInputElement).checked; this.notifyChanged(); });
   }
 
-  /** Mount the SHARED connection + model pickers into an open LLM entry card —
+  /** Mount the shared connection + model pickers into an open LLM entry card —
    *  the same full provider/key/endpoint + curated-model UX as Post-Processing,
    *  bound to this entry's `llm`. "Same as Post-Processing default" inherits the
    *  global connection (empty provider); a specific provider gets its own creds
-   *  + model. The model field hides while inheriting (model inherits too). */
+   *  and model. The model field hides while inheriting (model inherits too). */
   private mountLlmFields(card: HTMLElement, e: PlaybookEntry) {
     const connHost = card.querySelector<HTMLElement>(".pb-conn-host");
     const modelHost = card.querySelector<HTMLElement>(".pb-model-host");

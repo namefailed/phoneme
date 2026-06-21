@@ -177,7 +177,7 @@ describe("concurrency + events", () => {
     // Save while the load is pending — the catalog read hasn't returned yet.
     addSavedSearch("Mid-load save", filter("x"));
 
-    // The read now returns WITHOUT that entry (its upsert hasn't landed).
+    // The read now returns without that entry (its upsert hasn't landed yet).
     resolveList([]);
     await loading;
 

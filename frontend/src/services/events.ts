@@ -7,7 +7,7 @@
  *
  * Wire contract: `DaemonEvent` mirrors the daemon's `Event` enum in
  * `crates/phoneme-ipc/src/schema.rs` (serde-tagged by the `event` field,
- * snake_case). New daemon events must be added to BOTH places — an unknown
+ * snake_case). A new daemon event has to be added in both places — an unknown
  * event still arrives here, but no handler will match it.
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -42,9 +42,9 @@ export function stageLabel(stage: PipelineStage): string {
  *    `_resumed` / `_cancelled` / `_deleted`.
  *  - Pipeline: `transcription_started` → `transcription_partial` (live
  *    preview text) → `transcription_done` | `transcription_failed`, with
- *    `pipeline_stage_changed` marking each stage START (cleanup, summary,
- *    tagging, hook) and `llm_activity` streaming prompt/response deltas for
- *    the AI-activity log.
+ *    `pipeline_stage_changed` marking the start of each stage (cleanup,
+ *    summary, tagging, hook) and `llm_activity` streaming prompt/response
+ *    deltas for the AI-activity log.
  *  - Content updates (`transcript_updated`, `summary_updated`/`_failed`,
  *    `notes_updated`, `speaker_name_updated`, `tag_suggestions_updated`):
  *    carry only the id — listeners re-fetch the recording for the new data.
@@ -103,8 +103,8 @@ export type EventHandler = (event: DaemonEvent) => void;
 /**
  * Subscribe `handler` to the full daemon event stream. Every subscriber gets
  * every event — filter inside the handler. Returns the unlisten function;
- * components MUST call it on teardown (`disconnectedCallback` / `dispose`) or
- * the handler outlives them. App-lifetime subscribers (the queue panel, step
+ * components have to call it on teardown (`disconnectedCallback` / `dispose`)
+ * or the handler outlives them. App-lifetime subscribers (the queue panel, step
  * notifications) deliberately never unlisten.
  */
 export async function subscribe(handler: EventHandler): Promise<UnlistenFn> {
