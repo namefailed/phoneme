@@ -98,7 +98,6 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 - ✅ **Per-app tone / register** — *shipped:* pick the cleanup recipe (and so the polish style — email vs. code vs. prose) by the app focused at record start, via `[in_place].app_recipes`. See the changelog.
 - 🔬 **Real-time translation dictation** — speak one language, type another (Whisper translate path).
 - 🔬 **Dictation history / re-grab last** — a quick popover of recent typed snippets to re-paste when focus was lost or the wrong app got it (the #1 dictation failure mode). Wispr Flow keeps a history for exactly this; dictations are already saved, there's just no fast re-grab affordance.
-- 🔬 **Spoken-language detection → routing** — act on Whisper's auto-detected language per dictation (surface/route) instead of the single configured BCP-47 hint. Detection only; distinct from the translation-dictation item above.
 
 ### Intelligence / engine
 - 🔬 **True forced re-alignment of edited transcripts** ⚠️ *(needs a forced-aligner dependency)* — re-derive *precise* word timings from the audio after a hand edit. *(A proportional re-flow already ships — `realign.rs realign_transcript`, run on every edit + retranscribe — so the views stay roughly aligned; this swaps in an acoustic aligner for exactness.)*

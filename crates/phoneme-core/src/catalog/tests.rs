@@ -510,6 +510,7 @@ fn embedded_recording(meeting_id: Option<&str>) -> Recording {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -1391,6 +1392,7 @@ async fn test_insert_and_get() {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -1458,6 +1460,7 @@ async fn original_transcript_preserved_across_user_edit() {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -1533,6 +1536,7 @@ async fn notes_round_trip_and_survive_transcription() {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -1693,6 +1697,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -1750,6 +1755,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -3543,6 +3549,39 @@ async fn insert_restored_round_trips_mean_confidence() {
     );
 }
 
+#[tokio::test]
+async fn detected_language_round_trips_and_clears() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = embedded_recording(None);
+    db.insert(&r).await.unwrap();
+
+    // Fresh insert: no detected language yet (NULL), the graceful default.
+    assert_eq!(db.get(&r.id).await.unwrap().unwrap().detected_language, None);
+
+    // Store a code, then read it back through the DTO.
+    db.set_detected_language(&r.id, Some("es")).await.unwrap();
+    assert_eq!(
+        db.get(&r.id).await.unwrap().unwrap().detected_language.as_deref(),
+        Some("es")
+    );
+
+    // A retranscribe that drops to a detection-less provider clears it to NULL.
+    db.set_detected_language(&r.id, None).await.unwrap();
+    assert_eq!(db.get(&r.id).await.unwrap().unwrap().detected_language, None);
+}
+
+#[tokio::test]
+async fn insert_restored_round_trips_detected_language() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let mut r = embedded_recording(None);
+    r.detected_language = Some("fr".into());
+    db.insert_restored(&r).await.unwrap();
+    assert_eq!(
+        db.get(&r.id).await.unwrap().unwrap().detected_language.as_deref(),
+        Some("fr")
+    );
+}
+
 // ── Ask my archive: retrieve_context (local-RAG retrieval + citations) ───────
 //
 // These exercise the new `retrieve_context` helper that grounds an Ask answer:
@@ -3887,6 +3926,7 @@ fn entity_test_recording() -> Recording {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],

@@ -63,6 +63,19 @@ pub struct Transcription {
     /// it; cloud providers and plain text leave it empty. The pipeline persists
     /// them for cross-recording named-speaker recognition (#9).
     pub speaker_voiceprints: Vec<crate::diarization::SpeakerVoiceprint>,
+    /// The language the provider detected for this audio, as a BCP-47/ISO-639
+    /// code (e.g. `"en"`, `"es"`), or `None` when the provider exposed none.
+    ///
+    /// Whisper only knows the language *after* decoding, so this is the detected
+    /// result, not the request hint: the whisper-family `verbose_json` response
+    /// carries a top-level `"language"`, Deepgram returns one under
+    /// `detect_language`, etc. It is `None` for any provider/path that doesn't
+    /// surface it — `json` (non-verbose) responses, the `gpt-4o-transcribe`
+    /// family (which rejects verbose_json), the native in-process path, and
+    /// older transcripts. The daemon stores it (the "detected: es" badge) and
+    /// the spoken-language router keys off it; a `None` value degrades to no
+    /// detection and no routing, never an error.
+    pub language: Option<String>,
 }
 
 impl Transcription {
@@ -356,6 +369,12 @@ struct OpenAiResponse {
     /// `segments[].words[]`. The parse reads whichever the provider used, so
     /// both yield the finer word layer.
     words: Option<Vec<OpenAiWord>>,
+    /// The detected language, present only under `response_format=verbose_json`:
+    /// whisper.cpp's server and OpenAI's `verbose_json` both return a top-level
+    /// `"language"`. The plain `json` shape omits it, and the
+    /// `gpt-4o-transcribe` family rejects verbose_json entirely, so this stays
+    /// `None` on those paths and detection degrades silently.
+    language: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -575,6 +594,13 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             .await
             .map_err(|e| Error::Internal(format!("decoding transcription response: {e}")))?;
 
+        // Detected language (verbose_json only; `None` on the plain `json` shape
+        // and on backends that reject verbose_json). Empty strings degrade to
+        // `None` so a provider that returns `"language": ""` reads as "no
+        // detection" rather than an empty route key. Captured once here and
+        // attached to whichever transcription path runs below.
+        let detected_language = parsed.language.as_deref().and_then(non_empty);
+
         // Consume the segments into the timeline shape, pulling out any per-word
         // timings whisper.cpp nested inside each one as we go. (The cloud returns
         // a flat top-level `words[]` instead, handled just below.)
@@ -631,6 +657,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
                     words,
                     fixed_speaker_applied: true,
                     speaker_voiceprints: Vec::new(),
+                    language: detected_language,
                 });
             }
         }
@@ -646,9 +673,15 @@ impl TranscriptionProvider for OpenAiCompatProvider {
                     // the frame matrix and threads the speaker labels back into
                     // these words; with no words it falls back to segment-level
                     // attribution and returns the words untouched.
-                    return Ok(
-                        diarize_transcript(audio_path, segs, words, parsed.text, diarizer).await,
-                    );
+                    return Ok(diarize_transcript(
+                        audio_path,
+                        segs,
+                        words,
+                        parsed.text,
+                        detected_language,
+                        diarizer,
+                    )
+                    .await);
                 }
             }
         }
@@ -670,6 +703,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             words,
             fixed_speaker_applied: false,
             speaker_voiceprints: Vec::new(),
+            language: detected_language,
         })
     }
 }
@@ -740,8 +774,17 @@ pub(crate) async fn diarize_transcript(
     segments: Vec<crate::diarization::TextSegment>,
     words: Vec<TranscriptWord>,
     plain_text: String,
+    detected_language: Option<String>,
     diarizer: &LocalDiarizer,
 ) -> Transcription {
+    // The detected language is independent of speaker attribution, so the inner
+    // diarization paths all build their `Transcription` with `language: None` and
+    // this stamps it on whichever result comes back, in one place.
+    let with_language =
+        |mut t: Transcription| -> Transcription {
+            t.language = detected_language.clone();
+            t
+        };
     // Diarization failing must not cost the timeline its timing data, so the
     // fallback carries the whisper segments with no speaker attribution. The
     // words ride along with their timing and confidence but no speaker label
@@ -766,6 +809,7 @@ pub(crate) async fn diarize_transcript(
                     .collect(),
                 fixed_speaker_applied: false,
                 speaker_voiceprints: Vec::new(),
+                language: None,
             }
         };
 
@@ -778,11 +822,11 @@ pub(crate) async fn diarize_transcript(
         }
         Ok(Err(e)) => {
             tracing::warn!("local diarization failed, falling back to raw whisper: {e}");
-            return unlabeled(plain_text, &segments, words);
+            return with_language(unlabeled(plain_text, &segments, words));
         }
         Err(e) => {
             tracing::warn!("local diarization task panicked: {e}");
-            return unlabeled(plain_text, &segments, words);
+            return with_language(unlabeled(plain_text, &segments, words));
         }
     };
 
@@ -794,14 +838,14 @@ pub(crate) async fn diarize_transcript(
         if let Some(diarized) =
             diarize_per_word(&words, &diar, crate::diarization::WORD_MIN_TURN_SECS)
         {
-            return diarized;
+            return with_language(diarized);
         }
         // `diarize_per_word` returns `None` for the ≤1-speaker gate; fall through
         // to plain text (keeping segment timing), exactly as the segment path does.
-        return unlabeled(plain_text, &segments, words);
+        return with_language(unlabeled(plain_text, &segments, words));
     }
 
-    diarize_per_segment(&segments, &diar.spans, plain_text, words)
+    with_language(diarize_per_segment(&segments, &diar.spans, plain_text, words))
 }
 
 /// Segment-level attribution: the path for segments-only / cloud-routed inputs
@@ -849,6 +893,8 @@ fn diarize_per_segment(
             words: strip_word_speakers(words),
             fixed_speaker_applied: false,
             speaker_voiceprints: Vec::new(),
+            // Stamped by `diarize_transcript`'s `with_language` on return.
+            language: None,
         };
     }
 
@@ -886,6 +932,8 @@ fn diarize_per_segment(
         words: strip_word_speakers(words),
         fixed_speaker_applied: false,
         speaker_voiceprints: Vec::new(),
+        // Stamped by `diarize_transcript`'s `with_language` on return.
+        language: None,
     }
 }
 
@@ -1006,6 +1054,8 @@ fn diarize_per_word(
         // Capture each speaker's centroid voiceprint for cross-recording
         // recognition (#9); keyed by the same labels emitted above.
         speaker_voiceprints: crate::diarization::speaker_voiceprints(diar, &speaker_columns),
+        // Stamped by `diarize_transcript`'s `with_language` on return.
+        language: None,
     })
 }
 
@@ -1073,6 +1123,11 @@ struct DeepgramResults {
 #[derive(Debug, Deserialize)]
 struct DeepgramChannel {
     alternatives: Vec<DeepgramAlternative>,
+    /// The language Deepgram detected, present only when the request asked for
+    /// `detect_language=true` (i.e. no explicit `language` hint). Optional so an
+    /// explicit-language request — where Deepgram omits it — decodes cleanly and
+    /// leaves detection `None`.
+    detected_language: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1160,12 +1215,19 @@ impl TranscriptionProvider for DeepgramProvider {
             .await
             .map_err(|e| Error::Internal(format!("decoding Deepgram response: {e}")))?;
 
-        let alt = parsed
+        let channel = parsed
             .results
             .channels
             .into_iter()
             .next()
-            .and_then(|c| c.alternatives.into_iter().next())
+            .ok_or_else(|| Error::Internal("Deepgram response had no transcript".into()))?;
+        // Detected language (only present when `detect_language=true`, i.e. no
+        // explicit hint). Empty strings degrade to `None`.
+        let detected_language = channel.detected_language.as_deref().and_then(non_empty);
+        let alt = channel
+            .alternatives
+            .into_iter()
+            .next()
             .ok_or_else(|| Error::Internal("Deepgram response had no transcript".into()))?;
 
         // Capture the per-word layer on both paths. Deepgram returns word timing
@@ -1193,6 +1255,7 @@ impl TranscriptionProvider for DeepgramProvider {
             words: plain_words.clone(),
             fixed_speaker_applied: false,
             speaker_voiceprints: Vec::new(),
+            language: detected_language.clone(),
         };
 
         if !self.diarize || dg_words.is_empty() {
@@ -1269,6 +1332,7 @@ impl TranscriptionProvider for DeepgramProvider {
             words,
             fixed_speaker_applied: false,
             speaker_voiceprints: Vec::new(),
+            language: detected_language,
         })
     }
 }
@@ -1378,6 +1442,10 @@ struct AaiTranscript {
     status: String,
     text: Option<String>,
     error: Option<String>,
+    /// The detected (or echoed-back) language, an ISO-639 code AssemblyAI returns
+    /// on the completed transcript. Optional so a response without it decodes
+    /// cleanly and leaves detection `None`.
+    language_code: Option<String>,
     utterances: Option<Vec<AaiUtterance>>,
     /// Top-level per-word array, returned independently of diarization (start and
     /// end in milliseconds, with per-word `confidence` and a `speaker` label when
@@ -1486,6 +1554,10 @@ impl TranscriptionProvider for AssemblyAiProvider {
                     .await?;
                 match t.status.as_str() {
                     "completed" => {
+                        // Detected language (ISO-639). Empty strings degrade to
+                        // `None`. Read before `t.words`/`t.text` are consumed.
+                        let detected_language =
+                            t.language_code.as_deref().and_then(non_empty);
                         // The per-word layer is top-level and independent of
                         // diarization, so capture it once (already ms, carrying
                         // confidence and an optional speaker label) and attach it
@@ -1508,6 +1580,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                             words: words.clone(),
                             fixed_speaker_applied: false,
                             speaker_voiceprints: Vec::new(),
+                            language: detected_language.clone(),
                         };
 
                         if !self.diarize || t.utterances.is_none() {
@@ -1555,6 +1628,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                             words,
                             fixed_speaker_applied: false,
                             speaker_voiceprints: Vec::new(),
+                            language: detected_language,
                         });
                     }
                     "error" => {

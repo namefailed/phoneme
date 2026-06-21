@@ -151,6 +151,42 @@ correct. It's a *bias*, not a dictionary — it nudges, it doesn't force.
 
 ---
 
+## Spoken-language routing (per-language model & recipe)
+
+If you record in more than one language, you don't have to pin one global
+language and one cleanup recipe. **Settings → Transcription → Language routing**
+lets you route each recording by the language Whisper **detects**: send Spanish
+through a larger multilingual model and a Spanish cleanup recipe, English through
+your fast default, and so on.
+
+Add a rule per language (or a **catch-all** for "any other"), each with:
+
+- **Language** — the detected language to match (or *Any other*).
+- **Whisper model** — transcribe this language with a specific model. Leave blank
+  to keep the configured model (then nothing is re-transcribed).
+- **Recipe** — run this language's cleanup/summary/tags through a chosen recipe.
+  Leave on **Default** for the usual pipeline.
+- A toggle to enable/disable the rule without deleting it.
+
+Leave the table empty (the default) and every recording uses the single model and
+**Default** recipe above — exactly as before.
+
+**How it works.** The recording is transcribed once with auto-detect; Phoneme
+then looks the detected language up in your rules. If a rule names a *different*
+model, that one recording is re-transcribed with it (no extra cost for
+recipe-only rules, or when the model already matches). The detected language
+shows as a small 🌐 badge on the recording.
+
+> [!NOTE]
+> Routing needs a provider that **reports** the language. The local
+> `whisper.cpp` server and most cloud providers (Deepgram, AssemblyAI) do; the
+> `gpt-4o-transcribe` family and the native in-process engine don't — recordings
+> they transcribe have no detected language and fall through to your defaults. A
+> per-keybind model/recipe override (a Custom Hotkey) always wins over a language
+> route.
+
+---
+
 ## LLM providers (cleanup & summary)
 
 Set in **Settings → Post-Processing**. Cleanup uses `[llm_post_process]`; summary

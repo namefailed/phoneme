@@ -561,6 +561,9 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         // Mean per-word ASR confidence (nullable). `unwrap_or(None)` keeps older
         // rows that predate the column NULL — no badge, never flagged.
         mean_confidence: row.try_get("mean_confidence").unwrap_or(None),
+        // Detected spoken language (nullable). `unwrap_or(None)` keeps older rows
+        // that predate the column NULL — no badge, never routed.
+        detected_language: row.try_get("detected_language").unwrap_or(None),
         tags: Vec::new(),
         // Populated separately (child query against `entities`) by list/get, like `tags`.
         entities: Vec::new(),

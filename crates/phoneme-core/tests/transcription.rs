@@ -481,6 +481,81 @@ async fn local_provider_captures_segment_timeline() {
     assert_eq!(text_only, "hello world again");
 }
 
+/// A verbose_json response with a top-level `"language"` surfaces it as the
+/// detected language on the result — the signal the spoken-language router and
+/// the "detected: es" badge key off.
+#[tokio::test]
+async fn detected_language_parsed_from_verbose_json() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "hola mundo",
+            "language": "es",
+            "segments": [{"start": 0.0, "end": 1.0, "text": " hola mundo"}]
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+    let provider = local_provider(server.uri(), Duration::from_secs(5));
+    let result = provider
+        .transcribe_with_segments(&wav, None, DiarizationTrack::Diarize)
+        .await
+        .unwrap();
+    assert_eq!(result.language.as_deref(), Some("es"));
+}
+
+/// A response without a `"language"` field degrades gracefully to `None`
+/// detection — never an error — so plain-json and detection-less backends just
+/// don't get a badge or a route.
+#[tokio::test]
+async fn missing_language_degrades_to_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "no language field here",
+            "segments": [{"start": 0.0, "end": 1.0, "text": " no language field here"}]
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+    let provider = local_provider(server.uri(), Duration::from_secs(5));
+    let result = provider
+        .transcribe_with_segments(&wav, None, DiarizationTrack::Diarize)
+        .await
+        .unwrap();
+    assert_eq!(result.language, None);
+}
+
+/// An empty `"language": ""` degrades to `None`, not an empty route key.
+#[tokio::test]
+async fn empty_language_string_degrades_to_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "anything",
+            "language": "",
+            "segments": [{"start": 0.0, "end": 1.0, "text": " anything"}]
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+    let provider = local_provider(server.uri(), Duration::from_secs(5));
+    let result = provider
+        .transcribe_with_segments(&wav, None, DiarizationTrack::Diarize)
+        .await
+        .unwrap();
+    assert_eq!(result.language, None);
+}
+
 /// With segment capture off (cloud default, diarize off), the request must
 /// keep asking for plain `json` — some OpenAI-compatible backends reject
 /// verbose_json — and the result simply has no timeline.

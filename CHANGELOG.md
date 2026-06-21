@@ -217,6 +217,22 @@ trust boundary.*
 
 ### Providers & models
 
+- [x] **Spoken-language detection → routing** — Phoneme now stores the language
+  the transcriber *detects* for each recording (a 🌐 badge in the detail pane) and
+  can **route by it**: a new **Settings → Transcription → Language routing** table
+  (and `[[language_routes]]` in config) maps each detected language to an optional
+  Whisper-model override and an optional cleanup recipe. It's two-pass and opt-in
+  — the first transcription auto-detects; a rule that names a *different* model
+  re-transcribes that one recording under it (reusing the safe per-job model-swap
+  path, so the #49 server-thrash safety holds), while a recipe-only rule just
+  routes post-processing with no extra STT pass. A per-keybind model/recipe
+  override always wins; an empty table is exactly today's behaviour. Detection
+  rides the providers that report a language (local `whisper.cpp` `verbose_json`,
+  Deepgram `detect_language`, AssemblyAI) and degrades to "no detection, no route"
+  on the ones that don't (the `gpt-4o-transcribe` family, the native in-process
+  engine). Backed by a new nullable `recordings.detected_language` column and a
+  `language: Option<String>` on the core `Transcription`.
+
 - [x] **Manage your local Ollama models from inside the app** — a new **Manage
   local models** surface (a button on the Models picker's Post-processing tab and
   in **Settings → Post-Processing**, both shown when your Cleanup provider is a

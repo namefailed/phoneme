@@ -101,6 +101,12 @@ export type Recording = {
    *  for empty transcripts — a null aggregate shows no badge and is never
    *  flagged, so older rows and cloud transcripts degrade silently. */
   mean_confidence?: number | null;
+  /** The spoken language the transcriber detected for this recording (a BCP-47/
+   *  ISO-639 code, e.g. "en", "es"). Drives the detail-pane "detected" badge and
+   *  the spoken-language router. Null for older rows and providers/paths that
+   *  surface no language (the native path, the gpt-4o-transcribe family, plain
+   *  non-verbose responses); a null value shows no badge. */
+  detected_language?: string | null;
   /** Tags associated with this recording */
   tags?: Array<{ id: number; name: string; color?: string | null }>;
   /** Custom display names for this recording's diarized speaker labels, e.g.

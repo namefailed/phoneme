@@ -58,6 +58,7 @@ async fn seed_recording(
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -112,6 +113,7 @@ async fn seed_in_place_recording(
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -257,6 +259,7 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -386,6 +389,7 @@ async fn seed_meeting_track(
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -1416,6 +1420,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -2207,6 +2212,7 @@ async fn extract_entities_persists_typed_entities_from_mock_llm() {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -2436,6 +2442,79 @@ fn resolve_recipe_missing_id_falls_back_to_default() {
         vec!["transform", "title", "summary", "tags"],
         "a stale binding recipe id runs the default recipe"
     );
+}
+
+// ── Spoken-language route lookup ─────────────────────────────────────────────
+
+fn route(language: &str, model: &str, recipe: &str, enabled: bool) -> phoneme_core::config::LanguageRoute {
+    phoneme_core::config::LanguageRoute {
+        language: language.to_string(),
+        whisper_model: model.to_string(),
+        recipe_id: recipe.to_string(),
+        enabled,
+    }
+}
+
+#[test]
+fn resolve_language_route_exact_match_wins() {
+    let routes = vec![
+        route("es", "large-es", "meeting_notes", true),
+        route("*", "", "default", true),
+    ];
+    let r = crate::pipeline::resolve_language_route(&routes, Some("es")).unwrap();
+    assert_eq!(r.language, "es");
+    assert_eq!(r.whisper_model, "large-es");
+}
+
+#[test]
+fn resolve_language_route_is_case_insensitive() {
+    let routes = vec![route("ES", "large-es", "", true)];
+    let r = crate::pipeline::resolve_language_route(&routes, Some("es")).unwrap();
+    assert_eq!(r.whisper_model, "large-es");
+}
+
+#[test]
+fn resolve_language_route_falls_back_to_catch_all() {
+    let routes = vec![
+        route("es", "large-es", "", true),
+        route("*", "large-multi", "", true),
+    ];
+    // No exact `fr` rule → the `"*"` catch-all applies.
+    let r = crate::pipeline::resolve_language_route(&routes, Some("fr")).unwrap();
+    assert_eq!(r.whisper_model, "large-multi");
+}
+
+#[test]
+fn resolve_language_route_none_detected_uses_catch_all() {
+    let routes = vec![route("es", "large-es", "", true), route("*", "", "fallback", true)];
+    // Provider reported no language → only the catch-all can match.
+    let r = crate::pipeline::resolve_language_route(&routes, None).unwrap();
+    assert_eq!(r.recipe_id, "fallback");
+}
+
+#[test]
+fn resolve_language_route_no_match_returns_none() {
+    let routes = vec![route("es", "large-es", "", true)];
+    assert!(crate::pipeline::resolve_language_route(&routes, Some("fr")).is_none());
+    assert!(crate::pipeline::resolve_language_route(&routes, None).is_none());
+}
+
+#[test]
+fn resolve_language_route_skips_disabled() {
+    // The exact `es` rule is disabled, so it never fires; the enabled catch-all
+    // takes over instead.
+    let routes = vec![route("es", "large-es", "", false), route("*", "fallback-model", "", true)];
+    let r = crate::pipeline::resolve_language_route(&routes, Some("es")).unwrap();
+    assert_eq!(r.whisper_model, "fallback-model");
+
+    // With no enabled rule at all, lookup is empty.
+    let routes = vec![route("es", "large-es", "", false)];
+    assert!(crate::pipeline::resolve_language_route(&routes, Some("es")).is_none());
+}
+
+#[test]
+fn resolve_language_route_empty_table_is_off() {
+    assert!(crate::pipeline::resolve_language_route(&[], Some("es")).is_none());
 }
 
 /// End to end: an in-place custom-hotkey recording with a per-binding recipe and
@@ -3302,6 +3381,7 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],
@@ -3380,6 +3460,7 @@ fn meeting_track(meeting_id: &str, track: &str, transcript: Option<&str>) -> Rec
         tag_model: None,
         diarization_model: None,
         mean_confidence: None,
+        detected_language: None,
         tags: vec![],
         entities: vec![],
         speaker_names: vec![],

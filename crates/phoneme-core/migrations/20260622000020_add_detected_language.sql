@@ -1,0 +1,14 @@
+-- Per-recording detected spoken language: the language the transcription
+-- provider reported for this audio, captured once when transcription completed
+-- (see the pipeline's detected-language store). It powers the "detected: es"
+-- badge and the spoken-language router, which routes a recording to the right
+-- Whisper model / cleanup recipe by what was actually spoken.
+--
+-- Nullable, and NULL is the graceful-degradation switch: a recording predating
+-- this column, one whose provider returned no language (the native in-process
+-- path, the `gpt-4o-transcribe` family which rejects verbose_json, or any
+-- backend that didn't surface one), or an empty transcript stays NULL. A NULL
+-- value renders no badge and never matches a language route, so older rows and
+-- detection-less providers degrade silently. Stored as the provider's BCP-47 /
+-- ISO-639 code (e.g. "en", "es"), lowercased at lookup time by the router.
+ALTER TABLE recordings ADD COLUMN detected_language TEXT;

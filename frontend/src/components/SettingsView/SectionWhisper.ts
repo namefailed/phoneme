@@ -21,6 +21,42 @@ const VOCAB_MAX_TOKENS = 224;
  *  real limit and always bites first for any realistic vocab. */
 const VOCAB_CHAR_BACKSTOP = 8000;
 
+/** BCP-47/ISO-639 codes offered in the language-routing editor. Mirrors the
+ *  Language `<select>` above, plus a `*` catch-all for "any other detected
+ *  language". Users can route any code Whisper detects; this is the friendly
+ *  shortlist. */
+const ROUTE_LANGUAGE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "*", label: "Any other (catch-all)" },
+  { value: "en", label: "English (en)" },
+  { value: "es", label: "Spanish (es)" },
+  { value: "fr", label: "French (fr)" },
+  { value: "de", label: "German (de)" },
+  { value: "it", label: "Italian (it)" },
+  { value: "pt", label: "Portuguese (pt)" },
+  { value: "nl", label: "Dutch (nl)" },
+  { value: "ru", label: "Russian (ru)" },
+  { value: "ja", label: "Japanese (ja)" },
+  { value: "zh", label: "Chinese (zh)" },
+  { value: "ko", label: "Korean (ko)" },
+  { value: "ar", label: "Arabic (ar)" },
+  { value: "hi", label: "Hindi (hi)" },
+  { value: "tr", label: "Turkish (tr)" },
+  { value: "pl", label: "Polish (pl)" },
+  { value: "uk", label: "Ukrainian (uk)" },
+  { value: "sv", label: "Swedish (sv)" },
+  { value: "da", label: "Danish (da)" },
+  { value: "fi", label: "Finnish (fi)" },
+  { value: "no", label: "Norwegian (no)" },
+];
+
+/** One row of the language-routing table, mirroring the Rust `LanguageRoute`. */
+interface LanguageRouteRow {
+  language: string;
+  whisper_model: string;
+  recipe_id: string;
+  enabled: boolean;
+}
+
 type VocabTokenizer = { encode: (text: string) => number[]; decode: (tokens: number[]) => string };
 let _vocabTokenizer: Promise<VocabTokenizer> | null = null;
 /** Lazily load Whisper's BPE tokenizer (r50k_base == the GPT-2 byte-level BPE
@@ -441,6 +477,13 @@ export class SectionWhisper {
           </span>
         </div>
         <div class="settings-field">
+          <label>Language routing</label>
+          <div id="language-routes-host"></div>
+          <span style="${HELP}">
+            Route a recording by the language Whisper <b>detects</b>: send Spanish through a different model and a Spanish cleanup recipe, English through another, and so on. Add a rule per language, or a <code>*</code> catch-all. Leave empty to use the single model and <b>Default</b> recipe above for everything. Detection needs a provider that reports the language (the local <code>whisper.cpp</code> server and most cloud providers do; the <code>gpt-4o-transcribe</code> family and the native engine don't) — recordings with no detected language fall through to your defaults.
+          </span>
+        </div>
+        <div class="settings-field">
           <label>Custom vocabulary</label>
           <div style="display: block; width: 100%; min-width: 0;">
             <textarea data-key="whisper.initial_prompt" id="vocab-input" maxlength="8000" rows="6"
@@ -496,6 +539,9 @@ export class SectionWhisper {
     vocabInput?.addEventListener("input", updateVocabCount);
     updateVocabCount();
     void loadVocabTokenizer().then((m) => { vocabTok = m; updateVocabCount(); });
+
+    // Spoken-language routing table editor (writes `config.language_routes`).
+    this.mountLanguageRoutes(container);
 
     // Curated STT model dropdown (+ "Other…" free-text) for cloud providers,
     // re-mounted whenever the provider changes so the list matches it.
@@ -569,5 +615,120 @@ export class SectionWhisper {
         void this.fetchHardwareAndModels(); // Re-render selected state
       }
     });
+  }
+
+  /** Render and wire the spoken-language routing table editor. Reads/writes
+   *  `config.language_routes` directly (the same object the Settings save flow
+   *  persists), like the rest of this section. Each row maps a detected language
+   *  to an optional Whisper-model override and an optional cleanup recipe; the
+   *  whole table re-renders on add/remove so indices stay in step.
+   *  NEEDS-NATIVE-VERIFY: the recipe list comes from live daemon config and the
+   *  model field free-texts a model id — both confirmed only in the native window. */
+  private mountLanguageRoutes(container: HTMLElement) {
+    const host = container.querySelector<HTMLElement>("#language-routes-host");
+    if (!host) return;
+    // The live config carries the route table; default to empty so a config that
+    // predates the feature edits cleanly.
+    if (!Array.isArray(this.config.language_routes)) {
+      this.config.language_routes = [];
+    }
+    const routes: LanguageRouteRow[] = this.config.language_routes;
+    // Recipe choices come from the live config (same list the Hotkey manager
+    // uses); empty id = the global Default recipe.
+    const recipes: Array<{ id: string; name?: string }> = Array.isArray(this.config.recipes)
+      ? this.config.recipes
+      : [];
+
+    const langOption = (sel: string) =>
+      ROUTE_LANGUAGE_OPTIONS.map(
+        (o) =>
+          `<option value="${escapeAttr(o.value)}" ${o.value === sel ? "selected" : ""}>${escapeHtml(
+            o.label,
+          )}</option>`,
+      ).join("");
+    const recipeOption = (sel: string) =>
+      [`<option value="" ${sel === "" ? "selected" : ""}>Default recipe</option>`]
+        .concat(
+          recipes.map(
+            (r) =>
+              `<option value="${escapeAttr(r.id)}" ${r.id === sel ? "selected" : ""}>${escapeHtml(
+                r.name || r.id,
+              )}</option>`,
+          ),
+        )
+        .join("");
+
+    const draw = () => {
+      const rows = routes
+        .map(
+          (route, i) => `
+        <div class="lang-route-row" data-idx="${i}" style="display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.6fr) minmax(0, 1.3fr) auto auto; gap: 6px; align-items: center; margin-bottom: 6px;">
+          <select data-lr="language" title="Detected language this rule matches">${langOption(route.language)}</select>
+          <input data-lr="whisper_model" type="text" placeholder="Whisper model (blank = keep)" value="${escapeAttr(route.whisper_model ?? "")}" title="Transcription model for this language — blank keeps the configured one (no re-transcription)" />
+          <select data-lr="recipe_id" title="Cleanup recipe for this language">${recipeOption(route.recipe_id ?? "")}</select>
+          <input data-lr="enabled" type="checkbox" class="toggle-switch" title="Enable this rule" style="justify-self: center;" ${route.enabled ? "checked" : ""} />
+          <button type="button" data-lr-remove="${i}" title="Remove this rule" aria-label="Remove this rule" style="background: none; border: none; color: var(--fg-faded); cursor: pointer; font-size: 0.9286rem; padding: 2px 6px;">✕</button>
+        </div>`,
+        )
+        .join("");
+      host.innerHTML = `
+        ${
+          routes.length
+            ? rows
+            : `<div style="color: var(--fg-faded); font-size: 0.7857rem; margin-bottom: 6px;">No language routes — every recording uses the model and Default recipe above.</div>`
+        }
+        <button type="button" id="lr-add" style="margin-top: 2px; background: none; border: 1px dashed var(--border-subtle); border-radius: 6px; color: var(--fg-faded); cursor: pointer; font-size: 0.7857rem; padding: 4px 10px;">+ Add language route</button>
+      `;
+      wire();
+    };
+
+    const wire = () => {
+      host.querySelector<HTMLButtonElement>("#lr-add")?.addEventListener("click", () => {
+        // Seed a fresh rule with the catch-all and the Default recipe; the user
+        // narrows it from there.
+        routes.push({ language: "*", whisper_model: "", recipe_id: "", enabled: true });
+        draw();
+      });
+      host.querySelectorAll<HTMLButtonElement>("[data-lr-remove]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = Number(btn.dataset.lrRemove);
+          if (Number.isInteger(idx)) {
+            routes.splice(idx, 1);
+            draw();
+          }
+        });
+      });
+      host.querySelectorAll<HTMLElement>(".lang-route-row").forEach((rowEl) => {
+        const idx = Number(rowEl.dataset.idx);
+        const route = routes[idx];
+        if (!route) return;
+        rowEl.querySelector<HTMLSelectElement>('[data-lr="language"]')?.addEventListener(
+          "change",
+          (e) => {
+            route.language = (e.target as HTMLSelectElement).value;
+          },
+        );
+        rowEl.querySelector<HTMLInputElement>('[data-lr="whisper_model"]')?.addEventListener(
+          "input",
+          (e) => {
+            route.whisper_model = (e.target as HTMLInputElement).value;
+          },
+        );
+        rowEl.querySelector<HTMLSelectElement>('[data-lr="recipe_id"]')?.addEventListener(
+          "change",
+          (e) => {
+            route.recipe_id = (e.target as HTMLSelectElement).value;
+          },
+        );
+        rowEl.querySelector<HTMLInputElement>('[data-lr="enabled"]')?.addEventListener(
+          "change",
+          (e) => {
+            route.enabled = (e.target as HTMLInputElement).checked;
+          },
+        );
+      });
+    };
+
+    draw();
   }
 }

@@ -67,8 +67,8 @@ impl Catalog {
                  transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
                  cleanup_model, diarized, user_edited, favorite, pinned, tag_suggestions, summary,
                  summary_model, entities_model, title, title_is_auto, title_model, tag_model,
-                 diarization_model, mean_confidence
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 diarization_model, mean_confidence, detected_language
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -104,6 +104,34 @@ impl Catalog {
         .bind(r.tag_model.as_deref())
         .bind(r.diarization_model.as_deref())
         .bind(r.mean_confidence)
+        .bind(r.detected_language.as_deref())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Set (or clear) the detected spoken language for a recording.
+    ///
+    /// Called by the pipeline after every transcribe/retranscribe, from the
+    /// language the provider reported (see [`crate::transcription::Transcription`]).
+    /// `Some(code)` stores the BCP-47/ISO-639 code; `None` clears it back to NULL,
+    /// which is what a provider/path that surfaces no language (the native path,
+    /// the `gpt-4o-transcribe` family, a plain non-verbose response) writes — so a
+    /// retranscribe that drops to such a provider correctly un-detects the
+    /// recording instead of leaving a stale language. A NULL value shows no badge
+    /// and never matches a language route.
+    pub async fn set_detected_language(
+        &self,
+        id: &RecordingId,
+        language: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET detected_language = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(language)
+        .bind(id.as_str())
         .execute(&self.pool)
         .await?;
         Ok(())

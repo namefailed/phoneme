@@ -355,6 +355,23 @@ Named, ordered chains of `[[playbook]]` entry ids — what the default recording
 
 ---
 
+## `[[language_routes]]`
+
+Spoken-language routing rules — route a recording to a different transcription model and/or cleanup recipe by the language Whisper **detects**, instead of forcing one model + the `default` recipe on everything. An array-of-tables, **empty by default** (routing off; existing configs load unchanged).
+
+Two-pass and detected, not requested: the first transcription auto-detects the language; the detected code (stored on `recordings.detected_language`) is matched here — exact BCP-47/ISO-639 code first, then a `"*"` catch-all. A rule that names a **different** `whisper_model` re-transcribes that one recording under it, reusing the same guarded model-swap path a per-job override uses (the held whisper permit + supervisor wait + drop-restore, so the #49 server-thrash safety holds); a rule that names only a `recipe_id` skips re-transcription and just routes post-processing. A per-keybind `[[hotkeys]]` `whisper_model`/`recipe_id` **always wins** — language routing only fills the gap a binding left at its default.
+
+Detection requires a provider that **reports** the language: the local `whisper.cpp` server (`verbose_json`) and most cloud providers (Deepgram `detect_language`, AssemblyAI) do; the `gpt-4o-transcribe` family (which rejects `verbose_json`) and the native in-process engine do **not**, so their recordings carry a `NULL` `detected_language` and fall through to the defaults — a recording with no detected language matches only a `"*"` rule, never an exact code.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `language` | *(required)* | The detected language this rule matches, a BCP-47/ISO-639 code (e.g. `"es"`), or `"*"` for the catch-all. Compared case-insensitively. |
+| `whisper_model` | `""` | Transcription/STT model for this language. Empty keeps the model pass 1 used (no re-transcription). A non-empty value that **differs** triggers one routed re-transcription. |
+| `recipe_id` | `""` | The `[[recipes]]` id to run this language's post-processing through. Empty = the `default` recipe. A deleted/missing id degrades to `default`. |
+| `enabled` | `true` | Set `false` to park a rule without deleting it; disabled rules are skipped during lookup. |
+
+---
+
 ## `schema_version`
 
 | Key | Default | Description |

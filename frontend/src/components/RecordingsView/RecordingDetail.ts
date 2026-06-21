@@ -353,6 +353,11 @@ export class RecordingDetail {
               <span>${formatDuration(r.duration_ms)}</span>
               <span class="rec-source ${r.track === "system" ? "rec-source--system" : "rec-source--mic"}" title="${r.track === "system" ? "System audio" : "Microphone"}"><span class="rec-source-ico">${r.track === "system" ? "🔊" : "🎤"}</span></span>
               ${r.in_place ? `<span class="detail-inplace-badge" title="Dictation — typed straight in place at your cursor">⌨ in-place</span>` : ""}
+              ${
+                r.detected_language
+                  ? `<span class="detail-lang-badge" title="Spoken language the transcriber detected">🌐 ${escapeHtml(r.detected_language)}</span>`
+                  : ""
+              }
             </div>
           </div>
           <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">

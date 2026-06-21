@@ -2035,6 +2035,43 @@ async fn finalize_canceled(state: &AppState, id: &RecordingId) {
 /// The recipe id the normal recording pipeline runs.
 const DEFAULT_RECIPE_ID: &str = "default";
 
+/// Find the spoken-language route that applies to a detected `language`, if any.
+///
+/// Lookup order, over the `enabled` rules only: an exact (case-insensitive)
+/// match on the BCP-47/ISO-639 code wins; failing that, the `"*"` catch-all. A
+/// `None` detected language (the provider surfaced none, or routing isn't worth
+/// running) never matches an exact rule but still falls to `"*"` — a catch-all is
+/// "anything I didn't specifically route", which includes "couldn't tell". An
+/// empty route table returns `None`, the off state.
+///
+/// Returned by reference into `routes`; the caller reads its `whisper_model` /
+/// `recipe_id`. Disabled rules are skipped, so a parked rule never fires.
+fn resolve_language_route<'a>(
+    routes: &'a [phoneme_core::config::LanguageRoute],
+    language: Option<&str>,
+) -> Option<&'a phoneme_core::config::LanguageRoute> {
+    if routes.is_empty() {
+        return None;
+    }
+    // Exact code match (case-insensitive) takes precedence over the catch-all.
+    if let Some(lang) = language {
+        let lang = lang.trim();
+        if !lang.is_empty() {
+            if let Some(r) = routes
+                .iter()
+                .find(|r| r.enabled && r.language.trim().eq_ignore_ascii_case(lang))
+            {
+                return Some(r);
+            }
+        }
+    }
+    // Fall back to the `"*"` catch-all (covers an unmatched code and a `None`
+    // detection alike).
+    routes
+        .iter()
+        .find(|r| r.enabled && r.language.trim() == "*")
+}
+
 /// One resolved built-in step, ready to dispatch. The schema's `custom:<key>`
 /// enrichment has no persistence path yet, so it is carried as a forward-compat
 /// no-op (warn-only) rather than dropped silently or treated as a failure.
@@ -2755,7 +2792,7 @@ pub async fn run(
     };
     let audio_path = std::path::Path::new(&payload.audio_path).to_path_buf();
     // Filter empty string to None — frontend sends "" for "auto-detect"
-    let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
+    let configured_language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
 
     // Hold the whisper-server permit for the whole final transcription so the
     // streaming preview backs off and can't starve it (it used to time out).
@@ -2778,6 +2815,14 @@ pub async fn run(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&id);
+    // Did this recording carry an explicit per-binding (custom-hotkey) transcription
+    // model? Captured before `requested_override` is consumed by
+    // `apply_model_override`. Spoken-language routing only fills the gap a binding
+    // left at its default: an explicit per-binding model/recipe override always
+    // wins, so a binding that pinned a model is never auto-detected or re-routed.
+    let has_binding_model_override = requested_override
+        .as_deref()
+        .is_some_and(|m| !m.trim().is_empty());
     // Claim this recording's custom-hotkey recipe override (if any) at the same
     // early point as the model/all-overrides removals — before transcription — so
     // a transcribe failure / cancel can't leave a stale entry keyed by a dead id
@@ -2805,6 +2850,22 @@ pub async fn run(
     let recipe_routed = requested_recipe_id
         .as_deref()
         .is_some_and(|r| !r.trim().is_empty());
+
+    // Spoken-language routing is in play only when the user configured routes AND
+    // this recording carries no explicit per-binding model/recipe override (those
+    // win — a binding that pinned a model/recipe is honoured verbatim). When it
+    // is, pass 1 transcribes with auto-detect (`language = None`) regardless of
+    // the global `[whisper].language` hint, so the provider actually reports a
+    // language to route on; otherwise pass 1 keeps the configured hint and routing
+    // is a no-op. Empty table or an overriding binding → today's behaviour exactly.
+    let language_routing_active =
+        !cfg.language_routes.is_empty() && !has_binding_model_override && !recipe_routed;
+    let language = if language_routing_active {
+        None
+    } else {
+        configured_language.clone()
+    };
+
     let (whisper_cfg, override_guard) =
         apply_model_override(state, &cfg.whisper, requested_override).await;
     // Dial the port the bundled server is actually listening on: the supervisor
@@ -2877,7 +2938,9 @@ pub async fn run(
     // Race transcription against cancellation. Dropping the transcribe future on
     // cancel tears down the in-flight HTTP request (reqwest futures are
     // cancel-safe); the native path stops at the next stage boundary.
-    let transcription = tokio::select! {
+    // `mut` so spoken-language routing can replace this with a routed
+    // re-transcription's result (below) without re-running the whole block.
+    let mut transcription = tokio::select! {
         biased;
         _ = cancel.cancelled() => {
             state.events.emit(DaemonEvent::LlmActivity {
@@ -2950,6 +3013,109 @@ pub async fn run(
         return Ok(());
     }
 
+    // ── Spoken-language routing (pass 2 decision) ────────────────────────────
+    // Look the language pass 1 *detected* up in the route table and, on a match,
+    // route this recording: a model-bearing rule whose model differs re-runs STT
+    // under that model (the same guarded swap path, so the #49 server-thrash
+    // safety holds — held permit, supervisor wait, drop-restore); a recipe-bearing
+    // rule just points post-processing at a different recipe (no second STT pass).
+    // Only runs when `language_routing_active` (routes configured, no overriding
+    // binding) and pass 1 actually reported a language; otherwise it's a no-op.
+    //
+    // `routed_recipe_id` overrides the recipe resolved below when a route supplies
+    // one. A per-binding recipe override can't reach here (routing is gated off
+    // when one is present), so there's no precedence conflict.
+    let mut routed_recipe_id: Option<String> = None;
+    if language_routing_active {
+        let detected = transcription.language.clone();
+        if let Some(route) = resolve_language_route(&cfg.language_routes, detected.as_deref()) {
+            // Recipe routing: cheap, no STT re-run. Empty id → leave the default.
+            let route_recipe = route.recipe_id.trim();
+            if !route_recipe.is_empty() {
+                routed_recipe_id = Some(route_recipe.to_string());
+            }
+            // Model routing: re-transcribe only when the rule names a model that
+            // actually differs from what pass 1 used (the per-job `whisper_cfg`
+            // already reflects the configured/port-resolved model). A same-model
+            // rule, or a recipe-only rule, never pays a second STT pass.
+            let route_model = route.whisper_model.trim();
+            let pass1_model = match whisper_cfg.provider {
+                phoneme_core::config::TranscriptionBackend::Local => {
+                    std::path::Path::new(&whisper_cfg.model_path)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string()
+                }
+                _ => whisper_cfg.model.clone(),
+            };
+            if !route_model.is_empty() && route_model != pass1_model {
+                tracing::info!(
+                    detected = detected.as_deref().unwrap_or("*"),
+                    model = route_model,
+                    "spoken-language routing: re-transcribing under routed model"
+                );
+                state.events.emit(DaemonEvent::LlmActivity {
+                    id: id.clone(),
+                    stage: PipelineStage::Transcribing,
+                    prompt: format!(
+                        "Re-transcribing for detected language '{}' with routed model {route_model}",
+                        detected.as_deref().unwrap_or("?")
+                    ),
+                    delta: String::new(),
+                    done: false,
+                });
+                // Same guarded swap path the per-recording model override uses:
+                // publishes to the server's override slot, waits for the respawn,
+                // and restores the configured model when `routed_guard` drops —
+                // all under the still-held `_whisper_permit`, so the preview and
+                // other finals stay backed off through the swap (#49 safety).
+                let (routed_cfg, routed_guard) =
+                    apply_model_override(state, &cfg.whisper, Some(route_model.to_string())).await;
+                let routed_cfg = state.whisper_ports.apply(cfg, &routed_cfg);
+                let routed_provider =
+                    state.transcription.provider(&routed_cfg, &cfg.diarization);
+                let retried = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => {
+                        drop(routed_guard);
+                        finalize_canceled(state, &id).await;
+                        return Ok(());
+                    }
+                    // Pass 2 pins the routed language as the hint (no need to
+                    // re-detect — we already know it), so the routed model decodes
+                    // for that language directly. Falls back to the detected code,
+                    // or auto-detect if pass 1 reported none (the `"*"` case).
+                    res = routed_provider.transcribe_with_segments(
+                        &audio_path,
+                        detected.as_deref(),
+                        diar_track,
+                    ) => res,
+                };
+                drop(routed_guard);
+                match retried {
+                    Ok(t) => {
+                        // Keep pass 1's detected language on the routed result if the
+                        // routed model (now pinned to a language) reported none.
+                        transcription = phoneme_core::transcription::Transcription {
+                            language: t.language.or(detected),
+                            ..t
+                        };
+                    }
+                    Err(e) => {
+                        // A failed re-transcription must not lose the perfectly good
+                        // pass-1 result: log and keep it, so routing degrades to "no
+                        // model swap" rather than failing the recording.
+                        tracing::warn!(
+                            error = %e,
+                            "spoken-language routing re-transcription failed; keeping pass-1 result"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     // The segment + word timelines are machine truth (they describe the raw
     // whisper output, not the LLM-cleaned text), so split them off here — the rest
     // of the pipeline only transforms the text.
@@ -2965,18 +3131,27 @@ pub async fn run(
         // Per-speaker centroid voiceprints (local diarization only; empty for
         // cloud/plain paths), persisted below for cross-recording recognition.
         speaker_voiceprints,
+        // The language the provider detected (None for detection-less paths);
+        // persisted below for the badge + the spoken-language router.
+        language: detected_language,
     } = transcription;
 
     // Finish the Transcribing activity entry with timing + size for the popout.
+    // Append the detected language when the provider reported one (the "detected:
+    // es" signal), so the brain popout surfaces what was spoken.
     {
         let secs = transcribe_started.elapsed().as_secs_f32();
         let chars = transcript.chars().count();
         let words = transcript.split_whitespace().count();
+        let lang_note = detected_language
+            .as_deref()
+            .map(|l| format!(" · detected: {l}"))
+            .unwrap_or_default();
         state.events.emit(DaemonEvent::LlmActivity {
             id: id.clone(),
             stage: PipelineStage::Transcribing,
             prompt: String::new(),
-            delta: format!("✓ {words} words · {chars} chars in {secs:.1}s"),
+            delta: format!("✓ {words} words · {chars} chars in {secs:.1}s{lang_note}"),
             done: true,
         });
     }
@@ -3009,7 +3184,16 @@ pub async fn run(
     // `None` and resolves the `default` recipe. A dangling step id, an empty
     // recipe, or a deleted/missing recipe id degrades to a bare transcribe-only
     // run (falling back to `default` inside `resolve_recipe`), never a panic.
-    let recipe_id = requested_recipe_id.as_deref().unwrap_or(DEFAULT_RECIPE_ID);
+    //
+    // Precedence: a per-binding `recipe_id` (custom hotkey) always wins; a
+    // spoken-language route only supplies one when no binding did (routing is
+    // gated off when a binding override is present), so `routed_recipe_id` is the
+    // language-routed recipe and `requested_recipe_id` the binding's. Prefer the
+    // binding, then the route, then `default`.
+    let recipe_id = requested_recipe_id
+        .as_deref()
+        .or(routed_recipe_id.as_deref())
+        .unwrap_or(DEFAULT_RECIPE_ID);
     let recipe = resolve_recipe(cfg, recipe_id);
 
     // The earliest optional step (cleanup → title → summary → tag) that actually
@@ -3134,6 +3318,19 @@ pub async fn run(
             .map(|agg| agg.mean);
     if let Err(e) = state.catalog.update_confidence(&id, confidence_mean).await {
         tracing::warn!(id = %id.as_str(), "failed to persist confidence aggregate: {e}");
+    }
+
+    // Persist the detected spoken language (the "detected: es" badge + the signal
+    // the spoken-language router keyed off above). `None` for a detection-less
+    // provider/path clears it to NULL, so a retranscribe that drops to such a
+    // backend never leaves a stale language. Best-effort: a failure costs only the
+    // badge, never the recording.
+    if let Err(e) = state
+        .catalog
+        .set_detected_language(&id, detected_language.as_deref())
+        .await
+    {
+        tracing::warn!(id = %id.as_str(), "failed to persist detected language: {e}");
     }
 
     // When a Transform changed the transcript, re-derive a "cleaned" timing

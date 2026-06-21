@@ -198,6 +198,13 @@ pub struct Config {
     /// recording pipeline. Seeded via `default_recipes` when absent.
     #[serde(default = "default_recipes")]
     pub recipes: Vec<PlaybookRecipe>,
+    /// Spoken-language routing rules: route a recording to a different Whisper
+    /// model / cleanup recipe based on the language the transcriber *detected*.
+    /// Empty by default (routing off — every recording uses the global model and
+    /// `default` recipe), so existing configs load unchanged. See
+    /// [`LanguageRoute`].
+    #[serde(default = "default_language_routes")]
+    pub language_routes: Vec<LanguageRoute>,
     /// Monotonic schema version: how many one-time config migrations have already
     /// been applied to this config. Each migration owns a version step (v0→v1 =
     /// the Playbook reconcile, v1→v2 = the hooks cutover; see
@@ -2716,6 +2723,49 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
     ]
 }
 
+/// One spoken-language routing rule: when a recording's *detected* language
+/// matches, route it to a different Whisper/STT model and/or cleanup recipe than
+/// the global defaults. Opt-in — the route table is empty by default, so leaving
+/// it alone preserves today's single-model, single-recipe behaviour.
+///
+/// Routing is two-pass and detected, not requested: the first transcription runs
+/// the configured provider with auto-detect, the daemon reads the language the
+/// provider reported, and only then looks it up here. A model-bearing match that
+/// differs from what pass 1 used re-transcribes that one recording under the
+/// routed model (the same guarded model-swap path a per-recording override uses);
+/// a recipe-only match skips re-transcription and just routes post-processing.
+/// A per-binding (custom-hotkey) `whisper_model`/`recipe_id` always wins — a
+/// language route only fills the gap a binding left at its default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LanguageRoute {
+    /// The detected language this rule matches, a BCP-47/ISO-639 code (e.g.
+    /// `"es"`). `"*"` is the catch-all, applied when no exact code matched.
+    /// Compared case-insensitively against the provider's detected code.
+    pub language: String,
+    /// The Whisper/STT model to transcribe this language with. Empty = keep the
+    /// model pass 1 already used (no re-transcription on this account). A
+    /// non-empty value that differs triggers one routed re-transcription.
+    #[serde(default)]
+    pub whisper_model: String,
+    /// The Playbook recipe id to run this language's post-processing through.
+    /// Empty = the global `default` recipe. A deleted/missing id degrades to
+    /// `default` inside `resolve_recipe`, never an error.
+    #[serde(default)]
+    pub recipe_id: String,
+    /// Whether this rule is active. Disabled rules are skipped during lookup, so
+    /// a user can park a rule without deleting it. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// Default spoken-language routes: none. Routing is opt-in — an empty table means
+/// every recording uses the global Whisper model and `default` recipe, exactly as
+/// before this feature existed. Users add `[[language_routes]]` entries in
+/// Settings → Whisper or `config.toml` to turn it on.
+pub fn default_language_routes() -> Vec<LanguageRoute> {
+    Vec::new()
+}
+
 /// Curated starter recipes. `default` is the normal-recording pipeline —
 /// cleanup → title → summary → auto-tag — matching today's behaviour.
 pub fn default_recipes() -> Vec<PlaybookRecipe> {
@@ -3883,6 +3933,9 @@ impl Default for Config {
             ],
             playbook: default_playbook(),
             recipes: default_recipes(),
+            // Off by default: no language routes, so every recording uses the
+            // global Whisper model + `default` recipe (today's behaviour).
+            language_routes: default_language_routes(),
             // Start at version 0 so the migrations' idempotent paths are exercised
             // uniformly: a fresh config's seeds already mirror the legacy defaults,
             // so the reconcile is a self-confirming no-op — but a default built
@@ -6386,6 +6439,75 @@ mod tests {
         let toml_str = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.whisper.language.as_deref(), Some("es"));
+    }
+
+    #[test]
+    fn language_routes_default_to_empty() {
+        // Opt-in feature: a fresh config has no routes, so routing is off and
+        // behaviour is unchanged.
+        assert!(Config::default().language_routes.is_empty());
+    }
+
+    #[test]
+    fn language_routes_absent_in_legacy_toml_defaults_to_empty() {
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        // Serialize, then remove the table to simulate a pre-feature config.toml.
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(t) = toml_val.as_table_mut() {
+            t.remove("language_routes");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads config without language_routes");
+        assert!(parsed.language_routes.is_empty());
+    }
+
+    #[test]
+    fn language_routes_round_trip() {
+        let mut cfg = Config::default();
+        cfg.language_routes = vec![
+            LanguageRoute {
+                language: "es".into(),
+                whisper_model: "ggml-large-v3.bin".into(),
+                recipe_id: "meeting_notes".into(),
+                enabled: true,
+            },
+            LanguageRoute {
+                language: "*".into(),
+                whisper_model: String::new(),
+                recipe_id: "default".into(),
+                enabled: false,
+            },
+        ];
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.language_routes, cfg.language_routes);
+    }
+
+    #[test]
+    fn language_route_optional_fields_default() {
+        // A minimal `[[language_routes]]` with only `language` set fills the
+        // optional fields with their defaults (empty model/recipe, enabled=true).
+        let toml_str = r#"
+            [[language_routes]]
+            language = "fr"
+        "#;
+        let route: LanguageRoute = toml::from_str(toml_str)
+            .map(|v: toml::Value| {
+                v.get("language_routes")
+                    .and_then(|a| a.as_array())
+                    .and_then(|a| a.first())
+                    .cloned()
+                    .unwrap()
+                    .try_into()
+                    .unwrap()
+            })
+            .unwrap();
+        assert_eq!(route.language, "fr");
+        assert!(route.whisper_model.is_empty());
+        assert!(route.recipe_id.is_empty());
+        assert!(route.enabled, "enabled defaults to true");
     }
 
     #[test]

@@ -752,6 +752,48 @@ port = 3737
 
 
 # -----------------------------------------------------------------------------
+# [[language_routes]] — OPTIONAL spoken-language routing (off by default)
+# -----------------------------------------------------------------------------
+# Route a recording to a different transcription model and/or cleanup recipe by
+# the language Whisper DETECTS, instead of forcing one model + the `default`
+# recipe on everything. Two-pass and opt-in: with no `[[language_routes]]` tables
+# (the default) nothing changes — every recording uses [whisper].model and the
+# `default` recipe.
+#
+# How it runs: the first transcription auto-detects the language; the detected
+# code is matched here (exact code first, then a `"*"` catch-all). A rule that
+# names a DIFFERENT `whisper_model` re-transcribes that one recording under it
+# (reusing the safe model-swap path); a rule that only names a `recipe_id` skips
+# re-transcription and just routes the post-processing. A per-keybind (custom
+# hotkey) model/recipe override always wins — routing only fills the gap a
+# binding left at its default.
+#
+# Detection needs a provider that REPORTS the language: the local whisper.cpp
+# server and most cloud providers do; the `gpt-4o-transcribe` family (which
+# rejects verbose_json) and the native in-process engine do NOT, so their
+# recordings have no detected language and fall through to your defaults.
+#
+# Each entry's fields:
+#   language       BCP-47/ISO-639 code to match (e.g. "es"), or "*" catch-all.
+#   whisper_model  Model to transcribe this language with. Empty = keep the
+#                  configured one (no re-transcription).
+#   recipe_id      Cleanup recipe id. Empty = the `default` recipe.
+#   enabled        Set false to park a rule without deleting it. Default true.
+#
+# Example (commented out — uncomment + edit to enable):
+# [[language_routes]]
+# language = "es"
+# whisper_model = "ggml-large-v3.bin"
+# recipe_id = "meeting_notes"
+# enabled = true
+#
+# [[language_routes]]
+# language = "*"
+# recipe_id = "default"
+# enabled = true
+
+
+# -----------------------------------------------------------------------------
 # Config profiles (not a section in THIS file)
 # -----------------------------------------------------------------------------
 # A profile is a full-config snapshot saved as a separate file under

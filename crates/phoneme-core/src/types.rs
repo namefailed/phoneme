@@ -600,6 +600,17 @@ pub struct Recording {
     /// silently.
     #[serde(default)]
     pub mean_confidence: Option<f32>,
+    /// The spoken language the transcription provider detected for this audio, a
+    /// BCP-47/ISO-639 code (e.g. `"en"`, `"es"`). Stored when transcription
+    /// completed; it drives the "detected: es" badge and the spoken-language
+    /// router (`[[language_routes]]`). `None` — and stored NULL — for recordings
+    /// transcribed before this existed, for providers/paths that surface no
+    /// language (the native in-process path, the `gpt-4o-transcribe` family that
+    /// rejects verbose_json, a plain non-verbose response), and for empty
+    /// transcripts; a `None` value shows no badge and never matches a route, so
+    /// older rows and detection-less providers degrade silently.
+    #[serde(default)]
+    pub detected_language: Option<String>,
     /// Tags attached to this recording. Populated by `Catalog::list`/`get`;
     /// not a column on the recordings table (joined from `recording_tags`).
     #[serde(default)]

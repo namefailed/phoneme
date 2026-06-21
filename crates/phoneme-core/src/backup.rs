@@ -393,6 +393,7 @@ mod tests {
             tag_model: None,
             diarization_model: None,
             mean_confidence: Some(0.82),
+            detected_language: None,
             tags: vec![],
             entities: vec![],
             speaker_names: vec![],

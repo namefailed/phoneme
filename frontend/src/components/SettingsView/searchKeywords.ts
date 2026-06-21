@@ -89,6 +89,17 @@ const EXACT: Record<string, string[]> = {
     "flag",
     "quality",
   ],
+  "language_routes": [
+    "language routing",
+    "spoken language",
+    "detected language",
+    "route by language",
+    "per-language model",
+    "per-language recipe",
+    "multilingual",
+    "auto language",
+    "language detect",
+  ],
 };
 
 /** All intent keywords for a field's config path (`data-key`). */
