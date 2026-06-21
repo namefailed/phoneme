@@ -522,10 +522,89 @@ pub struct SemanticSearchConfig {
     /// `"passage: "` for E5). Empty for all-MiniLM.
     #[serde(default)]
     pub passage_prefix: String,
+    /// Optional approximate-nearest-neighbour (ANN) vector index for semantic
+    /// search. Defaults to off — the brute-force cosine scan is the established
+    /// behaviour and the always-present fallback. See [`AnnConfig`].
+    ///
+    /// `#[serde(default)]` on the whole field means every existing config keeps
+    /// working unchanged: a config written before this key existed deserializes
+    /// to `AnnConfig::default()` (ANN off).
+    #[serde(default)]
+    pub ann: AnnConfig,
+}
+
+/// Optional approximate-nearest-neighbour (ANN) index for semantic search,
+/// backed by usearch HNSW. Two independent off-switches gate it, default OFF:
+///
+/// 1. The cargo feature `ann-usearch` decides whether the native usearch C++
+///    core is compiled at all. The default build does **not** enable it, so the
+///    binary is byte-for-byte today's — zero new native code — and every field
+///    below is simply ignored.
+/// 2. [`AnnConfig::enabled`] (this struct, default `false`) decides whether a
+///    feature-compiled build actually uses the index at runtime. Off → the
+///    brute-force cosine scan, exactly as before.
+///
+/// When both are on, retrieval narrows the candidate set with usearch and then
+/// re-scores those candidates with the unchanged cosine/dedupe/fusion path, so
+/// displayed scores are identical to brute force and ANN can only ever miss a
+/// tail result (tunable via [`AnnConfig::oversample`] /
+/// [`AnnConfig::expansion_search`]). Any index error falls back to brute force.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnnConfig {
+    /// Master switch. OFF by default → brute-force scan, today's behaviour.
+    /// Has no effect unless the crate was built with the `ann-usearch` feature.
+    #[serde(default)]
+    pub enabled: bool,
+    /// `k = limit * oversample` chunk neighbours are fetched from the index
+    /// before the exact re-score and meeting-dedupe collapse them, so the final
+    /// top-`limit` survives the collapse. Higher trades a little query cost for
+    /// recall. Clamped to at least 1 at use.
+    #[serde(default = "default_ann_oversample")]
+    pub oversample: usize,
+    /// HNSW graph connectivity (M). Higher = better recall, more memory/build
+    /// time. usearch's own default (0) auto-selects; this pins a sane value.
+    #[serde(default = "default_ann_connectivity")]
+    pub connectivity: usize,
+    /// HNSW build-time candidate-list width (efConstruction). Higher = better
+    /// graph quality at the cost of build time.
+    #[serde(default = "default_ann_expansion_add")]
+    pub expansion_add: usize,
+    /// HNSW query-time candidate-list width (efSearch). The main recall/latency
+    /// knob: higher recovers more true neighbours per query.
+    #[serde(default = "default_ann_expansion_search")]
+    pub expansion_search: usize,
 }
 
 fn default_embed_max_tokens() -> usize {
     256
+}
+
+fn default_ann_oversample() -> usize {
+    5
+}
+
+fn default_ann_connectivity() -> usize {
+    16
+}
+
+fn default_ann_expansion_add() -> usize {
+    128
+}
+
+fn default_ann_expansion_search() -> usize {
+    64
+}
+
+impl Default for AnnConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            oversample: default_ann_oversample(),
+            connectivity: default_ann_connectivity(),
+            expansion_add: default_ann_expansion_add(),
+            expansion_search: default_ann_expansion_search(),
+        }
+    }
 }
 
 impl Default for SemanticSearchConfig {
@@ -538,6 +617,7 @@ impl Default for SemanticSearchConfig {
             token_type_ids: true,
             query_prefix: String::new(),
             passage_prefix: String::new(),
+            ann: AnnConfig::default(),
         }
     }
 }
@@ -5150,6 +5230,53 @@ mod tests {
         let path = write_config(&dir, &cfg_text);
         let cfg = Config::load(&path).expect("loads");
         assert_eq!(cfg, Config::default());
+    }
+
+    /// The optional ANN index is OFF by default, and an existing config that
+    /// predates the `[semantic_search.ann]` table parses unchanged (the whole
+    /// `ann` field is `#[serde(default)]`), so turning the cargo feature on never
+    /// silently activates the index on an upgraded install.
+    #[test]
+    fn ann_index_defaults_off_and_old_configs_parse_unchanged() {
+        let cfg = Config::default();
+        assert!(
+            !cfg.semantic_search.ann.enabled,
+            "ANN must default to disabled"
+        );
+        // Sane tuning defaults so an opt-in user doesn't have to set every knob.
+        assert_eq!(cfg.semantic_search.ann.oversample, 5);
+        assert_eq!(cfg.semantic_search.ann.connectivity, 16);
+        assert_eq!(cfg.semantic_search.ann.expansion_add, 128);
+        assert_eq!(cfg.semantic_search.ann.expansion_search, 64);
+
+        // Simulate a config written before the key existed: serialize a default
+        // config, strip every `[semantic_search.ann]` section + its keys, and
+        // confirm it parses back identical to the default (ANN off).
+        let serialized = toml::to_string(&cfg).unwrap();
+        let old: String = {
+            let mut out = Vec::new();
+            let mut in_ann_section = false;
+            for line in serialized.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with('[') {
+                    in_ann_section = trimmed.starts_with("[semantic_search.ann");
+                }
+                if !in_ann_section {
+                    out.push(line);
+                }
+            }
+            out.join("\n")
+        };
+        assert!(
+            !old.contains("[semantic_search.ann"),
+            "the old-config fixture must omit the ann table"
+        );
+        let parsed: Config = toml::from_str(&old).unwrap();
+        assert!(!parsed.semantic_search.ann.enabled);
+        assert_eq!(
+            parsed, cfg,
+            "a config missing the ann table parses identical to default"
+        );
     }
 
     #[test]

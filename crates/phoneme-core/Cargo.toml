@@ -30,6 +30,16 @@ hound.workspace = true
 # already pins, so this adds no new resolution in Cargo.lock.
 zip = { workspace = true }
 whisper-rs = { version = "0.11", optional = true }
+# Optional approximate-nearest-neighbour vector index for semantic search,
+# behind the `ann-usearch` feature (NOT default) and the runtime config flag
+# `semantic_search.ann.enabled` (default false). usearch is a header-only C++
+# HNSW core compiled via `cc` — the same class of native build the repo already
+# pays for whisper-rs / ort / bundled SQLite — and is statically linked, so it
+# adds no runtime DLL. Pinned exactly: its on-disk sidecar format and API have
+# moved across 2.x, and the sidecar is treated as a disposable cache rebuildable
+# from SQLite so a version bump is a non-event. All usearch usage is confined to
+# `catalog::ann` behind `#[cfg(feature = "ann-usearch")]`.
+usearch = { version = "=2.25.3", optional = true }
 regex.workspace = true
 which = "6"
 # HMAC-SHA256 signing of outbound webhook bodies (X-Phoneme-Signature). Both
@@ -54,6 +64,14 @@ windows-sys = { version = "0.59", features = [
 
 [features]
 native-whisper = ["dep:whisper-rs"]
+# Optional approximate-nearest-neighbour vector index for semantic search.
+# NOT in any default feature set: the default build pulls zero usearch native
+# code and the brute-force cosine scan stays the literal default. Enabling this
+# compiles the usearch C++ HNSW core (statically linked, no runtime DLL); the
+# index is still gated at runtime by `semantic_search.ann.enabled` (default
+# false). Build/test this lane with `--features ann-usearch`. All usearch usage
+# lives behind `#[cfg(feature = "ann-usearch")]` in `catalog::ann`.
+ann-usearch = ["dep:usearch"]
 
 [dev-dependencies]
 proptest.workspace = true

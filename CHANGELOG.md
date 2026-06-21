@@ -887,6 +887,25 @@ trust boundary.*
   repeated queries (and the upcoming RAG retrieval) skip re-reading and
   re-decoding every vector BLOB from SQLite; invalidated on any re-embed or
   delete, bounded for large libraries.
+- [x] **Optional ANN vector index for semantic search** — an opt-in
+  [usearch](https://github.com/unum-cloud/usearch) HNSW index that replaces the
+  brute-force cosine scan with sub-linear nearest-neighbour search on large
+  libraries. Gated **twice** and **off by default**: the cargo feature
+  `ann-usearch` (not in any default build — a stock binary is byte-for-byte
+  today's, zero new native code) *and* the runtime flag `semantic_search.ann.enabled`
+  (default `false`). When on, the index only narrows *which* candidates are
+  scored; the existing exact cosine re-score, meeting-dedupe, and RRF fusion are
+  unchanged, so displayed scores match brute force and the index can at worst
+  miss a tail result (tunable via `oversample` / `expansion_search`). The
+  brute-force scan stays the guaranteed fallback: a missing/stale sidecar,
+  dimension mismatch, count drift, or any query error logs a `warn` and falls
+  through to it — search never errors. The on-disk index is a disposable sidecar
+  (`catalog.ann`) rebuilt from SQLite on any integrity doubt; the daemon
+  background-builds it after the embedding backfill drains (startup never blocks),
+  and incremental insert/delete/re-embed keep it in step through the existing
+  embedding-cache choke points. The Doctor reports its health
+  (disabled / rebuilding / healthy / stale). Build the feature lane with
+  `cargo build --features ann-usearch`.
 
 ### Reliability & polish
 

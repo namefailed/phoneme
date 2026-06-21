@@ -303,6 +303,11 @@ impl Catalog {
         // A recording's chunk vectors were replaced — patch just it into the warm
         // cache instead of dropping the whole snapshot.
         self.patch_recording_in_cache(id).await;
+        // Keep the ANN index in step through the SAME choke point (no-op unless
+        // ANN is enabled): remove the recording's old keys and add the new chunk
+        // vectors. Routing both structures through one call site keeps them
+        // coherent and reuses the proven race discipline of the cache patch.
+        self.sync_recording_to_ann(id, vectors).await;
         Ok(())
     }
 
@@ -320,9 +325,20 @@ impl Catalog {
         sqlx::query("DELETE FROM embeddings")
             .execute(&mut *tx)
             .await?;
+        // The ANN key map is derived from the chunks just deleted — clear it in
+        // the same transaction so a later re-embed allocates fresh keys rather
+        // than reusing stale ones. Purely additive: a no-op on a library that
+        // never enabled ANN (the table is just empty).
+        sqlx::query("DELETE FROM ann_keys")
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         // Whole library wiped for a re-embed — drop the snapshot.
         self.invalidate_embedding_cache();
+        // The chunk vectors are gone, so the ANN index is stale: drop it + the
+        // sidecar (no-op unless the feature is compiled). A later re-embed
+        // re-allocates keys and the daemon rebuilds the index from SQLite.
+        self.clear_ann_index();
         Ok(())
     }
 
@@ -472,10 +488,17 @@ impl Catalog {
         // The decoded corpus (cached across queries; rebuilt after any write).
         let corpus = self.embedding_corpus().await?;
 
-        // Best-chunk cosine over the whole corpus is CPU-bound — up to
-        // MAX_CACHED_VECTORS dot products — so run it on the blocking pool rather
-        // than inline on the async executor, where a large library would stall
-        // IPC reads / audio streaming between await points.
+        // ANN candidate narrowing (only when the feature is compiled, the flag is
+        // on, a warm index exists, and its dimension matches). Returns the set of
+        // chunk-bearing recording ids whose vectors the scan should consider, plus
+        // the (few) legacy-only recordings that have no chunks yet. `None` means
+        // "no ANN this query" → the full brute-force scan below, verbatim.
+        let ann_candidate_ids = self.ann_candidate_recording_ids(&query, dim).await;
+
+        // Best-chunk cosine is CPU-bound — up to MAX_CACHED_VECTORS dot products
+        // on the brute-force path — so run it on the blocking pool rather than
+        // inline on the async executor, where a large library would stall IPC
+        // reads / audio streaming between await points.
         let best = tokio::task::spawn_blocking(move || {
             // best raw cosine per dedupe key (meeting_id or recording id).
             let mut best: std::collections::HashMap<String, (RecordingId, f32)> =
@@ -506,16 +529,29 @@ impl Catalog {
                     .or_insert((rec_id, score));
             };
 
-            // Per-chunk vectors (the primary, high-recall path).
+            // Per-chunk vectors (the primary, high-recall path). On the ANN path
+            // only the candidate recordings' chunks are scored; on the brute-force
+            // path every chunk is. The exact scoring math, dimension guard, and
+            // meeting-dedupe are identical either way — ANN changes *which*
+            // candidates are scored, never *how* — so the returned scores stay
+            // bit-identical to brute force.
             let mut have_chunks: std::collections::HashSet<&str> =
                 std::collections::HashSet::new();
             for cv in &corpus.chunks {
                 have_chunks.insert(cv.id.as_str());
+                if let Some(ids) = &ann_candidate_ids {
+                    if !ids.contains(cv.id.as_str()) {
+                        continue; // not in the ANN candidate set this query
+                    }
+                }
                 consider(cv);
             }
 
             // Legacy whole-recording vectors, only for recordings not yet chunked,
-            // so the library stays searchable while the backfill runs.
+            // so the library stays searchable while the backfill runs. These are
+            // ALWAYS scanned (even on the ANN path): they're few — the backfill
+            // drains them — and scanning them preserves the "searchable during
+            // migration" guarantee for recordings the index doesn't cover yet.
             for cv in &corpus.legacy {
                 if have_chunks.contains(cv.id.as_str()) {
                     continue; // chunks supersede the legacy whole-recording vector
@@ -902,4 +938,500 @@ impl Catalog {
         }
         Ok(results)
     }
+}
+
+// ── ANN (approximate nearest-neighbour) index lifecycle + retrieval ──────────
+//
+// Every method here is a no-op (or returns `None`) when the `ann-usearch`
+// feature is off OR `ann_config.enabled` is false, so a catalog that never
+// turned ANN on behaves exactly as before. The index is a disposable derived
+// cache over the `embedding_chunks` BLOBs; the `ann_keys` table maps the usearch
+// `u64` keys back to `(recording_id, chunk_index)`. Brute force is the always-
+// present fallback: any ANN error logs a warn, drops the index/sidecar, and the
+// caller falls through to the cosine scan — never an error to the user.
+impl Catalog {
+    /// Snapshot of the ANN tuning config (cheap clone under a short read lock).
+    pub(crate) fn ann_config_snapshot(&self) -> AnnConfig {
+        self.ann_config
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|poison| poison.into_inner().clone())
+    }
+
+    /// Whether the ANN path is active right now: the feature is compiled AND the
+    /// runtime flag is on. Does not check whether a warm index exists. `pub` so
+    /// the daemon can gate its startup load/rebuild + log on it.
+    pub fn ann_enabled(&self) -> bool {
+        ann::feature_compiled() && self.ann_config_snapshot().enabled
+    }
+
+    /// Set the ANN tuning config (the daemon calls this after `open` from the
+    /// loaded `Config`). Turning ANN off drops any warm index + sidecar so a
+    /// later re-enable rebuilds cleanly; turning it on does not build here —
+    /// the daemon background-builds so startup never blocks. Safe to call on a
+    /// default build: with the feature off, `enabled` has no runtime effect.
+    pub fn set_ann_config(&self, cfg: AnnConfig) {
+        let now_enabled = ann::feature_compiled() && cfg.enabled;
+        {
+            let mut guard = match self.ann_config.write() {
+                Ok(g) => g,
+                Err(poison) => poison.into_inner(),
+            };
+            *guard = cfg;
+        }
+        if !now_enabled {
+            self.drop_ann_index();
+        }
+    }
+
+    /// Drop the in-memory ANN index (the sidecar on disk is left as-is; callers
+    /// that want it gone call [`Catalog::delete_ann_sidecar`]).
+    fn drop_ann_index(&self) {
+        let mut guard = match self.ann.write() {
+            Ok(g) => g,
+            Err(poison) => poison.into_inner(),
+        };
+        *guard = None;
+    }
+
+    /// Best-effort delete of the on-disk sidecar. A missing file is success.
+    fn delete_ann_sidecar(&self) {
+        if let Some(path) = &self.ann_sidecar {
+            if path.exists() {
+                if let Err(e) = std::fs::remove_file(path) {
+                    tracing::warn!(path = %path.display(), error = %e, "ann index: failed to delete sidecar");
+                }
+            }
+        }
+    }
+
+    /// The ANN-narrowed candidate recording-id set for a query, or `None` to fall
+    /// back to the full brute-force scan. `None` is returned whenever ANN is off,
+    /// no warm index exists, the index dimension doesn't match the query, or the
+    /// search errors — so the caller's brute-force path is always the guaranteed
+    /// fallback. On success the set holds the recording ids whose chunks the
+    /// re-score should consider (resolved from the `ann_keys` table); the caller
+    /// still scans legacy-only recordings unconditionally.
+    async fn ann_candidate_recording_ids(
+        &self,
+        query: &[f32],
+        dim: usize,
+    ) -> Option<std::collections::HashSet<String>> {
+        if !self.ann_enabled() {
+            return None;
+        }
+        let cfg = self.ann_config_snapshot();
+        // Fetch k = limit*oversample neighbours. `vector_ranking` has no `limit`
+        // of its own (the caller truncates after fusion), so oversample off a
+        // generous default top-k: enough candidates to absorb the meeting-dedupe
+        // / max-sim collapse while staying far below a full scan. Clamp to ≥1.
+        let oversample = cfg.oversample.max(1);
+        const ANN_BASE_K: usize = 200;
+        let k = ANN_BASE_K.saturating_mul(oversample);
+
+        // Search under a read lock, then resolve keys outside it. A dimension
+        // mismatch or an empty index means "no usable ANN" → brute force.
+        let hits: Vec<(u64, f32)> = {
+            let guard = self.ann.read().ok()?;
+            let index = guard.as_ref()?;
+            if index.dim() != dim || index.is_empty() {
+                return None;
+            }
+            match index.search(query, k) {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::warn!(error = %e, "ann index: search failed; falling back to brute force");
+                    return None;
+                }
+            }
+        };
+        if hits.is_empty() {
+            // A healthy index that returns nothing is a legitimate "no neighbours"
+            // — but to stay safe (never silently drop results that brute force
+            // would find), treat it as a fallback rather than an empty result.
+            return None;
+        }
+
+        // Resolve usearch keys → recording ids via ann_keys. Keys not found (a
+        // race with a concurrent delete) are simply skipped.
+        let keys: Vec<i64> = hits.iter().map(|(k, _)| *k as i64).collect();
+        let placeholders = vec!["?"; keys.len()].join(",");
+        let sql =
+            format!("SELECT DISTINCT recording_id FROM ann_keys WHERE key IN ({placeholders})");
+        let mut q = sqlx::query_scalar::<_, String>(&sql);
+        for k in &keys {
+            q = q.bind(k);
+        }
+        match q.fetch_all(&self.pool).await {
+            Ok(ids) => Some(ids.into_iter().collect()),
+            Err(e) => {
+                tracing::warn!(error = %e, "ann index: key resolution failed; falling back to brute force");
+                None
+            }
+        }
+    }
+
+    /// Allocate (or reuse) `ann_keys` rows for a recording's chunks and return
+    /// the `key`s in chunk order. Idempotent: re-embedding reuses the same keys
+    /// for unchanged `(recording_id, chunk_index)` pairs via the UNIQUE upsert,
+    /// and prunes any rows past the new chunk count so a shrunk recording doesn't
+    /// leave dangling keys.
+    async fn allocate_ann_keys(&self, id: &RecordingId, chunk_count: usize) -> Result<Vec<u64>> {
+        let mut keys = Vec::with_capacity(chunk_count);
+        let mut tx = self.pool.begin().await?;
+        // Drop rows for chunk indices that no longer exist (recording shrank).
+        sqlx::query("DELETE FROM ann_keys WHERE recording_id = ? AND chunk_index >= ?")
+            .bind(id.as_str())
+            .bind(chunk_count as i64)
+            .execute(&mut *tx)
+            .await?;
+        for idx in 0..chunk_count {
+            // Insert-or-ignore keeps an existing key stable across re-embeds.
+            sqlx::query("INSERT OR IGNORE INTO ann_keys (recording_id, chunk_index) VALUES (?, ?)")
+                .bind(id.as_str())
+                .bind(idx as i64)
+                .execute(&mut *tx)
+                .await?;
+            let key: i64 = sqlx::query_scalar(
+                "SELECT key FROM ann_keys WHERE recording_id = ? AND chunk_index = ?",
+            )
+            .bind(id.as_str())
+            .bind(idx as i64)
+            .fetch_one(&mut *tx)
+            .await?;
+            keys.push(key as u64);
+        }
+        tx.commit().await?;
+        Ok(keys)
+    }
+
+    /// The recording's ANN keys, for the delete path to drop from the index
+    /// before the FK cascade removes the `ann_keys` rows. Returns empty (no DB
+    /// hit) unless ANN is enabled, and swallows a read error into empty — a
+    /// missed remove only leaves a dead node the next rebuild reclaims, never an
+    /// error to the user. `pub(crate)` so the sibling `recordings` module can
+    /// call it.
+    pub(crate) async fn recording_ann_keys_for_delete(&self, id: &RecordingId) -> Vec<u64> {
+        if !self.ann_enabled() {
+            return Vec::new();
+        }
+        self.recording_ann_keys(id).await.unwrap_or_default()
+    }
+
+    /// The current `ann_keys` for a recording, `(key, chunk_index)` ascending —
+    /// used to remove a recording's old vectors from the index before re-adding
+    /// or on delete.
+    async fn recording_ann_keys(&self, id: &RecordingId) -> Result<Vec<u64>> {
+        let rows: Vec<i64> = sqlx::query_scalar(
+            "SELECT key FROM ann_keys WHERE recording_id = ? ORDER BY chunk_index",
+        )
+        .bind(id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|k| k as u64).collect())
+    }
+
+    /// Keep the ANN index in step with one recording's chunk vectors: remove its
+    /// old keys, allocate keys for the new chunks, and `add` them. Called from
+    /// `upsert_chunk_embeddings` after the DB write + cache patch, reusing the
+    /// same single choke point so the index and the warm cache stay coherent.
+    ///
+    /// A no-op unless ANN is enabled. Any error logs a warn and drops the index
+    /// (a rebuild from SQLite then heals it) — a stale ANN must never serve.
+    pub(crate) async fn sync_recording_to_ann(&self, id: &RecordingId, vectors: &[Vec<f32>]) {
+        if !self.ann_enabled() {
+            return;
+        }
+        // Old keys to remove from the graph (before they're reallocated/pruned).
+        let old_keys = self.recording_ann_keys(id).await.unwrap_or_default();
+        // Allocate stable keys for the new chunk set (also prunes shrunk tail).
+        let new_keys = match self.allocate_ann_keys(id, vectors.len()).await {
+            Ok(k) => k,
+            Err(e) => {
+                tracing::warn!(id = %id.as_str(), error = %e, "ann index: key allocation failed; dropping index");
+                self.drop_ann_index();
+                return;
+            }
+        };
+        let guard = match self.ann.read() {
+            Ok(g) => g,
+            Err(poison) => poison.into_inner(),
+        };
+        let Some(index) = guard.as_ref() else {
+            // No warm index yet (the daemon hasn't built it). The keys are now in
+            // ann_keys, so the eventual build/rebuild picks them up — nothing to do.
+            return;
+        };
+        // Remove any old keys that won't be reused, then add the current vectors.
+        let reused: std::collections::HashSet<u64> = new_keys.iter().copied().collect();
+        for k in old_keys {
+            if !reused.contains(&k) {
+                if let Err(e) = index.remove(k) {
+                    tracing::warn!(key = k, error = %e, "ann index: remove during re-embed failed");
+                }
+            }
+        }
+        for (vec, key) in vectors.iter().zip(&new_keys) {
+            // A re-embed reuses the key, so remove the stale vector first (add
+            // alone would error or duplicate). A fresh key isn't present, so the
+            // remove is a harmless no-op.
+            let _ = index.remove(*key);
+            if let Err(e) = index.add(*key, vec) {
+                tracing::warn!(id = %id.as_str(), key = *key, error = %e, "ann index: add failed; dropping index");
+                drop(guard);
+                self.drop_ann_index();
+                return;
+            }
+        }
+    }
+
+    /// Remove a recording's vectors from the ANN index (its `ann_keys` rows are
+    /// dropped by the FK cascade when the recording row goes). Called from the
+    /// recording-delete path alongside `patch_recording_in_cache`. A no-op unless
+    /// ANN is enabled. Capture the keys BEFORE the cascade removes them.
+    pub(crate) async fn remove_recording_from_ann_keys(&self, keys: &[u64]) {
+        if !self.ann_enabled() || keys.is_empty() {
+            return;
+        }
+        let guard = match self.ann.read() {
+            Ok(g) => g,
+            Err(poison) => poison.into_inner(),
+        };
+        let Some(index) = guard.as_ref() else {
+            return;
+        };
+        for &k in keys {
+            if let Err(e) = index.remove(k) {
+                tracing::warn!(key = k, error = %e, "ann index: remove on delete failed");
+            }
+        }
+    }
+
+    /// Drop the in-memory index and delete the sidecar — the ANN twin of
+    /// `clear_all_embeddings` / `clear_all_recordings`. The `ann_keys` rows are
+    /// taken by the same cascade/DELETE that clears the embedding tables.
+    pub(crate) fn clear_ann_index(&self) {
+        if !ann::feature_compiled() {
+            return;
+        }
+        self.drop_ann_index();
+        self.delete_ann_sidecar();
+    }
+
+    /// All chunk vectors with their ANN keys, for a full index (re)build. Decodes
+    /// the `embedding_chunks` BLOBs joined to `ann_keys`; a chunk missing a key
+    /// row (it predates the table) gets one allocated. Skips corrupt blobs (the
+    /// same guard the scan uses). Returns `(dim, pairs)`; `dim` is the first
+    /// good vector's length, or `None` when there's nothing to index.
+    async fn collect_ann_build_pairs(&self) -> Result<Option<(usize, Vec<(u64, Vec<f32>)>)>> {
+        // Ensure every chunk has a key row first (covers a library embedded
+        // before ANN was enabled). Group chunk counts per recording, then
+        // allocate keys for each.
+        let counts: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT recording_id, COUNT(*) AS n FROM embedding_chunks GROUP BY recording_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        for (rid, n) in &counts {
+            if let Some(id) = RecordingId::parse(rid.clone()) {
+                self.allocate_ann_keys(&id, *n as usize).await?;
+            }
+        }
+
+        // Join chunks to their keys and decode.
+        let rows = sqlx::query(
+            "SELECT ak.key AS key, ec.vector AS vector \
+             FROM embedding_chunks ec \
+             JOIN ann_keys ak ON ak.recording_id = ec.recording_id \
+                             AND ak.chunk_index = ec.chunk_index",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut dim: Option<usize> = None;
+        let mut pairs: Vec<(u64, Vec<f32>)> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let key: i64 = row.try_get("key")?;
+            let bytes: Vec<u8> = row.try_get("vector")?;
+            if !bytes.len().is_multiple_of(4) {
+                continue; // corrupt blob, skip (matches the scan's guard)
+            }
+            let vec: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes(c.try_into().expect("chunks_exact(4) yields 4 bytes")))
+                .collect();
+            if vec.is_empty() {
+                continue;
+            }
+            match dim {
+                None => dim = Some(vec.len()),
+                Some(d) if d != vec.len() => continue, // mixed dims → skip the odd one
+                _ => {}
+            }
+            pairs.push((key as u64, vec));
+        }
+        Ok(dim.map(|d| (d, pairs)))
+    }
+
+    /// Build (or rebuild) the ANN index from SQLite and swap it in warm. Drives
+    /// the daemon's background build after the embedding backfill drains, and the
+    /// CLI `phoneme reindex`. CPU-heavy (HNSW build), so the daemon runs it under
+    /// `spawn_blocking`; the SQLite reads here are async. A no-op unless ANN is
+    /// enabled. On any error the index is left `None` (brute force) — never fatal.
+    pub async fn rebuild_ann_index(&self) -> Result<()> {
+        if !self.ann_enabled() {
+            return Ok(());
+        }
+        let cfg = self.ann_config_snapshot();
+        let Some(sidecar) = self.ann_sidecar.clone() else {
+            tracing::debug!("ann index: no on-disk sidecar (in-memory db); skipping build");
+            return Ok(());
+        };
+        let Some((dim, pairs)) = self.collect_ann_build_pairs().await? else {
+            // Nothing to index yet — drop any stale index so search falls back.
+            self.drop_ann_index();
+            return Ok(());
+        };
+        match ann::AnnIndex::build_from_pairs(sidecar, dim, &pairs, &cfg) {
+            Ok(index) => {
+                if let Err(e) = index.save() {
+                    tracing::warn!(error = %e, "ann index: save after build failed (index still usable in memory)");
+                }
+                let mut guard = match self.ann.write() {
+                    Ok(g) => g,
+                    Err(poison) => poison.into_inner(),
+                };
+                *guard = Some(index);
+                tracing::info!(vectors = pairs.len(), dim, "ann index: built");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "ann index: build failed; staying on brute force");
+                self.drop_ann_index();
+                self.delete_ann_sidecar();
+                Ok(())
+            }
+        }
+    }
+
+    /// Load the index from its sidecar if it's healthy, else rebuild from SQLite.
+    /// The daemon calls this once at startup (under `spawn_blocking` for the
+    /// build path) so a warm-start reuses the persisted graph and a cold/stale
+    /// one heals. A no-op unless ANN is enabled.
+    pub async fn load_or_rebuild_ann_index(&self) -> Result<()> {
+        if !self.ann_enabled() {
+            return Ok(());
+        }
+        let cfg = self.ann_config_snapshot();
+        let Some(sidecar) = self.ann_sidecar.clone() else {
+            return Ok(());
+        };
+        // Expected count + dim from SQLite (the source of truth) to verify the
+        // sidecar against.
+        let expected_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ann_keys ak JOIN embedding_chunks ec \
+                ON ak.recording_id = ec.recording_id AND ak.chunk_index = ec.chunk_index",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+        let dim = self.ann_dim_from_sqlite().await;
+        if let (true, Some(dim)) = (sidecar.exists(), dim) {
+            match ann::AnnIndex::load_verified(sidecar.clone(), dim, expected_count as usize, &cfg)
+            {
+                Ok(index) => {
+                    let mut guard = match self.ann.write() {
+                        Ok(g) => g,
+                        Err(poison) => poison.into_inner(),
+                    };
+                    *guard = Some(index);
+                    tracing::info!(
+                        vectors = expected_count,
+                        dim,
+                        "ann index: loaded from sidecar"
+                    );
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::info!(error = %e, "ann index: sidecar unusable; rebuilding from SQLite");
+                }
+            }
+        }
+        self.rebuild_ann_index().await
+    }
+
+    /// The embedding dimension implied by the stored chunk vectors (length of the
+    /// first well-formed blob), or `None` when there are no chunks.
+    async fn ann_dim_from_sqlite(&self) -> Option<usize> {
+        let bytes: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT vector FROM embedding_chunks LIMIT 1")
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
+        bytes.and_then(|b| (b.len().is_multiple_of(4) && !b.is_empty()).then_some(b.len() / 4))
+    }
+
+    /// Persist the warm index to its sidecar if one is present. The daemon
+    /// piggybacks this on the idle `checkpoint()` cadence so a steady stream of
+    /// incremental `add`s isn't an fsync each. A no-op unless ANN is enabled and
+    /// an index is warm.
+    pub async fn save_ann_index(&self) {
+        if !self.ann_enabled() {
+            return;
+        }
+        let guard = match self.ann.read() {
+            Ok(g) => g,
+            Err(poison) => poison.into_inner(),
+        };
+        if let Some(index) = guard.as_ref() {
+            if let Err(e) = index.save() {
+                tracing::warn!(error = %e, "ann index: idle save failed");
+            }
+        }
+    }
+
+    /// Health snapshot for the Doctor probe: whether the feature is compiled,
+    /// whether the flag is on, whether a warm index exists, its vector count, and
+    /// the SQLite chunk-key count it should match. The Doctor renders
+    /// "healthy / rebuilding / disabled (brute-force)" from this.
+    pub async fn ann_health(&self) -> AnnHealth {
+        let compiled = ann::feature_compiled();
+        let enabled = self.ann_config_snapshot().enabled;
+        let sqlite_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ann_keys ak JOIN embedding_chunks ec \
+             ON ak.recording_id = ec.recording_id AND ak.chunk_index = ec.chunk_index",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+        let index_count = self
+            .ann
+            .read()
+            .ok()
+            .and_then(|g| g.as_ref().map(|i| i.len()));
+        AnnHealth {
+            feature_compiled: compiled,
+            enabled,
+            index_loaded: index_count.is_some(),
+            index_vectors: index_count.unwrap_or(0),
+            sqlite_vectors: sqlite_count as usize,
+        }
+    }
+}
+
+/// A snapshot of the ANN index's health for the Doctor probe. See
+/// [`Catalog::ann_health`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnnHealth {
+    /// Whether the crate was built with the `ann-usearch` feature.
+    pub feature_compiled: bool,
+    /// Whether `semantic_search.ann.enabled` is set.
+    pub enabled: bool,
+    /// Whether a warm index is loaded in memory right now.
+    pub index_loaded: bool,
+    /// How many vectors the warm index holds (0 when none is loaded).
+    pub index_vectors: usize,
+    /// How many chunk vectors SQLite holds — what a healthy index should match.
+    pub sqlite_vectors: usize,
 }

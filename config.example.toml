@@ -656,6 +656,35 @@ query_prefix = ""
 # Prefix prepended to a STORED PASSAGE before embedding (e.g. "passage: " for E5).
 passage_prefix = ""
 
+# --- [semantic_search.ann] — optional approximate-nearest-neighbour index ----
+# Speeds up semantic search on large libraries with a usearch HNSW index instead
+# of the brute-force cosine scan. Gated TWICE and OFF by default:
+#   1. A build-time cargo feature `ann-usearch` must be compiled in (it is NOT in
+#      any default build — a stock binary has zero usearch code and ignores every
+#      key below). Build it with `cargo build --features ann-usearch`.
+#   2. `enabled` below must be true at runtime.
+# When both are on, the index only narrows WHICH candidates are scored; the exact
+# cosine re-score, meeting-dedupe, and fusion are unchanged, so displayed scores
+# match brute force. Any index trouble silently falls back to the brute-force
+# scan — search never breaks. The on-disk index (catalog.ann) is a disposable
+# cache rebuilt from SQLite whenever it's missing or stale.
+[semantic_search.ann]
+# Master switch. false = brute-force cosine scan (today's behaviour, the
+# guaranteed fallback). No effect unless built with the `ann-usearch` feature.
+enabled = false
+# k = limit * oversample chunk neighbours are fetched before the re-score and
+# meeting-dedupe collapse them, so the final top-`limit` survives. Higher trades
+# a little query cost for recall.
+oversample = 5
+# HNSW graph connectivity (M). Higher = better recall, more memory/build time.
+connectivity = 16
+# HNSW build-time candidate-list width (efConstruction). Higher = better graph
+# quality at the cost of build time.
+expansion_add = 128
+# HNSW query-time candidate-list width (efSearch). The main recall/latency knob:
+# higher recovers more true neighbours per query.
+expansion_search = 64
+
 
 # -----------------------------------------------------------------------------
 # [retention] — automatic cleanup of old recordings

@@ -609,6 +609,11 @@ impl AppState {
         }
 
         let catalog = Catalog::open(&paths.catalog_db).await?;
+        // Hand the catalog its ANN tuning config. Off by default and a no-op
+        // unless the `ann-usearch` feature is compiled in; the daemon
+        // background-builds the index after the embedding backfill (see main.rs)
+        // so opening the catalog never blocks on an HNSW build.
+        catalog.set_ann_config(config.semantic_search.ann.clone());
         let inbox = InboxQueue::new(&paths.inbox_dir).await?;
         let transcription = Transcriber::new()?;
         let llm = LlmPostProcessor::new()?;

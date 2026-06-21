@@ -3304,3 +3304,271 @@ async fn insert_restored_round_trips_mean_confidence() {
         "got {back:?}"
     );
 }
+
+// ── ANN (approximate nearest-neighbour) index ───────────────────────────────
+//
+// These tests are gated behind the `ann-usearch` feature so the default CI lane
+// stays C++-free; they are pure DB + in-process index tests with no real OS I/O,
+// so they're safe under the unattended-test keystroke-injection rule. They use a
+// file-based catalog (a TempDir) because the ANN sidecar needs an on-disk home —
+// an in-memory `sqlite::memory:` catalog has no sidecar and the ANN stays
+// disabled there by design.
+#[cfg(feature = "ann-usearch")]
+mod ann_tests {
+    use super::*;
+    use crate::config::AnnConfig;
+
+    /// A tiny deterministic LCG so the synthetic corpus is reproducible without
+    /// pulling an rng crate into dev-deps. Park–Miller minimal standard.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next_f32(&mut self) -> f32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            // Top 24 bits → [0,1).
+            ((self.0 >> 40) as f32) / ((1u64 << 24) as f32)
+        }
+    }
+
+    /// One L2-normalized random vector of dimension `dim`.
+    fn random_unit(rng: &mut Lcg, dim: usize) -> Vec<f32> {
+        let mut v: Vec<f32> = (0..dim).map(|_| rng.next_f32() * 2.0 - 1.0).collect();
+        crate::embed::l2_normalize(&mut v);
+        v
+    }
+
+    /// Open a file-based catalog with ANN enabled, under a TempDir.
+    async fn open_ann_catalog(dir: &std::path::Path, cfg: AnnConfig) -> Catalog {
+        let db = Catalog::open(&dir.join("catalog.db")).await.unwrap();
+        db.set_ann_config(cfg);
+        db
+    }
+
+    fn enabled_cfg() -> AnnConfig {
+        AnnConfig {
+            enabled: true,
+            ..AnnConfig::default()
+        }
+    }
+
+    /// Build (insert) → save → load → search → remove round-trip on the raw
+    /// index type, independent of the catalog wiring.
+    #[test]
+    fn ann_index_build_save_load_search_remove_roundtrip() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sidecar = dir.path().join("rt.ann");
+        let cfg = enabled_cfg();
+        let dim = 16;
+        let mut rng = Lcg(42);
+        let pairs: Vec<(u64, Vec<f32>)> = (0..50u64)
+            .map(|k| (k + 1, random_unit(&mut rng, dim)))
+            .collect();
+
+        let index =
+            crate::catalog::ann::AnnIndex::build_from_pairs(sidecar.clone(), dim, &pairs, &cfg)
+                .unwrap();
+        assert_eq!(index.len(), pairs.len());
+
+        // The nearest neighbour of a stored vector is itself.
+        let (key0, vec0) = &pairs[0];
+        let hits = index.search(vec0, 5).unwrap();
+        assert_eq!(
+            hits[0].0, *key0,
+            "a vector's own key is its nearest neighbour"
+        );
+
+        index.save().unwrap();
+        assert!(sidecar.exists(), "save wrote the sidecar");
+
+        // Load into a fresh index and confirm identical top hit.
+        let loaded =
+            crate::catalog::ann::AnnIndex::load_verified(sidecar.clone(), dim, pairs.len(), &cfg)
+                .unwrap();
+        assert_eq!(loaded.len(), pairs.len());
+        let hits2 = loaded.search(vec0, 5).unwrap();
+        assert_eq!(hits2[0].0, *key0, "loaded index returns the same top hit");
+
+        // Remove drops the vector.
+        loaded.remove(*key0).unwrap();
+        assert_eq!(loaded.len(), pairs.len() - 1);
+    }
+
+    /// The correctness gate: ANN top-10 agrees with brute force on a seeded
+    /// corpus at recall@10 >= 0.95, with bit-identical scores for the overlap.
+    #[tokio::test]
+    async fn ann_recall_at_10_matches_brute_force() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let dim = 32;
+        let n = 400usize;
+        let mut rng = Lcg(7);
+
+        // Brute-force reference catalog (ANN off) and the ANN catalog, populated
+        // identically so the only difference is the retrieval path. Each lives in
+        // its own subdir so their catalog.db / catalog.ann files don't collide.
+        let brute_dir = dir.path().join("brute");
+        let ann_dir = dir.path().join("ann");
+        std::fs::create_dir_all(&brute_dir).unwrap();
+        std::fs::create_dir_all(&ann_dir).unwrap();
+        let brute = Catalog::open(&brute_dir.join("catalog.db")).await.unwrap();
+        let ann = open_ann_catalog(&ann_dir, enabled_cfg()).await;
+
+        let mut corpus: Vec<(RecordingId, Vec<f32>)> = Vec::with_capacity(n);
+        for _ in 0..n {
+            let r = embedded_recording(None);
+            brute.insert(&r).await.unwrap();
+            ann.insert(&r).await.unwrap();
+            let v = random_unit(&mut rng, dim);
+            brute
+                .upsert_chunk_embeddings(&r.id, std::slice::from_ref(&v))
+                .await
+                .unwrap();
+            ann.upsert_chunk_embeddings(&r.id, std::slice::from_ref(&v))
+                .await
+                .unwrap();
+            corpus.push((r.id, v));
+        }
+
+        // Build the ANN index from SQLite (the daemon's background-build path).
+        ann.rebuild_ann_index().await.unwrap();
+        let health = ann.ann_health().await;
+        assert!(health.index_loaded, "index should be warm after rebuild");
+        assert_eq!(health.index_vectors, n, "every chunk vector is indexed");
+
+        // Run a battery of queries; compare the top-10 recording sets.
+        let queries = 40;
+        let mut total_overlap = 0usize;
+        let mut total_expected = 0usize;
+        for _ in 0..queries {
+            let q = random_unit(&mut rng, dim);
+            let brute_rank = brute.vector_ranking(&q).await.unwrap();
+            let ann_rank = ann.vector_ranking(&q).await.unwrap();
+
+            let brute_top: Vec<String> = brute_rank
+                .iter()
+                .take(10)
+                .map(|(_, id, _)| id.as_str().to_string())
+                .collect();
+            let ann_top: std::collections::HashSet<String> = ann_rank
+                .iter()
+                .take(10)
+                .map(|(_, id, _)| id.as_str().to_string())
+                .collect();
+
+            // Scores must be bit-identical for any recording both paths returned
+            // (the ANN re-score uses the same cosine_similarity).
+            let brute_score: std::collections::HashMap<&str, f32> = brute_rank
+                .iter()
+                .map(|(_, id, s)| (id.as_str(), *s))
+                .collect();
+            for (_, id, s) in &ann_rank {
+                if let Some(bs) = brute_score.get(id.as_str()) {
+                    assert_eq!(*bs, *s, "ANN re-score must equal brute-force score");
+                }
+            }
+
+            for id in &brute_top {
+                total_expected += 1;
+                if ann_top.contains(id) {
+                    total_overlap += 1;
+                }
+            }
+        }
+        let recall = total_overlap as f64 / total_expected as f64;
+        assert!(
+            recall >= 0.95,
+            "recall@10 = {recall:.3} must be >= 0.95 (overlap {total_overlap}/{total_expected})"
+        );
+    }
+
+    /// Lifecycle: embed → search (hit) → delete → search (gone); re-embed →
+    /// old chunk gone, new chunk found. Mirrors the cache lifecycle tests.
+    #[tokio::test]
+    async fn ann_lifecycle_insert_delete_reembed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let dim = 8;
+        let db = open_ann_catalog(dir.path(), enabled_cfg()).await;
+
+        let a = embedded_recording(None);
+        let b = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.insert(&b).await.unwrap();
+        let mut va = vec![0.0f32; dim];
+        va[0] = 1.0;
+        let mut vb = vec![0.0f32; dim];
+        vb[1] = 1.0;
+        db.upsert_chunk_embeddings(&a.id, &[va.clone()])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&b.id, &[vb.clone()])
+            .await
+            .unwrap();
+        db.rebuild_ann_index().await.unwrap();
+
+        // Query on a's axis: a wins.
+        let hit = db.vector_ranking(&va).await.unwrap();
+        assert_eq!(hit[0].1.as_str(), a.id.as_str());
+
+        // Delete a → its node leaves the index; b is now the only candidate.
+        db.delete(&a.id).await.unwrap();
+        let after = db.vector_ranking(&va).await.unwrap();
+        assert!(
+            !after.iter().any(|(_, id, _)| id.as_str() == a.id.as_str()),
+            "deleted recording must not return from the ANN path"
+        );
+        assert_eq!(db.ann_health().await.index_vectors, 1, "a's node removed");
+
+        // Re-embed b onto a's old axis: it now wins an a-axis query.
+        db.upsert_chunk_embeddings(&b.id, &[va.clone()])
+            .await
+            .unwrap();
+        let reembed = db.vector_ranking(&va).await.unwrap();
+        assert_eq!(reembed[0].1.as_str(), b.id.as_str());
+    }
+
+    /// Fallback: a corrupt/dimension-mismatched sidecar must not panic and must
+    /// fall through to brute force (same results).
+    #[tokio::test]
+    async fn ann_dim_mismatch_falls_back_to_brute_force() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = open_ann_catalog(dir.path(), enabled_cfg()).await;
+        let a = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        // 4-dim corpus + index.
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.rebuild_ann_index().await.unwrap();
+
+        // Query with a DIFFERENT dimension (3 vs the index's 4): the ANN path
+        // declines (dim mismatch) and brute force scores nothing (it also skips
+        // the dim-mismatched stored vector), so this is just a no-panic check.
+        let res = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert!(
+            res.is_empty(),
+            "dim-mismatched query yields nothing, no panic"
+        );
+
+        // A matching-dim query still works via the ANN path.
+        let ok = db.vector_ranking(&[1.0, 0.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(ok[0].1.as_str(), a.id.as_str());
+    }
+
+    /// With ANN enabled but no index built yet (cold), search must fall back to
+    /// brute force and return correct results.
+    #[tokio::test]
+    async fn ann_cold_index_uses_brute_force() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = open_ann_catalog(dir.path(), enabled_cfg()).await;
+        let a = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        // Deliberately do NOT rebuild: the index is cold.
+        assert!(!db.ann_health().await.index_loaded);
+        let res = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(res[0].1.as_str(), a.id.as_str(), "cold index → brute force");
+    }
+}

@@ -128,7 +128,7 @@ pub mod wer;
 
 pub use catalog::{Catalog, FindReplaceLibraryOutcome, FindReplaceOutcome};
 pub use chunk::chunk_transcript;
-pub use config::Config;
+pub use config::{AnnConfig, Config, SemanticSearchConfig};
 pub use embed::Embedder;
 pub use error::{Error, Result};
 pub use fusion::{calibrate_cosine, reciprocal_rank_fusion};

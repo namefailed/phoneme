@@ -84,8 +84,11 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
                 }
                 // Take the WAL sidecars with it (best-effort): a leftover
                 // catalog.db-wal next to a brand-new database is at best dead
-                // weight and at worst a confusing recovery candidate.
-                for ext in ["db-wal", "db-shm"] {
+                // weight and at worst a confusing recovery candidate. The ANN
+                // index sidecar (catalog.ann, optional feature) is a disposable
+                // derived cache keyed to the now-deleted catalog, so it goes too —
+                // the daemon rebuilds it from the fresh DB if ANN is enabled.
+                for ext in ["db-wal", "db-shm", "ann"] {
                     let sidecar = data_local.join(format!("catalog.{ext}"));
                     let _ = std::fs::remove_file(sidecar);
                 }

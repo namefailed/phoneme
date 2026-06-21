@@ -23,6 +23,7 @@
 //!   caps the WAL size and the daemon calls [`Catalog::checkpoint`] on idle so a
 //!   long-lived reader can't let it grow without bound.
 
+use crate::config::AnnConfig;
 use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
@@ -33,7 +34,7 @@ use crate::types::{
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -131,6 +132,25 @@ pub struct Catalog {
     /// unchanged — so an invalidation that races the rebuild can't be lost. See
     /// the "Lost-invalidation safe" note above.
     embedding_cache_gen: Arc<AtomicU64>,
+    /// The optional approximate-nearest-neighbour index for semantic search, or
+    /// `None` when it's disabled, cold, or unhealthy — in which case retrieval
+    /// uses the brute-force cosine scan over `embedding_cache`. Mirrors
+    /// `embedding_cache` exactly (`Arc<RwLock<Option<…>>>`, shared across the
+    /// daemon's clones). Always `None` unless the `ann-usearch` feature is
+    /// compiled *and* `ann_config.enabled` is set *and* the daemon background-
+    /// built it; `Catalog::open` never builds it, so startup never blocks. See
+    /// [`crate::catalog::ann`].
+    ann: Arc<RwLock<Option<ann::AnnIndex>>>,
+    /// The ANN tuning config, set by the daemon via [`Catalog::set_ann_config`]
+    /// after `open` when the feature is enabled. Defaults to
+    /// [`AnnConfig::default`] (disabled), so a catalog opened without that call
+    /// — every existing caller, every test — keeps the brute-force behaviour
+    /// unchanged.
+    ann_config: Arc<RwLock<AnnConfig>>,
+    /// Where the ANN index persists, derived from the catalog path in `open`
+    /// (`catalog.db` → `catalog.ann`). `None` for an in-memory catalog
+    /// (`sqlite::memory:`), which has no on-disk home for a sidecar.
+    ann_sidecar: Option<PathBuf>,
 }
 
 /// Upper bound on how many vectors the in-memory embedding cache will hold.
@@ -331,7 +351,9 @@ fn replace_ignore_case(haystack: &str, needle: &str, replacement: &str) -> (usiz
     (count, out)
 }
 
+pub mod ann;
 mod embeddings;
+pub use embeddings::AnnHealth;
 mod recordings;
 mod saved_search;
 mod segments;
@@ -379,10 +401,30 @@ impl Catalog {
             .await?;
 
         sqlx::migrate!("./migrations").run(&pool).await?;
+        // Derive the ANN sidecar next to the database (catalog.db → catalog.ann).
+        // An in-memory database (`sqlite::memory:`, used by tests) has no on-disk
+        // file, so it gets no sidecar — the ANN then runs index-in-memory only,
+        // never persisting, which is exactly what the tests want.
+        let ann_sidecar = if path.is_absolute() || path.extension().is_some() {
+            path.parent().map(|dir| {
+                let stem = path
+                    .file_stem()
+                    .map(|s| s.to_os_string())
+                    .unwrap_or_else(|| std::ffi::OsString::from("catalog"));
+                let mut name = stem;
+                name.push(".ann");
+                dir.join(name)
+            })
+        } else {
+            None
+        };
         Ok(Self {
             pool,
             embedding_cache: Arc::new(RwLock::new(None)),
             embedding_cache_gen: Arc::new(AtomicU64::new(0)),
+            ann: Arc::new(RwLock::new(None)),
+            ann_config: Arc::new(RwLock::new(AnnConfig::default())),
+            ann_sidecar,
         })
     }
 }

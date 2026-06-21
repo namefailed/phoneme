@@ -1433,6 +1433,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             // Daemon-side: needs the catalog + an audio-dir scan, so it can't live
             // in phoneme-core's stateless checks.
             checks.push(orphan_audio_check(state).await);
+            // ANN search-index health (feature/flag/warm-state), also catalog-side.
+            checks.push(phoneme_core::doctor::ann_index_check_result(
+                state.catalog.ann_health().await,
+            ));
             serialize_response(checks)
         }
         Request::RestartWhisper => {

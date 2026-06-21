@@ -880,15 +880,23 @@ impl Catalog {
         .fetch_all(&self.pool)
         .await?;
 
+        // Capture the recording's ANN keys before the DELETE: the FK cascade
+        // removes its `ann_keys` rows, so afterwards we couldn't find them to
+        // drop the matching nodes from the in-memory index. A no-op unless ANN
+        // is enabled.
+        let ann_keys = self.recording_ann_keys_for_delete(id).await;
+
         sqlx::query("DELETE FROM recordings WHERE id = ?")
             .bind(id.as_str())
             .execute(&self.pool)
             .await?;
-        // The cascade took this recording's embeddings, voiceprints, and dismissed
-        // suggestions with it — patch its now-empty vectors out of the warm cache,
-        // then recompute any named voice that just lost a sample so its centroid
-        // and count stay accurate.
+        // The cascade took this recording's embeddings, voiceprints, dismissed
+        // suggestions, and ann_keys with it — patch its now-empty vectors out of
+        // the warm cache, drop its nodes from the ANN index, then recompute any
+        // named voice that just lost a sample so its centroid and count stay
+        // accurate.
         self.patch_recording_in_cache(id).await;
+        self.remove_recording_from_ann_keys(&ann_keys).await;
         for nid in affected {
             self.recompute_named_centroid(&nid).await?;
         }
@@ -916,6 +924,10 @@ impl Catalog {
             .execute(&self.pool)
             .await?;
         self.invalidate_embedding_cache();
+        // Every recording's ann_keys went with the cascade — drop the in-memory
+        // index and its sidecar so search falls back to brute force until a
+        // re-import re-embeds and the daemon rebuilds (no-op without the feature).
+        self.clear_ann_index();
         for nid in affected {
             self.recompute_named_centroid(&nid).await?;
         }

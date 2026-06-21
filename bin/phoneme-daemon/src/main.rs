@@ -178,6 +178,21 @@ async fn main() -> Result<()> {
                 tracing::info!("Finished backfilling chunk embeddings.");
             }
         }
+
+        // Optional ANN (approximate nearest-neighbour) vector index: load the
+        // persisted sidecar if it's healthy, else rebuild from SQLite, now that
+        // the chunk-embedding backfill has drained. A no-op unless the
+        // `ann-usearch` feature is compiled AND `semantic_search.ann.enabled` is
+        // on; the HNSW build is CPU-heavy, so it runs here (off the startup path)
+        // and never blocks the first query — search uses the brute-force scan
+        // until the index is warm. Any failure leaves the index `None` (brute
+        // force), so this is best-effort.
+        if retroactive_state.catalog.ann_enabled() {
+            tracing::info!("ANN index enabled: loading or rebuilding in the background...");
+            if let Err(e) = retroactive_state.catalog.load_or_rebuild_ann_index().await {
+                tracing::warn!(error = %e, "ANN index load/rebuild failed; staying on brute-force search");
+            }
+        }
     });
 
     // Start idle pre-roll pre-capture if enabled (opt-in; no-op by default).
@@ -316,6 +331,13 @@ async fn main() -> Result<()> {
     // And the dictation supervisor — its optional third server (if the user
     // opted in) must be killed before exit too.
     let _ = dictation_supervisor_handle.await;
+    // Persist the optional ANN index so incremental adds since the last build
+    // survive a restart (a warm-start then reloads the sidecar instead of
+    // rebuilding). A no-op unless the `ann-usearch` feature is compiled,
+    // `semantic_search.ann.enabled` is on, and an index is warm; the sidecar is
+    // disposable, so a save failure only means the next start rebuilds.
+    state.catalog.save_ann_index().await;
+
     // Stop the Ollama this daemon launched, if any — a user-started one is
     // NotOurs and stays untouched (see `ollama_launcher`).
     state.ollama.shutdown().await;

@@ -846,6 +846,50 @@ pub fn orphan_audio_check_result(count: usize) -> CheckResult {
     }
 }
 
+/// Build the "Semantic search index (ANN)" Doctor check from an
+/// [`crate::catalog::AnnHealth`] snapshot. Daemon-side (it needs the catalog),
+/// so it's a pure builder here — like [`orphan_audio_check_result`] — that the
+/// daemon's `RunDoctor` handler fills with `catalog.ann_health()`.
+///
+/// The check is always `Info` severity: the ANN index is a pure optimization
+/// with a brute-force fallback, so a missing or rebuilding index never breaks
+/// search and should never raise the health pill. It reports one of:
+/// - "disabled (not compiled)" — the `ann-usearch` feature wasn't built in;
+/// - "disabled (brute-force)" — compiled but `semantic_search.ann.enabled` off;
+/// - "rebuilding" — enabled but no warm index yet (the daemon is building it);
+/// - "healthy (N vectors)" — warm and matching SQLite;
+/// - "stale (index N vs SQLite M) — rebuilding" — a count drift the next rebuild
+///   heals.
+pub fn ann_index_check_result(health: crate::catalog::AnnHealth) -> CheckResult {
+    let explanation =
+        "Reports the optional approximate-nearest-neighbour vector index that speeds up semantic search on large libraries. Optional — search always works via the brute-force scan, so this never blocks anything."
+            .to_string();
+    let detail = if !health.feature_compiled {
+        "disabled (not compiled — build with --features ann-usearch)".to_string()
+    } else if !health.enabled {
+        "disabled (brute-force scan; set semantic_search.ann.enabled to turn it on)".to_string()
+    } else if !health.index_loaded {
+        "rebuilding (search uses the brute-force scan until it's ready)".to_string()
+    } else if health.index_vectors == health.sqlite_vectors {
+        format!("healthy ({} vectors)", health.index_vectors)
+    } else {
+        format!(
+            "stale (index {} vs SQLite {}) — rebuilding",
+            health.index_vectors, health.sqlite_vectors
+        )
+    };
+    CheckResult {
+        name: "Semantic search index (ANN)".into(),
+        // Always ok: a disabled/rebuilding/stale index falls back to brute force.
+        ok: true,
+        detail,
+        fix_action: None,
+        category: CheckCategory::Info,
+        explanation,
+        fix_hint: None,
+    }
+}
+
 // ── LLM step connections ─────────────────────────────────────────────────────
 
 /// One enabled LLM pipeline step and the connection it will actually use.

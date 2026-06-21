@@ -385,6 +385,45 @@ Custom keybinds beyond the three built-ins (`[hotkey]` / `[in_place_hotkey]` / `
 
 Changing the model or its dimension makes old vectors unsearchable — re-index with **Re-embed all recordings** (IPC `ReembedAll`). See [Semantic Search](../user-guide/semantic_search.md).
 
+### `[semantic_search.ann]` — optional approximate-nearest-neighbour index
+
+An optional [usearch](https://github.com/unum-cloud/usearch) HNSW index that
+replaces the brute-force cosine scan with sub-linear nearest-neighbour search on
+large libraries. It is gated **twice** and **off by default**:
+
+1. **Build-time:** the cargo feature `ann-usearch` (in `phoneme-core`, **not** in
+   any default feature set) must be compiled in. A stock binary contains zero
+   usearch native code and ignores every key in this table. Build/test the
+   feature lane with:
+
+   ```sh
+   cargo build  -p phoneme-core --features ann-usearch
+   cargo clippy -p phoneme-core --features ann-usearch -- -D warnings
+   cargo test   -p phoneme-core --features ann-usearch
+   ```
+
+   The default lanes (no `--features`) must stay green too — that is the shipped
+   build, and the brute-force scan is its guaranteed behaviour.
+2. **Run-time:** `enabled` below must be `true`.
+
+When both are on, the index only narrows *which* candidates are scored; the exact
+cosine re-score, meeting-dedupe, and RRF fusion are unchanged, so displayed
+scores are bit-identical to brute force and the worst the index can do is miss a
+tail result (tunable via `oversample` / `expansion_search`). Any index trouble
+(missing/stale sidecar, dimension mismatch, count drift, query error) logs a
+`warn` and falls back to the brute-force scan — search never errors. The on-disk
+index lives in a disposable sidecar next to the catalog (`catalog.ann`),
+rebuilt from SQLite whenever it is absent or fails its integrity check; the
+`phoneme doctor --rebuild-catalog` path deletes it so a rebuild re-derives it.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Master switch. `false` = brute-force cosine scan (the guaranteed fallback). No effect unless built with the `ann-usearch` feature. |
+| `oversample` | `5` | `k = limit * oversample` chunk neighbours fetched before the exact re-score and meeting-dedupe collapse them, so the final top-`limit` survives. Higher trades a little query cost for recall. |
+| `connectivity` | `16` | HNSW graph connectivity (M). Higher = better recall, more memory/build time. |
+| `expansion_add` | `128` | HNSW build-time candidate-list width (efConstruction). Higher = better graph quality at the cost of build time. |
+| `expansion_search` | `64` | HNSW query-time candidate-list width (efSearch). The main recall/latency knob: higher recovers more true neighbours per query. |
+
 ---
 
 ## `[retention]`
