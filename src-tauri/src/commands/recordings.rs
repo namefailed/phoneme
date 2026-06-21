@@ -1130,6 +1130,29 @@ pub async fn suggest_chapters(bridge: Br<'_>, id: String) -> Result<Value, Comma
     forward(&bridge, Request::SuggestChapters { id }).await
 }
 
+/// Run the LLM task-extraction step for one recording on demand. The structured
+/// tasks land on the recording (preserving any `done` flag on a surviving task)
+/// and arrive via the `TasksUpdated` daemon event. Task counterpart of
+/// `suggest_entities`.
+#[tauri::command]
+pub async fn suggest_tasks(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SuggestTasks { id }).await
+}
+
+/// Toggle (or set) one task's done flag. Emits `TasksUpdated` for the recording
+/// so open views refresh. `not_found` when `task_id` is unknown.
+#[tauri::command]
+pub async fn set_task_done(
+    bridge: Br<'_>,
+    id: String,
+    task_id: i64,
+    done: bool,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SetTaskDone { id, task_id, done }).await
+}
+
 /// Approve one suggested tag (create if needed + attach + drop the suggestion).
 #[tauri::command]
 pub async fn approve_tag_suggestion(
@@ -1350,6 +1373,14 @@ pub async fn kind_counts(bridge: Br<'_>) -> Result<Value, CommandError> {
 #[tauri::command]
 pub async fn list_all_entities(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::ListAllEntities).await
+}
+
+/// The cross-recording task list: every extracted task across the library, open
+/// first. Powers the sidebar's Tasks section. When `only_open` is set, done tasks
+/// are dropped. The task counterpart of `list_all_entities`.
+#[tauri::command]
+pub async fn list_all_tasks(bridge: Br<'_>, only_open: bool) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ListAllTasks { only_open }).await
 }
 
 /// Merge one tag into another: re-point all of `from_id`'s recordings onto

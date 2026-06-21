@@ -32,6 +32,7 @@ import { ClipExport } from "./ClipExport";
 import { isLowConfidence, lowConfidenceThreshold } from "../../utils/confidence";
 import { TagChips } from "./TagChips";
 import { EntityChips } from "./EntityChips";
+import { TaskChips } from "./TaskChips";
 import { TranscriptDiff } from "./TranscriptDiff";
 import { TranscriptEditor } from "./TranscriptEditor";
 import { NotesEditor } from "./NotesEditor";
@@ -373,6 +374,7 @@ export class RecordingDetail {
         <div id="actions"></div>
         <div id="tags"></div>
         <div id="entities"></div>
+        <div id="tasks"></div>
         <div class="transcript-block">
           <div id="editor" style="flex: 1; display: flex; flex-direction: column; min-height: 0;"></div>
           <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
@@ -452,6 +454,9 @@ export class RecordingDetail {
 
     const entitiesRoot = this.container.querySelector<HTMLElement>("#entities");
     if (entitiesRoot) new EntityChips(entitiesRoot, r.id);
+
+    const tasksRoot = this.container.querySelector<HTMLElement>("#tasks");
+    if (tasksRoot) new TaskChips(tasksRoot, r.id);
 
     this.wirePipeline();
 

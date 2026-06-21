@@ -305,6 +305,13 @@ const RECORDINGS: Array<Record<string, unknown>> = [
       { kind: "topic", value: "project roadmap" },
     ],
     entities_model: "phi3:mini",
+    // A couple of extracted tasks (one done, one open) so the detail-pane task
+    // checkboxes and the sidebar's Tasks section render without an extract.
+    tasks: [
+      { id: 1, text: "Send the roadmap to the team", due_hint: "by Friday", done: false },
+      { id: 2, text: "Schedule the design review", due_hint: null, done: true },
+    ],
+    tasks_model: "phi3:mini",
   }),
   // Meeting 1 (day 0, 10:05) — two tracks kept adjacent so the list groups them.
   track("m1a", "m1", "Product sync call", "mic", 0, 10, 5, M1_MIC, [1], {
@@ -640,6 +647,16 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
           ),
         );
       }
+      // Task-presence filter (sidebar Tasks section): keep recordings with any
+      // extracted task ("has_tasks") or any open one ("has_open"); mirrors the
+      // daemon's `tasks` subquery.
+      const taskState = f.task_state as string | undefined;
+      if (taskState === "has_tasks" || taskState === "has_open") {
+        rows = rows.filter((r) => {
+          const ts = (r.tasks as Array<{ done: boolean }> | undefined) ?? [];
+          return taskState === "has_open" ? ts.some((t) => !t.done) : ts.length > 0;
+        });
+      }
       return rows;
     }
     case "get_recording": return RECORDINGS.find((r) => r.id === id) ?? RECORDINGS[0];
@@ -804,6 +821,42 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       return undefined;
     }
     case "get_chapters": return id ? (CHAPTERS[id] ?? []) : [];
+    // ── Task extraction (the ✅ checkable list): synthesize a few action items so
+    //    the task rows + checkboxes render in dev. Re-extracting preserves any
+    //    `done` flag on a surviving task, mirroring the daemon's done-merge. ──
+    case "suggest_tasks": {
+      const r = RECORDINGS.find((x) => x.id === id);
+      if (r) {
+        const prior = ((r.tasks as Array<{ text: string; done: boolean }> | undefined) ?? []);
+        const priorDone = new Map(prior.map((t) => [t.text, t.done]));
+        const fresh: Array<{ text: string; due: string | null }> = [
+          { text: "Send the roadmap to the team", due: "by Friday" },
+          { text: "Schedule the design review", due: null },
+          { text: "Follow up with ACME on pricing", due: "next week" },
+        ];
+        r.tasks = fresh.map((t, i) => ({
+          id: i + 1,
+          text: t.text,
+          due_hint: t.due,
+          done: priorDone.get(t.text) ?? false,
+        }));
+        r.tasks_model = "phi3:mini";
+        emitDaemon({ event: "tasks_updated", id });
+      }
+      return undefined;
+    }
+    case "set_task_done": {
+      const r = RECORDINGS.find((x) => x.id === id);
+      if (r) {
+        const tasks = (r.tasks as Array<{ id: number; done: boolean }> | undefined) ?? [];
+        const t = tasks.find((x) => x.id === (args.taskId as number));
+        if (t) {
+          t.done = !!args.done;
+          emitDaemon({ event: "tasks_updated", id });
+        }
+      }
+      return undefined;
+    }
     // ── Whole-meeting digest (the merged-view digest card): store a canned digest
     //    and broadcast so the parent reloads + clears the "Generating…" state.
     //    The event carries `meeting_id` (not a recording id) per events.ts. ──
@@ -918,6 +971,32 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       return [...counts.values()].sort(
         (a, b) => a.kind.localeCompare(b.kind) || a.value.localeCompare(b.value),
       );
+    }
+    // The cross-recording task list: every extracted task across the seeded
+    // recordings, open first then newest recording first, each carrying its
+    // recording id + title (mirrors the daemon's `list_all_tasks`). `onlyOpen`
+    // drops done tasks. Powers the sidebar's Tasks section.
+    case "list_all_tasks": {
+      const onlyOpen = args.onlyOpen === true;
+      const rows: Array<{ recording_id: string; title: string | null; id: number; text: string; due_hint: string | null; done: boolean }> = [];
+      const byStart = [...RECORDINGS].sort((a, b) =>
+        String(b.started_at).localeCompare(String(a.started_at)),
+      );
+      for (const r of byStart) {
+        for (const t of ((r.tasks as Array<{ id: number; text: string; due_hint?: string | null; done: boolean }> | undefined) ?? [])) {
+          if (onlyOpen && t.done) continue;
+          rows.push({
+            recording_id: r.id as string,
+            title: (r.title as string | null) ?? null,
+            id: t.id,
+            text: t.text,
+            due_hint: t.due_hint ?? null,
+            done: t.done,
+          });
+        }
+      }
+      // Open tasks first, preserving the newest-recording order within each group.
+      return rows.sort((a, b) => Number(a.done) - Number(b.done));
     }
     case "get_segments": return id ? (SEGMENTS[id] ?? []) : [];
     case "get_words": return [];

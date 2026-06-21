@@ -269,6 +269,24 @@ fn err_response_roundtrips() {
 }
 
 #[test]
+fn task_requests_roundtrip() {
+    let id = RecordingId::new();
+    roundtrip(&Request::SuggestTasks { id: id.clone() });
+    roundtrip(&Request::SetTaskDone {
+        id: id.clone(),
+        task_id: 7,
+        done: true,
+    });
+    roundtrip(&Request::ListAllTasks { only_open: false });
+    roundtrip(&Request::ListAllTasks { only_open: true });
+    // `only_open` is serde-defaulted, so an older client that omits it still
+    // deserializes to the all-tasks variant.
+    let from_bare: Request =
+        serde_json::from_str(r#"{"type":"list_all_tasks"}"#).expect("bare list_all_tasks");
+    assert_eq!(from_bare, Request::ListAllTasks { only_open: false });
+}
+
+#[test]
 fn all_daemon_events_roundtrip() {
     let id = RecordingId::new();
     let events = vec![
@@ -281,6 +299,11 @@ fn all_daemon_events_roundtrip() {
         DaemonEvent::TagSuggestionsUpdated { id: id.clone() },
         DaemonEvent::EntitiesUpdated { id: id.clone() },
         DaemonEvent::EntitiesFailed {
+            id: id.clone(),
+            error: "parse error".into(),
+        },
+        DaemonEvent::TasksUpdated { id: id.clone() },
+        DaemonEvent::TasksFailed {
             id: id.clone(),
             error: "parse error".into(),
         },

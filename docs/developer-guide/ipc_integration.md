@@ -140,6 +140,10 @@ active recording has nothing new to attach them to):
 **Entity extraction (LLM structured entities):**
 - `suggest_entities` (`{ "id" }`) — on-demand run of the entity-extraction step for one recording (regardless of recipe membership). Awaits the model like `suggest_tags`; the typed entities (`person` / `org` / `topic` / `term`) land on the recording, **replacing** any previous set, and `entities_updated` fires (or `entities_failed`). The `Recording` DTO carries them as `entities: [{kind, value}, …]` plus the `entities_model` provenance field.
 
+**Task extraction (LLM action items, with a mutable done flag):**
+- `suggest_tasks` (`{ "id" }`) — on-demand run of the task-extraction step for one recording (regardless of recipe membership). Awaits the model like `suggest_entities`; the action items (`{text, due_hint?}`) land on the recording **replacing** the previous set, **but any `done` flag the user set is preserved** when a task's text survives, and `tasks_updated` fires (or `tasks_failed`). The `Recording` DTO carries them as `tasks: [{id, text, due_hint, done}, …]` (open first) plus the `tasks_model` provenance field. `due_hint` is the model's free-text deadline phrase verbatim — never a parsed date.
+- `set_task_done` (`{ "id", "task_id", "done" }`) — toggle one task's `done` flag (the one task mutation; entities have no analogue). Emits `tasks_updated` for the recording so open views refresh; `not_found` when `task_id` matches no row.
+
 The `list_recordings` filter takes `limit`/`offset` (pagination),
 `since`/`until` (RFC 3339), `status` (one of the recording statuses below),
 `search` (FTS5), `tag_id`, `sort_desc`, plus the type filters applied in SQL
@@ -151,8 +155,11 @@ takes `tagged` (`true` = recordings with ≥1 tag, `false` = untagged) and the
 **entity facet filter** `entity_value` (+ optional `entity_kind`) — keep only
 recordings that mention this extracted entity, via a `recordings.id IN (SELECT
 recording_id FROM entities WHERE value = ? [AND kind = ?])` subquery, the entity
-counterpart of `tag_id`. All fields are optional; older clients that omit the
-newer ones keep working. `list` always sorts pinned recordings first
+counterpart of `tag_id`. It also takes the **task-presence filter** `task_state`
+(`"has_open"` = recordings with ≥1 not-done task, `"has_tasks"` = any extracted
+task) via a `recordings.id IN (SELECT recording_id FROM tasks [WHERE done = 0])`
+subquery; an unrecognized value is ignored. All fields are optional; older clients
+that omit the newer ones keep working. `list` always sorts pinned recordings first
 (`pinned DESC` leads the ORDER BY), ahead of the date sort, so pins float to the
 top regardless of `sort_desc`.
 
@@ -168,6 +175,13 @@ the entity counterpart of `list_all_tags` + `tag_usage_counts`, powers the
 sidebar's browse-by-entity surface and `phoneme entities`, and pairs with the
 `entity_value` / `entity_kind` list filter above to drill from a facet row into
 the recordings that mention it.
+
+`list_all_tasks` (`{ "only_open" }`, default `false`) returns the **cross-recording
+task list**: every extracted task across the library as a JSON array of
+`{recording_id, title, id, text, due_hint, done}`, open first then newest recording
+first (`Catalog::list_all_tasks`). It is the task counterpart of `list_all_entities`,
+powers the sidebar's Tasks section and `phoneme tasks`, and pairs with the
+`task_state` list filter above. When `only_open` is `true`, done tasks are dropped.
 
 Recording `status` values: `recording`, `paused`, `queued`, `transcribing`,
 `cleaning_up`, `summarizing`, `tagging`, `hook_running`, `done`,
@@ -301,6 +315,11 @@ stored, or `entities_failed` (`{ id, error }`) on failure — the entity twins o
 `tag_suggestions_updated` / `tag_failed`. A failure is best-effort: the
 transcript stays intact and the recording usable; only the optional entity step
 failed.
+
+Task extraction emits `tasks_updated` (`{ id }`) when the action items are stored,
+toggled (`set_task_done`), or re-extracted, or `tasks_failed` (`{ id, error }`) on
+failure — the task twins of `entities_updated` / `entities_failed`, equally
+best-effort.
 
 **Ask my archive stream** (`ask_activity`, after sending `ask` with a
 `request_id`): the daemon ships the citation `sources` first (before any token),

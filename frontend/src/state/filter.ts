@@ -89,6 +89,10 @@ export function toWireFilter(f: UiFilter, lowConfidenceThreshold?: number): List
     wire.entity_value = f.entity_value;
     if (f.entity_kind) wire.entity_kind = f.entity_kind;
   }
+  // Task-presence filter (sidebar Tasks section): pass the state token through so
+  // the daemon narrows to recordings with open / any tasks via its `tasks`
+  // subquery. Unrecognized values are ignored daemon-side.
+  if (f.task_state) wire.task_state = f.task_state;
   // Low-confidence: the UI boolean becomes the daemon's numeric threshold so the
   // SQL `mean_confidence < t` comparison uses the configured value. Without a
   // threshold (config not loaded) the filter is simply dropped rather than
@@ -152,4 +156,25 @@ export function clearEntityFilter(): void {
     entity_kind: null,
     entity_label: null,
   });
+}
+
+/**
+ * Apply the cross-recording task-presence filter: narrow the list to recordings
+ * with at least one open task (`"has_open"`) or any extracted task
+ * (`"has_tasks"`), the task counterpart of {@link applyEntityFilter}. Clicking the
+ * already-active state toggles it off. Leaves the other filter dimensions alone so
+ * it COMBINES with kind/date/etc.
+ */
+export function applyTaskFilter(state: "has_open" | "has_tasks"): void {
+  const f = filterStore.get();
+  if (f.task_state === state) {
+    clearTaskFilter();
+    return;
+  }
+  filterStore.set({ ...f, task_state: state });
+}
+
+/** Clear the task-presence filter and return to the normal list. */
+export function clearTaskFilter(): void {
+  filterStore.set({ ...filterStore.get(), task_state: null });
 }

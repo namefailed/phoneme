@@ -31,6 +31,22 @@ trust boundary.*
   `Catalog::entity_facets`) and an `entity_value` / `entity_kind` filter on the
   list query (a `recordings.id IN (SELECT … FROM entities …)` subquery, the entity
   counterpart of `tag_id`), with a matching `phoneme entities [--kind]` CLI.
+- [x] **Tasks / reminders from voice** — an LLM enrichment step that pulls
+  **task-shaped action items** (`{text, due_hint?}`) out of a transcript into a
+  per-recording `tasks` child table, browsable and **checkable**. The detail pane
+  gains a **✅ Tasks** section: a checkbox per action item (strike-through + dim
+  when done, an optional `due_hint` shown as a muted suffix), plus a **✅ Extract**
+  button that runs the step on demand. The sidebar gains a **Tasks** section with
+  **Open** / **All tasks** filter rows. Re-extraction **preserves any task you
+  already checked off** (the `done` flag survives when a task's text recurs), and
+  an empty extraction never wipes the existing list. Backed by a new `tasks` table
+  + `tasks_model` column (migration `20260622000010_add_tasks.sql`), a `tasks`
+  Playbook enrichment target (opt-in, no `[tasks]` config section), `SuggestTasks`
+  / `SetTaskDone` / `ListAllTasks` IPC + `tasks_updated` / `tasks_failed` events +
+  a `task_state` (`has_open` / `has_tasks`) list filter, and a
+  `phoneme suggest-tasks <ID>` / `phoneme tasks [--open] [done|undone …]` CLI.
+  `due_hint` is the model's deadline phrase stored verbatim — Phoneme does **not**
+  parse it to a date or schedule a reminder.
 
 ### Transcripts
 
@@ -83,7 +99,6 @@ trust boundary.*
   model too). An empty map keeps the built-in defaults, so existing configs are
   unchanged; an entry with an unknown action is dropped on load with a warning
   rather than failing the config.
-<<<<<<< HEAD
 - [x] **Per-app tone / register** — dictation can now pick its cleanup **recipe**
   (and so the register the AI rewrites toward — formal for an email client, terse
   for an editor, prose for a doc) by the app focused when you **start** dictating,
@@ -108,7 +123,6 @@ trust boundary.*
   built-in set** — an empty map means no expansion, so existing configs are
   unchanged byte-for-byte; a master `snippets_enabled` switch turns the whole pass
   off without clearing your macros.
-=======
 - [x] **Dictation history / re-grab (opt-in)** — keep a short, bounded record of
   recent in-place dictations (the **text as typed**, no audio) so a past one can be
   **re-inserted** or **re-copied** — for when a dictation went into the wrong
@@ -122,7 +136,6 @@ trust boundary.*
   requests; re-grab is classified **not retry-safe** so a dropped reply can never
   type the text twice. Re-insert types at the *current* caret (the original window
   is gone). Privacy: the typed text is retained until cleared, so it stays opt-in.
->>>>>>> worktree-wf_6a25c6ea-b81-5
 - [x] **Library-wide find & replace** — `phoneme find-replace --library <FIND>
   <REPLACE>` (and the new `find_replace_library` IPC request) runs the same
   literal, revertible replacement across **every** recording's transcript in one

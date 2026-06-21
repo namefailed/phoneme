@@ -576,6 +576,7 @@ mod tests {
             summary_model: None,
             entities_model: None,
             chapters_model: None,
+            tasks_model: None,
             title: Some("Standup notes".into()),
             title_is_auto: true,
             title_model: None,
@@ -585,6 +586,7 @@ mod tests {
             detected_language: None,
             tags: vec![],
             entities: vec![],
+            tasks: vec![],
             speaker_names: vec![],
         };
         state.catalog.insert(&row).await.unwrap();

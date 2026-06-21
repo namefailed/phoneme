@@ -1,8 +1,8 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { listTags, tagUsageCounts, kindCounts, listAllEntities, type Tag, type KindCounts, type EntityFacet } from "../../services/ipc";
+import { listTags, tagUsageCounts, kindCounts, listAllEntities, listAllTasks, type Tag, type KindCounts, type EntityFacet, type TaskWithRecording } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
-import { filterStore, applyEntityFilter, type UiFilter, type RecordingKind, type TagState } from "../../state/filter";
+import { filterStore, applyEntityFilter, applyTaskFilter, type UiFilter, type RecordingKind, type TagState } from "../../state/filter";
 import "./QueuePanel";
 
 /** The entity classes, in display order, with their sidebar group label + icon.
@@ -48,23 +48,30 @@ export class SidebarElement extends LitElement {
   /** The cross-recording entity facet (distinct extracted entities + recording
    *  counts), grouped by kind into the Entities section. Mirrors `tags`. */
   @state() private entities: EntityFacet[] = [];
+  /** Every extracted task across the library (open first), backing the Tasks
+   *  section's Open / All counts. Mirrors `entities`. */
+  @state() private tasks: TaskWithRecording[] = [];
   @state() private filterState: UiFilter = filterStore.get();
   @state() private libraryOpen = localStorage.getItem("phoneme.sidebar.libraryOpen") !== "false";
   @state() private tagsOpen = localStorage.getItem("phoneme.sidebar.tagsOpen") !== "false";
   @state() private entitiesOpen = localStorage.getItem("phoneme.sidebar.entitiesOpen") !== "false";
+  @state() private tasksOpen = localStorage.getItem("phoneme.sidebar.tasksOpen") !== "false";
   private unsubFilter: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
 
-  private toggleSection(which: "library" | "tags" | "entities") {
+  private toggleSection(which: "library" | "tags" | "entities" | "tasks") {
     if (which === "library") {
       this.libraryOpen = !this.libraryOpen;
       localStorage.setItem("phoneme.sidebar.libraryOpen", String(this.libraryOpen));
     } else if (which === "tags") {
       this.tagsOpen = !this.tagsOpen;
       localStorage.setItem("phoneme.sidebar.tagsOpen", String(this.tagsOpen));
-    } else {
+    } else if (which === "entities") {
       this.entitiesOpen = !this.entitiesOpen;
       localStorage.setItem("phoneme.sidebar.entitiesOpen", String(this.entitiesOpen));
+    } else {
+      this.tasksOpen = !this.tasksOpen;
+      localStorage.setItem("phoneme.sidebar.tasksOpen", String(this.tasksOpen));
     }
   }
 
@@ -80,6 +87,7 @@ export class SidebarElement extends LitElement {
     void this.loadTags();
     void this.loadKindCounts();
     void this.loadEntities();
+    void this.loadTasks();
     window.addEventListener("phoneme:counts-stale", this.onCountsStale);
     await this.subscribeToEvents();
   }
@@ -128,6 +136,18 @@ export class SidebarElement extends LitElement {
     }
   }
 
+  /** Load every extracted task across the library for the Tasks section's Open /
+   *  All counts. Failures clear the list (the section then shows empty), mirroring
+   *  `loadEntities`. */
+  private async loadTasks() {
+    try {
+      this.tasks = await listAllTasks(false);
+    } catch (e) {
+      console.error("Failed to load tasks for sidebar:", e);
+      this.tasks = [];
+    }
+  }
+
   private async subscribeToEvents() {
     const unsub = await subscribe((event: DaemonEvent) => {
       const eventName = (event as { event: string }).event;
@@ -160,6 +180,15 @@ export class SidebarElement extends LitElement {
       // it off those triggers, the entity counterpart of the tag-event refresh.
       if (eventName === "entities_updated" || eventName === "recording_deleted") {
         void this.loadEntities();
+      }
+      // The task list shifts whenever a recording's tasks are (re)extracted, a
+      // task is toggled done (the Open count changes), or a recording is removed;
+      // refresh off those triggers, the task counterpart of the entity refresh.
+      if (
+        eventName === "tasks_updated" ||
+        eventName === "recording_deleted"
+      ) {
+        void this.loadTasks();
       }
     });
     // If the element disconnected while subscribe was awaiting,
@@ -201,6 +230,16 @@ export class SidebarElement extends LitElement {
     // clearing `tagState`). `applyEntityFilter` handles the click-to-toggle-off.
     filterStore.set({ ...this.filterState, tag_id: null, tagState: null });
     applyEntityFilter(facet.value, facet.kind, label);
+  }
+
+  /** Toggle the cross-recording task-presence filter ("Open" = has ≥1 not-done
+   *  task, "All" = has any extracted task). Clicking the active row turns it off
+   *  (back to All Recordings). Combines with the Library `kind`/date filters; only
+   *  the tag selections it would visually conflict with are cleared, mirroring
+   *  `setEntityFilter`. */
+  private setTaskFilter(state: "has_open" | "has_tasks") {
+    filterStore.set({ ...this.filterState, tag_id: null, tagState: null });
+    applyTaskFilter(state);
   }
 
   /** Set the Library type-filter. Independent of the tag filter — they COMBINE,
@@ -276,6 +315,35 @@ export class SidebarElement extends LitElement {
     });
   }
 
+  /** Render the Tasks section's two filter rows — "Open" (recordings with ≥1
+   *  not-done task) and "All tasks" (any extracted task) — each a clickable
+   *  `.sidebar-item` with a count badge, active when it matches the `task_state`
+   *  filter. Same row shape as the tag/entity rows, so the vim-layer's sidebar
+   *  grid picks them up for keyboard nav. */
+  private renderTaskRows(f: UiFilter) {
+    const total = this.tasks.length;
+    const open = this.tasks.filter((t) => !t.done).length;
+    if (total === 0) {
+      return html`<div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No tasks yet. Extract them from a recording's detail view.</div>`;
+    }
+    const openActive = f.task_state === "has_open";
+    const allActive = f.task_state === "has_tasks";
+    return html`
+      <div class="sidebar-item ${openActive ? "active" : ""}" @click=${() => this.setTaskFilter("has_open")}
+        title="Recordings with at least one task still open">
+        <span class="sidebar-icon">☐</span>
+        <span class="sidebar-label">Open</span>
+        <span class="sidebar-count" title="${open} open task${open === 1 ? "" : "s"}">${open}</span>
+      </div>
+      <div class="sidebar-item ${allActive ? "active" : ""}" @click=${() => this.setTaskFilter("has_tasks")}
+        title="Recordings with any extracted task">
+        <span class="sidebar-icon">✅</span>
+        <span class="sidebar-label">All tasks</span>
+        <span class="sidebar-count" title="${total} task${total === 1 ? "" : "s"} across the library">${total}</span>
+      </div>
+    `;
+  }
+
   render() {
     const f = this.filterState;
 
@@ -346,6 +414,16 @@ export class SidebarElement extends LitElement {
               ${this.entities.length === 0 ? html`
                 <div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No entities yet. Extract them from a recording's detail view.</div>
               ` : this.renderEntityGroups(f)}
+            </div>
+          ` : ""}
+
+          <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);"
+            @click=${() => this.toggleSection("tasks")} title="Collapse / expand">
+            <span class="sidebar-chevron ${this.tasksOpen ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>Tasks
+          </div>
+          ${this.tasksOpen ? html`
+            <div class="sidebar-list">
+              ${this.renderTaskRows(f)}
             </div>
           ` : ""}
         </div>

@@ -566,6 +566,11 @@ pub struct Recording {
     /// `GetChapters` IPC / `Catalog::chapters_for`), not carried on this DTO.
     #[serde(default)]
     pub chapters_model: Option<String>,
+    /// The LLM model the task-extraction step used for this recording, if it ran.
+    /// `None` for older rows or recordings whose tasks were never extracted.
+    /// Mirrors [`Self::entities_model`].
+    #[serde(default)]
+    pub tasks_model: Option<String>,
     /// Display title for the recording — auto-generated (heuristic or LLM) or
     /// set by the user. `None` until generated; the UI falls back to the
     /// `started_at` timestamp.
@@ -621,6 +626,12 @@ pub struct Recording {
     /// Empty when the entity-extraction step never ran.
     #[serde(default)]
     pub entities: Vec<Entity>,
+    /// Task / action items extracted from this recording's transcript. Populated
+    /// by `Catalog::list`/`get` (an N+1 child query against the `tasks` table,
+    /// like `entities`); not a column on the recordings table. Open tasks sort
+    /// first. Empty when the task-extraction step never ran.
+    #[serde(default)]
+    pub tasks: Vec<Task>,
     /// Custom display names for this recording's diarized speaker labels, e.g.
     /// `[Speaker 1]` → "Sarah". Populated by `Catalog::list`/`get`/`list_by_meeting`
     /// from the `speaker_names` table (not a column on `recordings`). The stored
@@ -715,6 +726,60 @@ pub struct Chapter {
     /// the model gave none.
     #[serde(default)]
     pub summary: Option<String>,
+}
+
+/// One task / action item extracted from a recording's transcript by the LLM
+/// task-extraction enrichment step — a concrete to-do the speaker committed to
+/// or asked for.
+///
+/// Mirrors [`Entity`] (a typed child-table row populated onto the recording),
+/// with two task-only additions: a mutable, user-owned `done` flag (entities are
+/// read-only) and a free-text `due_hint`. `due_hint` is the model's deadline
+/// phrase stored **verbatim** (e.g. "by Friday", "next sprint") — it is NOT
+/// parsed to a date and drives no scheduling. `id` is the table row id, carried
+/// so a single task can be toggled done unambiguously (entities omit it). Stored
+/// in the `tasks` table, keyed per recording and unique on `(recording_id,
+/// text)`; populated onto [`Recording::tasks`] by `Catalog::list`/`get`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Task {
+    /// The table row id, needed so a single task can be toggled done.
+    pub id: i64,
+    /// The action item text (imperative, short).
+    pub text: String,
+    /// The model's free-text deadline phrase ("by Friday"), or `None` when no
+    /// deadline was mentioned. Stored verbatim — never parsed to a date.
+    #[serde(default)]
+    pub due_hint: Option<String>,
+    /// Whether the user has marked this task done. The one mutable field; a
+    /// freshly-extracted task is never pre-checked.
+    #[serde(default)]
+    pub done: bool,
+}
+
+/// One row of the cross-recording task facet: an open / done count for a single
+/// recording, plus enough to link back to it. Powers the cross-library
+/// "everything I have to do" list (`phoneme tasks`, the sidebar's Tasks
+/// section), the way [`EntityFacet`] backs the browse-by-entity surface. The
+/// task counterpart of an entity facet row, but per-recording rather than per
+/// distinct value (tasks have no `kind`/`value` to dedup across recordings).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskWithRecording {
+    /// The recording this task belongs to (so the UI/CLI can link back).
+    pub recording_id: String,
+    /// The recording's display title, when one has been set (else `None` — the
+    /// UI falls back to the id / timestamp).
+    #[serde(default)]
+    pub title: Option<String>,
+    /// The task row id (for `SetTaskDone`).
+    pub id: i64,
+    /// The action item text.
+    pub text: String,
+    /// The free-text deadline phrase, when the model emitted one.
+    #[serde(default)]
+    pub due_hint: Option<String>,
+    /// Whether the task is marked done.
+    #[serde(default)]
+    pub done: bool,
 }
 
 /// A whole-meeting digest: one LLM-generated synthesis across **all** tracks of a
@@ -1015,6 +1080,15 @@ pub struct ListFilter {
     /// a value set) matches that value across every kind. Serde-defaulted.
     #[serde(default)]
     pub entity_kind: Option<String>,
+    /// Task-presence filter (the sidebar's Tasks section): `Some("has_open")` =
+    /// only recordings with at least one not-done task, `Some("has_tasks")` =
+    /// only recordings with any extracted task, `None` = no filter. Applied in
+    /// SQL via a `recordings.id IN (SELECT recording_id FROM tasks [WHERE done =
+    /// 0])` subquery, before `LIMIT`/`OFFSET` so it composes with pagination,
+    /// exactly like the entity subquery. An unrecognized value is ignored (no
+    /// filter), so older/newer clients degrade safely. Serde-defaulted.
+    #[serde(default)]
+    pub task_state: Option<String>,
     /// Low-confidence filter: when `Some(t)`, keep only recordings whose stored
     /// `mean_confidence` is non-NULL **and strictly below** `t` — the
     /// confidence-driven "needs a closer look" view. Applied in SQL like the

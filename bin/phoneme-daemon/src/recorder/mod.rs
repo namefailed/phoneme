@@ -530,6 +530,7 @@ impl DaemonRecorder {
             summary_model: None,
             entities_model: None,
             chapters_model: None,
+            tasks_model: None,
             title: None,
             title_is_auto: true,
             title_model: None,
@@ -539,6 +540,7 @@ impl DaemonRecorder {
             detected_language: None,
             tags: vec![],
             entities: vec![],
+            tasks: vec![],
             speaker_names: vec![],
         };
         if let Err(e) = state.catalog.insert(&row).await {

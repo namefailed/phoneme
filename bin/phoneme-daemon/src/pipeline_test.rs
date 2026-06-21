@@ -52,6 +52,7 @@ async fn seed_recording(
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -61,6 +62,7 @@ async fn seed_recording(
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -107,6 +109,7 @@ async fn seed_in_place_recording(
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -116,6 +119,7 @@ async fn seed_in_place_recording(
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -253,6 +257,7 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -262,6 +267,7 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -383,6 +389,7 @@ async fn seed_meeting_track(
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -392,6 +399,7 @@ async fn seed_meeting_track(
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -1414,6 +1422,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1423,6 +1432,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -2145,6 +2155,245 @@ fn parse_chapters_clamps_last_end_to_start() {
     assert_eq!(chapters[0].end_ms, 5000); // clamped: max(4000, 5000)
 }
 
+/// A Done recording carrying `transcript`, built inline (the task extraction
+/// tests need a synchronous `Recording` to insert, like the entity test's inline
+/// builder — `seed_recording` is async and leaves the transcript empty).
+fn task_test_recording(id: &RecordingId, transcript: &str) -> Recording {
+    Recording {
+        id: id.clone(),
+        started_at: chrono::Local::now(),
+        duration_ms: 1000,
+        audio_path: "x.wav".into(),
+        transcript: Some(transcript.into()),
+        model: Some("tiny".into()),
+        status: RecordingStatus::Done,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: None,
+        meeting_name: None,
+        track: None,
+        in_place: false,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        pinned: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        entities_model: None,
+        chapters_model: None,
+        tasks_model: None,
+        title: None,
+        title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
+        mean_confidence: None,
+        detected_language: None,
+        tags: vec![],
+        entities: vec![],
+        tasks: vec![],
+        speaker_names: vec![],
+    }
+}
+
+/// `parse_tasks` finds the first valid JSON array-of-objects even when the model
+/// wraps it in bracket-bearing prose, trims text + due, drops empty/over-long
+/// text, dedupes case-insensitively on text, defaults `done = false`, and caps.
+#[test]
+fn parse_tasks_scans_prose_trims_and_dedupes() {
+    use crate::pipeline::parse_tasks;
+
+    // Wrapped in prose with stray brackets before/after the real array; a blank
+    // `due` collapses to None.
+    let parsed = parse_tasks(
+        "Sure [1]: [{\"text\":\"Send the roadmap\",\"due\":\"by Friday\"},{\"text\":\"Book the room\",\"due\":\"\"}] done",
+        10,
+    );
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(parsed[0].text, "Send the roadmap");
+    assert_eq!(parsed[0].due_hint.as_deref(), Some("by Friday"));
+    assert!(!parsed[0].done, "a freshly-extracted task is never pre-checked");
+    assert_eq!(parsed[1].text, "Book the room");
+    assert_eq!(parsed[1].due_hint, None);
+
+    // Code-fenced; a bare `{text}` (no due) parses with no due hint.
+    let fenced = parse_tasks(
+        "```json\n[{\"text\":\"Reply to Sam\"}]\n```",
+        10,
+    );
+    assert_eq!(fenced.len(), 1);
+    assert_eq!(fenced[0].text, "Reply to Sam");
+    assert_eq!(fenced[0].due_hint, None);
+
+    // Case-insensitive text dedupe + the cap.
+    let deduped = parse_tasks(
+        "[{\"text\":\"Ship it\"},{\"text\":\"ship it\"},{\"text\":\"Test it\"}]",
+        2,
+    );
+    assert_eq!(deduped.len(), 2);
+    assert_eq!(deduped[0].text, "Ship it");
+    assert_eq!(deduped[1].text, "Test it");
+
+    // No JSON array at all → nothing extracted.
+    assert!(parse_tasks("just some prose, no json here", 10).is_empty());
+    assert!(parse_tasks("", 10).is_empty());
+}
+
+/// One malformed element (a missing `text`) must not drop its well-formed
+/// siblings: the array is parsed element-by-element, so a bad object is skipped
+/// and every valid task is kept.
+#[test]
+fn parse_tasks_skips_a_bad_element_and_keeps_the_good_ones() {
+    use crate::pipeline::parse_tasks;
+
+    // The middle object has no `text` (required), so it's skipped; the two good
+    // ones survive.
+    let parsed = parse_tasks(
+        "[{\"text\":\"First\"},{\"due\":\"soon\"},{\"text\":\"Third\",\"due\":\"Monday\"}]",
+        10,
+    );
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(parsed[0].text, "First");
+    assert_eq!(parsed[1].text, "Third");
+    assert_eq!(parsed[1].due_hint.as_deref(), Some("Monday"));
+}
+
+/// End-to-end on-demand task extraction against a mocked LLM: the model returns a
+/// JSON task array, and `extract_tasks` parses it, stores the tasks (`set_tasks`),
+/// records the model (`set_tasks_model`), and the result reads back off the
+/// recording.
+#[tokio::test]
+async fn extract_tasks_persists_tasks_from_mock_llm() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content":
+                "[{\"text\":\"Send the roadmap\",\"due\":\"by Friday\"},{\"text\":\"Book the room\",\"due\":\"\"}]"
+            } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    // The `tasks` Playbook entry inherits provider/url/model from
+    // `[llm_post_process]` (its own llm fields are blank), so pointing the cleanup
+    // connection at the mock routes the task step there.
+    cfg.llm_post_process.enabled = true;
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.llm_post_process.model = "test-llm".into();
+    cfg.migrate_playbook();
+
+    let state = test_state(tmp.path(), cfg.clone()).await;
+
+    let id = RecordingId::new();
+    let rec = task_test_recording(&id, "We agreed to send the roadmap and book a room.");
+    state.catalog.insert(&rec).await.unwrap();
+
+    let failure =
+        crate::pipeline::extract_tasks(&state, &cfg, &id, "We agreed to send the roadmap and book a room.")
+            .await;
+    assert!(failure.is_none(), "a clean extract is not a failure");
+
+    let fetched = state.catalog.get(&id).await.unwrap().expect("exists");
+    assert_eq!(fetched.tasks.len(), 2);
+    assert!(fetched.tasks.iter().any(|t| t.text == "Send the roadmap"
+        && t.due_hint.as_deref() == Some("by Friday")
+        && !t.done));
+    assert_eq!(fetched.tasks_model.as_deref(), Some("test-llm"));
+
+    // The user checks one off, then re-extracts: the done flag survives (the
+    // done-merge in set_tasks), proving a re-run doesn't wipe user state.
+    let roadmap_id = fetched
+        .tasks
+        .iter()
+        .find(|t| t.text == "Send the roadmap")
+        .unwrap()
+        .id;
+    state.catalog.set_task_done(roadmap_id, true).await.unwrap();
+    let again =
+        crate::pipeline::extract_tasks(&state, &cfg, &id, "We agreed to send the roadmap and book a room.")
+            .await;
+    assert!(again.is_none());
+    let after = state.catalog.get(&id).await.unwrap().expect("exists");
+    assert!(
+        after
+            .tasks
+            .iter()
+            .find(|t| t.text == "Send the roadmap")
+            .unwrap()
+            .done,
+        "done flag preserved across re-extraction"
+    );
+}
+
+/// An empty parse (the model returns `[]`) must keep the prior tasks and NOT
+/// advance the model column — a flaky run can't erase the user's task list.
+#[tokio::test]
+async fn extract_tasks_empty_parse_keeps_prior_tasks() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "[]" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.llm_post_process.enabled = true;
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.llm_post_process.model = "test-llm".into();
+    cfg.migrate_playbook();
+
+    let state = test_state(tmp.path(), cfg.clone()).await;
+    let id = RecordingId::new();
+    let rec = task_test_recording(&id, "Some transcript with no clear actions.");
+    state.catalog.insert(&rec).await.unwrap();
+
+    // Seed a prior task + model, then run an extraction that parses to nothing.
+    state
+        .catalog
+        .set_tasks(
+            &id,
+            &[phoneme_core::Task {
+                id: 0,
+                text: "Keep me".into(),
+                due_hint: None,
+                done: false,
+            }],
+        )
+        .await
+        .unwrap();
+    state.catalog.set_tasks_model(&id, "prior-model").await.unwrap();
+
+    let failure =
+        crate::pipeline::extract_tasks(&state, &cfg, &id, "Some transcript with no clear actions.")
+            .await;
+    assert!(failure.is_none(), "nothing extracted is not a failure");
+
+    let fetched = state.catalog.get(&id).await.unwrap().expect("exists");
+    assert_eq!(fetched.tasks.len(), 1, "prior task kept on empty parse");
+    assert_eq!(fetched.tasks[0].text, "Keep me");
+    assert_eq!(
+        fetched.tasks_model.as_deref(),
+        Some("prior-model"),
+        "model column not advanced on empty parse"
+    );
+}
+
 /// End-to-end on-demand entity extraction against a mocked LLM: the model
 /// returns a JSON entity array, and `extract_entities` parses it, stores the
 /// typed entities (`set_entities`), records the model (`set_entities_model`), and
@@ -2206,6 +2455,7 @@ async fn extract_entities_persists_typed_entities_from_mock_llm() {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -2215,6 +2465,7 @@ async fn extract_entities_persists_typed_entities_from_mock_llm() {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&rec).await.unwrap();
@@ -3380,6 +3631,7 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -3389,6 +3641,7 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -3459,6 +3712,7 @@ fn meeting_track(meeting_id: &str, track: &str, transcript: Option<&str>) -> Rec
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -3468,6 +3722,7 @@ fn meeting_track(meeting_id: &str, track: &str, transcript: Option<&str>) -> Rec
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     }
 }

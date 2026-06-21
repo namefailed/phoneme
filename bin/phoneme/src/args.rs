@@ -57,6 +57,8 @@ pub enum Command {
     /// in a date window (what was discussed, decisions, open items). Distinct from
     /// the per-recording `summarize` and the meeting-scoped `meeting digest`.
     Digest(DigestArgs),
+    /// Re-run the LLM task-extraction step on a recording on demand.
+    SuggestTasks(SuggestTasksArgs),
     /// Get or set a recording's free-form notes.
     Notes(NotesArgs),
     /// Edit a recording's transcript and/or metadata (title, favorite).
@@ -97,6 +99,8 @@ pub enum Command {
     /// List the extracted entities across the library (the cross-recording
     /// entity facet: people, orgs, topics, terms — each with a recording count).
     Entities(EntitiesArgs),
+    /// List the extracted tasks across the library, or mark one done / not done.
+    Tasks(TasksArgs),
     /// Manage config profiles (named full-config snapshots).
     Profile(ProfileArgs),
     /// Export all recordings and metadata to a zip file.
@@ -391,6 +395,11 @@ pub struct ChaptersArgs {
     /// Print the stored chapters without regenerating them.
     #[arg(long)]
     pub show: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SuggestTasksArgs {
+    pub id: String,
 }
 
 #[derive(Debug, clap::Args)]
@@ -781,6 +790,35 @@ pub struct EntitiesArgs {
     /// list every kind, grouped.
     #[arg(long, value_name = "KIND", value_parser = ["person", "org", "topic", "term"])]
     pub kind: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct TasksArgs {
+    /// Show only open (not-done) tasks. Omit to list every task, open first.
+    /// Ignored when a `done` / `undone` sub-action is given.
+    #[arg(long)]
+    pub open: bool,
+    #[command(subcommand)]
+    pub action: Option<TasksAction>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TasksAction {
+    /// Mark one task done. The TASK_ID is the row id shown by `phoneme tasks` /
+    /// `phoneme show`.
+    Done {
+        /// The recording the task belongs to.
+        id: String,
+        /// The task row id to mark done.
+        task_id: i64,
+    },
+    /// Mark one task as not done again (the inverse of `done`).
+    Undone {
+        /// The recording the task belongs to.
+        id: String,
+        /// The task row id to mark not done.
+        task_id: i64,
+    },
 }
 
 #[derive(Debug, clap::Args)]

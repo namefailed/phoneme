@@ -2748,6 +2748,22 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             target: "chapters".into(),
             hook: PlaybookHook::default(),
         },
+        // Task extraction — a REAL enrichment (target `tasks`, backed by the
+        // `tasks` child table), unlike the `custom:action_items` example which has
+        // no store. Add it to a recipe (or the `default` recipe) to pull action
+        // items on every recording, or run it on demand from the detail pane /
+        // `phoneme suggest-tasks`. Opt-in by default (not in the `default` recipe).
+        PlaybookEntry {
+            id: "tasks".into(),
+            name: "Extract tasks".into(),
+            description: "Pull action items / to-dos out of the transcript into a browsable, checkable task list.".into(),
+            builtin: true,
+            kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
+            llm: llm("Extract concrete action items or to-dos the speaker committed to or asked for. Reply with ONLY a JSON array of objects, each {\"text\":\"...\",\"due\":\"...\"}, where text is the action (imperative and short) and due is any deadline mentioned (a free-text phrase like \"by Friday\", or an empty string if none). Output at most 20 items, no duplicates, no preamble, no code fences."),
+            target: "tasks".into(),
+            hook: PlaybookHook::default(),
+        },
         PlaybookEntry {
             id: "todo_capture".into(),
             name: "Capture to-dos".into(),

@@ -80,6 +80,12 @@ export type Recording = {
   /** The LLM model used by the entity-extraction step, when recorded. Null for
    *  older rows or recordings whose entities were never extracted. */
   entities_model?: string | null;
+  /** Task / action items extracted from the transcript by the task-extraction
+   *  step. Open tasks sort first. Empty until extracted. */
+  tasks?: Task[];
+  /** The LLM model used by the task-extraction step, when recorded. Null for
+   *  older rows or recordings whose tasks were never extracted. */
+  tasks_model?: string | null;
   /** Display title — auto-generated (heuristic/LLM) or user-set. Null until
    *  generated; the UI falls back to the started-at timestamp. */
   title?: string | null;
@@ -123,6 +129,19 @@ export type SpeakerName = { speaker_label: number; name: string };
  *  `kind` is `person` | `org` | `topic` | `term` (an unknown kind from the model
  *  is stored as `topic`); `value` is the surface text. */
 export type Entity = { kind: string; value: string };
+
+/** One task / action item extracted from a recording's transcript by the
+ *  task-extraction step. `id` is the table row id (needed to toggle `done`);
+ *  `text` is the action; `due_hint` is the model's free-text deadline phrase
+ *  ("by Friday") stored verbatim (never a parsed date), null when none; `done`
+ *  is the one mutable, user-owned field. Task counterpart of {@link Entity}, plus
+ *  the mutable `done` + free-text `due_hint`. */
+export type Task = {
+  id: number;
+  text: string;
+  due_hint?: string | null;
+  done: boolean;
+};
 
 /** A whole-meeting digest: one LLM synthesis across all of a meeting's tracks
  *  (mic + system together), distinct from a single track's `summary`. Keyed by
@@ -297,6 +316,11 @@ export type ListFilter = {
    *  with `entity_value` so the same surface text under two kinds is distinct.
    *  Ignored unless `entity_value` is set; omit to match the value across kinds. */
   entity_kind?: string | null;
+  /** Server-side task-presence filter (the sidebar's Tasks section): `"has_open"`
+   *  = only recordings with at least one not-done task, `"has_tasks"` = any
+   *  extracted task, omit/null = no filter. Applied in SQL before pagination via a
+   *  subquery over the `tasks` child table. An unrecognized value is ignored. */
+  task_state?: string | null;
   /** Server-side low-confidence filter: when set, only recordings whose stored
    *  `mean_confidence` is non-null AND strictly below this value. Applied in SQL
    *  before pagination. The value is the configured
@@ -1046,6 +1070,21 @@ export async function suggestChapters(id: string): Promise<void> {
   await tauriInvoke("suggest_chapters", { id });
 }
 
+/** Ask the LLM to extract action items / tasks for a recording now (on demand).
+ *  The structured tasks land on the recording (preserving any `done` flag on a
+ *  surviving task); a `tasks_updated` event fires when ready. Task counterpart of
+ *  {@link suggestEntities}. */
+export async function suggestTasks(id: string): Promise<void> {
+  await tauriInvoke("suggest_tasks", { id });
+}
+
+/** Toggle (or set) one task's `done` flag. Emits `tasks_updated` for the
+ *  recording so open views refresh the chips. The one task mutation (entities
+ *  have no analogue). `taskId` is the task row id from {@link Task}. */
+export async function setTaskDone(id: string, taskId: number, done: boolean): Promise<void> {
+  await tauriInvoke("set_task_done", { id, taskId, done });
+}
+
 /** Approve one suggested tag: creates the tag if needed, attaches it, and
  *  removes it from the suggestion list. Returns the (created) tag. */
 export async function approveTagSuggestion(id: string, name: string): Promise<Tag> {
@@ -1227,6 +1266,30 @@ export type EntityFacet = { kind: string; value: string; count: number };
  *  / `entity_kind`. */
 export async function listAllEntities(): Promise<EntityFacet[]> {
   return await tauriInvoke<EntityFacet[]>("list_all_entities");
+}
+
+// ── Tasks (cross-recording list) ──────────────────────────────────────────────
+
+/** One row of the cross-recording task list: a task plus enough to link back to
+ *  its recording (`recording_id` + `title`). The task counterpart of an
+ *  {@link EntityFacet}, but per-task rather than per distinct value. */
+export type TaskWithRecording = {
+  recording_id: string;
+  title?: string | null;
+  id: number;
+  text: string;
+  due_hint?: string | null;
+  done: boolean;
+};
+
+/** Every extracted task across the library — the "everything I have to do" list —
+ *  open first then newest recording first, each carrying its `recording_id` +
+ *  `title`. When `onlyOpen` is set, done tasks are dropped. Powers the sidebar's
+ *  Tasks section. The task counterpart of {@link listAllEntities}; the
+ *  per-recording task *filter* rides on `listRecordings` via
+ *  `ListFilter.task_state`. */
+export async function listAllTasks(onlyOpen = false): Promise<TaskWithRecording[]> {
+  return await tauriInvoke<TaskWithRecording[]>("list_all_tasks", { onlyOpen });
 }
 
 /**

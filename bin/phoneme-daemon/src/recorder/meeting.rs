@@ -251,6 +251,7 @@ impl DaemonRecorder {
                 summary_model: None,
                 entities_model: None,
                 chapters_model: None,
+                tasks_model: None,
                 title: None,
                 title_is_auto: true,
                 title_model: None,
@@ -260,6 +261,7 @@ impl DaemonRecorder {
                 detected_language: None,
                 tags: vec![],
                 entities: vec![],
+                tasks: vec![],
                 speaker_names: vec![],
             };
             // Insert the catalog row. If it fails, roll back every track already
@@ -963,6 +965,7 @@ mod tests {
             summary_model: None,
             entities_model: None,
             chapters_model: None,
+            tasks_model: None,
             title: None,
             title_is_auto: true,
             title_model: None,
@@ -972,6 +975,7 @@ mod tests {
             detected_language: None,
             tags: vec![],
             entities: vec![],
+            tasks: vec![],
             speaker_names: vec![],
         };
         state.catalog.insert(&row).await.unwrap();

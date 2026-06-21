@@ -30,7 +30,7 @@ use crate::tags::Tag;
 use crate::types::{
     AiActivityEntry, DictationHistoryEntry, Entity, EntityFacet, ListFilter, MeetingDigest,
     NamedVoice, PropagationCandidate, Recording, RecordingStatus, SavedSearch, SpeakerName,
-    SpeakerSuggestion, TranscriptSegment, TranscriptWord,
+    SpeakerSuggestion, Task, TaskWithRecording, TranscriptSegment, TranscriptWord,
 };
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -402,6 +402,7 @@ mod saved_search;
 mod segments;
 mod speakers;
 mod tags;
+mod tasks;
 
 #[cfg(test)]
 mod tests;
@@ -554,6 +555,9 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         // The auto-chapter model (nullable). `unwrap_or(None)` keeps older rows
         // that predate the column NULL.
         chapters_model: row.try_get("chapters_model").unwrap_or(None),
+        // The task-extraction model (nullable). `unwrap_or(None)` keeps older
+        // rows that predate the column NULL.
+        tasks_model: row.try_get("tasks_model").unwrap_or(None),
         title: row.try_get("title").unwrap_or(None),
         title_is_auto: row.try_get("title_is_auto").unwrap_or(true),
         title_model: row.try_get("title_model").unwrap_or(None),
@@ -568,6 +572,8 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         tags: Vec::new(),
         // Populated separately (child query against `entities`) by list/get, like `tags`.
         entities: Vec::new(),
+        // Populated separately (child query against `tasks`) by list/get, like `entities`.
+        tasks: Vec::new(),
         // Populated separately (joined from `speaker_names`) by list/get/list_by_meeting.
         speaker_names: Vec::new(),
     })

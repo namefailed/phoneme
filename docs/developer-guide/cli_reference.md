@@ -418,6 +418,19 @@ list; errors when there's no transcript to chapter (exit 6) or the id is unknown
 ```bash
 phoneme chapters 20260519T143500823          # generate + print
 phoneme chapters 20260519T143500823 --show   # print stored chapters only
+### ✅ `phoneme suggest-tasks <ID>`
+
+Re-run the LLM task-extraction step on a recording on demand (the CLI face of the
+GUI ✅ Extract button), regardless of whether the recipe includes a `tasks` step.
+Like `suggest-entities`, the command awaits the model, then returns; the
+structured action items (`{text, due_hint?}`) land on the recording, **replacing**
+the previous set — but **any task you already checked off is preserved** when its
+text survives the re-extraction. Review them with `phoneme tasks` or
+`phoneme show <ID>`. Errors when the recording has no transcript yet (exit 6) or
+the id is unknown (exit 7).
+
+```bash
+phoneme suggest-tasks 20260519T143500823
 ```
 
 ### ✏️ `phoneme edit <ID>`
@@ -879,6 +892,31 @@ phoneme entities --kind person
 
 # Machine-readable (one JSON object per facet row: {kind, value, count})
 phoneme entities --json
+```
+
+### ✅ `phoneme tasks`
+
+List the cross-recording **task list** — every action item the LLM
+task-extraction step pulled across the whole library — open first, then newest
+recording first, each line showing `[x]`/`[ ]` done state, the text, an optional
+due hint, and the recording it came from. The CLI face of the GUI sidebar's Tasks
+section. Extract tasks for a recording with `phoneme suggest-tasks <ID>`. The
+`done` / `undone` sub-actions toggle one task by its row id (shown in the list
+and by `phoneme show`).
+
+```bash
+# List every extracted task across the library (open first)
+phoneme tasks
+
+# Only the still-open tasks
+phoneme tasks --open
+
+# Machine-readable (one JSON object per task: {recording_id, title, id, text, due_hint, done})
+phoneme tasks --json
+
+# Mark task #3 of a recording done (or undone)
+phoneme tasks done 20260519T143500823 3
+phoneme tasks undone 20260519T143500823 3
 ```
 
 ### 🎭 `phoneme profile`

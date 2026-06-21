@@ -47,7 +47,7 @@ use phoneme_core::error::Result;
 use phoneme_core::transcription::DiarizationTrack;
 use phoneme_core::{
     Catalog, Chapter, Embedder, Entity, HookMetadata, HookPayload, HookRunner, RecordingId,
-    RecordingStatus, TranscriptSegment,
+    RecordingStatus, Task, TranscriptSegment,
 };
 use phoneme_ipc::{DaemonEvent, PipelineStage};
 use std::sync::Arc;
@@ -2008,6 +2008,32 @@ pub fn chapters_llm_config(cfg: &Config) -> LlmPostProcessConfig {
     }
 }
 
+// ── Tasks / action items ─────────────────────────────────────────────────────────
+
+/// The built-in instruction the task-extraction step uses when the recording has
+/// no migrated `tasks` Playbook entry (a user deleted it) — the task counterpart
+/// of [`DEFAULT_ENTITY_PROMPT`]. Asks for a small JSON array of `{text,due}` so
+/// [`parse_tasks`] can scan it robustly. Kept in code (not a config section)
+/// because there is no `[tasks]` section today; the Playbook `tasks` entry is the
+/// editable source of truth.
+pub(crate) const DEFAULT_TASK_PROMPT: &str = "Extract concrete action items or to-dos the speaker committed to or asked for. Reply with ONLY a JSON array of objects, each {\"text\":\"...\",\"due\":\"...\"}, where text is the action (imperative and short) and due is any deadline mentioned (a free-text phrase like \"by Friday\", or an empty string if none). Output at most 20 items, no duplicates, no preamble, no code fences.";
+
+/// Hard cap on how many tasks one extraction run stores, mirroring
+/// [`MAX_ENTITIES`]. Keeps a chatty model from flooding the child table.
+const MAX_TASKS: usize = 20;
+
+/// Build the effective LLM config for task extraction, mirroring
+/// [`entities_llm_config`]: resolve the migrated `tasks` Playbook entry's LLM
+/// half against `[llm_post_process]` (inherit-on-blank). Falls back to the bare
+/// cleanup connection when no `tasks` entry exists, so the on-demand path always
+/// has a usable provider.
+pub fn tasks_llm_config(cfg: &Config) -> LlmPostProcessConfig {
+    match entry_config_for_target(cfg, "tasks") {
+        Some((llm_cfg, _)) => llm_cfg,
+        None => cfg.llm_post_process.clone(),
+    }
+}
+
 /// One parsed `{start_ms, title, summary}` shape from the model's JSON reply,
 /// before snapping/validation. Every field is optional except a title-bearing
 /// entry needs a `title`; a missing `start_ms` drops the entry (it can't be
@@ -2167,6 +2193,92 @@ fn parse_chapters(
     out
 }
 
+/// One parsed `{text, due}` shape from the model's JSON reply, before
+/// normalization. `due` is optional so a model that emits a bare `{"text":…}`
+/// still parses (it defaults to no due hint).
+#[derive(serde::Deserialize)]
+struct RawTask {
+    text: String,
+    #[serde(default)]
+    due: Option<String>,
+}
+
+/// Parse the task-extractor's reply into clean [`Task`] values.
+///
+/// Mirrors [`parse_entities`]' robustness: scan every `[` and take the first
+/// position that deserializes as a JSON array of `{text,due}` objects, so chatty
+/// models that wrap the array in bracket-bearing prose don't poison it. Each
+/// entry's `text` is trimmed; an empty or over-long text is dropped; `due` is
+/// trimmed (a blank `due` becomes `None`); case-insensitive duplicate texts
+/// collapse; the list is capped at `max`. A freshly-extracted task is never
+/// pre-checked (`done = false`); the `id` is a placeholder (`0`) until the row is
+/// stored — [`Catalog::set_tasks`] assigns the real id. Returns an empty vec when
+/// nothing usable parses — the caller treats that as "nothing extracted".
+pub(crate) fn parse_tasks(raw: &str, max: usize) -> Vec<Task> {
+    let cleaned = raw.trim();
+    // Same per-`[` scan + per-element deserialize as parse_entities: a single
+    // malformed object can't reject the whole batch, and a stray non-task array
+    // earlier in the prose (e.g. `[1, 2]`) is skipped by the "at least one valid
+    // task" gate.
+    let candidates: Vec<RawTask> = cleaned
+        .char_indices()
+        .filter(|(_, c)| *c == '[')
+        .find_map(|(start, _)| {
+            let elems = serde_json::Deserializer::from_str(&cleaned[start..])
+                .into_iter::<Vec<serde_json::Value>>()
+                .next()?
+                .ok()?;
+            let parsed: Vec<RawTask> = elems
+                .into_iter()
+                .filter_map(|v| serde_json::from_value::<RawTask>(v).ok())
+                .collect();
+            if parsed.is_empty() {
+                None
+            } else {
+                Some(parsed)
+            }
+        })
+        .unwrap_or_default();
+    let mut seen: Vec<String> = Vec::new();
+    let mut out: Vec<Task> = Vec::new();
+    for c in candidates {
+        let text = c
+            .text
+            .trim()
+            .trim_matches(|ch| ch == '"' || ch == '\'' || ch == '`')
+            .trim()
+            .to_string();
+        // Action items are short imperative phrases; a paragraph is the model
+        // ignoring instructions — drop it rather than store junk.
+        if text.is_empty() || text.chars().count() > 200 {
+            continue;
+        }
+        let key = text.to_lowercase();
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        let due_hint = c.due.and_then(|d| {
+            let t = d.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        });
+        out.push(Task {
+            id: 0,
+            text,
+            due_hint,
+            done: false,
+        });
+        if out.len() >= max {
+            break;
+        }
+    }
+    out
+}
+
 /// Extract auto-chapters for `id` and persist them (replacing any previous set),
 /// emitting `ChaptersUpdated` so the UI shows the new chapter rows. The legacy/IPC
 /// path reads the `chapters` Playbook entry (or the built-in default prompt when
@@ -2315,6 +2427,125 @@ async fn run_chapters_step(
         stage: PipelineStage::Tagging,
     });
     extract_chapters_with(state, id, transcript, llm_cfg, prompt).await
+}
+
+/// Extract task / action items for `transcript` and persist them on the recording
+/// (done-preserving, via [`Catalog::set_tasks`]), emitting `TasksUpdated` so the
+/// UI shows the togglable task chips. The task counterpart of
+/// [`extract_entities`]: the legacy/IPC path reads the migrated `tasks` Playbook
+/// entry (or the built-in default prompt when absent). Non-fatal; returns
+/// `Some(error)` only on a real LLM-call failure (the caller folds it into the
+/// terminal status). Empty transcript / missing provider / user-skip / nothing
+/// extracted are all non-failures (`None`).
+pub async fn extract_tasks(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    transcript: &str,
+) -> Option<String> {
+    let (llm_cfg, prompt) = match entry_config_for_target(cfg, "tasks") {
+        Some(pair) => pair,
+        None => (tasks_llm_config(cfg), DEFAULT_TASK_PROMPT.to_string()),
+    };
+    extract_tasks_with(state, id, transcript, llm_cfg, &prompt).await
+}
+
+/// The task-extractor's core, parameterized by an already-resolved LLM config +
+/// prompt so the legacy/IPC path ([`extract_tasks`]) and the recipe executor
+/// share one implementation. Reuses [`PipelineStage::Tagging`] for the live
+/// activity stream (entities do too — no dedicated stage exists). Records the
+/// model via `set_tasks_model` once per run, only after a non-empty parse, so the
+/// model column never advances past the tasks actually stored — on an empty parse
+/// the prior tasks (and their model) are kept untouched. [`Catalog::set_tasks`]
+/// preserves any `done` flag the user set on a surviving task.
+pub(crate) async fn extract_tasks_with(
+    state: &AppState,
+    id: &RecordingId,
+    transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    prompt: &str,
+) -> Option<String> {
+    if transcript.trim().is_empty() {
+        return None;
+    }
+    let llm = match llm_provider_for_run(state, &llm_cfg).await {
+        Some(llm) => llm,
+        None => {
+            tracing::warn!(
+                provider = %llm_cfg.provider,
+                "task extraction requested but no usable LLM provider is configured"
+            );
+            return None;
+        }
+    };
+    match run_llm_stage(
+        state,
+        id,
+        // Reuse Tagging for the live activity stream (like entities); the
+        // dedicated TasksUpdated/Failed events carry the structured result.
+        PipelineStage::Tagging,
+        &*llm,
+        prompt,
+        transcript,
+    )
+    .await
+    {
+        Ok(reply) => {
+            let tasks = parse_tasks(&reply, MAX_TASKS);
+            if tasks.is_empty() {
+                // Keep the prior tasks (and their model) on an empty parse — the
+                // same keep-prior-on-empty behavior the entity path uses, so a
+                // flaky model run never erases the user's task list. The model
+                // column is written only below, after this guard.
+                tracing::info!(id = %id.as_str(), "task extraction produced nothing");
+                return None;
+            }
+            match state.catalog.set_tasks(id, &tasks).await {
+                Ok(()) => {
+                    // Record which model ran, only once tasks are stored, so the
+                    // model column never disagrees with the stored set.
+                    if let Err(e) = state.catalog.set_tasks_model(id, &llm_cfg.model).await {
+                        tracing::warn!(error = %e, "failed to persist tasks model");
+                    }
+                    tracing::info!(id = %id.as_str(), count = tasks.len(), "tasks saved");
+                    state.events.emit(DaemonEvent::TasksUpdated { id: id.clone() });
+                }
+                Err(e) => tracing::warn!(error = %e, "failed to persist tasks"),
+            }
+            None
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "task extraction LLM call failed");
+            let skipped = stage_skipped(&e);
+            let msg = e.to_string();
+            state.events.emit(DaemonEvent::TasksFailed {
+                id: id.clone(),
+                error: msg.clone(),
+            });
+            if skipped {
+                None
+            } else {
+                Some(msg)
+            }
+        }
+    }
+}
+
+/// Run the task-extraction step from the recipe executor: emit the
+/// `PipelineStageChanged(Tagging)` the UI reads, then run the shared
+/// [`extract_tasks_with`] core. Mirrors [`run_entities_step`].
+async fn run_tasks_step(
+    state: &AppState,
+    id: &RecordingId,
+    transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    prompt: &str,
+) -> Option<String> {
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Tagging,
+    });
+    extract_tasks_with(state, id, transcript, llm_cfg, prompt).await
 }
 
 /// Write a recording's terminal status at the end of the pipeline: `Done` on a
@@ -2480,6 +2711,13 @@ enum ResolvedStep {
     /// Like [`ResolvedStep::Entities`] but the result is anchored to the
     /// recording's segment timing (see [`extract_chapters_with`]).
     Chapters {
+        llm_cfg: LlmPostProcessConfig,
+        prompt: String,
+    },
+    /// Enrichment writing task / action items (the `tasks` child table). Carries
+    /// the entry-resolved LLM config + prompt from the `tasks` Playbook entry. The
+    /// task counterpart of [`ResolvedStep::Entities`].
+    Tasks {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
     },
@@ -2660,6 +2898,10 @@ fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
                         prompt: entry.llm.prompt.clone(),
                     }),
                     "chapters" => steps.push(ResolvedStep::Chapters {
+                        llm_cfg: entry_llm_config(cfg, &entry.llm),
+                        prompt: entry.llm.prompt.clone(),
+                    }),
+                    "tasks" => steps.push(ResolvedStep::Tasks {
                         llm_cfg: entry_llm_config(cfg, &entry.llm),
                         prompt: entry.llm.prompt.clone(),
                     }),
@@ -2975,6 +3217,22 @@ async fn run_enrichment_steps(
                     .await;
                 if let Some(msg) =
                     run_chapters_step(state, id, transcript, llm_cfg.clone(), prompt).await
+                {
+                    step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
+                }
+            }
+            ResolvedStep::Tasks { llm_cfg, prompt } => {
+                // Reuse the Tagging status + stage for the live view (like
+                // entities — no dedicated status was added); the dedicated
+                // TasksUpdated/Failed events carry the result. A real failure
+                // folds into TagFailed for the terminal status (the transcript is
+                // intact, like the other enrichments).
+                let _ = state
+                    .catalog
+                    .update_status(id, RecordingStatus::Tagging)
+                    .await;
+                if let Some(msg) =
+                    run_tasks_step(state, id, transcript, llm_cfg.clone(), prompt).await
                 {
                     step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
                 }

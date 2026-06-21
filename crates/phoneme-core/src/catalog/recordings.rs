@@ -66,9 +66,9 @@ impl Catalog {
                  error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
                  transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
                  cleanup_model, diarized, user_edited, favorite, pinned, tag_suggestions, summary,
-                 summary_model, entities_model, title, title_is_auto, title_model, tag_model,
+                 summary_model, entities_model, tasks_model, title, title_is_auto, title_model, tag_model,
                  diarization_model, mean_confidence, detected_language
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -98,6 +98,7 @@ impl Catalog {
         .bind(r.summary.as_deref())
         .bind(r.summary_model.as_deref())
         .bind(r.entities_model.as_deref())
+        .bind(r.tasks_model.as_deref())
         .bind(r.title.as_deref())
         .bind(r.title_is_auto)
         .bind(r.title_model.as_deref())
@@ -726,6 +727,9 @@ impl Catalog {
         // reads `Recording::entities` straight off GetRecording, with no separate
         // fetch of its own. Best-effort — a child-query failure leaves it empty.
         rec.entities = self.list_entities(&rec.id).await.unwrap_or_default();
+        // Tasks populate here too (like entities): the detail pane's task chips
+        // read `Recording::tasks` straight off GetRecording. Best-effort.
+        rec.tasks = self.list_tasks(&rec.id).await.unwrap_or_default();
         Ok(Some(rec))
     }
 
@@ -833,6 +837,24 @@ impl Catalog {
                 );
             }
         }
+        // Task-presence filter (sidebar Tasks section). A subquery over the
+        // `tasks` child table, the task counterpart of the entity facet: keep only
+        // recordings with any extracted task ("has_tasks") or any not-done task
+        // ("has_open"). Both subqueries are static (no bound params), injection-
+        // safe; an unrecognized value falls through to no filter so older/newer
+        // clients degrade safely. Applied before LIMIT/OFFSET so it composes with
+        // pagination.
+        match filter.task_state.as_deref() {
+            Some("has_open") => {
+                sql.push_str(
+                    " AND recordings.id IN (SELECT recording_id FROM tasks WHERE done = 0)",
+                );
+            }
+            Some("has_tasks") => {
+                sql.push_str(" AND recordings.id IN (SELECT recording_id FROM tasks)");
+            }
+            _ => {}
+        }
         // Low-confidence filter: only recordings with a non-NULL mean confidence
         // strictly below the threshold (carried in the filter, set by the daemon
         // from `[whisper].low_confidence_threshold`). The `IS NOT NULL` guard keeps
@@ -919,6 +941,7 @@ impl Catalog {
         for rec in &mut recs {
             rec.tags = self.tags_for(&rec.id).await.unwrap_or_default();
             rec.entities = self.list_entities(&rec.id).await.unwrap_or_default();
+            rec.tasks = self.list_tasks(&rec.id).await.unwrap_or_default();
             rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
         }
         Ok(recs)

@@ -504,6 +504,7 @@ fn embedded_recording(meeting_id: Option<&str>) -> Recording {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -513,6 +514,7 @@ fn embedded_recording(meeting_id: Option<&str>) -> Recording {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     }
 }
@@ -1386,6 +1388,7 @@ async fn test_insert_and_get() {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1395,6 +1398,7 @@ async fn test_insert_and_get() {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     db.insert(&r).await.expect("insert");
@@ -1454,6 +1458,7 @@ async fn original_transcript_preserved_across_user_edit() {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1463,6 +1468,7 @@ async fn original_transcript_preserved_across_user_edit() {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     db.insert(&r).await.expect("insert");
@@ -1530,6 +1536,7 @@ async fn notes_round_trip_and_survive_transcription() {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1539,6 +1546,7 @@ async fn notes_round_trip_and_survive_transcription() {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     db.insert(&r).await.expect("insert");
@@ -1691,6 +1699,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1700,6 +1709,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     let mic = make("mic");
@@ -1749,6 +1759,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1758,6 +1769,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     };
     db.insert(&solo).await.expect("insert solo");
@@ -3999,6 +4011,7 @@ fn entity_test_recording() -> Recording {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -4008,6 +4021,7 @@ fn entity_test_recording() -> Recording {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     }
 }
@@ -4275,6 +4289,183 @@ async fn set_chapters_model_lands_on_get() {
     assert_eq!(fetched.chapters_model.as_deref(), Some("phi3:mini"));
     // Chapters are NOT carried on the Recording DTO — they are fetched lazily.
     assert_eq!(db.chapters_for(&r.id).await.unwrap().len(), 1);
+}
+
+// ── Tasks (the per-recording child table + the mutable done flag) ────────────
+//
+// Mirrors the entity tests, plus the two task-only behaviors: the done-flag is
+// preserved across re-extraction (the #1 risk in the brief), and `set_task_done`
+// flips one row.
+
+/// A task with no due hint, the common shape.
+fn task(text: &str) -> Task {
+    Task {
+        id: 0,
+        text: text.into(),
+        due_hint: None,
+        done: false,
+    }
+}
+
+#[tokio::test]
+async fn tasks_round_trip_and_populate_on_get_and_list() {
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r = entity_test_recording();
+    db.insert(&r).await.expect("insert");
+
+    let tasks = vec![
+        Task {
+            id: 0,
+            text: "Send the roadmap".into(),
+            due_hint: Some("by Friday".into()),
+            done: false,
+        },
+        task("Book the meeting room"),
+    ];
+    db.set_tasks(&r.id, &tasks).await.expect("set tasks");
+    db.set_tasks_model(&r.id, "phi3:mini")
+        .await
+        .expect("set tasks model");
+
+    // list_tasks returns them open-first then by id, carrying the row id + due hint.
+    let listed = db.list_tasks(&r.id).await.expect("list tasks");
+    assert_eq!(listed.len(), 2);
+    assert!(listed.iter().all(|t| t.id > 0), "row ids assigned");
+    assert_eq!(listed[0].text, "Send the roadmap");
+    assert_eq!(listed[0].due_hint.as_deref(), Some("by Friday"));
+    assert!(!listed[0].done);
+
+    // get() populates Recording::tasks + tasks_model.
+    let fetched = db.get(&r.id).await.expect("get").expect("some");
+    assert_eq!(fetched.tasks.len(), 2);
+    assert_eq!(fetched.tasks_model.as_deref(), Some("phi3:mini"));
+
+    // list() populates them per-row too.
+    let rows = db
+        .list(&ListFilter {
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await
+        .expect("list");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].tasks.len(), 2);
+}
+
+#[tokio::test]
+async fn set_tasks_preserves_done_flag_across_reextraction() {
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r = entity_test_recording();
+    db.insert(&r).await.expect("insert");
+
+    db.set_tasks(&r.id, &[task("Send the roadmap"), task("Book the room")])
+        .await
+        .expect("set");
+    // The user checks off the first task.
+    let listed = db.list_tasks(&r.id).await.expect("list");
+    let roadmap_id = listed
+        .iter()
+        .find(|t| t.text == "Send the roadmap")
+        .expect("roadmap task")
+        .id;
+    db.set_task_done(roadmap_id, true)
+        .await
+        .expect("set done");
+
+    // Re-extraction returns the SAME texts (all freshly done = false). The done
+    // flag on the surviving text must be preserved — not silently un-checked.
+    db.set_tasks(&r.id, &[task("Send the roadmap"), task("Book the room")])
+        .await
+        .expect("re-extract");
+    let after = db.list_tasks(&r.id).await.expect("list after");
+    let roadmap = after
+        .iter()
+        .find(|t| t.text == "Send the roadmap")
+        .expect("roadmap survived");
+    assert!(roadmap.done, "done flag survived re-extraction");
+    // open-first ordering puts the still-open "Book the room" before the done one.
+    assert_eq!(after[0].text, "Book the room");
+    assert!(!after[0].done);
+}
+
+#[tokio::test]
+async fn set_task_done_flips_one_row_and_reports_missing() {
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r = entity_test_recording();
+    db.insert(&r).await.expect("insert");
+    db.set_tasks(&r.id, &[task("A"), task("B")])
+        .await
+        .expect("set");
+    let listed = db.list_tasks(&r.id).await.expect("list");
+    let a_id = listed.iter().find(|t| t.text == "A").unwrap().id;
+
+    // Flipping one row affects exactly one and leaves the other alone.
+    let affected = db.set_task_done(a_id, true).await.expect("done");
+    assert_eq!(affected, 1);
+    let after = db.list_tasks(&r.id).await.expect("list");
+    assert!(after.iter().find(|t| t.text == "A").unwrap().done);
+    assert!(!after.iter().find(|t| t.text == "B").unwrap().done);
+
+    // An unknown task id matches no row (0 affected) — the handler maps that to
+    // not_found.
+    let none = db.set_task_done(999_999, true).await.expect("missing");
+    assert_eq!(none, 0);
+}
+
+#[tokio::test]
+async fn empty_set_tasks_clears_and_list_all_filters_open() {
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r1 = entity_test_recording();
+    let r2 = entity_test_recording();
+    db.insert(&r1).await.expect("insert r1");
+    db.insert(&r2).await.expect("insert r2");
+
+    db.set_tasks(&r1.id, &[task("r1 open"), task("r1 done")])
+        .await
+        .expect("set r1");
+    db.set_tasks(&r2.id, &[task("r2 open")])
+        .await
+        .expect("set r2");
+    // Mark one of r1's tasks done.
+    let r1_tasks = db.list_tasks(&r1.id).await.expect("list r1");
+    let done_id = r1_tasks.iter().find(|t| t.text == "r1 done").unwrap().id;
+    db.set_task_done(done_id, true).await.expect("done");
+
+    // list_all_tasks(false) returns every task with its recording ref.
+    let all = db.list_all_tasks(false).await.expect("all");
+    assert_eq!(all.len(), 3);
+    assert!(all.iter().all(|t| !t.recording_id.is_empty()));
+    // list_all_tasks(true) drops the done one.
+    let open = db.list_all_tasks(true).await.expect("open");
+    assert_eq!(open.len(), 2);
+    assert!(open.iter().all(|t| !t.done));
+
+    // An empty slice clears a recording's tasks.
+    db.set_tasks(&r1.id, &[]).await.expect("clear");
+    assert!(db.list_tasks(&r1.id).await.expect("list").is_empty());
+}
+
+#[tokio::test]
+async fn deleting_a_recording_cascades_its_tasks() {
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r = entity_test_recording();
+    db.insert(&r).await.expect("insert");
+    db.set_tasks(&r.id, &[task("cascade me")])
+        .await
+        .expect("set");
+    db.delete(&r.id).await.expect("delete");
+    // The FK ON DELETE CASCADE took the task rows with the recording.
+    assert!(db.list_all_tasks(false).await.expect("all").is_empty());
 }
 
 // ── ANN (approximate nearest-neighbour) index ───────────────────────────────

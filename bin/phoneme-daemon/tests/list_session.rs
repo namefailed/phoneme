@@ -42,6 +42,7 @@ fn meeting_track(meeting_id: &str, track: &str) -> Recording {
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -51,6 +52,7 @@ fn meeting_track(meeting_id: &str, track: &str) -> Recording {
         detected_language: None,
         tags: vec![],
         entities: vec![],
+        tasks: vec![],
         speaker_names: vec![],
     }
 }

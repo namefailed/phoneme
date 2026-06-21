@@ -5,6 +5,8 @@ import {
   clearMoreLikeThis,
   applyEntityFilter,
   clearEntityFilter,
+  applyTaskFilter,
+  clearTaskFilter,
   toWireFilter,
 } from './filter';
 
@@ -107,6 +109,49 @@ describe('toWireFilter', () => {
       expect('entity_value' in f).toBe(false);
       expect('entity_kind' in f).toBe(false);
     }
+  });
+
+  it('maps the task_state token onto the wire field', () => {
+    expect(toWireFilter({ task_state: 'has_open' }).task_state).toBe('has_open');
+    expect(toWireFilter({ task_state: 'has_tasks' }).task_state).toBe('has_tasks');
+  });
+
+  it('omits task_state when no task filter is set', () => {
+    for (const f of [toWireFilter({ task_state: null }), toWireFilter({})]) {
+      expect('task_state' in f).toBe(false);
+    }
+  });
+});
+
+describe('Task-filter helpers', () => {
+  it('applyTaskFilter sets the state and keeps other dimensions', () => {
+    filterStore.set({ search: 'standup', tag_id: 7 });
+    applyTaskFilter('has_open');
+    expect(filterStore.get()).toEqual({
+      search: 'standup',
+      tag_id: 7, // it COMBINES — other dimensions untouched
+      task_state: 'has_open',
+    });
+  });
+
+  it('applyTaskFilter on the active state toggles it off', () => {
+    filterStore.set({});
+    applyTaskFilter('has_open');
+    applyTaskFilter('has_open');
+    expect(filterStore.get().task_state).toBeNull();
+  });
+
+  it('applyTaskFilter to a different state replaces, not toggles', () => {
+    filterStore.set({});
+    applyTaskFilter('has_open');
+    applyTaskFilter('has_tasks');
+    expect(filterStore.get().task_state).toBe('has_tasks');
+  });
+
+  it('clearTaskFilter returns to the normal list', () => {
+    applyTaskFilter('has_tasks');
+    clearTaskFilter();
+    expect(filterStore.get().task_state).toBeNull();
   });
 });
 

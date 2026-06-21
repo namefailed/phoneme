@@ -187,6 +187,8 @@ fn is_retry_safe(req: &Request) -> bool {
         | TagUsageCounts
         | KindCounts
         | ListAllEntities
+        // Pure read: the cross-recording task list. Idempotent.
+        | ListAllTasks { .. }
         | SemanticSearch { .. }
         | MoreLikeThis { .. } => true,
 
@@ -255,6 +257,11 @@ fn is_retry_safe(req: &Request) -> bool {
         // single-attempt so a blind re-send after a lost reply can't fire the model
         // twice.
         | SuggestChapters { .. }
+        // Task extraction — same reasoning as SuggestEntities (awaits an LLM call).
+        | SuggestTasks { .. }
+        // Toggling a task's done flag is a mutation; classify it single-attempt
+        // like the other Set* mutations (it sits with that boundary).
+        | SetTaskDone { .. }
         | ApproveTagSuggestion { .. }
         | DismissTagSuggestion { .. }
         | ClearAllTagSuggestions

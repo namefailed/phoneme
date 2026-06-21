@@ -74,6 +74,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
         }
         Command::Chapters(args) => commands::chapters::run(args, cfg, cli.json).await,
         Command::Digest(args) => commands::digest::run(args, cfg, cli.json).await,
+        Command::SuggestTasks(args) => commands::suggest_tasks::run(args, cfg, cli.json).await,
         Command::Notes(args) => commands::notes::run(args, cfg, cli.json).await,
         Command::Edit(args) => commands::edit::run(args, cfg).await,
         Command::FindReplace(args) => commands::find_replace::run(args, cfg, cli.json).await,
@@ -93,6 +94,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
         Command::Hook(args) => commands::hook_cmd::run(args, cfg, cli.json).await,
         Command::Tag(args) => commands::tag::run(args, cfg, cli.json).await,
         Command::Entities(args) => commands::entities::run(args, cfg, cli.json).await,
+        Command::Tasks(args) => commands::tasks::run(args, cfg, cli.json).await,
         Command::Profile(args) => commands::profile_cmd::run(args, cfg, cli.json).await,
         Command::Export(args) => commands::export::run(args, cfg).await,
         Command::ImportBackup(args) => commands::import_backup::run(args, cfg).await,

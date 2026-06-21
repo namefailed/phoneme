@@ -70,7 +70,9 @@ fn new_subcommands_are_recognized() {
         "refire-hook",
         "suggest-tags",
         "suggest-entities",
+        "suggest-tasks",
         "entities",
+        "tasks",
         "speaker",
         "import-backup",
         "find-replace",
@@ -81,6 +83,24 @@ fn new_subcommands_are_recognized() {
             .assert()
             .success();
     }
+}
+
+/// `tasks`' own subcommands (`done` / `undone`) must parse.
+#[test]
+fn tasks_subcommands_are_recognized() {
+    for sub in ["done", "undone"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args(["tasks", sub, "--help"])
+            .assert()
+            .success();
+    }
+    // `tasks --open` (the list flag) must parse without a daemon.
+    Command::cargo_bin("phoneme")
+        .unwrap()
+        .args(["tasks", "--open", "--help"])
+        .assert()
+        .success();
 }
 
 /// `speaker`'s own subcommands must parse.

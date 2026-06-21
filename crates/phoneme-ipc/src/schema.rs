@@ -842,6 +842,32 @@ pub enum Request {
         /// The recording whose chapters to fetch.
         id: RecordingId,
     },
+    /// Run the LLM task-extraction step for one recording on demand (regardless
+    /// of whether the recipe includes a `tasks` step). Mirrors
+    /// [`Request::SuggestEntities`]: it awaits the step — Ok `null` arrives after
+    /// the model replies. Streams [`DaemonEvent::LlmActivity`] (Tagging stage)
+    /// while running; the structured tasks land on the recording (replacing any
+    /// previous set, **preserving any `done` flag** on a surviving task) and
+    /// [`DaemonEvent::TasksUpdated`] fires (or `TasksFailed`). Errors:
+    /// `invalid_config` when the recording has no transcript yet, `not_found`.
+    /// GUI Extract-tasks button, `phoneme suggest-tasks <id>`.
+    SuggestTasks {
+        /// The recording to extract tasks for.
+        id: RecordingId,
+    },
+    /// Toggle (or set) one task's `done` flag. The one task mutation — entities
+    /// have no analogue. Ok `null`; emits [`DaemonEvent::TasksUpdated`] for the
+    /// recording so open views refresh the chips. `not_found` when `task_id` is
+    /// unknown. GUI task checkbox, `phoneme tasks done <id> <task_id>`.
+    SetTaskDone {
+        /// The recording the task belongs to (carried so the emitted
+        /// `TasksUpdated` event names it, and for the `not_found` message).
+        id: RecordingId,
+        /// The task row id to toggle.
+        task_id: i64,
+        /// The new done state.
+        done: bool,
+    },
     /// Approve one suggested tag: create the tag if needed, attach it, and
     /// remove the name from the recording's suggestion list. Ok = the tag
     /// object `{"id":n,"name":…,"color":…}`; emits
@@ -1264,6 +1290,20 @@ pub enum Request {
     /// The entity *filter* itself rides on the existing [`Request::ListRecordings`]
     /// via `ListFilter::entity_value` / `entity_kind`.
     ListAllEntities,
+    /// The cross-recording task list: every extracted task across the library,
+    /// open first then newest recording first, each carrying its `recording_id` +
+    /// `title` so the UI/CLI can link back. The task counterpart of
+    /// [`Request::ListAllEntities`]. When `only_open` is set, done tasks are
+    /// dropped. Ok = a JSON array of
+    /// `{"recording_id":"…","title":…,"id":n,"text":"…","due_hint":…,"done":bool}`
+    /// (see [`phoneme_core::types::TaskWithRecording`]). Powers the GUI sidebar's
+    /// Tasks section and `phoneme tasks`. The per-recording task *filter* rides on
+    /// the existing [`Request::ListRecordings`] via `ListFilter::task_state`.
+    ListAllTasks {
+        /// When `true`, return only not-done tasks; when `false`, every task.
+        #[serde(default)]
+        only_open: bool,
+    },
     /// Merge one tag into another: re-point all recordings, then delete
     /// `from_id`. Ok `null`; emits [`DaemonEvent::TagDeleted`] for the
     /// source tag (consumers refresh on it). GUI Tag Manager merge,
@@ -1861,6 +1901,24 @@ pub enum DaemonEvent {
     /// [`DaemonEvent::EntitiesFailed`].
     ChaptersFailed {
         /// The recording whose auto-chapter step failed.
+        id: RecordingId,
+        /// Human-readable reason (endpoint, model, parse error, skip).
+        error: String,
+    },
+    /// A recording's tasks changed — the result of `SuggestTasks`, `SetTaskDone`,
+    /// or the auto-pipeline task-extraction step. Views re-fetch the recording to
+    /// show the new (or toggled) task chips. Mirrors
+    /// [`DaemonEvent::EntitiesUpdated`].
+    TasksUpdated {
+        /// The recording whose tasks changed.
+        id: RecordingId,
+    },
+    /// Task extraction failed. Best-effort like the other optional enrichment
+    /// steps: the recording keeps its transcript and stays usable (no tasks
+    /// added); this only surfaces the failure for the toast. `error` carries the
+    /// user-skip sentinel when skipped. Mirrors [`DaemonEvent::EntitiesFailed`].
+    TasksFailed {
+        /// The recording whose task-extraction step failed.
         id: RecordingId,
         /// Human-readable reason (endpoint, model, parse error, skip).
         error: String,
