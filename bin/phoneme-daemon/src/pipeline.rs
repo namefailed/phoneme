@@ -554,18 +554,11 @@ pub(crate) async fn run_llm_stage(
             done: false,
         });
     }
-    state.events.emit(DaemonEvent::LlmActivity {
-        id: id.clone(),
-        stage,
-        prompt: String::new(),
-        delta: String::new(),
-        done: true,
-    });
-
-    // Persist the completed session so the 🧠 AI-activity log survives an app
-    // restart (the live event stream above is in-memory only). Best-effort: a
-    // log-write failure must never fail the stage. A skipped/errored stage isn't
-    // persisted — only completed prompt→response sessions are logged.
+    // Persist the completed session BEFORE the terminal `done` marker, so the 🧠
+    // AI-activity log is durable by the time the UI sees completion and re-fetches
+    // (the live event stream above is in-memory only). Best-effort: a log-write
+    // failure must never fail the stage. A skipped/errored stage isn't persisted —
+    // only completed prompt→response sessions are logged.
     if let Ok(ref out) = result {
         if let Err(e) = state
             .catalog
@@ -575,6 +568,16 @@ pub(crate) async fn run_llm_stage(
             tracing::warn!(error = %e, ?stage, "failed to persist AI activity");
         }
     }
+
+    // The terminal `done` marker — emitted last (always, even on error), after the
+    // log write above so a GetRecording triggered by `done` can't race ahead of it.
+    state.events.emit(DaemonEvent::LlmActivity {
+        id: id.clone(),
+        stage,
+        prompt: String::new(),
+        delta: String::new(),
+        done: true,
+    });
 
     result
 }

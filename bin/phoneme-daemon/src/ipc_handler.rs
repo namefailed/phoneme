@@ -1133,7 +1133,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::SetTaskDone { id, task_id, done } => {
             // Toggle one task's done flag, then refresh open views. `not_found`
             // when the task id matches no row (a stale UI / bad id).
-            match state.catalog.set_task_done(task_id, done).await {
+            match state.catalog.set_task_done(&id, task_id, done).await {
                 Ok(0) => not_found(format!("no task {task_id}")),
                 Ok(_) => {
                     state.events.emit(DaemonEvent::TasksUpdated { id });

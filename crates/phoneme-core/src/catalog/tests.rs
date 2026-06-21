@@ -4410,7 +4410,9 @@ async fn set_tasks_preserves_done_flag_across_reextraction() {
         .find(|t| t.text == "Send the roadmap")
         .expect("roadmap task")
         .id;
-    db.set_task_done(roadmap_id, true).await.expect("set done");
+    db.set_task_done(&r.id, roadmap_id, true)
+        .await
+        .expect("set done");
 
     // Re-extraction returns the SAME texts (all freshly done = false). The done
     // flag on the surviving text must be preserved — not silently un-checked.
@@ -4442,7 +4444,7 @@ async fn set_task_done_flips_one_row_and_reports_missing() {
     let a_id = listed.iter().find(|t| t.text == "A").unwrap().id;
 
     // Flipping one row affects exactly one and leaves the other alone.
-    let affected = db.set_task_done(a_id, true).await.expect("done");
+    let affected = db.set_task_done(&r.id, a_id, true).await.expect("done");
     assert_eq!(affected, 1);
     let after = db.list_tasks(&r.id).await.expect("list");
     assert!(after.iter().find(|t| t.text == "A").unwrap().done);
@@ -4450,8 +4452,39 @@ async fn set_task_done_flips_one_row_and_reports_missing() {
 
     // An unknown task id matches no row (0 affected) — the handler maps that to
     // not_found.
-    let none = db.set_task_done(999_999, true).await.expect("missing");
+    let none = db
+        .set_task_done(&r.id, 999_999, true)
+        .await
+        .expect("missing");
     assert_eq!(none, 0);
+}
+
+#[tokio::test]
+async fn set_task_done_is_scoped_to_its_recording() {
+    // A task can only be toggled through the recording it belongs to: naming a
+    // different recording matches no row, so a client can't flip another
+    // recording's task (nor mis-fire TasksUpdated for the wrong recording).
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r1 = entity_test_recording();
+    let r2 = entity_test_recording();
+    db.insert(&r1).await.expect("insert r1");
+    db.insert(&r2).await.expect("insert r2");
+    db.set_tasks(&r1.id, &[task("r1 task")])
+        .await
+        .expect("set r1");
+    let t_id = db.list_tasks(&r1.id).await.expect("list r1")[0].id;
+
+    // Wrong recording → nothing matched, the task stays open.
+    let affected = db.set_task_done(&r2.id, t_id, true).await.expect("scoped");
+    assert_eq!(affected, 0, "cross-recording toggle matches nothing");
+    assert!(!db.list_tasks(&r1.id).await.expect("relist")[0].done);
+
+    // Right recording → flips exactly that row.
+    let affected = db.set_task_done(&r1.id, t_id, true).await.expect("owned");
+    assert_eq!(affected, 1);
+    assert!(db.list_tasks(&r1.id).await.expect("relist2")[0].done);
 }
 
 #[tokio::test]
@@ -4473,7 +4506,7 @@ async fn empty_set_tasks_clears_and_list_all_filters_open() {
     // Mark one of r1's tasks done.
     let r1_tasks = db.list_tasks(&r1.id).await.expect("list r1");
     let done_id = r1_tasks.iter().find(|t| t.text == "r1 done").unwrap().id;
-    db.set_task_done(done_id, true).await.expect("done");
+    db.set_task_done(&r1.id, done_id, true).await.expect("done");
 
     // list_all_tasks(false) returns every task with its recording ref.
     let all = db.list_all_tasks(false).await.expect("all");

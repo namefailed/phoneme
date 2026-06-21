@@ -2324,7 +2324,11 @@ async fn extract_tasks_persists_tasks_from_mock_llm() {
         .find(|t| t.text == "Send the roadmap")
         .unwrap()
         .id;
-    state.catalog.set_task_done(roadmap_id, true).await.unwrap();
+    state
+        .catalog
+        .set_task_done(&fetched.id, roadmap_id, true)
+        .await
+        .unwrap();
     let again = crate::pipeline::extract_tasks(
         &state,
         &cfg,

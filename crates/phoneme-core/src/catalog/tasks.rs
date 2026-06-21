@@ -98,14 +98,24 @@ impl Catalog {
             .collect()
     }
 
-    /// Toggle (or set) one task's `done` flag by its row id — the one mutation the
-    /// task feature adds (entities have no analogue). No-op when `task_id` is
-    /// unknown (the `UPDATE` simply matches no row); callers that need to detect a
-    /// missing task check the affected row count.
-    pub async fn set_task_done(&self, task_id: i64, done: bool) -> Result<u64> {
-        let res = sqlx::query("UPDATE tasks SET done = ? WHERE id = ?")
+    /// Toggle (or set) one task's `done` flag by its row id, **scoped to its
+    /// `recording_id`** — the one mutation the task feature adds (entities have no
+    /// analogue). The UPDATE matches on both the row id and the recording, so a
+    /// caller can never flip a task that belongs to a different recording than the
+    /// one it named (which would also fire `TasksUpdated` for the wrong recording).
+    /// A mismatched or unknown `(recording_id, task_id)` pair matches no row;
+    /// callers that need to detect that check the affected row count (the handler
+    /// maps 0 to `not_found`).
+    pub async fn set_task_done(
+        &self,
+        recording_id: &RecordingId,
+        task_id: i64,
+        done: bool,
+    ) -> Result<u64> {
+        let res = sqlx::query("UPDATE tasks SET done = ? WHERE id = ? AND recording_id = ?")
             .bind(done)
             .bind(task_id)
+            .bind(recording_id.as_str())
             .execute(&self.pool)
             .await?;
         Ok(res.rows_affected())

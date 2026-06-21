@@ -171,6 +171,18 @@ pub fn apply_voice_commands(text: &str, commands: &BTreeMap<String, String>) -> 
 /// trigger that is empty or all-whitespace is skipped so it can never match the
 /// gaps between every character.
 pub fn apply_snippets(text: &str, snippets: &BTreeMap<String, String>) -> String {
+    // Lowercase 1:1 by char (the first lowercase char of each), so the lowercased
+    // view stays index-aligned with the original — unlike `to_lowercase`, whose
+    // multi-char folds would change the length and desync the match positions.
+    // Unicode-aware unlike `to_ascii_lowercase`, so accented uppercase like 'É'
+    // folds to 'é' and a trigger in a non-ASCII script still matches (the config
+    // layer lowercases stored triggers the Unicode-aware way, so the text side
+    // must too, or 'CAFÉ' would never match the stored 'café').
+    fn lower_1to1(s: &str) -> String {
+        s.chars()
+            .map(|c| c.to_lowercase().next().unwrap_or(c))
+            .collect()
+    }
     if snippets.is_empty() {
         return text.to_string();
     }
@@ -180,19 +192,19 @@ pub fn apply_snippets(text: &str, snippets: &BTreeMap<String, String>) -> String
     let mut triggers: Vec<(Vec<char>, &str)> = snippets
         .iter()
         .filter(|(t, _)| !t.trim().is_empty())
-        .map(|(t, e)| (t.to_ascii_lowercase().chars().collect(), e.as_str()))
+        .map(|(t, e)| (lower_1to1(t).chars().collect(), e.as_str()))
         .collect();
     if triggers.is_empty() {
         return text.to_string();
     }
     triggers.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
 
-    let lower = text.to_ascii_lowercase();
+    let lower = lower_1to1(text);
     let chars: Vec<char> = text.chars().collect();
     let lower_chars: Vec<char> = lower.chars().collect();
-    // `to_ascii_lowercase` is 1:1 on chars, so the lowercased view aligns
-    // index-for-index with the original — a match position in one is the same in
-    // the other, letting us copy the original (cased) text outside matches.
+    // `lower_1to1` is 1:1 on chars, so the lowercased view aligns index-for-index
+    // with the original — a match position in one is the same in the other,
+    // letting us copy the original (cased) text outside matches.
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < chars.len() {

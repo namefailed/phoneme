@@ -112,6 +112,18 @@ Branch/restore across many edits and re-transcriptions, not just original-vs-cur
   vs manual edit) covers ~95% of the real need. A full version graph in SQLite + a
   history UI is a lot of machinery for the last 5%.
 
+### Streaming stall indicator (mid-stream LLM heartbeat)
+While a summary/cleanup streams token-by-token, a mid-stream provider stall (e.g.
+Ollama's per-chunk idle timeout) just stops the deltas — the live UI can't tell a
+"slow local model" from a "stuck" one. Real failures already surface through the
+terminal `summary_failed` / `cleanup_failed` events, so this is polish, not a
+correctness gap.
+- **Why parked:** would add an error/heartbeat field to the `LlmActivity` IPC
+  event (schema + daemon + frontend) so the streaming view can show a
+  stall/timeout marker. Surfaced by a post-merge cluster audit.
+- **Promote when:** users report streaming that "hangs" in a way they can't
+  distinguish from a genuinely slow model.
+
 ---
 
 *See also: [`ROADMAP.md`](../ROADMAP.md) → "Not convinced yet" for ideas we've
