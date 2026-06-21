@@ -523,6 +523,7 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         diarized: row.try_get("diarized").unwrap_or(false),
         user_edited: row.try_get("user_edited").unwrap_or(false),
         favorite: row.try_get("favorite").unwrap_or(false),
+        pinned: row.try_get("pinned").unwrap_or(false),
         tag_suggestions: row
             .try_get::<Option<String>, _>("tag_suggestions")
             .ok()

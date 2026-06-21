@@ -258,6 +258,86 @@ async fn list_filters_kind_and_favorites_in_sql_before_pagination() {
     assert_eq!(fav_singles.len(), 25);
 }
 
+#[tokio::test]
+async fn list_pins_float_to_top_and_filters_in_sql() {
+    // Pinned recordings always sort first (independent of the date order), and
+    // the `pinned` filter / `set_pinned` round-trip work like favorites.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+    // Insert oldest → newest so the natural (newest-first) order is the reverse
+    // of insertion; pin the OLDEST one so we can prove it jumps to the front.
+    let mut ids = Vec::new();
+    for i in 0..5 {
+        // Distinct started_at via from_datetime so the date sort is deterministic.
+        let dt = Local::now() - chrono::Duration::minutes((10 - i) as i64);
+        let id = RecordingId::from_datetime(dt);
+        let r = Recording {
+            id: id.clone(),
+            started_at: dt,
+            ..embedded_recording(None)
+        };
+        db.insert(&r).await.unwrap();
+        ids.push(id);
+    }
+    let oldest = ids[0].clone();
+
+    // No pin yet: pure newest-first, so the oldest is last.
+    let before = db.list(&ListFilter::default()).await.unwrap();
+    assert_eq!(before.last().unwrap().id.as_str(), oldest.as_str());
+    assert!(before.iter().all(|r| !r.pinned));
+
+    // Pin the oldest: it must now lead the list, ahead of the newer rows.
+    db.set_pinned(&oldest, true).await.unwrap();
+    let after = db.list(&ListFilter::default()).await.unwrap();
+    assert_eq!(
+        after.first().unwrap().id.as_str(),
+        oldest.as_str(),
+        "a pinned recording floats to the top regardless of date order"
+    );
+    assert!(after.first().unwrap().pinned);
+
+    // Pins still lead even when the user sorts oldest-first (pinned DESC wins).
+    let asc = db
+        .list(&ListFilter {
+            sort_desc: Some(false),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(asc.first().unwrap().id.as_str(), oldest.as_str());
+
+    // The `pinned` filter keeps only pinned rows; `Some(false)` is the complement.
+    let only_pinned = db
+        .list(&ListFilter {
+            pinned: Some(true),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(only_pinned.len(), 1);
+    assert!(only_pinned.iter().all(|r| r.pinned));
+    let unpinned = db
+        .list(&ListFilter {
+            pinned: Some(false),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(unpinned.len(), 4);
+    assert!(unpinned.iter().all(|r| !r.pinned));
+
+    // Unpinning reverts the sort: the oldest drops back to last.
+    db.set_pinned(&oldest, false).await.unwrap();
+    let reverted = db.list(&ListFilter::default()).await.unwrap();
+    assert_eq!(reverted.last().unwrap().id.as_str(), oldest.as_str());
+
+    // The KindCounts pinned badge tracks the live count.
+    db.set_pinned(&ids[1], true).await.unwrap();
+    db.set_pinned(&ids[2], true).await.unwrap();
+    let counts = db.kind_counts().await.unwrap();
+    assert_eq!(counts.pinned, 2);
+}
+
 #[test]
 fn test_sanitize_fts5_query() {
     // Bare words become quoted prefix terms, AND-ed.
@@ -322,6 +402,7 @@ fn embedded_recording(meeting_id: Option<&str>) -> Recording {
         diarized: false,
         user_edited: false,
         favorite: false,
+        pinned: false,
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
@@ -1199,6 +1280,7 @@ async fn test_insert_and_get() {
         diarized: false,
         user_edited: false,
         favorite: false,
+        pinned: false,
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
@@ -1262,6 +1344,7 @@ async fn original_transcript_preserved_across_user_edit() {
         diarized: false,
         user_edited: false,
         favorite: false,
+        pinned: false,
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
@@ -1333,6 +1416,7 @@ async fn notes_round_trip_and_survive_transcription() {
         diarized: false,
         user_edited: false,
         favorite: false,
+        pinned: false,
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
@@ -1489,6 +1573,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         diarized: false,
         user_edited: false,
         favorite: false,
+        pinned: false,
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
@@ -1542,6 +1627,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         diarized: false,
         user_edited: false,
         favorite: false,
+        pinned: false,
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,

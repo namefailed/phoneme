@@ -570,6 +570,7 @@ mod tests {
             diarized: false,
             user_edited: false,
             favorite: false,
+            pinned: false,
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,

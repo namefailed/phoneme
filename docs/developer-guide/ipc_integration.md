@@ -111,7 +111,7 @@ active recording has nothing new to attach them to):
 - `find_replace` (`{ "id", "find", "replace", "case_sensitive"? }`) — **literal** (not regex) find-and-replace across the live transcript, case-insensitive by default. Only the live `transcript` is rewritten (the preserved original/clean copies stay, so the edit is revertible); the word/segment timing layers are re-flowed and the text re-embedded exactly like `update_transcript`. A zero-match (or empty `find`) is a no-op. Ok = `{ "replaced": N }`; emits `transcript_updated` only when `N > 0`.
 - `find_replace_library` (`{ "find", "replace", "case_sensitive"? }`) — the across-**all**-recordings counterpart of `find_replace`. Runs the same literal, revertible, timing-re-flowing replacement over every recording's live transcript in one request. A recording with zero matches is skipped entirely (no write, no version churn, no event); an empty `find` is a whole-operation no-op. Ok = `{ "recordings_changed": R, "total_replacements": N, "failed": F }` (F = recordings whose update errored, excluding the benign no-transcript skip; the sweep is best-effort and never aborts on one bad row); emits one `transcript_updated` per changed recording.
 - `get_original_transcript` (raw machine transcript), `get_clean_transcript` (cleaned, pre-edit)
-- `set_favorite` (star/unstar), `set_speaker_name` (rename a diarized `[Speaker N]` label; never rewrites the stored transcript)
+- `set_favorite` (star/unstar), `set_pinned` (pin/unpin — pinned recordings sort to the top of the library, independent of favorites), `set_speaker_name` (rename a diarized `[Speaker N]` label; never rewrites the stored transcript)
 - **In-recording speaker correction** (fix the diarizer's per-segment assignments — `transcript_segments` stays authoritative, and each op rebuilds the prose transcript's `[Speaker N]:` markers in the same transaction so every view agrees; all three are mutating, not retry-safe, and emit `speaker_name_updated`):
   - `reassign_segment_speaker` (`{ "id", "idx": 0-based segment index, "new_label": 1-based label }`) — move one segment to another speaker; a brand-new label simply starts existing.
   - `merge_speakers` (`{ "id", "from_label", "into_label" }`) — every `from` segment becomes `into`, then `from` ceases to exist. `into` keeps its name (adopts `from`'s only when unnamed); `from`'s captured voiceprint is dropped (the centroid is per-label — a retranscribe re-captures the merged label) and any affected named voice is recomputed.
@@ -123,15 +123,17 @@ active recording has nothing new to attach them to):
 
 The `list_recordings` filter takes `limit`/`offset` (pagination),
 `since`/`until` (RFC 3339), `status` (one of the recording statuses below),
-`search` (FTS5), `tag_id`, `sort_desc`, plus three type filters applied in SQL
+`search` (FTS5), `tag_id`, `sort_desc`, plus the type filters applied in SQL
 **before** pagination so pages stay full: `kind` (`"single"` voice notes /
 `"meeting"` tracks; omit for all), `favorite` (`true` = starred only,
-`false` = unstarred only), and `in_place` (`true` = only in-place-dictation
-recordings). All fields are optional; older clients that omit the newer ones
-keep working.
+`false` = unstarred only), `pinned` (`true` = pinned only, `false` = unpinned
+only), and `in_place` (`true` = only in-place-dictation recordings). All fields
+are optional; older clients that omit the newer ones keep working. `list` always
+sorts pinned recordings first (`pinned DESC` leads the ORDER BY), ahead of the
+date sort, so pins float to the top regardless of `sort_desc`.
 
 `kind_counts` returns full-corpus recording counts per Library kind as a JSON
-object — `{all, single, meeting, in_place, favorite}` (one SQL pass,
+object — `{all, single, meeting, in_place, favorite, pinned}` (one SQL pass,
 `Catalog::kind_counts`) — powering the sidebar's Library count badges.
 
 Recording `status` values: `recording`, `paused`, `queued`, `transcribing`,

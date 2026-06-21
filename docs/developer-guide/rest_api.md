@@ -112,6 +112,7 @@ A state-changing `POST`/`DELETE` carrying a foreign `Origin` is refused with
 | `POST`   | `/api/meeting/stop` | `StopMeeting` | No body. Stops and finalizes the active meeting. |
 | `POST`   | `/api/recordings/{id}/title` | `SetRecordingTitle` | `{"title":"…"}` to set; `{}` or `{"title":null}` to clear back to auto. |
 | `POST`   | `/api/recordings/{id}/favorite` | `SetFavorite` | `{"favorite":true|false}`. |
+| `POST`   | `/api/recordings/{id}/pinned` | `SetPinned` | `{"pinned":true|false}`. Pinned recordings sort to the top of the library. |
 | `POST`   | `/api/recordings/{id}/tags` | `AttachTag` | `{"tag_id":<id>}` — attach an existing tag. |
 | `DELETE` | `/api/recordings/{id}/tags/{tag_id}` | `DetachTag` | No body. Detach a tag from a recording. |
 | `POST`   | `/api/recordings/{id}/cleanup` | `RerunCleanup` | No body. Re-runs the LLM cleanup step against the stored original transcript (configured provider/model/prompt; the per-run overrides are not exposed over REST). |
@@ -227,6 +228,8 @@ curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/title \
   -H 'content-type: application/json' -d '{"title":"Quarterly review"}'
 curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/favorite \
   -H 'content-type: application/json' -d '{"favorite":true}'
+curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/pinned \
+  -H 'content-type: application/json' -d '{"pinned":true}'
 
 # Re-run cleanup / summary on the stored transcript
 curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/cleanup

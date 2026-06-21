@@ -840,6 +840,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        Request::SetPinned { id, pinned } => match state.catalog.set_pinned(&id, pinned).await {
+            Ok(()) => ok_null(),
+            Err(e) => err_response(&e),
+        },
         Request::SetRecordingTitle { id, title } => {
             // A blank title means "clear back to auto", same as None. `Some` marks
             // the title user-owned, so the pipeline never overwrites it; `None`
@@ -2583,6 +2587,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         diarized: false,
         user_edited: false,
         favorite: false,
+        pinned: false,
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
@@ -2853,6 +2858,7 @@ async fn reimport_from_disk(state: &AppState, dry_run: bool) -> Response {
             diarized: false,
             user_edited: false,
             favorite: false,
+            pinned: false,
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
@@ -3297,6 +3303,7 @@ mod tests {
             diarized: false,
             user_edited: false,
             favorite: false,
+            pinned: false,
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,

@@ -3,8 +3,9 @@
 `phoneme-mcp` is a thin [Model Context Protocol](https://modelcontextprotocol.io)
 bridge that exposes Phoneme to MCP-capable AI clients (Claude Desktop, the
 Claude CLI, and any other MCP host). It lets an assistant **record, search and
-read your library, and act on recordings** — set titles, star favorites,
-suggest / approve / dismiss tags, summarize, re-run cleanup, re-transcribe, find
+read your library, and act on recordings** — set titles, star favorites, pin
+recordings, suggest / approve / dismiss tags, summarize, re-run cleanup,
+re-transcribe, find
 similar recordings, pull word-level timings and segments, run meetings, and
 correct / name / recognize speakers (including the named-voice library) —
 through the same daemon the GUI and `phoneme` CLI talk to.
@@ -58,6 +59,7 @@ Any other method returns a JSON-RPC `-32601` (method not found).
 |------|-----------|---------|---------|
 | `set_title` | `id` (required), `title?` | `SetRecordingTitle` | Confirmation (omit/blank `title` reverts to auto) |
 | `set_favorite` | `id`, `favorite` (both required) | `SetFavorite` | Confirmation |
+| `set_pinned` | `id`, `pinned` (both required) | `SetPinned` | Confirmation (pinned recordings sort to the top of the library) |
 | `suggest_tags` | `id` (required) | `SuggestTags` | Confirmation (LLM suggestions land for approval; awaits the model) |
 | `list_tags` | _(none)_ | `ListAllTags` | A bulleted list of every tag name |
 | `summarize` | `id` (required) | `RerunSummary` | Confirmation (regenerates + stores the summary) |
@@ -227,7 +229,7 @@ enum:
 `ToolRegistry::with_phoneme_tools()` (also `Default`) registers the **canonical
 Phoneme toolset in the same order** `phoneme-mcp` exposes it: the read-only core
 (`start_recording`, `stop_recording`, `get_transcript`, `search_recordings`,
-`list_recent`), the "act on it" tools (`set_title`, `set_favorite`,
+`list_recent`), the "act on it" tools (`set_title`, `set_favorite`, `set_pinned`,
 `suggest_tags`, `list_tags`, `summarize`, `rerun_cleanup`, `retranscribe`,
 `more_like_this`, `get_words`, `get_segments`, `approve_tag_suggestion`,
 `dismiss_tag_suggestion`), the meeting tools (`start_meeting`, `stop_meeting`,

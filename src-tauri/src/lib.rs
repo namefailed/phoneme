@@ -535,6 +535,7 @@ pub fn run() {
             commands::get_clean_transcript,
             commands::update_notes,
             commands::set_favorite,
+            commands::set_pinned,
             commands::set_recording_title,
             commands::export_captions,
             commands::export_recording_json,

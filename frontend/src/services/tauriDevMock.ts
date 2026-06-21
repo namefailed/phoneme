@@ -70,6 +70,7 @@ function rec(
     title,
     title_is_auto: true,
     favorite,
+    pinned: false,
     diarized: id === "r11",
     user_edited: false,
     tags: tagIds.map((t) => TAGS.find((x) => x.id === t)).filter(Boolean),
@@ -234,6 +235,7 @@ function moreRecordings(): Array<Record<string, unknown>> {
     const h = 8 + (i % 12);
     const m = (i * 7) % 60;
     const favorite = i % 5 === 0;
+    const pinned = i % 11 === 4; // a couple of pinned rows for preview
     const inPlace = i % 7 === 3;
     const isLong = i % 6 === 2;
     const title = MORE_TITLES[i % MORE_TITLES.length];
@@ -242,7 +244,10 @@ function moreRecordings(): Array<Record<string, unknown>> {
     const transcript = isLong
       ? `${title} — extended sample.\n\n${LONG}`
       : `${title}. Placeholder transcript for layout testing.\n\n${i % 2 ? PARA : P1}`;
-    out.push(rec(id, daysAgo, h, m, dur, title, tags, favorite, transcript, inPlace ? { in_place: true } : {}));
+    const extra: Record<string, unknown> = {};
+    if (inPlace) extra.in_place = true;
+    if (pinned) extra.pinned = true;
+    out.push(rec(id, daysAgo, h, m, dur, title, tags, favorite, transcript, extra));
   }
   return out;
 }
@@ -532,7 +537,12 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       let rows = [...RECORDINGS].sort((a, b) =>
         String(b.started_at).localeCompare(String(a.started_at)),
       );
+      // Pinned recordings float to the top, mirroring the daemon's
+      // `pinned DESC` lead in the ORDER BY (stable within each group).
+      rows.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
       if (f.favorite === true) rows = rows.filter((r) => r.favorite);
+      if (f.pinned === true) rows = rows.filter((r) => r.pinned);
+      else if (f.pinned === false) rows = rows.filter((r) => !r.pinned);
       if (f.in_place === true) rows = rows.filter((r) => r.in_place);
       if (f.kind === "single") rows = rows.filter((r) => r.meeting_id == null);
       if (f.kind === "meeting") rows = rows.filter((r) => r.meeting_id != null);
@@ -600,6 +610,14 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       const i = RECORDINGS.findIndex((x) => x.id === id);
       if (i >= 0) RECORDINGS.splice(i, 1);
       emitDaemon({ event: "recording_deleted", id });
+      return undefined;
+    }
+    case "set_pinned": {
+      // Mutate the in-memory record so the pinned-first sort + sidebar "Pinned"
+      // badge reflect it in the browser preview.
+      const id = args.id as string;
+      const rec = RECORDINGS.find((x) => x.id === id);
+      if (rec) rec.pinned = !!args.pinned;
       return undefined;
     }
     case "delete_session": {
@@ -712,6 +730,7 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       meeting: RECORDINGS.filter((r) => r.meeting_id != null).length,
       in_place: RECORDINGS.filter((r) => r.in_place).length,
       favorite: RECORDINGS.filter((r) => r.favorite).length,
+      pinned: RECORDINGS.filter((r) => r.pinned).length,
       tagged: RECORDINGS.filter((r) => Array.isArray(r.tags) && (r.tags as unknown[]).length > 0).length,
       untagged: RECORDINGS.filter((r) => !Array.isArray(r.tags) || (r.tags as unknown[]).length === 0).length,
     };

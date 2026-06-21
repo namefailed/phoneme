@@ -164,6 +164,24 @@ pub fn set_favorite(id: RecordingId, body: &FavoriteBody) -> Request {
     }
 }
 
+/// JSON body for `POST /api/recordings/:id/pinned`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PinnedBody {
+    /// `true` = pinned. Lenient (`#[serde(default)]`) for the same reason as
+    /// [`FavoriteBody::favorite`]: an omitted field decodes to `false` rather
+    /// than erroring out of the uniform `{"error":…}` envelope.
+    #[serde(default)]
+    pub pinned: bool,
+}
+
+/// `POST /api/recordings/:id/pinned` → [`Request::SetPinned`].
+pub fn set_pinned(id: RecordingId, body: &PinnedBody) -> Request {
+    Request::SetPinned {
+        id,
+        pinned: body.pinned,
+    }
+}
+
 /// JSON body for `POST /api/recordings/:id/tags`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct AttachTagBody {
@@ -454,6 +472,23 @@ mod tests {
         match set_favorite(id.clone(), &FavoriteBody::default()) {
             Request::SetFavorite { favorite, .. } => assert!(!favorite),
             other => panic!("expected SetFavorite, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_pinned_carries_the_flag() {
+        let id = parse_id("20260519T143500042").unwrap();
+        match set_pinned(id.clone(), &PinnedBody { pinned: true }) {
+            Request::SetPinned { id: got, pinned } => {
+                assert_eq!(got, id);
+                assert!(pinned);
+            }
+            other => panic!("expected SetPinned, got {other:?}"),
+        }
+        // Default body is unpinned.
+        match set_pinned(id.clone(), &PinnedBody::default()) {
+            Request::SetPinned { pinned, .. } => assert!(!pinned),
+            other => panic!("expected SetPinned, got {other:?}"),
         }
     }
 

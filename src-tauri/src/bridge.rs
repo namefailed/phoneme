@@ -228,6 +228,7 @@ fn is_retry_safe(req: &Request) -> bool {
         | UpdateMeetingName { .. }
         | UpdateNotes { .. }
         | SetFavorite { .. }
+        | SetPinned { .. }
         | SetRecordingTitle { .. }
         // Tag suggestions.
         | SuggestTags { .. }

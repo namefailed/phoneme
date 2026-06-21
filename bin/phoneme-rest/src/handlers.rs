@@ -14,7 +14,7 @@ use axum::Json;
 use crate::daemon;
 use crate::error::RestError;
 use crate::request_map::{
-    self, AttachTagBody, FavoriteBody, ListQuery, SearchQuery, SimilarQuery, TitleBody,
+    self, AttachTagBody, FavoriteBody, ListQuery, PinnedBody, SearchQuery, SimilarQuery, TitleBody,
 };
 use crate::server::AppState;
 
@@ -133,6 +133,18 @@ pub async fn set_favorite(
 ) -> Result<Json<serde_json::Value>, RestError> {
     let id = require_id(&id)?;
     let value = daemon::forward(&state.pipe_name, request_map::set_favorite(id, &body)).await?;
+    Ok(Json(value))
+}
+
+/// `POST /api/recordings/:id/pinned` — set/clear the pinned flag
+/// (`{"pinned":true|false}`). Pinned recordings sort to the top of the library.
+pub async fn set_pinned(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<PinnedBody>,
+) -> Result<Json<serde_json::Value>, RestError> {
+    let id = require_id(&id)?;
+    let value = daemon::forward(&state.pipe_name, request_map::set_pinned(id, &body)).await?;
     Ok(Json(value))
 }
 

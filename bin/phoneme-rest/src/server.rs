@@ -106,6 +106,7 @@ pub struct AppState {
 /// | DELETE | `/api/recordings/{id}/tags/{tag_id}` | `DetachTag` |
 /// | POST   | `/api/recordings/{id}/title`  | `SetRecordingTitle` |
 /// | POST   | `/api/recordings/{id}/favorite` | `SetFavorite`   |
+/// | POST   | `/api/recordings/{id}/pinned` | `SetPinned`       |
 /// | POST   | `/api/recordings/{id}/cleanup` | `RerunCleanup`   |
 /// | POST   | `/api/recordings/{id}/summary` | `RerunSummary`   |
 /// | GET    | `/api/tags`                   | `ListTags`        |
@@ -141,6 +142,7 @@ pub fn router(state: AppState) -> Router {
             "/api/recordings/{id}/favorite",
             post(handlers::set_favorite),
         )
+        .route("/api/recordings/{id}/pinned", post(handlers::set_pinned))
         .route(
             "/api/recordings/{id}/cleanup",
             post(handlers::rerun_cleanup),

@@ -9,9 +9,11 @@
 //!   title user-owned); `--clear-title` → `SetRecordingTitle { title: None }`
 //!   (reverts to auto-generation on the next pipeline run).
 //! - favorite: `--favorite` / `--unfavorite` → `SetFavorite`.
+//! - pinned: `--pin` / `--unpin` → `SetPinned`.
 //!
 //! Stdin is only consulted when a transcript edit is actually requested — a
-//! metadata-only edit (e.g. just `--favorite`) never blocks reading stdin.
+//! metadata-only edit (e.g. just `--favorite` or `--pin`) never blocks reading
+//! stdin.
 
 use crate::args::EditArgs;
 use crate::client::Client;
@@ -32,13 +34,14 @@ pub async fn run(args: EditArgs, cfg: &Config) -> ExitCode {
 
     let title_edit = args.title.is_some() || args.clear_title;
     let favorite_edit = args.favorite || args.unfavorite;
+    let pin_edit = args.pin || args.unpin;
 
     // A transcript edit happens when --text is given, or when there is no
     // metadata edit at all (the original stdin-driven behavior). A
     // metadata-only edit must not block reading stdin.
     let transcript_text = if args.text.is_some() {
         args.text
-    } else if title_edit || favorite_edit {
+    } else if title_edit || favorite_edit || pin_edit {
         None
     } else {
         let mut buf = String::new();
@@ -100,6 +103,20 @@ pub async fn run(args: EditArgs, cfg: &Config) -> ExitCode {
         println!("{}", if favorite { "favorited" } else { "unfavorited" });
     }
 
+    if pin_edit {
+        let pinned = args.pin;
+        if let Err(code) = client
+            .send(Request::SetPinned {
+                id: id.clone(),
+                pinned,
+            })
+            .await
+        {
+            return code;
+        }
+        println!("{}", if pinned { "pinned" } else { "unpinned" });
+    }
+
     ExitCode::SUCCESS
 }
 
@@ -118,6 +135,8 @@ mod tests {
             clear_title: false,
             favorite: false,
             unfavorite: false,
+            pin: false,
+            unpin: false,
         }
     }
 
@@ -195,6 +214,27 @@ mod tests {
                 favorite: false
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn pin_and_unpin_send_set_pinned() {
+        let id = RecordingId::new();
+        let mut args = base_args(&id.to_string());
+        args.pin = true;
+        let (code, reqs) = run_edit(args).await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            reqs,
+            vec![Request::SetPinned {
+                id: id.clone(),
+                pinned: true
+            }]
+        );
+
+        let mut args = base_args(&id.to_string());
+        args.unpin = true;
+        let (_code, reqs) = run_edit(args).await;
+        assert_eq!(reqs, vec![Request::SetPinned { id, pinned: false }]);
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listRecordings, semanticSearch, moreLikeThis, updateMeetingName, setFavorite, type Recording } from "../../services/ipc";
+import { listRecordings, semanticSearch, moreLikeThis, updateMeetingName, setFavorite, setPinned, type Recording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { Store } from "../../state/store";
 import { filterStore, toWireFilter, type RecordingKind, type UiFilter } from "../../state/filter";
@@ -194,6 +194,8 @@ export class RecordingsListElement extends LitElement {
   private freshIds = new Set<string>();
   /** A favorite that was just toggled on — gets a one-shot star pop. */
   private poppedFavId: string | null = null;
+  /** A recording just pinned — gets a one-shot pin pop. */
+  private poppedPinId: string | null = null;
 
   protected willUpdate() {
     const ids = this.listState?.recordings?.map((r) => r.id) ?? [];
@@ -323,6 +325,38 @@ export class RecordingsListElement extends LitElement {
       r.favorite = !next; // revert on failure
       this.requestUpdate();
       showToast(`Couldn't ${next ? "star" : "unstar"}: ${errText(e)}`, "error");
+    }
+  }
+
+  /** Toggle the pinned flag on a recording (optimistic; persisted via IPC).
+   *  Mirrors `toggleFavorite`, but pinning also re-sorts the list (pins float to
+   *  the top), so a successful change re-queries via the counts-stale nudge. */
+  private async togglePinned(r: Recording) {
+    const next = !r.pinned;
+    r.pinned = next; // optimistic — reflect immediately
+    // One-shot pin pop when pinning; cleared after the animation so it doesn't
+    // replay on the next re-render.
+    this.poppedPinId = next ? r.id : null;
+    if (next) {
+      const id = r.id;
+      window.setTimeout(() => {
+        if (this.poppedPinId === id) {
+          this.poppedPinId = null;
+          this.requestUpdate();
+        }
+      }, 320);
+    }
+    this.requestUpdate();
+    try {
+      await setPinned(r.id, next);
+      // Pinned has no daemon event; nudge the sidebar to refresh its Library
+      // "Pinned" count badge, then re-query so the pinned-first sort applies.
+      window.dispatchEvent(new CustomEvent("phoneme:counts-stale"));
+      void this.refresh();
+    } catch (e) {
+      r.pinned = !next; // revert on failure
+      this.requestUpdate();
+      showToast(`Couldn't ${next ? "pin" : "unpin"}: ${errText(e)}`, "error");
     }
   }
 
@@ -801,10 +835,11 @@ export class RecordingsListElement extends LitElement {
       "source",
       "transcript",
     ];
-    // The star/favorite column is always present (a quick affordance, not a data
-    // column you reorder), so inject it at the front when the saved column config
-    // doesn't already include it.
+    // The star/favorite and pin columns are always present (quick affordances,
+    // not data columns you reorder), so inject them at the front when the saved
+    // column config doesn't already include them. Pin sits leftmost, then star.
     if (!visibleCols.includes("favorite")) visibleCols = ["favorite", ...visibleCols];
+    if (!visibleCols.includes("pinned")) visibleCols = ["pinned", ...visibleCols];
     // The transcript snippet is always the last column: its read-more horizontal
     // scroll depends on it and any other position misbehaves (Settings pins it
     // last too; this is the defensive guarantee). If a stale config has it
@@ -823,6 +858,7 @@ export class RecordingsListElement extends LitElement {
       // title, a couple of tag chips, model names (e.g. whisper-large-v3-turbo),
       // boolean badges, a source label. Transcript takes the rest (1fr).
       const defaults: Record<string, string> = {
+        pinned: "40px",
         favorite: "40px",
         day: "96px",
         time: "96px",
@@ -889,6 +925,7 @@ export class RecordingsListElement extends LitElement {
     const someSelected = this.multiSelected.size > 0 && !allSelected;
 
     const colLabels: Record<string, string> = {
+      pinned: "📌",
       favorite: "⭐",
       day: "Day",
       time: "Time",
@@ -1052,6 +1089,7 @@ export class RecordingsListElement extends LitElement {
     const cellMap: Record<string, unknown> = {
       day: html`<span class="rec-time">${day}</span>`,
       favorite: html`<span class="rec-fav"><button class="rec-fav-btn ${r.favorite ? "on" : ""} ${this.poppedFavId === r.id ? "star-pop" : ""}" title=${r.favorite ? "Unstar" : "Star"} aria-label=${r.favorite ? "Unstar" : "Star"} @click=${(e: Event) => { e.stopPropagation(); void this.toggleFavorite(r); }}>⭐</button></span>`,
+      pinned: html`<span class="rec-pin"><button class="rec-pin-btn ${r.pinned ? "on" : ""} ${this.poppedPinId === r.id ? "pin-pop" : ""}" title=${r.pinned ? "Unpin" : "Pin to top"} aria-label=${r.pinned ? "Unpin" : "Pin to top"} @click=${(e: Event) => { e.stopPropagation(); void this.togglePinned(r); }}>📌</button></span>`,
       time: html`<span class="rec-time">${time}</span>`,
       duration: html`<span class="rec-dur">${dur}</span>`,
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,

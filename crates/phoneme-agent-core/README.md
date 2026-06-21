@@ -31,9 +31,9 @@ order):
 
 - **Read-only core** — `start_recording`, `stop_recording`, `get_transcript`,
   `search_recordings`, `list_recent`.
-- **Act on it** — `set_title`, `set_favorite`, `suggest_tags`, `list_tags`,
-  `summarize`, `rerun_cleanup`, `retranscribe`, `more_like_this`, `get_words`,
-  `get_segments`, `approve_tag_suggestion`, `dismiss_tag_suggestion`.
+- **Act on it** — `set_title`, `set_favorite`, `set_pinned`, `suggest_tags`,
+  `list_tags`, `summarize`, `rerun_cleanup`, `retranscribe`, `more_like_this`,
+  `get_words`, `get_segments`, `approve_tag_suggestion`, `dismiss_tag_suggestion`.
 - **Meetings** — `start_meeting`, `stop_meeting`, `list_meeting`.
 - **Speakers** — `set_speaker_name`, `reassign_speaker_segment`,
   `merge_speakers`, `split_speaker`, `recognize_speakers`.

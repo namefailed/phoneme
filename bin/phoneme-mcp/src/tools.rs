@@ -133,6 +133,7 @@ pub fn render_result(tool: &str, value: &Value) -> String {
         // short confirmation is the useful rendering.
         "set_title" => "Title updated.".to_string(),
         "set_favorite" => "Favorite updated.".to_string(),
+        "set_pinned" => "Pinned updated.".to_string(),
         "suggest_tags" => "Tag suggestions generated.".to_string(),
         "summarize" => "Summary generated.".to_string(),
         "rerun_cleanup" => "Cleanup re-run started.".to_string(),
@@ -650,6 +651,20 @@ mod tests {
     }
 
     #[test]
+    fn set_pinned_maps_and_requires_flag() {
+        let id = RecordingId::new();
+        assert_eq!(
+            build_request("set_pinned", &json!({"id": id.as_str(), "pinned": true})).unwrap(),
+            Request::SetPinned {
+                id: id.clone(),
+                pinned: true
+            }
+        );
+        // Missing the required boolean → tool error (never reaches the daemon).
+        assert!(build_request("set_pinned", &json!({"id": id.as_str()})).is_err());
+    }
+
+    #[test]
     fn suggest_tags_and_list_tags_map() {
         let id = RecordingId::new();
         assert_eq!(
@@ -756,6 +771,7 @@ mod tests {
             render_result("set_favorite", &Value::Null),
             "Favorite updated."
         );
+        assert_eq!(render_result("set_pinned", &Value::Null), "Pinned updated.");
         assert_eq!(
             render_result("suggest_tags", &Value::Null),
             "Tag suggestions generated."

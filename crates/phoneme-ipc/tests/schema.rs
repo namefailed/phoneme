@@ -63,6 +63,7 @@ fn list_recordings_request_roundtrips() {
         sort_desc: None,
         kind: Some(ListKind::Single),
         favorite: Some(true),
+        pinned: Some(true),
         in_place: None,
         tagged: None,
         low_confidence_below: None,
@@ -82,7 +83,16 @@ fn list_filter_without_kind_or_favorite_still_deserializes() {
     };
     assert_eq!(filter.kind, None);
     assert_eq!(filter.favorite, None);
+    assert_eq!(filter.pinned, None);
     assert_eq!(filter.limit, Some(10));
+}
+
+#[test]
+fn set_pinned_request_roundtrips() {
+    roundtrip(&Request::SetPinned {
+        id: RecordingId::new(),
+        pinned: true,
+    });
 }
 
 #[test]

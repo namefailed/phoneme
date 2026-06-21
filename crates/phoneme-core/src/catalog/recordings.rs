@@ -65,10 +65,10 @@ impl Catalog {
                  id, started_at, duration_ms, audio_path, transcript, model, status,
                  error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
                  transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
-                 cleanup_model, diarized, user_edited, favorite, tag_suggestions, summary,
+                 cleanup_model, diarized, user_edited, favorite, pinned, tag_suggestions, summary,
                  summary_model, title, title_is_auto, title_model, tag_model, diarization_model,
                  mean_confidence
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -93,6 +93,7 @@ impl Catalog {
         .bind(r.diarized)
         .bind(r.user_edited)
         .bind(r.favorite)
+        .bind(r.pinned)
         .bind(tag_suggestions)
         .bind(r.summary.as_deref())
         .bind(r.summary_model.as_deref())
@@ -567,6 +568,21 @@ impl Catalog {
         Ok(())
     }
 
+    /// Set or clear the "pinned" flag for a recording (Pinned view). Pinned
+    /// recordings sort to the top of the library, independent of `favorite`.
+    pub async fn set_pinned(&self, id: &RecordingId, pinned: bool) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET pinned = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(pinned as i64)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// The preserved original (machine) transcript, if any. `None` for
     /// recordings transcribed before this column existed, or never transcribed.
     pub async fn get_original_transcript(&self, id: &RecordingId) -> Result<Option<String>> {
@@ -680,14 +696,15 @@ impl Catalog {
         Ok(Some(rec))
     }
 
-    /// List recordings matching `filter`, newest-first by default, with tags and
-    /// speaker names populated per row.
+    /// List recordings matching `filter`, pinned-first then newest-first by
+    /// default, with tags and speaker names populated per row.
     ///
     /// Every predicate — full-text search, tag, status, kind (single vs. meeting),
-    /// favorites, date range — is applied in SQL before `LIMIT`/`OFFSET`, so
-    /// pagination composes correctly. Filtering after pagination would return
-    /// mostly-empty pages of the chosen kind. Backs the GUI Library and the CLI
-    /// `phoneme list`.
+    /// favorites, pinned, date range — is applied in SQL before `LIMIT`/`OFFSET`,
+    /// so pagination composes correctly. Filtering after pagination would return
+    /// mostly-empty pages of the chosen kind. Pinned recordings always sort to the
+    /// top (`pinned DESC` leads the ORDER BY), ahead of the date sort. Backs the
+    /// GUI Library and the CLI `phoneme list`.
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
         let mut sql = String::from("SELECT recordings.* FROM recordings");
 
@@ -726,9 +743,10 @@ impl Catalog {
         if filter.status.is_some() {
             sql.push_str(" AND recordings.status = ?");
         }
-        // Kind and favorites are filtered in SQL, not client-side: they must apply
-        // before LIMIT/OFFSET, or pages of the chosen kind come back mostly empty
-        // (post-pagination filtering only ever thins the fetched page).
+        // Kind, favorites, and pinned are filtered in SQL, not client-side: they
+        // must apply before LIMIT/OFFSET, or pages of the chosen kind come back
+        // mostly empty (post-pagination filtering only ever thins the fetched
+        // page).
         match filter.kind {
             Some(crate::types::ListKind::Single) => {
                 sql.push_str(" AND recordings.meeting_id IS NULL");
@@ -741,6 +759,11 @@ impl Catalog {
         match filter.favorite {
             Some(true) => sql.push_str(" AND recordings.favorite = 1"),
             Some(false) => sql.push_str(" AND recordings.favorite = 0"),
+            None => {}
+        }
+        match filter.pinned {
+            Some(true) => sql.push_str(" AND recordings.pinned = 1"),
+            Some(false) => sql.push_str(" AND recordings.pinned = 0"),
             None => {}
         }
         match filter.in_place {
@@ -782,8 +805,12 @@ impl Catalog {
         } else {
             "ASC"
         };
+        // Pinned recordings always float to the top, independent of the date sort
+        // direction (`pinned DESC` puts 1s before 0s), then the chosen order
+        // applies within each group. So pins lead the list whether the user sorts
+        // newest- or oldest-first.
         sql.push_str(&format!(
-            " ORDER BY recordings.started_at {dir}, recordings.id {dir}"
+            " ORDER BY recordings.pinned DESC, recordings.started_at {dir}, recordings.id {dir}"
         ));
         // LIMIT / OFFSET for pagination. SQLite requires a LIMIT before an OFFSET,
         // so an offset given on its own uses `LIMIT -1` (no row cap). `limit` and

@@ -342,6 +342,9 @@ below applies in one invocation:
   pipeline run).
 - **Favorite** — `--favorite` / `--unfavorite` star or unstar the recording
   (the Favorites view).
+- **Pinned** — `--pin` / `--unpin` pin or unpin the recording. Pinned
+  recordings sort to the top of the library, independent of favorites
+  (the Pinned view).
 
 ```bash
 # Transcript edit (the original behavior): --text or stdin
@@ -356,11 +359,15 @@ phoneme edit 20260519T143500823 --clear-title
 phoneme edit 20260519T143500823 --favorite
 phoneme edit 20260519T143500823 --unfavorite
 
+# Pin / unpin (sorts to the top of the library)
+phoneme edit 20260519T143500823 --pin
+phoneme edit 20260519T143500823 --unpin
+
 # Combine: fix the text and set a title in one call
 phoneme edit 20260519T143500823 --text "Fixed." --title "Standup notes"
 ```
 
-A metadata-only edit (e.g. just `--favorite`) never blocks reading stdin.
+A metadata-only edit (e.g. just `--favorite` or `--pin`) never blocks reading stdin.
 
 ### 🔁 `phoneme find-replace <ID> <FIND> <REPLACE>`
 

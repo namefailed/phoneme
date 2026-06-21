@@ -55,6 +55,13 @@ describe('toWireFilter', () => {
     expect(wire.kind).toBeUndefined();
   });
 
+  it('maps the pinned kind onto the wire pinned flag, not kind', () => {
+    const wire = toWireFilter({ kind: 'pinned' });
+    expect(wire.pinned).toBe(true);
+    expect(wire.kind).toBeUndefined();
+    expect(wire.favorite).toBeUndefined();
+  });
+
   it('sends neither field for "all" or an unset kind', () => {
     for (const f of [toWireFilter({ kind: 'all' }), toWireFilter({})]) {
       expect(f.kind).toBeUndefined();

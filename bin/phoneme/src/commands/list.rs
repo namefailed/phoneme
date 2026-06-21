@@ -212,6 +212,7 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
         until,
         kind,
         favorite: None,             // no CLI flag for this yet
+        pinned: None,               // no CLI flag for this yet
         in_place: None,             // no CLI flag for this yet
         tagged: None,               // no CLI flag for this yet
         low_confidence_below: None, // no CLI flag for this yet

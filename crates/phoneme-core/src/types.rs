@@ -232,10 +232,11 @@ pub struct SavedSearch {
 /// translate the filter.
 ///
 /// It is a superset of [`ListFilter`]: it carries the same wire fields plus the
-/// UI-only re-modelling the frontend uses — the four-way `kind`
-/// (`all`/`single`/`meeting`/`in_place`/`favorite`) that maps onto the daemon's
-/// `kind`/`favorite`/`in_place`, and `tag_state` (`tagged`/`untagged`) that maps
-/// onto `tagged`. UI-only display state (`semantic`, `like_id`, `like_label`) is
+/// UI-only re-modelling the frontend uses — the `kind`
+/// (`all`/`single`/`meeting`/`in_place`/`favorite`/`pinned`) that maps onto the
+/// daemon's `kind`/`favorite`/`in_place`/`pinned`, and `tag_state`
+/// (`tagged`/`untagged`) that maps onto `tagged`. UI-only display state
+/// (`semantic`, `like_id`, `like_label`) is
 /// accepted-and-ignored: executing a saved search runs the normal *list* query,
 /// not a similarity/semantic search (those are separate IPCs). Every field is
 /// optional / serde-defaulted so a snapshot written by any frontend version (or
@@ -269,9 +270,9 @@ pub struct SavedSearchFilter {
     /// `true` (default) = newest first; `false` = oldest first.
     #[serde(default)]
     pub sort_desc: Option<bool>,
-    /// The frontend's four-way Library type-filter, as a string:
-    /// `all`/`single`/`meeting`/`in_place`/`favorite`. Mapped onto the daemon's
-    /// `kind`/`favorite`/`in_place` by [`Self::into_list_filter`].
+    /// The frontend's Library type-filter, as a string:
+    /// `all`/`single`/`meeting`/`in_place`/`favorite`/`pinned`. Mapped onto the
+    /// daemon's `kind`/`favorite`/`in_place`/`pinned` by [`Self::into_list_filter`].
     #[serde(default)]
     pub kind: Option<SavedSearchKind>,
     /// The frontend's tag-presence filter: `tagged` / `untagged`. Mapped onto the
@@ -293,10 +294,10 @@ pub struct SavedSearchFilter {
     pub low_confidence: Option<bool>,
 }
 
-/// The frontend's four-way Library `kind` choice (a superset of [`ListKind`]:
-/// adds `all`, `in_place`, and `favorite`, which the daemon models on separate
-/// `ListFilter` fields). Unknown strings deserialize as an error, which the
-/// run path reports as a clear "malformed saved search".
+/// The frontend's Library `kind` choice (a superset of [`ListKind`]: adds
+/// `all`, `in_place`, `favorite`, and `pinned`, which the daemon models on
+/// separate `ListFilter` fields). Unknown strings deserialize as an error, which
+/// the run path reports as a clear "malformed saved search".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SavedSearchKind {
@@ -310,6 +311,8 @@ pub enum SavedSearchKind {
     InPlace,
     /// Starred (favorite) recordings only.
     Favorite,
+    /// Pinned recordings only.
+    Pinned,
 }
 
 /// The frontend's tag-presence choice.
@@ -325,9 +328,9 @@ pub enum SavedSearchTagState {
 impl SavedSearchFilter {
     /// Translate the saved (UI) filter into the daemon's wire [`ListFilter`],
     /// the Rust mirror of the frontend's `toWireFilter`: drop UI-only display
-    /// state (semantic / like-mode) and map the four-way `kind` and `tag_state`
-    /// onto the daemon's `kind` / `favorite` / `in_place` / `tagged` fields, so
-    /// the same query runs in SQL *before* pagination.
+    /// state (semantic / like-mode) and map the `kind` and `tag_state`
+    /// onto the daemon's `kind` / `favorite` / `in_place` / `pinned` / `tagged`
+    /// fields, so the same query runs in SQL *before* pagination.
     ///
     /// `low_confidence_threshold` is the live `[whisper].low_confidence_threshold`
     /// the daemon passes in: when this filter's `low_confidence` is `Some(true)`,
@@ -351,6 +354,7 @@ impl SavedSearchFilter {
             Some(SavedSearchKind::Meeting) => wire.kind = Some(ListKind::Meeting),
             Some(SavedSearchKind::InPlace) => wire.in_place = Some(true),
             Some(SavedSearchKind::Favorite) => wire.favorite = Some(true),
+            Some(SavedSearchKind::Pinned) => wire.pinned = Some(true),
             Some(SavedSearchKind::All) | None => {}
         }
         match self.tag_state {
@@ -495,6 +499,12 @@ pub struct Recording {
     /// organisation only; never affects transcription or the pipeline.
     #[serde(default)]
     pub favorite: bool,
+    /// Whether the user has pinned this recording. Pinned recordings sort to the
+    /// top of the library (independent of `favorite`) and back the Library
+    /// "Pinned" filter. Cosmetic organisation only; never affects transcription
+    /// or the pipeline.
+    #[serde(default)]
+    pub pinned: bool,
     /// LLM-suggested tags awaiting the user's approval (auto-tagging). Names
     /// only — approving creates/attaches the real tag and removes the entry.
     #[serde(default)]
@@ -781,6 +791,13 @@ pub struct ListFilter {
     /// recordings, `Some(false)` = only unstarred, `None` = no filter.
     #[serde(default)]
     pub favorite: Option<bool>,
+    /// Pinned flag, applied in SQL like `favorite`: `Some(true)` = only pinned
+    /// recordings, `Some(false)` = only unpinned, `None` = no filter. Powers the
+    /// GUI Library "Pinned" filter. Independent of the pinned-first sort `list()`
+    /// always applies. Serde-defaulted: older clients that omit it still
+    /// deserialize.
+    #[serde(default)]
+    pub pinned: Option<bool>,
     /// In-place-dictation flag, applied in SQL like `favorite`: `Some(true)` =
     /// only recordings captured via in-place dictation, `Some(false)` = only the
     /// rest, `None` = no filter. Powers the GUI Library "In-Place" filter.
@@ -824,6 +841,8 @@ pub struct KindCounts {
     pub in_place: i64,
     /// Starred recordings (`favorite = 1`).
     pub favorite: i64,
+    /// Pinned recordings (`pinned = 1`).
+    pub pinned: i64,
     /// Distinct recordings carrying at least one tag (the sidebar "All Tags" badge).
     pub tagged: i64,
     /// Recordings carrying no tags (the sidebar "Untagged" badge). `all - tagged`.
@@ -916,6 +935,10 @@ mod tests {
         assert_eq!(fav.into_list_filter(0.6).favorite, Some(true));
         let ip: SavedSearchFilter = serde_json::from_str(r#"{"kind":"in_place"}"#).unwrap();
         assert_eq!(ip.into_list_filter(0.6).in_place, Some(true));
+
+        // `kind:"pinned"` → `pinned:true`.
+        let pin: SavedSearchFilter = serde_json::from_str(r#"{"kind":"pinned"}"#).unwrap();
+        assert_eq!(pin.into_list_filter(0.6).pinned, Some(true));
 
         // `tag_state` maps onto `tagged`.
         let tagged: SavedSearchFilter = serde_json::from_str(r#"{"tag_state":"tagged"}"#).unwrap();

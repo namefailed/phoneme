@@ -196,6 +196,7 @@ export class SidebarElement extends LitElement {
           ${this.libraryOpen ? html`
             <div class="sidebar-list">
               ${this.renderKindItem("all", "📚", "All Recordings")}
+              ${this.renderKindItem("pinned", "📌", "Pinned")}
               ${this.renderKindItem("favorite", "⭐", "Favorites")}
               ${this.renderKindItem("single", "🎙️", "Voice Notes")}
               ${this.renderKindItem("meeting", "👥", "Meetings")}

@@ -9,6 +9,18 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 *Workspace version `1.8.1`. Closing promise-vs-reality gaps and hardening the
 trust boundary.*
 
+### Library & organization
+
+- [x] **Pinned recordings** — pin a recording so it sorts to the **top of the
+  library**, independent of favorites. A 📌 toggle in the list row and the detail
+  header, a **Pinned** Library sidebar filter (with its own count badge), and a
+  pinned-first sort applied in SQL (`pinned DESC` leads the ORDER BY, ahead of the
+  date sort, so pins float to the top regardless of sort direction). Backed by a
+  new `recordings.pinned` column on the `Recording` DTO, a `SetPinned` IPC (plus
+  `pinned` on the list filter), `phoneme edit <ID> --pin/--unpin`, and matching
+  REST (`POST /api/recordings/{id}/pinned`) and MCP (`set_pinned`) surfaces. Pins
+  survive restarts and travel with library exports.
+
 ### Transcripts
 
 - [x] **Ask my archive (local RAG)** — ask a plain-language question and get an

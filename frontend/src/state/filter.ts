@@ -9,9 +9,9 @@ import { Store } from "./store";
 import type { ListFilter } from "../services/ipc";
 
 /** Library type-filter: all recordings, single-track only, meetings only,
- *  in-place dictations (typed straight into another app), or starred
- *  (favorites). */
-export type RecordingKind = "all" | "single" | "meeting" | "in_place" | "favorite";
+ *  in-place dictations (typed straight into another app), starred (favorites),
+ *  or pinned. */
+export type RecordingKind = "all" | "single" | "meeting" | "in_place" | "favorite" | "pinned";
 
 /** Tag-presence filter, independent of `kind` and `tag_id`: only recordings
  *  with ≥1 tag, only recordings with 0 tags, or no constraint. Powers the
@@ -21,13 +21,14 @@ export type TagState = "tagged" | "untagged" | null;
 /**
  * The library filter as the UI models it: the daemon's `ListFilter` extended
  * with UI-only state that is never sent over the wire (`semantic`, the
- * like-mode fields) and with `kind`/`favorite` re-modelled as one four-way
- * choice. Convert with `toWireFilter` before calling `listRecordings`.
+ * like-mode fields) and with `kind`/`favorite`/`pinned` re-modelled as one
+ * single choice. Convert with `toWireFilter` before calling `listRecordings`.
  */
-export type UiFilter = Omit<ListFilter, "kind" | "favorite"> & {
+export type UiFilter = Omit<ListFilter, "kind" | "favorite" | "pinned"> & {
   semantic?: boolean;
-  /** Library type-filter as the UI models it (one dropdown of four choices).
-   *  `toWireFilter` maps it onto the daemon's `kind` / `favorite` fields. */
+  /** Library type-filter as the UI models it (one dropdown of choices).
+   *  `toWireFilter` maps it onto the daemon's `kind` / `favorite` / `pinned`
+   *  fields. */
   kind?: RecordingKind;
   /** Tag-presence filter, independent of `kind`/`tag_id`. `toWireFilter` maps it
    *  onto the daemon's `tagged` flag (true = tagged only, false = untagged only). */
@@ -53,10 +54,10 @@ export const filterStore = new Store<UiFilter>({});
 
 /**
  * Translate the UI filter into the daemon's wire `ListFilter`: drop the
- * UI-only state (semantic toggle, like-mode) and map the four-way Library
- * `kind` onto the server-side `kind` / `favorite` fields, so the daemon
- * filters in SQL *before* pagination. Filtering client-side after pagination
- * made pages of the chosen kind come back mostly (or entirely) empty.
+ * UI-only state (semantic toggle, like-mode) and map the Library `kind` onto the
+ * server-side `kind` / `favorite` / `pinned` fields, so the daemon filters in
+ * SQL *before* pagination. Filtering client-side after pagination made pages of
+ * the chosen kind come back mostly (or entirely) empty.
  */
 export function toWireFilter(f: UiFilter, lowConfidenceThreshold?: number): ListFilter {
   const wire: ListFilter = {
@@ -72,6 +73,7 @@ export function toWireFilter(f: UiFilter, lowConfidenceThreshold?: number): List
   if (f.kind === "single" || f.kind === "meeting") wire.kind = f.kind;
   else if (f.kind === "in_place") wire.in_place = true;
   else if (f.kind === "favorite") wire.favorite = true;
+  else if (f.kind === "pinned") wire.pinned = true;
   // Tag-presence ("All Tags" / "Untagged") rides its own flag, independent of
   // the kind/tag_id filters it combines with.
   if (f.tagState === "tagged") wire.tagged = true;

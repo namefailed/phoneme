@@ -9,6 +9,7 @@ import {
   revertToVersion,
   rerunSummary,
   setRecordingTitle,
+  setPinned,
   setSpeakerName,
   recognizeSpeakers,
   dismissSpeakerSuggestion,
@@ -312,6 +313,7 @@ export class RecordingDetail {
             </div>
           </div>
           <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+            <button class="detail-focus-btn rec-pin-btn ${r.pinned ? "on" : ""}" id="detail-pin" aria-label=${r.pinned ? "Unpin" : "Pin to top"} title=${r.pinned ? "Unpin from the top of the library" : "Pin to the top of the library"}>📌</button>
             <button class="detail-focus-btn" id="detail-similar" aria-label="More like this" title="More like this — fill the list with recordings about similar things"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
             <span aria-hidden="true" style="width: 1px; align-self: stretch; margin: 2px 2px; background: var(--border-subtle);"></span>
             <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">${EXPAND_SVG}</button>
@@ -729,6 +731,33 @@ export class RecordingDetail {
     const closeBtn = this.container.querySelector<HTMLButtonElement>("#detail-close");
     if (closeBtn) {
       closeBtn.onclick = () => window.dispatchEvent(new CustomEvent("phoneme:close-detail"));
+    }
+
+    // 📌 Pin toggle in the title bar: pin/unpin and re-query the list so the
+    // pinned-first sort and the sidebar "Pinned" badge update. Optimistically
+    // flips the button state; reverts on failure.
+    const pinBtn = this.container.querySelector<HTMLButtonElement>("#detail-pin");
+    if (pinBtn) {
+      pinBtn.onclick = async () => {
+        const next = !r.pinned;
+        r.pinned = next;
+        pinBtn.classList.toggle("on", next);
+        pinBtn.setAttribute("aria-label", next ? "Unpin" : "Pin to top");
+        pinBtn.title = next
+          ? "Unpin from the top of the library"
+          : "Pin to the top of the library";
+        try {
+          await setPinned(r.id, next);
+          // No daemon event for pinning; nudge the sidebar's "Pinned" badge and
+          // re-query the list so the pinned-first order applies.
+          window.dispatchEvent(new CustomEvent("phoneme:counts-stale"));
+          this.onRefresh();
+        } catch (e) {
+          r.pinned = !next; // revert on failure
+          pinBtn.classList.toggle("on", r.pinned);
+          showToast(`Couldn't ${next ? "pin" : "unpin"}: ${errText(e)}`, "error");
+        }
+      };
     }
 
     // ✨ Similar lives in the title bar; Delete is on the action row.

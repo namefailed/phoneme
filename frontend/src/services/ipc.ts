@@ -64,6 +64,9 @@ export type Recording = {
   user_edited?: boolean;
   /** Whether the user has starred this recording (the Favorites view). */
   favorite?: boolean;
+  /** Whether the user has pinned this recording. Pinned recordings sort to the
+   *  top of the library, independent of `favorite`. */
+  pinned?: boolean;
   /** LLM-suggested tags awaiting approval (auto-tagging). Names only. */
   tag_suggestions?: string[];
   /** LLM-generated summary of the transcript, if one has been produced. */
@@ -221,6 +224,10 @@ export type ListFilter = {
   /** Server-side favorites flag: `true` = starred only, `false` = unstarred
    *  only, omit = no filter. Applied in SQL before pagination. */
   favorite?: boolean | null;
+  /** Server-side pinned flag: `true` = pinned only, `false` = unpinned only,
+   *  omit/null = no filter. Applied in SQL before pagination. Independent of the
+   *  pinned-first sort the daemon always applies. */
+  pinned?: boolean | null;
   /** Server-side in-place-dictation flag: `true` = only recordings captured via
    *  in-place dictation, omit = no filter. Applied in SQL before pagination. */
   in_place?: boolean | null;
@@ -750,6 +757,12 @@ export async function setFavorite(id: string, favorite: boolean): Promise<void> 
   await tauriInvoke("set_favorite", { id, favorite });
 }
 
+/** Pin or unpin a recording (the Pinned view). Pinned recordings sort to the top
+ *  of the library, independent of the favorite flag. Cosmetic organisation only. */
+export async function setPinned(id: string, pinned: boolean): Promise<void> {
+  await tauriInvoke("set_pinned", { id, pinned });
+}
+
 /**
  * Set or clear a recording's display title. A non-empty string marks the title
  * user-owned — auto generation never overwrites it again. `null` (or empty)
@@ -997,6 +1010,8 @@ export type KindCounts = {
   meeting: number;
   in_place: number;
   favorite: number;
+  /** Pinned recordings (the sidebar "Pinned" badge). */
+  pinned: number;
   /** Distinct recordings carrying at least one tag (the sidebar "Tagged" badge). */
   tagged: number;
   /** Recordings carrying no tags (the sidebar "Untagged" badge). */

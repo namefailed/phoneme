@@ -591,6 +591,14 @@ pub async fn set_favorite(
     forward(&bridge, Request::SetFavorite { id, favorite }).await
 }
 
+/// Set or clear the "pinned" flag for a recording (Pinned view). Pinned
+/// recordings sort to the top of the library, independent of the favorite flag.
+#[tauri::command]
+pub async fn set_pinned(bridge: Br<'_>, id: String, pinned: bool) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SetPinned { id, pinned }).await
+}
+
 /// Set or clear a recording's display title. `Some` marks the title user-owned
 /// (auto generation never overwrites it again); `None` clears it back to auto —
 /// it empties now and regenerates on the next pipeline run.

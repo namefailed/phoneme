@@ -404,8 +404,8 @@ pub struct EditArgs {
     pub id: String,
     /// New transcript text. With no metadata flag and no `--text`, the text is
     /// read from stdin; when a metadata flag (`--title`/`--clear-title`/
-    /// `--favorite`/`--unfavorite`) is the only edit, the transcript is left
-    /// untouched.
+    /// `--favorite`/`--unfavorite`/`--pin`/`--unpin`) is the only edit, the
+    /// transcript is left untouched.
     #[arg(long)]
     pub text: Option<String>,
     /// Set a user-owned display title. The pipeline never overwrites a
@@ -422,6 +422,12 @@ pub struct EditArgs {
     /// Unstar this recording.
     #[arg(long)]
     pub unfavorite: bool,
+    /// Pin this recording (sorts it to the top of the library).
+    #[arg(long, conflicts_with = "unpin")]
+    pub pin: bool,
+    /// Unpin this recording.
+    #[arg(long)]
+    pub unpin: bool,
 }
 
 #[derive(Debug, clap::Args)]

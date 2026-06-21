@@ -341,6 +341,7 @@ mod tests {
             diarized: false,
             user_edited: true,
             favorite: true,
+            pinned: true,
             tag_suggestions: vec![],
             summary: Some("short summary".into()),
             summary_model: Some("phi3:mini".into()),
@@ -425,6 +426,7 @@ mod tests {
         assert_eq!(g1.title.as_deref(), Some("My Title"));
         assert!(!g1.title_is_auto);
         assert!(g1.favorite);
+        assert!(g1.pinned);
         assert!(g1.user_edited);
         assert_eq!(g1.summary.as_deref(), Some("short summary"));
         assert_eq!(g1.summary_model.as_deref(), Some("phi3:mini"));

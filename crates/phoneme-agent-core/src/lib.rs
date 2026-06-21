@@ -81,6 +81,7 @@ impl ToolRegistry {
         r.register(Box::new(ListRecent));
         r.register(Box::new(SetTitle));
         r.register(Box::new(SetFavorite));
+        r.register(Box::new(SetPinned));
         r.register(Box::new(SuggestTags));
         r.register(Box::new(ListTags));
         r.register(Box::new(Summarize));
@@ -459,6 +460,43 @@ impl Tool for SetFavorite {
                 reason: "missing required boolean `favorite`".to_string(),
             })?;
         Ok(Request::SetFavorite { id, favorite })
+    }
+}
+
+struct SetPinned;
+impl Tool for SetPinned {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "set_pinned",
+            description: "Pin or un-pin a recording. Pinned recordings sort to \
+                the top of the library, independent of favorites.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The recording id."
+                    },
+                    "pinned": {
+                        "type": "boolean",
+                        "description": "true = pinned, false = un-pinned."
+                    }
+                },
+                "required": ["id", "pinned"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "set_pinned")?;
+        let pinned = args
+            .get("pinned")
+            .and_then(|v| v.as_bool())
+            .ok_or_else(|| ToolError::BadArgs {
+                tool: "set_pinned".to_string(),
+                reason: "missing required boolean `pinned`".to_string(),
+            })?;
+        Ok(Request::SetPinned { id, pinned })
     }
 }
 
@@ -1257,6 +1295,7 @@ mod tests {
                 "list_recent",
                 "set_title",
                 "set_favorite",
+                "set_pinned",
                 "suggest_tags",
                 "list_tags",
                 "summarize",
@@ -1460,6 +1499,25 @@ mod tests {
         // Missing the required boolean → BadArgs.
         assert!(matches!(
             r.to_request("set_favorite", &json!({ "id": id.as_str() })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn set_pinned_maps_and_requires_flag() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request("set_pinned", &json!({ "id": id.as_str(), "pinned": true }))
+                .unwrap(),
+            Request::SetPinned {
+                id: id.clone(),
+                pinned: true
+            }
+        );
+        // Missing the required boolean → BadArgs.
+        assert!(matches!(
+            r.to_request("set_pinned", &json!({ "id": id.as_str() })),
             Err(ToolError::BadArgs { .. })
         ));
     }

@@ -646,6 +646,16 @@ pub enum Request {
         /// `true` = starred.
         favorite: bool,
     },
+    /// Set or clear the "pinned" flag for a recording (Pinned view). Pinned
+    /// recordings sort to the top of the library, independent of `favorite`. Ok
+    /// `null`; no event — the toggling view already shows the new state. GUI
+    /// pin button.
+    SetPinned {
+        /// The recording to (un)pin.
+        id: RecordingId,
+        /// `true` = pinned.
+        pinned: bool,
+    },
     /// Set or clear a recording's display title. `Some` marks the title
     /// user-owned, so auto-generation leaves it alone from then on. `None` (or a
     /// blank string) clears it back to auto: the title empties now and is

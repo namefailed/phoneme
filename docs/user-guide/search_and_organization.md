@@ -55,6 +55,17 @@ recording as a favorite. The Library sidebar's **Favorites** filter shows only
 starred recordings, alongside All / Voice Notes / Meetings. Stars are stored in
 the catalog, so they survive restarts and travel with exports.
 
+## 📌 Pinned
+
+Click the **pin column** (the leading 📌 in the recordings list) — or the pin
+button in a recording's detail header — to pin a recording. Pinned recordings
+**sort to the top of the library**, ahead of everything else, regardless of how
+the list is otherwise sorted. Pinning is independent of favorites: a recording
+can be pinned, starred, both, or neither. The Library sidebar's **Pinned** filter
+shows only pinned recordings. Pins are stored in the catalog, so they survive
+restarts and travel with exports. From the CLI: `phoneme edit <ID> --pin` /
+`--unpin`.
+
 ## 🎙️ The Source column
 
 The recordings list's **Source** column (shown by default; toggle it under
@@ -208,7 +219,7 @@ per device.
 
 You can drill down into your catalog using the Filter pills above the recordings list.
 
-- **Library filter**: switch between **All**, **Voice Notes** (single recordings), **Meetings** (multi-track meeting recordings), and **Favorites** (starred). This mirrors the CLI `phoneme list --kind all|single|meeting`. The filter is applied by the daemon before pagination, so every page is full of the chosen kind — including Favorites pages deep into a large library.
+- **Library filter**: switch between **All**, **Pinned** (pinned to the top), **Favorites** (starred), **Voice Notes** (single recordings), and **Meetings** (multi-track meeting recordings). This mirrors the CLI `phoneme list --kind all|single|meeting`. The filter is applied by the daemon before pagination, so every page is full of the chosen kind — including Favorites and Pinned pages deep into a large library.
 - **Status filter**: the header's status dropdown narrows the list to one processing state. The full set is below.
 - **Tag Filters**: Click "Filter by Tag" to only show recordings that have specific tags attached. You can select multiple tags to narrow your view.
 - **Date Filters**: Click the Date pill to restrict your view to "Today", "This Week", or select a custom date range from the calendar.
