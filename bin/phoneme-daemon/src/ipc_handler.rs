@@ -1711,7 +1711,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::ReloadConfig => {
             tracing::info!("reloading config via IPC");
             match crate::load_config() {
-                Ok(cfg) => {
+                Ok(mut cfg) => {
+                    // Same explicit sequence as startup: migrate+persist, then the
+                    // in-memory-only runtime defaults, before the daemon adopts it.
+                    crate::reconcile_and_persist_config(&mut cfg);
+                    crate::apply_runtime_defaults(&mut cfg);
                     state.config.store(std::sync::Arc::new(cfg));
 
                     let cfg_arc = state.config.load();

@@ -70,14 +70,16 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    // One-time Playbook reconcile (Strategy B): `load_config()` now folds the
-    // migrate-then-persist in for EVERY load path (startup here + the
-    // `ReloadConfig` IPC + the queue worker's post-run reload), so the in-memory
-    // config the daemon runs on is always the migrated one and the on-disk seeds
-    // are frozen in their migrated form before any unrelated write. A persist
-    // failure is non-fatal — the in-memory migration still applies and the next
-    // load retries.
-    let cfg = load_config()?;
+    // Load → reconcile(+persist migrations) → apply in-memory defaults. The three
+    // steps are explicit (not folded into a "load") so the disk write is visible.
+    // Every load path runs the same sequence (startup here + the `ReloadConfig`
+    // IPC + the queue worker's post-run reload), so the in-memory config the
+    // daemon runs on is always the migrated one and the on-disk seeds freeze in
+    // their migrated form. Persist failure is non-fatal — the in-memory migration
+    // still applies and the next load retries.
+    let mut cfg = load_config()?;
+    reconcile_and_persist_config(&mut cfg);
+    apply_runtime_defaults(&mut cfg);
 
     // Install logging BEFORE building AppState so early warnings aren't dropped:
     // job-object creation, the embedder load, and the first config-apply all
@@ -321,48 +323,48 @@ async fn main() -> Result<()> {
     server_result
 }
 
-/// Load the daemon's configuration from disk.
+/// Read the daemon's config from disk. PURE: no migration, no persist, no
+/// in-memory synthesis — just the parsed config.
 ///
-/// Canonical loader shared with the CLI: honors `PHONEME_CONFIG`, else the
-/// per-user default path, else built-in defaults. Also called by the
-/// `ReloadConfig` IPC handler and the queue worker's post-run mtime check, so
-/// every config-(re)read in the process resolves the same file.
-///
-/// Self-healing Playbook migration: after loading, run the one-time
-/// `migrate_playbook()` reconcile and, if it actually migrated, persist the
-/// result so the on-disk config is frozen in its migrated form. Folding this
-/// into the shared loader (not just the startup caller) means EVERY reload path
-/// — `ReloadConfig` and the queue worker's post-run reload — self-heals: if the
-/// startup persist ever failed (and the on-disk config is still the un-migrated
-/// seed), the next reload retries instead of reverting the in-memory entries to
-/// the seed prompts. `migrate_playbook()` is idempotent (a no-op once
-/// `playbook_migrated` is set), so the already-migrated steady state does zero
-/// work and the startup caller's behaviour is unchanged. A persist failure is
-/// non-fatal: the in-memory migration still applies for this load and the next
-/// reload retries (mirrors the startup block).
+/// Canonical reader shared with the CLI: honors `PHONEME_CONFIG`, else the
+/// per-user default path, else built-in defaults. Callers that want the daemon's
+/// runtime config follow this with [`reconcile_and_persist_config`] (the one-time
+/// migrations and the disk write they imply) then [`apply_runtime_defaults`]
+/// (in-memory-only derivations). Keeping those steps explicit means a "load"
+/// never silently writes to disk.
 pub fn load_config() -> anyhow::Result<phoneme_core::Config> {
-    let mut cfg = phoneme_core::Config::load_resolved()?;
-    // Run BOTH one-time migrations (non-short-circuiting `|` so both always run),
-    // playbook FIRST: it rebuilds the `default` recipe's step list from the legacy
-    // enable flags, then `migrate_hooks` APPENDS the migrated Hook steps to it.
-    // Both are idempotent; persist once if either actually migrated so the on-disk
-    // config freezes in its migrated form (self-heals on every reload path).
+    Ok(phoneme_core::Config::load_resolved()?)
+}
+
+/// Run the one-time config migrations on `cfg` IN PLACE and, if either actually
+/// changed something, persist the result so the on-disk config freezes in its
+/// migrated form. This is the explicit disk side-effect that used to hide inside
+/// `load_config`. Idempotent + self-healing: safe to call on every load path
+/// (startup, `ReloadConfig`, the queue worker's post-run reload); a no-op once
+/// the file is already migrated. A persist failure is non-fatal — the in-memory
+/// migration still applies and the next load retries.
+///
+/// Runs BOTH migrations with a non-short-circuiting `|` so both always execute,
+/// playbook FIRST: it rebuilds the `default` recipe's step list from the legacy
+/// enable flags, then `migrate_hooks` APPENDS the migrated Hook steps.
+pub fn reconcile_and_persist_config(cfg: &mut phoneme_core::Config) {
     if cfg.migrate_playbook() | cfg.migrate_hooks() {
         if let Err(e) = cfg.write_resolved() {
             tracing::warn!(error = %e, "failed to persist config migration; will retry next reload");
         }
     }
+}
 
-    // Auto-default the live preview to the smallest LOCAL whisper model when
-    // `[preview_whisper]` is unset and the main provider is a local bundled
-    // model (P1). Resolved AFTER the on-disk persist above so the synthesized
-    // block is in-memory only and never written to config.toml. The scan needs
-    // a real, absolute model file, so derive against an EXPANDED view (paths
-    // resolved) and copy the resulting absolute-path block onto the unexpanded
-    // config we return — `expanded()` later no-ops on an already-absolute path,
-    // so the supervisor and preview loop agree on the same model/port. A no-op
-    // when the user set `preview_whisper`, the main is cloud/external, or no
-    // smaller local model exists.
+/// Apply IN-MEMORY-ONLY runtime defaults that must never be written back to
+/// `config.toml`. Currently: auto-default the live preview to the smallest LOCAL
+/// whisper model when `[preview_whisper]` is unset and the main provider is a
+/// local bundled model (P1). Call this AFTER [`reconcile_and_persist_config`] so
+/// the synthesized block is never caught by that persist. The model scan needs a
+/// real absolute file, so it derives against an EXPANDED view and copies the
+/// absolute-path block onto `cfg` (`expanded()` later no-ops on an already-
+/// absolute path). A no-op when the user set `preview_whisper`, the main is
+/// cloud/external, or no smaller local model exists.
+pub fn apply_runtime_defaults(cfg: &mut phoneme_core::Config) {
     if cfg.preview_whisper.is_none() {
         match cfg.expanded() {
             Ok(mut expanded) => {
@@ -382,6 +384,4 @@ pub fn load_config() -> anyhow::Result<phoneme_core::Config> {
             }
         }
     }
-
-    Ok(cfg)
 }

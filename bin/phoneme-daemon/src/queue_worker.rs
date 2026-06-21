@@ -261,7 +261,11 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                 if changed {
                     config_mtime = current_mtime;
                     match crate::load_config() {
-                        Ok(cfg) => {
+                        Ok(mut cfg) => {
+                            // Same explicit load→reconcile→defaults sequence as
+                            // startup + ReloadConfig.
+                            crate::reconcile_and_persist_config(&mut cfg);
+                            crate::apply_runtime_defaults(&mut cfg);
                             // Config changed on disk: drop the cached local
                             // diarization pipeline if `[diarization]` changed
                             // (backend switch / model path). One of the two daemon
