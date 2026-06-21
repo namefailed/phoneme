@@ -138,6 +138,14 @@ function onEvent(event: DaemonEvent) {
     case "meeting_digest_failed":
       stepFailedToast("Meeting digest", String(e.error ?? ""), stepsEnabled);
       return;
+    // Period digest (the date-window rollup) — the date-window twin of the
+    // meeting digest. A failure is best-effort like the meeting digest.
+    case "period_digest_updated":
+      if (stepsEnabled) showToast("Period digest ready", "success");
+      return;
+    case "period_digest_failed":
+      stepFailedToast("Period digest", String(e.error ?? ""), stepsEnabled);
+      return;
     case "tag_suggestions_updated": {
       if (!stepsEnabled) return;
       // Only toast when the suggestion count GROWS — dismissing, approving, or

@@ -1812,6 +1812,85 @@ async fn meeting_digest_set_get_upsert_and_delete() {
     db.delete_meeting_digest(meeting_id).await.unwrap();
 }
 
+#[tokio::test]
+async fn period_digest_set_get_upsert_and_delete() {
+    // The period digest (the date-window rollup): set → read back → regenerate
+    // (upsert overwrites on the range key) → delete. Keyed by range, independent
+    // of the recordings table.
+    use chrono::TimeZone;
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let key = "2026-06-21T00:00:00+00:00|2026-06-21T23:59:59+00:00";
+    let since = Local.with_ymd_and_hms(2026, 6, 21, 0, 0, 0).unwrap();
+    let until = Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap();
+
+    // Nothing stored yet.
+    assert!(db.period_digest(key).await.unwrap().is_none());
+
+    // Store a digest; it round-trips with every field intact.
+    db.update_period_digest(
+        key,
+        "2026-06-21",
+        since,
+        until,
+        "Overview: shipped the digest feature.",
+        Some("llama3.2:3b"),
+        3,
+    )
+    .await
+    .unwrap();
+    let got = db.period_digest(key).await.unwrap().unwrap();
+    assert_eq!(got.key, key);
+    assert_eq!(got.label, "2026-06-21");
+    assert_eq!(got.since, since);
+    assert_eq!(got.until, until);
+    assert_eq!(got.digest, "Overview: shipped the digest feature.");
+    assert_eq!(got.digest_model.as_deref(), Some("llama3.2:3b"));
+    assert_eq!(got.source_count, 3);
+
+    // Regenerate the same range: the upsert replaces the row in place (keyed by
+    // range), not a second row — and a re-run with a new label/count updates them.
+    db.update_period_digest(key, "today", since, until, "Revised rollup.", None, 5)
+        .await
+        .unwrap();
+    let got = db.period_digest(key).await.unwrap().unwrap();
+    assert_eq!(got.digest, "Revised rollup.");
+    assert_eq!(got.label, "today");
+    assert_eq!(got.digest_model, None);
+    assert_eq!(got.source_count, 5);
+
+    // Exactly one row for the key (the upsert overwrote, didn't append).
+    let all = db.list_all_period_digests().await.unwrap();
+    assert_eq!(all.len(), 1);
+
+    // Delete removes it; a second delete is a harmless no-op.
+    db.delete_period_digest(key).await.unwrap();
+    assert!(db.period_digest(key).await.unwrap().is_none());
+    db.delete_period_digest(key).await.unwrap();
+}
+
+#[tokio::test]
+async fn list_all_period_digests_orders_newest_range_first() {
+    use chrono::TimeZone;
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let older_since = Local.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+    let older_until = Local.with_ymd_and_hms(2026, 6, 7, 23, 59, 59).unwrap();
+    let newer_since = Local.with_ymd_and_hms(2026, 6, 15, 0, 0, 0).unwrap();
+    let newer_until = Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap();
+
+    db.update_period_digest("older", "early June", older_since, older_until, "old", None, 1)
+        .await
+        .unwrap();
+    db.update_period_digest("newer", "mid June", newer_since, newer_until, "new", None, 2)
+        .await
+        .unwrap();
+
+    let all = db.list_all_period_digests().await.unwrap();
+    assert_eq!(all.len(), 2);
+    // Newest range (later `since`) leads.
+    assert_eq!(all[0].key, "newer");
+    assert_eq!(all[1].key, "older");
+}
+
 // ── Named speakers ────────────────────────────────────────────────────────
 
 #[tokio::test]

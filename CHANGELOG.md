@@ -34,6 +34,21 @@ trust boundary.*
 
 ### Transcripts
 
+- [x] **Daily / weekly digest (period digest)** — generate one LLM **rollup
+  across every recording in a date window** (what was discussed, decisions
+  reached, open/action items), distinct from the per-recording summary and the
+  meeting-scoped digest. The daemon selects the window (`since`..`until`,
+  oldest-first), concatenates each recording's transcript prefixed with its date
+  + title (capped to a size limit so a huge week can't overflow the model's
+  context), and runs the merged text through the configured `[summary]` provider.
+  Re-running the same window upserts in place (stored in a new `period_digests`
+  table keyed by the range). New `phoneme digest` CLI (`--daily` default,
+  `--weekly`, explicit `--since/--until`, `--model`, and `--show` to read the
+  stored digest), `rerun_period_digest` / `get_period_digest` /
+  `list_period_digests` IPC requests, `period_digest_updated` /
+  `period_digest_failed` events, and Tauri commands behind them. Period digests
+  travel with library exports. (Scheduling the rollup to fire automatically is a
+  deliberate follow-up.)
 - [x] **Ask my archive (local RAG)** — ask a plain-language question and get an
   answer drawn **only** from your own recordings, with a citation for every
   claim. The daemon embeds the question, retrieves the best-matching transcript

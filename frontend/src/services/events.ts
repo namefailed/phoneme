@@ -87,6 +87,10 @@ export type DaemonEvent =
   // keyed by meeting_id — the meeting-scope twin of summary_updated/_failed.
   | { event: "meeting_digest_updated"; meeting_id: string }
   | { event: "meeting_digest_failed"; meeting_id: string; error: string }
+  // Period digest (the LLM rollup across every recording in a date window),
+  // keyed by the range `key` — the date-window twin of meeting_digest_updated/_failed.
+  | { event: "period_digest_updated"; key: string }
+  | { event: "period_digest_failed"; key: string; error: string }
   | { event: "cleanup_failed"; id: string; error: string }
   | { event: "title_failed"; id: string; error: string }
   | { event: "tag_failed"; id: string; error: string }

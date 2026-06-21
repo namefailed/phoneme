@@ -21,8 +21,8 @@ daemon-is-down state is itself the answer for them, so they print
 
 | Behavior | Commands |
 |----------|----------|
-| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `suggest-tags`, `notes`, `edit`, `find-replace`, `clip`, `speaker rename/clear/reassign/merge/split`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed/dismiss-failed`, `tag add/update/delete/attach/detach/clear-suggestions/merge`, `profile use`, `hook test`, `export` (zip and `--captions`), `config reload`, `daemon start` |
-| **Observe-only** (fail fast with exit 3 when no daemon) | `list`, `show`, `search`, `watch`, `doctor`, `daemon status`, `queue list/counts/status`, `queue skip`*, `tag list/for/usage`, `meeting tracks`, `profile list` |
+| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `digest` (generate), `suggest-tags`, `notes`, `edit`, `find-replace`, `clip`, `speaker rename/clear/reassign/merge/split`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed/dismiss-failed`, `tag add/update/delete/attach/detach/clear-suggestions/merge`, `profile use`, `hook test`, `export` (zip and `--captions`), `config reload`, `daemon start` |
+| **Observe-only** (fail fast with exit 3 when no daemon) | `list`, `show`, `search`, `watch`, `doctor`, `daemon status`, `queue list/counts/status`, `queue skip`*, `tag list/for/usage`, `meeting tracks`, `digest --show`, `profile list` |
 | **Purely local** (no daemon involved at all) | `config` (print), `config path`, `config set`, `profile save`, `version` |
 
 \* `queue skip` mutates, but only a live daemon mid-LLM-stage has anything to
@@ -336,6 +336,47 @@ this run only.
 phoneme summarize 20260519T143500823
 phoneme summarize 20260519T143500823 --model llama3.1
 phoneme summarize 20260519T143500823 --prompt "Three bullet points, no preamble."
+```
+
+### 🗓️ `phoneme digest`
+
+Generate (or view) a **period digest** — one LLM rollup across *every* recording
+in a date window (what was discussed, decisions reached, open/action items).
+Distinct from the per-recording `summarize` and the meeting-scoped
+`meeting digest`. The daemon selects the window's recordings, concatenates their
+transcripts (each prefixed with its date + title, oldest first), and runs the
+merged text through the configured summary provider; the result is stored keyed
+by the range, so re-running the same window overwrites in place. A very large
+window is truncated to a size cap (and the digest notes it) so it can't overflow
+the model's context.
+
+The range is one of:
+
+- `--daily` (the default): the current calendar day (local midnight → end of
+  today).
+- `--weekly`: the last 7 calendar days (six days ago at midnight → end of today).
+- `--since <DATE> --until <DATE>`: an explicit, inclusive range. Each accepts a
+  bare `YYYY-MM-DD` (`--since` at local start-of-day, `--until` extended to
+  end-of-day so the final day is included) or a full RFC 3339 timestamp. The two
+  are required together and are mutually exclusive with `--daily`/`--weekly`.
+
+`--daily`/`--weekly` snap to whole calendar days, so the range is stable within
+the day — a `--show` later the same day fetches the digest a prior generate
+stored.
+
+Generating ACKs immediately and rolls up in the background (like `summarize`),
+emitting `period_digest_updated` / `period_digest_failed`. `--show` reads the
+stored digest for the resolved window instead, printing "no digest yet" when none
+exists for that exact range. `--model` overrides the summary model for this run
+only (ignored with `--show`).
+
+```bash
+phoneme digest                                   # today → now
+phoneme digest --weekly                          # last 7 days
+phoneme digest --since 2026-06-15 --until 2026-06-20
+phoneme digest --weekly --model llama3.2:3b      # one-off model override
+phoneme digest --show                            # view today's stored digest
+phoneme digest --show --since 2026-06-15 --until 2026-06-20
 ```
 
 ### ✨ `phoneme suggest-tags <ID>`

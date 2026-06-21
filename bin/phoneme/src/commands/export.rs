@@ -19,7 +19,9 @@
 
 use crate::args::{CaptionFormat, ExportArgs};
 use phoneme_core::backup;
-use phoneme_core::{Config, ListFilter, MeetingDigest, Recording, Tag, TranscriptSegment};
+use phoneme_core::{
+    Config, ListFilter, MeetingDigest, PeriodDigest, Recording, Tag, TranscriptSegment,
+};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -177,6 +179,15 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
 
+    // Period digests (the date-window rollups) likewise live in their own side
+    // table, so fetch them separately. Best-effort like the rest.
+    let period_digests: Vec<PeriodDigest> = conn
+        .send(phoneme_ipc::Request::ListPeriodDigests)
+        .await
+        .ok()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
     let expanded = match cfg.expanded() {
         Ok(c) => c,
         Err(e) => {
@@ -190,6 +201,7 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
         &recordings,
         &tags,
         &meeting_digests,
+        &period_digests,
         audio_dir,
         Path::new(zip_path),
     ) {

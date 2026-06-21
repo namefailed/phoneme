@@ -737,6 +737,40 @@ pub struct MeetingDigest {
     pub digest_model: Option<String>,
 }
 
+/// A period digest: one LLM-generated rollup across **every** recording in a
+/// date window (what was discussed, decisions reached, open/action items),
+/// distinct from the per-recording [`Recording::summary`] and from
+/// [`MeetingDigest`] (which is meeting-scoped, keyed by `meeting_id`).
+///
+/// A period spans many independent recordings selected by a `since..until`
+/// range, so it has no parent row — it lives in its own `period_digests` table
+/// keyed by [`PeriodDigest::key`], a stable string derived from the canonical
+/// (daemon-normalized) `since`/`until` bounds so re-running the same window
+/// upserts in place. `digest_model` records which LLM produced it, mirroring
+/// [`MeetingDigest::digest_model`]; it is `None` for an older row or when the
+/// provider didn't report a model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PeriodDigest {
+    /// Stable id for the range, derived from the canonical `since`/`until`
+    /// bounds (see the daemon's `period_digest_key`). Re-running the same window
+    /// reuses this key, so the upsert overwrites rather than accumulating rows.
+    pub key: String,
+    /// Human label for the period, shown in the UI ("2026-06-21",
+    /// "week of 2026-06-15"). Two ranges can share a label, so it is never the
+    /// storage key.
+    pub label: String,
+    /// Lower bound of the window (inclusive). Mirrors [`ListFilter::since`].
+    pub since: DateTime<Local>,
+    /// Upper bound of the window (inclusive). Mirrors [`ListFilter::until`].
+    pub until: DateTime<Local>,
+    /// The LLM-generated rollup text spanning every recording in the window.
+    pub digest: String,
+    /// The LLM model that produced `digest`, when known.
+    pub digest_model: Option<String>,
+    /// How many recordings were rolled up (for the "N recordings" line).
+    pub source_count: i64,
+}
+
 /// One machine transcript segment with its audio-relative timing.
 ///
 /// Captured from the transcription provider (whisper `verbose_json` segments,

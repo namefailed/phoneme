@@ -166,6 +166,8 @@ fn is_retry_safe(req: &Request) -> bool {
         | ListMeeting { .. }
         | GetMeetingDigest { .. }
         | ListMeetingDigests
+        | GetPeriodDigest { .. }
+        | ListPeriodDigests
         | GetSegments { .. }
         | GetWords { .. }
         // Pure read of a recording's stored auto-chapters; idempotent like
@@ -226,6 +228,9 @@ fn is_retry_safe(req: &Request) -> bool {
         // Whole-meeting digest re-run: re-enqueues an LLM call, so single-attempt
         // like RerunSummary (a blind re-send could fire the model twice).
         | RerunMeetingDigest { .. }
+        // Period digest re-run: same as the meeting digest — fires an LLM call,
+        // so a blind re-send could run (and bill) it twice. Single-attempt only.
+        | RerunPeriodDigest { .. }
         // Transcript & metadata edits.
         | UpdateTranscript { .. }
         // Find-replace mutates the transcript; classified single-attempt like
@@ -545,5 +550,21 @@ mod tests {
         // The history mutations are single-attempt like other deletes/clears.
         assert!(!is_retry_safe(&Request::DeleteDictationHistory { id: 1 }));
         assert!(!is_retry_safe(&Request::ClearDictationHistory));
+        // Period digest: reads (fetch / list) are retry-safe; the generate is not
+        // (a re-send could fire the LLM twice), like the meeting digest. The
+        // range bounds are built by deserializing RFC3339 strings so this test
+        // needs no direct chrono dependency (the wire shape is what matters).
+        assert!(is_retry_safe(&Request::GetPeriodDigest {
+            key: "2026-06-21T00:00:00+00:00|2026-06-21T23:59:59+00:00".to_string(),
+        }));
+        assert!(is_retry_safe(&Request::ListPeriodDigests));
+        let rerun: Request = serde_json::from_value(serde_json::json!({
+            "type": "rerun_period_digest",
+            "since": "2026-06-21T00:00:00+00:00",
+            "until": "2026-06-21T23:59:59+00:00",
+            "label": "2026-06-21",
+        }))
+        .expect("rerun_period_digest deserializes from its wire form");
+        assert!(!is_retry_safe(&rerun));
     }
 }

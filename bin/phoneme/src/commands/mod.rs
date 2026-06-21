@@ -13,6 +13,7 @@ pub mod config_cmd;
 pub mod daemon_cmd;
 pub mod delete;
 pub mod dictation;
+pub mod digest;
 pub mod doctor;
 pub mod edit;
 pub mod entities;

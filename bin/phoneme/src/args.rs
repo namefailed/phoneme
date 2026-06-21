@@ -53,6 +53,10 @@ pub enum Command {
     SuggestEntities(SuggestEntitiesArgs),
     /// Generate a recording's topic chapters (or view stored ones with --show).
     Chapters(ChaptersArgs),
+    /// Generate (or view) a period digest — one LLM rollup across every recording
+    /// in a date window (what was discussed, decisions, open items). Distinct from
+    /// the per-recording `summarize` and the meeting-scoped `meeting digest`.
+    Digest(DigestArgs),
     /// Get or set a recording's free-form notes.
     Notes(NotesArgs),
     /// Edit a recording's transcript and/or metadata (title, favorite).
@@ -341,6 +345,34 @@ pub struct SummarizeArgs {
     /// Override the summary prompt for this run only.
     #[arg(long)]
     pub prompt: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct DigestArgs {
+    /// View the stored digest for the resolved range instead of generating one.
+    /// With no stored digest for that exact window, prints "no digest yet".
+    #[arg(long)]
+    pub show: bool,
+    /// Roll up the current calendar day (local midnight → end of today). The
+    /// default when no range flag is given.
+    #[arg(long, group = "period")]
+    pub daily: bool,
+    /// Roll up the last 7 calendar days (six days ago at midnight → end of today).
+    #[arg(long, group = "period")]
+    pub weekly: bool,
+    /// Custom range lower bound (inclusive). ISO 8601 date (e.g. 2026-06-15) or a
+    /// full RFC 3339 timestamp. Pairs with --until; together they form the
+    /// "custom" range, mutually exclusive with --daily/--weekly.
+    #[arg(long, group = "period", requires = "until")]
+    pub since: Option<String>,
+    /// Custom range upper bound (inclusive). ISO 8601 date or RFC 3339 timestamp.
+    /// Requires --since.
+    #[arg(long, requires = "since")]
+    pub until: Option<String>,
+    /// Override the summary model for this run only (never persisted). Ignored
+    /// with --show.
+    #[arg(long)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]

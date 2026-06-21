@@ -36,7 +36,7 @@ use crate::catalog::Catalog;
 use crate::error::{Error, Result};
 use crate::id::RecordingId;
 use crate::tags::Tag;
-use crate::types::{MeetingDigest, Recording};
+use crate::types::{MeetingDigest, PeriodDigest, Recording};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -78,6 +78,12 @@ pub struct BackupManifest {
     /// replayed via [`Catalog::update_meeting_digest`] on restore.
     #[serde(default)]
     pub meeting_digests: Vec<MeetingDigest>,
+    /// The period digests, one per date range. A side table keyed by range
+    /// (not a [`Recording`] column), so it's carried here and replayed via
+    /// [`Catalog::update_period_digest`] on restore. `#[serde(default)]` keeps a
+    /// pre-period-digest backup readable (it simply restores none).
+    #[serde(default)]
+    pub period_digests: Vec<PeriodDigest>,
 }
 
 /// What a [`restore_from_zip`] did: how many recordings were newly imported and
@@ -114,14 +120,15 @@ fn audio_entry_name(audio_dir: &Path, path: &Path) -> String {
 /// Write a backup zip: the `catalog.json` envelope plus every `.wav` under
 /// `audio_dir`, into a freshly created file at `out`.
 ///
-/// The recordings/tags/meeting digests are supplied by the caller (the
-/// daemon-driven export fetches them over IPC; the round-trip test reads them
-/// straight from a `Catalog`), so this owns only the archive format — the one
-/// place the layout is defined for both directions.
+/// The recordings/tags/meeting digests/period digests are supplied by the caller
+/// (the daemon-driven export fetches them over IPC; the round-trip test reads
+/// them straight from a `Catalog`), so this owns only the archive format — the
+/// one place the layout is defined for both directions.
 pub fn write_to_zip(
     recordings: &[Recording],
     tags: &[Tag],
     meeting_digests: &[MeetingDigest],
+    period_digests: &[PeriodDigest],
     audio_dir: &Path,
     out: &Path,
 ) -> Result<()> {
@@ -130,6 +137,7 @@ pub fn write_to_zip(
         recordings: recordings.to_vec(),
         tags: tags.to_vec(),
         meeting_digests: meeting_digests.to_vec(),
+        period_digests: period_digests.to_vec(),
     };
     let json_bytes = serde_json::to_vec_pretty(&manifest)?;
 
@@ -295,6 +303,27 @@ pub async fn restore_from_zip(
             .await?;
     }
 
+    // Replay the period digests (the side table keyed by range, carried in the
+    // manifest rather than on any recording). Idempotent like the meeting
+    // digests: a digest is only written when the target has none for that range,
+    // so a re-import never clobbers a digest regenerated since restore.
+    for digest in &manifest.period_digests {
+        if catalog.period_digest(&digest.key).await?.is_some() {
+            continue;
+        }
+        catalog
+            .update_period_digest(
+                &digest.key,
+                &digest.label,
+                digest.since,
+                digest.until,
+                &digest.digest,
+                digest.digest_model.as_deref(),
+                digest.source_count,
+            )
+            .await?;
+    }
+
     Ok(report)
 }
 
@@ -451,13 +480,38 @@ mod tests {
             .await
             .unwrap();
 
+        // Seed a period digest (its own side table keyed by range) so the
+        // round-trip proves it survives too.
+        let p_since = Local.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap();
+        let p_until = Local.with_ymd_and_hms(2026, 5, 20, 23, 59, 59).unwrap();
+        src.update_period_digest(
+            "period-key-1",
+            "week of 2026-05-19",
+            p_since,
+            p_until,
+            "Rollup: two recordings; one decision; one open item.",
+            Some("phi3:mini"),
+            2,
+        )
+        .await
+        .unwrap();
+
         // Export to a temp zip via the shared writer (the same archive format
         // the CLI export emits).
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
         let tags = src.list_all_tags().await.unwrap();
         let digests = src.list_all_meeting_digests().await.unwrap();
-        write_to_zip(&recordings, &tags, &digests, &src_audio, &zip_path).unwrap();
+        let period_digests = src.list_all_period_digests().await.unwrap();
+        write_to_zip(
+            &recordings,
+            &tags,
+            &digests,
+            &period_digests,
+            &src_audio,
+            &zip_path,
+        )
+        .unwrap();
         assert!(zip_path.exists());
 
         // Import into a FRESH catalog + audio dir.
@@ -505,6 +559,19 @@ mod tests {
         let restored_digest = dst.meeting_digest("meeting-xyz").await.unwrap().unwrap();
         assert_eq!(restored_digest.digest, "Overview: shipped v2.");
         assert_eq!(restored_digest.digest_model.as_deref(), Some("llama3.2:3b"));
+
+        // The period digest round-tripped too (its own manifest array, replayed
+        // by key on restore), with every field intact.
+        let restored_period = dst.period_digest("period-key-1").await.unwrap().unwrap();
+        assert_eq!(restored_period.label, "week of 2026-05-19");
+        assert_eq!(
+            restored_period.digest,
+            "Rollup: two recordings; one decision; one open item."
+        );
+        assert_eq!(restored_period.digest_model.as_deref(), Some("phi3:mini"));
+        assert_eq!(restored_period.source_count, 2);
+        assert_eq!(restored_period.since, p_since);
+        assert_eq!(restored_period.until, p_until);
     }
 
     #[tokio::test]
@@ -518,7 +585,7 @@ mod tests {
 
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
-        write_to_zip(&recordings, &[], &[], &src_audio, &zip_path).unwrap();
+        write_to_zip(&recordings, &[], &[], &[], &src_audio, &zip_path).unwrap();
 
         let dst_audio = tmp.path().join("dst");
         let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
@@ -564,7 +631,7 @@ mod tests {
 
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
-        write_to_zip(&recordings, &[], &[], &src_audio, &zip_path).unwrap();
+        write_to_zip(&recordings, &[], &[], &[], &src_audio, &zip_path).unwrap();
 
         let dst_audio = tmp.path().join("dst");
         let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();

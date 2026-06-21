@@ -110,6 +110,21 @@ pub async fn get_meeting_digest(bridge: Br<'_>, meeting_id: String) -> Result<Va
     forward(&bridge, Request::GetMeetingDigest { meeting_id }).await
 }
 
+/// Fetch a stored period digest by its range `key` (the rollup across every
+/// recording in a date window), or `null` when none has been generated for that
+/// range. The digest panel fetches this by key.
+#[tauri::command]
+pub async fn get_period_digest(bridge: Br<'_>, key: String) -> Result<Value, CommandError> {
+    forward(&bridge, Request::GetPeriodDigest { key }).await
+}
+
+/// List every stored period digest, newest range first. Powers the digest
+/// panel's history.
+#[tauri::command]
+pub async fn list_period_digests(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ListPeriodDigests).await
+}
+
 /// Fetch one recording's machine transcript segments in timeline order
 /// (start/end ms into the track's audio, text, optional speaker label). An
 /// empty list is normal — older recordings predate segment capture and some
@@ -412,6 +427,36 @@ pub async fn rerun_meeting_digest(
         },
     )
     .await
+}
+
+/// Generate (or regenerate) a period digest on demand — one LLM rollup across
+/// every recording in a date window. `since`/`until` are RFC3339 timestamp
+/// strings (the window bounds); `label` is the human period name; `model`
+/// overrides the configured summary model for this run only. The digest arrives
+/// via the `PeriodDigestUpdated` daemon event. Date-window twin of
+/// `rerun_meeting_digest`.
+///
+/// The `since`/`until` strings are deserialized into the request's
+/// `DateTime<Local>` fields through the wire schema (the same shape `ListFilter`
+/// uses), so this command needs no direct chrono dependency. A malformed
+/// timestamp yields a descriptive error rather than reaching the daemon.
+#[tauri::command]
+pub async fn rerun_period_digest(
+    bridge: Br<'_>,
+    since: String,
+    until: String,
+    label: String,
+    model: Option<String>,
+) -> Result<Value, CommandError> {
+    let req: Request = serde_json::from_value(serde_json::json!({
+        "type": "rerun_period_digest",
+        "since": since,
+        "until": until,
+        "label": label,
+        "model": model,
+    }))
+    .map_err(|e| CommandError::from(format!("invalid period digest range: {e}")))?;
+    forward(&bridge, req).await
 }
 
 /// List the transcription pipeline queue (pending + processing items).

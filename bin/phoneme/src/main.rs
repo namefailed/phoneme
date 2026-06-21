@@ -73,6 +73,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
             commands::suggest_entities::run(args, cfg, cli.json).await
         }
         Command::Chapters(args) => commands::chapters::run(args, cfg, cli.json).await,
+        Command::Digest(args) => commands::digest::run(args, cfg, cli.json).await,
         Command::Notes(args) => commands::notes::run(args, cfg, cli.json).await,
         Command::Edit(args) => commands::edit::run(args, cfg).await,
         Command::FindReplace(args) => commands::find_replace::run(args, cfg, cli.json).await,

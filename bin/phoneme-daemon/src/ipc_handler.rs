@@ -378,6 +378,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(digests) => serialize_response(digests),
             Err(e) => err_response(&e),
         },
+        // An unknown/never-generated range yields `null` (not `NotFound`): "no
+        // digest yet" is a normal state, mirroring `GetMeetingDigest`.
+        Request::GetPeriodDigest { key } => match state.catalog.period_digest(&key).await {
+            Ok(digest) => serialize_response(digest),
+            Err(e) => err_response(&e),
+        },
+        // Every stored period digest (newest range first), for the digest panel's
+        // history and the library-backup export.
+        Request::ListPeriodDigests => match state.catalog.list_all_period_digests().await {
+            Ok(digests) => serialize_response(digests),
+            Err(e) => err_response(&e),
+        },
         // An unknown id yields an empty list, not `NotFound`: "no segments" is a
         // normal state (pre-capture recordings, providers without timing) and
         // callers treat the two identically.
@@ -1664,6 +1676,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             model,
             recipe_id,
         } => rerun_meeting_digest(state, meeting_id, model, recipe_id).await,
+        Request::RerunPeriodDigest {
+            since,
+            until,
+            label,
+            model,
+        } => rerun_period_digest(state, since, until, label, model).await,
         Request::RunDoctor => {
             let cfg = state.config.load();
             // Thread the bundled servers' live ports into the backend probes so a
@@ -2737,6 +2755,132 @@ async fn rerun_meeting_digest(
             Err(reason) => {
                 task_state.events.emit(DaemonEvent::MeetingDigestFailed {
                     meeting_id,
+                    error: reason,
+                });
+            }
+        }
+    });
+
+    ok_null()
+}
+
+/// Derive the stable storage key for a period digest from its canonical
+/// (already-normalized) range bounds. Re-running the same window yields the same
+/// key, so the upsert overwrites rather than accumulating near-duplicate rows.
+/// Keyed on the range — never the human `label`, since two ranges can share one.
+/// The bounds are serialized to RFC3339 so the key is deterministic across runs.
+fn period_digest_key(
+    since: chrono::DateTime<chrono::Local>,
+    until: chrono::DateTime<chrono::Local>,
+) -> String {
+    format!("{}|{}", since.to_rfc3339(), until.to_rfc3339())
+}
+
+/// Generate (or regenerate) a period digest on demand — the date-window twin of
+/// [`rerun_meeting_digest`]. Selects every recording in `since..until` (oldest
+/// first), assembles their transcripts into one chronological document, and runs
+/// it through the configured summary provider with the period-scope prompt. Like
+/// `rerun_meeting_digest`, the LLM call runs in a spawned task so it doesn't block
+/// the IPC connection; the result is stored keyed by the range (see
+/// [`period_digest_key`]) and the UI listens for `PeriodDigestUpdated`. `model`
+/// overrides the configured summary model for this run only (never persisted).
+async fn rerun_period_digest(
+    state: &AppState,
+    since: chrono::DateTime<chrono::Local>,
+    until: chrono::DateTime<chrono::Local>,
+    label: String,
+    model: Option<String>,
+) -> Response {
+    // Select the window's recordings, oldest-first so the merged transcript reads
+    // chronologically. This is the existing list query — no new SQL.
+    let filter = phoneme_core::ListFilter {
+        since: Some(since),
+        until: Some(until),
+        sort_desc: Some(false),
+        ..Default::default()
+    };
+    let recordings = match state.catalog.list(&filter).await {
+        Ok(rows) if !rows.is_empty() => rows,
+        Ok(_) => return not_found("no recordings in that range".into()),
+        Err(e) => return err_response(&e),
+    };
+
+    // Need at least one recording with a transcript to have anything to digest.
+    // The generator re-checks this defensively, but report it up front so the
+    // caller gets a clear error instead of a silent no-op.
+    let merged = crate::pipeline::assemble_period_transcript(&recordings);
+    if merged.trim().is_empty() {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::Internal,
+            message: "no transcribed recordings in that range — nothing to digest".into(),
+        });
+    }
+
+    // Bake the one-shot model override into a [summary] clone, then let the digest
+    // generator resolve the summary connection exactly as the meeting digest does.
+    let mut cfg = (**state.config.load()).clone();
+    if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+        cfg.summary.model = m;
+    }
+
+    // Require a usable LLM provider up front so the user gets a clear error rather
+    // than a silent failure inside the spawned task.
+    if state
+        .llm
+        .provider(&crate::pipeline::summary_llm_config(&cfg))
+        .is_none()
+    {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::InvalidConfig,
+            message: "no LLM provider configured for summaries (set a summary or [llm_post_process] provider)".into(),
+        });
+    }
+
+    // Derive the storage key from the (normalized) range before spawning, so the
+    // result and any failure event both reference the same stable key.
+    let key = period_digest_key(since, until);
+    let source_count = recordings.len() as i64;
+
+    // The LlmActivity/skip stream is keyed per-recording, so attribute this run to
+    // the window's first recording; the digest itself is stored against the range.
+    let event_id = recordings[0].id.clone();
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        task_state.events.emit(DaemonEvent::PipelineStageChanged {
+            id: event_id.clone(),
+            stage: PipelineStage::Summarizing,
+        });
+        match crate::pipeline::generate_period_digest(&task_state, &cfg, &event_id, &recordings)
+            .await
+        {
+            Ok((digest, model)) => {
+                if let Err(e) = task_state
+                    .catalog
+                    .update_period_digest(
+                        &key,
+                        &label,
+                        since,
+                        until,
+                        &digest,
+                        Some(&model),
+                        source_count,
+                    )
+                    .await
+                {
+                    tracing::error!(error = %e, "rerun_period_digest: failed to persist digest");
+                    task_state.events.emit(DaemonEvent::PeriodDigestFailed {
+                        key,
+                        error: e.to_string(),
+                    });
+                    return;
+                }
+                task_state
+                    .events
+                    .emit(DaemonEvent::PeriodDigestUpdated { key });
+            }
+            Err(reason) => {
+                task_state.events.emit(DaemonEvent::PeriodDigestFailed {
+                    key,
                     error: reason,
                 });
             }

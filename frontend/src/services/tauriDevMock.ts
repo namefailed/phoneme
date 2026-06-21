@@ -534,6 +534,21 @@ function emitDaemon(evt: Record<string, unknown>): void {
  *  (no digest until the user clicks Generate), mirroring a fresh daemon. */
 const MEETING_DIGESTS: Record<string, { meeting_id: string; digest: string; digest_model: string | null }> = {};
 
+/** Period digests generated in preview, keyed by the range key. Starts empty,
+ *  mirroring a fresh daemon. */
+const PERIOD_DIGESTS: Record<
+  string,
+  {
+    key: string;
+    label: string;
+    since: string;
+    until: string;
+    digest: string;
+    digest_model: string | null;
+    source_count: number;
+  }
+> = {};
+
 /** Replace a non-empty `api_key`/secret string on `obj` with the mask placeholder. */
 function maskKey(obj: unknown, field: string): void {
   if (obj && typeof obj === "object") {
@@ -809,6 +824,35 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     case "get_meeting_digest": {
       const mid = args.meetingId as string;
       return MEETING_DIGESTS[mid] ?? null;
+    }
+    // ── Period digest (the date-window rollup): store a canned digest keyed by
+    //    the range and broadcast so the panel reloads + clears "Generating…".
+    //    The event carries `key` (not a recording id) per events.ts. ──
+    case "rerun_period_digest": {
+      const since = String(args.since ?? "");
+      const until = String(args.until ?? "");
+      const key = `${since}|${until}`;
+      PERIOD_DIGESTS[key] = {
+        key,
+        label: String(args.label ?? key),
+        since,
+        until,
+        digest:
+          "Demo period digest: across the window, the recordings covered a few topics, " +
+          "reached one decision, and left two open action items.",
+        digest_model: (args.model as string) || "phi3:mini",
+        source_count: 3,
+      };
+      emitDaemon({ event: "period_digest_updated", key });
+      return undefined;
+    }
+    case "get_period_digest": {
+      const key = args.key as string;
+      return PERIOD_DIGESTS[key] ?? null;
+    }
+    case "list_period_digests": {
+      // Newest range first (by `since`), mirroring the daemon's ORDER BY.
+      return Object.values(PERIOD_DIGESTS).sort((a, b) => b.since.localeCompare(a.since));
     }
     case "approve_tag_suggestion": {
       const r = RECORDINGS.find((x) => x.id === id);

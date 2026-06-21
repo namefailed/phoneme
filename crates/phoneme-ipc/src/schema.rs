@@ -319,6 +319,20 @@ pub enum Request {
     /// `Recording` DTO column) and so aren't carried by `ListRecordings`. The
     /// many-meetings sibling of [`Request::GetMeetingDigest`].
     ListMeetingDigests,
+    /// Fetch a stored period digest by its range `key` (the stable id the daemon
+    /// derived from the canonical `since`/`until` bounds), or `null` when none has
+    /// been generated for that range. Ok = the digest DTO (`{key, label, since,
+    /// until, digest, digest_model, source_count}`) or `null`. GUI digest panel.
+    GetPeriodDigest {
+        /// The range key whose digest to fetch.
+        key: String,
+    },
+    /// List every stored period digest, newest range first. Ok = a JSON array
+    /// (possibly empty) of `PeriodDigest` objects. A pure read used by the digest
+    /// panel's history and the library-backup export (period digests live in
+    /// their own side table, not carried by `ListRecordings`). The many-ranges
+    /// sibling of [`Request::GetPeriodDigest`].
+    ListPeriodDigests,
     /// Fetch one recording's machine transcript segments in timeline order.
     /// Ok = JSON array (possibly empty) of `TranscriptSegment` objects:
     /// `start_ms`/`end_ms` offsets into the track's audio, the segment text,
@@ -620,6 +634,34 @@ pub enum Request {
         /// non-meeting-scope id falls back to the built-in digest, never an error.
         #[serde(default)]
         recipe_id: Option<String>,
+    },
+    /// Generate (or regenerate) a **period digest**: one LLM rollup across EVERY
+    /// recording in a date window (what was discussed, decisions reached,
+    /// open/action items), distinct from the per-recording [`Request::RerunSummary`]
+    /// and the meeting-scoped [`Request::RerunMeetingDigest`]. The daemon selects
+    /// the window's recordings (`ListFilter { since, until }`, oldest-first),
+    /// concatenates their transcripts (each prefixed with its date + title), and
+    /// runs the merged text through the configured summary provider, storing the
+    /// result keyed by a stable range key (the `period_digests` table). Reuses the
+    /// summary connection; `model` optionally overrides the summary model for this
+    /// run only (never persisted). Ok `null` immediately — the LLM call runs
+    /// detached, emitting `PipelineStageChanged(Summarizing)` + [`DaemonEvent::LlmActivity`],
+    /// and the result arrives as [`DaemonEvent::PeriodDigestUpdated`] (or
+    /// `PeriodDigestFailed`). Errors up front: `not_found` for a window with no
+    /// recordings, no transcribed recordings, or `invalid_config` when no usable
+    /// LLM provider is configured. GUI digest panel, `phoneme digest`.
+    RerunPeriodDigest {
+        /// Lower bound of the window (inclusive).
+        since: DateTime<Local>,
+        /// Upper bound of the window (inclusive).
+        until: DateTime<Local>,
+        /// Human label for the period ("2026-06-21", "week of 2026-06-15"),
+        /// stored for display. The storage key is derived from the range, not
+        /// this label (two ranges can share a label).
+        label: String,
+        /// One-time summary model override (never persisted).
+        #[serde(default)]
+        model: Option<String>,
     },
 
     // ── Library: transcript & metadata edits ────────────────────────────
@@ -1874,6 +1916,21 @@ pub enum DaemonEvent {
     MeetingDigestFailed {
         /// The meeting whose digest step failed.
         meeting_id: String,
+        /// Human-readable reason (endpoint, model, empty output, skip).
+        error: String,
+    },
+    /// A period digest was (re)generated and stored — the result of
+    /// `RerunPeriodDigest`. The date-window twin of [`DaemonEvent::MeetingDigestUpdated`];
+    /// the digest panel re-fetches by `key`.
+    PeriodDigestUpdated {
+        /// The range key whose digest changed.
+        key: String,
+    },
+    /// Period-digest generation failed. `error` carries the user-skip sentinel
+    /// when the stage was skipped, which the GUI toasts as "skipped".
+    PeriodDigestFailed {
+        /// The range key whose digest step failed.
+        key: String,
         /// Human-readable reason (endpoint, model, empty output, skip).
         error: String,
     },

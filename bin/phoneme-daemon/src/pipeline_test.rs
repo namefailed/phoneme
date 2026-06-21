@@ -3638,3 +3638,134 @@ async fn run_meeting_recipe_errors_when_no_tracks_transcribed() {
         .expect_err("no transcribed tracks → error");
     assert!(err.contains("nothing to digest"), "got: {err}");
 }
+
+// ── Period digest (the date-window rollup) ──────────────────────────────────
+
+/// Build a standalone (non-meeting) recording at a given local datetime, with an
+/// optional title + transcript, for the period-digest assembler tests.
+fn period_recording(
+    y: i32,
+    mo: u32,
+    d: u32,
+    h: u32,
+    mi: u32,
+    title: Option<&str>,
+    transcript: Option<&str>,
+) -> Recording {
+    use chrono::TimeZone;
+    let started_at = chrono::Local.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap();
+    Recording {
+        id: RecordingId::new(),
+        started_at,
+        duration_ms: 1000,
+        audio_path: "note.wav".into(),
+        transcript: transcript.map(str::to_string),
+        model: None,
+        status: RecordingStatus::Done,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: None,
+        meeting_name: None,
+        track: None,
+        in_place: false,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        pinned: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        entities_model: None,
+        chapters_model: None,
+        title: title.map(str::to_string),
+        title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
+        mean_confidence: None,
+        detected_language: None,
+        tags: vec![],
+        entities: vec![],
+        speaker_names: vec![],
+    }
+}
+
+#[test]
+fn assemble_period_transcript_orders_chronologically_and_prefixes_date_title() {
+    // Two recordings out of order on input; the merge re-sorts oldest-first and
+    // prefixes each block with its date + title.
+    let later = period_recording(2026, 6, 21, 15, 30, Some("Afternoon sync"), Some("later text"));
+    let earlier = period_recording(2026, 6, 21, 9, 0, Some("Morning note"), Some("earlier text"));
+    let merged = crate::pipeline::assemble_period_transcript(&[later, earlier]);
+
+    assert!(merged.contains("2026-06-21 09:00 — Morning note\nearlier text"));
+    assert!(merged.contains("2026-06-21 15:30 — Afternoon sync\nlater text"));
+    // Oldest leads: the morning block precedes the afternoon one.
+    let morning = merged.find("Morning note").unwrap();
+    let afternoon = merged.find("Afternoon sync").unwrap();
+    assert!(morning < afternoon, "chronological order: oldest first");
+}
+
+#[test]
+fn assemble_period_transcript_skips_empty_and_falls_back_to_id() {
+    // A recording with no transcript (still transcribing / failed) contributes
+    // nothing; a transcribed one with no title falls back to its id in the prefix.
+    let titled = period_recording(2026, 6, 20, 8, 0, Some("Kickoff"), Some("kickoff text"));
+    let untitled = period_recording(2026, 6, 20, 10, 0, None, Some("untitled body"));
+    let id_str = untitled.id.as_str().to_string();
+    let pending = period_recording(2026, 6, 20, 12, 0, Some("Pending"), None);
+
+    let merged = crate::pipeline::assemble_period_transcript(&[titled, untitled, pending]);
+    assert!(merged.contains("Kickoff"));
+    assert!(merged.contains(&id_str), "no-title block uses the recording id");
+    assert!(!merged.contains("Pending"), "an empty-transcript block is skipped");
+
+    // All empty → empty (the caller treats that as nothing to digest).
+    let all_empty = [
+        period_recording(2026, 6, 20, 8, 0, Some("a"), None),
+        period_recording(2026, 6, 20, 9, 0, Some("b"), Some("   ")),
+    ];
+    assert!(crate::pipeline::assemble_period_transcript(&all_empty)
+        .trim()
+        .is_empty());
+}
+
+#[test]
+fn assemble_period_transcript_truncates_over_budget() {
+    // A window whose combined transcripts exceed the budget is cut off and
+    // marked, rather than overflowing the model's context unbounded.
+    let big = "x".repeat(crate::pipeline::PERIOD_DIGEST_MAX_CHARS);
+    let recs = [
+        period_recording(2026, 6, 1, 8, 0, Some("first"), Some(&big)),
+        period_recording(2026, 6, 2, 8, 0, Some("second"), Some("should be omitted")),
+    ];
+    let merged = crate::pipeline::assemble_period_transcript(&recs);
+    assert!(merged.contains("transcript truncated"), "marks the cut: {merged:.80}");
+    assert!(
+        !merged.contains("should be omitted"),
+        "the over-budget tail is dropped"
+    );
+}
+
+#[tokio::test]
+async fn generate_period_digest_errors_when_no_recordings_transcribed() {
+    // Nothing transcribed in the window → a clear error, never a silent empty digest.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = Config::default();
+    let state = test_state(tmp.path(), cfg.clone()).await;
+    let recs = vec![
+        period_recording(2026, 6, 21, 9, 0, Some("a"), None),
+        period_recording(2026, 6, 21, 10, 0, Some("b"), Some("  ")),
+    ];
+    let err = crate::pipeline::generate_period_digest(&state, &cfg, &recs[0].id, &recs)
+        .await
+        .expect_err("no transcribed recordings → error");
+    assert!(err.contains("nothing to digest"), "got: {err}");
+}

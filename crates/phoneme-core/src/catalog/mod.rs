@@ -396,6 +396,7 @@ mod embeddings;
 pub use embeddings::AnnHealth;
 mod entities;
 mod meeting_digests;
+mod period_digests;
 mod recordings;
 mod saved_search;
 mod segments;

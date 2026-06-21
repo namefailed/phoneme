@@ -133,6 +133,22 @@ export type MeetingDigest = {
   digest_model?: string | null;
 };
 
+/** A period digest: one LLM rollup across every recording in a date window
+ *  (what was discussed, decisions, open items), distinct from a single track's
+ *  `summary` and from the meeting-scoped {@link MeetingDigest}. Keyed by `key`,
+ *  a stable id derived from the range bounds; `since`/`until` are RFC3339
+ *  strings; `digest_model` is the LLM that produced it (null when unknown);
+ *  `source_count` is how many recordings were rolled up. */
+export type PeriodDigest = {
+  key: string;
+  label: string;
+  since: string;
+  until: string;
+  digest: string;
+  digest_model?: string | null;
+  source_count: number;
+};
+
 /** How a recording started via `recordStart` decides to stop: "hold" = on the
  *  explicit stop signal (Stop click / hotkey release), "oneshot" = by itself
  *  on silence (or the max-duration ceiling), `duration:N` = after exactly N
@@ -515,6 +531,39 @@ export async function rerunMeetingDigest(
   recipeId: string | null = null,
 ): Promise<void> {
   await tauriInvoke("rerun_meeting_digest", { meetingId, model, recipeId });
+}
+
+/**
+ * Fetch a stored period digest by its range `key` (the rollup across every
+ * recording in a date window), or `null` when none has been generated for that
+ * range. The digest panel fetches this by the key {@link rerunPeriodDigest}
+ * derives from the same range.
+ */
+export async function getPeriodDigest(key: string): Promise<PeriodDigest | null> {
+  return await tauriInvoke<PeriodDigest | null>("get_period_digest", { key });
+}
+
+/** List every stored period digest, newest range first. Powers the digest
+ *  panel's history. */
+export async function listPeriodDigests(): Promise<PeriodDigest[]> {
+  return await tauriInvoke<PeriodDigest[]>("list_period_digests");
+}
+
+/**
+ * Generate (or regenerate) a period digest on demand — one LLM rollup across
+ * every recording in the `since`..`until` window (RFC3339 strings). `label` is
+ * the human period name shown in the UI; `model` overrides the configured
+ * summary model for this run only (never persisted). The digest arrives via the
+ * `period_digest_updated` daemon event — re-fetch (by the same key) when it
+ * fires.
+ */
+export async function rerunPeriodDigest(
+  since: string,
+  until: string,
+  label: string,
+  model: string | null = null,
+): Promise<void> {
+  await tauriInvoke("rerun_period_digest", { since, until, label, model });
 }
 
 /**

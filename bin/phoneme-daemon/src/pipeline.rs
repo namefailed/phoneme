@@ -1120,6 +1120,128 @@ async fn run_meeting_hook(
     }
 }
 
+/// The instruction a period digest is generated with. A period digest rolls up
+/// EVERY recording in a date window into one account, so the transcript handed
+/// to the model concatenates many independent recordings (each prefixed with its
+/// date + title) rather than the tracks of one meeting. Reuses the `[summary]`
+/// provider/model connection (see [`summary_llm_config`]); only the prompt
+/// differs, so no new provider keys.
+pub(crate) const PERIOD_DIGEST_PROMPT: &str = "You are writing a rollup of everything the user recorded over a period. The transcript below concatenates multiple separate recordings in chronological order, each prefixed with its date/time and title. Produce: a short overview of what was discussed across the period, the key topics, decisions reached, and open/action items (with the owner when stated). Synthesize across recordings; do not summarize each one separately. Output only the digest, with no preamble.";
+
+/// Soft cap on the assembled period transcript, in characters. A period can span
+/// a week of recordings whose combined transcripts dwarf the meeting digest's
+/// ~2 tracks and can blow past the model's context window (and run up cost). The
+/// assembler stops adding recordings once this budget is reached and appends a
+/// truncation marker, so a huge window degrades gracefully instead of failing or
+/// silently overflowing. ~120k chars is a generous ceiling that still fits a
+/// large local context; lowering it trades completeness for cost/latency.
+pub(crate) const PERIOD_DIGEST_MAX_CHARS: usize = 120_000;
+
+/// Assemble a single transcript spanning every recording in a date window, for a
+/// period digest. Recordings are ordered chronologically (`started_at`, ties
+/// broken by id for determinism) and each block is prefixed with its date + title
+/// so the model can attribute content to a moment in time. Recordings with no
+/// transcript yet (still transcribing, or failed) contribute nothing. Returns an
+/// empty string when no recording in the window has any transcript — the caller
+/// treats that as "nothing to digest".
+///
+/// Bounded by [`PERIOD_DIGEST_MAX_CHARS`]: once the running length would exceed
+/// the budget, no further recordings are appended and a truncation marker is
+/// added, so an enormous window can't overflow the model's context or run up
+/// unbounded cost (risk 1 in the design brief). Pure — testable without an LLM.
+pub(crate) fn assemble_period_transcript(recordings: &[phoneme_core::Recording]) -> String {
+    let mut ordered: Vec<&phoneme_core::Recording> = recordings
+        .iter()
+        .filter(|r| {
+            r.transcript
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|t| !t.is_empty())
+        })
+        .collect();
+    // The `list` query already sorts, but re-sort defensively (oldest-first) so
+    // the merged transcript reads chronologically regardless of caller ordering.
+    ordered.sort_by(|a, b| {
+        a.started_at
+            .cmp(&b.started_at)
+            .then_with(|| a.id.as_str().cmp(b.id.as_str()))
+    });
+
+    let mut out = String::new();
+    let mut truncated = false;
+    for r in ordered {
+        let date = r.started_at.format("%Y-%m-%d %H:%M").to_string();
+        let title = r
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| r.id.as_str());
+        let text = r.transcript.as_deref().unwrap_or("").trim();
+        let block = format!("=== {date} — {title} ===\n{text}");
+        // Stop before exceeding the budget; account for the "\n\n" joiner. The
+        // first block is always included even if it alone exceeds the budget, so
+        // a single very long recording still produces (a truncated) digest.
+        let added_len = if out.is_empty() {
+            block.len()
+        } else {
+            out.len() + 2 + block.len()
+        };
+        if !out.is_empty() && added_len > PERIOD_DIGEST_MAX_CHARS {
+            truncated = true;
+            break;
+        }
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&block);
+        if out.len() >= PERIOD_DIGEST_MAX_CHARS {
+            // The block we just added reached/passed the budget; stop here.
+            truncated = true;
+            break;
+        }
+    }
+    if truncated {
+        out.push_str("\n\n=== [transcript truncated: period exceeds the digest size limit; some later recordings were omitted] ===");
+    }
+    out
+}
+
+/// Generate an LLM rollup across every recording in a date window: assemble the
+/// window's transcripts into one document ([`assemble_period_transcript`]) and
+/// run it through the same summary provider + streaming/persistence path the
+/// per-recording summary uses ([`generate_summary_with`]), but with the
+/// period-scope [`PERIOD_DIGEST_PROMPT`]. Returns `(digest, model)` on success or
+/// a human-readable reason on failure (reaches the UI toast verbatim). The
+/// `LlmActivity`/skip events are keyed on `event_id` (the window's first
+/// recording), since the activity stream is per-recording; the result is stored
+/// against the range, not the recording.
+pub(crate) async fn generate_period_digest(
+    state: &AppState,
+    cfg: &Config,
+    event_id: &RecordingId,
+    recordings: &[phoneme_core::Recording],
+) -> std::result::Result<(String, String), String> {
+    let merged = assemble_period_transcript(recordings);
+    if merged.trim().is_empty() {
+        return Err("no transcribed recordings in that range — nothing to digest".into());
+    }
+    let endpoint_hint = cfg.summary.api_url.trim();
+    let endpoint_hint = (!endpoint_hint.is_empty()).then(|| endpoint_hint.to_string());
+    // Reuse the summary connection (provider/model/key/url) but the period-scope
+    // prompt. `generate_summary_with` gives identical events + skip/empty/error
+    // classification + recorded model as the per-recording summary.
+    generate_summary_with(
+        state,
+        event_id,
+        &merged,
+        summary_llm_config(cfg),
+        PERIOD_DIGEST_PROMPT,
+        endpoint_hint.as_deref(),
+    )
+    .await
+}
+
 /// Whether this pipeline run should type the transcript at the cursor.
 ///
 /// Only in-place dictations type, and only when the text hasn't already landed.

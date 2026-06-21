@@ -441,6 +441,39 @@ fn meeting_digest_requests_and_events_roundtrip() {
 }
 
 #[test]
+fn period_digest_requests_and_events_roundtrip() {
+    use chrono::{Local, TimeZone};
+    let since = Local.with_ymd_and_hms(2026, 6, 21, 0, 0, 0).unwrap();
+    let until = Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap();
+    // The on-demand digest re-run (with and without a one-shot model override).
+    roundtrip(&Request::RerunPeriodDigest {
+        since,
+        until,
+        label: "2026-06-21".into(),
+        model: None,
+    });
+    roundtrip(&Request::RerunPeriodDigest {
+        since,
+        until,
+        label: "week of 2026-06-15".into(),
+        model: Some("llama3.2:3b".into()),
+    });
+    // The read requests (by key, and the list-all the backup export uses).
+    roundtrip(&Request::GetPeriodDigest {
+        key: "2026-06-21T00:00:00+00:00|2026-06-21T23:59:59+00:00".into(),
+    });
+    roundtrip(&Request::ListPeriodDigests);
+    // The result + failure events (the date-window twins of MeetingDigest*).
+    roundtrip(&DaemonEvent::PeriodDigestUpdated {
+        key: "2026-06-21T00:00:00+00:00|2026-06-21T23:59:59+00:00".into(),
+    });
+    roundtrip(&DaemonEvent::PeriodDigestFailed {
+        key: "2026-06-21T00:00:00+00:00|2026-06-21T23:59:59+00:00".into(),
+        error: "no usable AI provider".into(),
+    });
+}
+
+#[test]
 fn all_error_kinds_have_distinct_serialized_form() {
     let kinds = [
         IpcErrorKind::AlreadyRecording,
