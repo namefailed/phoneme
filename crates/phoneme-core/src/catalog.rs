@@ -64,10 +64,14 @@ struct CachedVector {
 /// read + decode, never changes which vectors are considered.
 #[derive(Debug, Clone, Default)]
 struct EmbeddingCorpus {
-    /// Every row of `embedding_chunks`, decoded once.
-    chunks: Vec<CachedVector>,
-    /// Every row of `embeddings` (legacy whole-recording), decoded once.
-    legacy: Vec<CachedVector>,
+    /// Every row of `embedding_chunks`, decoded once. Each vector is held behind
+    /// an `Arc` so a single-recording update can copy-on-write a fresh corpus
+    /// that SHARES every other recording's vectors by pointer — no deep copy and
+    /// no SQLite re-decode (see `patch_recording_in_cache`).
+    chunks: Vec<Arc<CachedVector>>,
+    /// Every row of `embeddings` (legacy whole-recording), decoded once. `Arc`-held
+    /// for the same cheap copy-on-write as `chunks`.
+    legacy: Vec<Arc<CachedVector>>,
 }
 
 /// SQLite-backed recordings catalog.
@@ -86,15 +90,20 @@ struct EmbeddingCorpus {
 /// `embedding_cache` holds the decoded corpus in memory so repeated queries
 /// reuse it. The design is deliberately simple and pessimistic about staleness:
 ///
-/// - **One whole-corpus snapshot**, not a per-id map. The ranking loops iterate
-///   the full corpus anyway, so a snapshot mirrors them exactly and needs no
-///   partial-miss reconciliation. It is rebuilt lazily on the first query after
-///   any invalidation.
-/// - **Coarse invalidation.** Every embedding write — `upsert_embedding`,
-///   `upsert_chunk_embeddings`, `clear_all_embeddings` — and a recording
-///   `delete` (which cascade-drops its embeddings) drops the snapshot. The next
-///   query rebuilds it from SQLite. A stale vector returning a wrong ranking is
-///   far worse than rebuilding, so invalidation never tries to be clever.
+/// - **One whole-corpus snapshot** whose vectors are each `Arc`-held, built lazily
+///   on the first query. The ranking loops iterate the full corpus, so a flat
+///   snapshot mirrors them; holding each vector behind an `Arc` is what lets a
+///   single-recording change copy-on-write a fresh snapshot cheaply (below).
+/// - **Incremental single-recording updates.** A single embed (`upsert_embedding`,
+///   `upsert_chunk_embeddings`) or a recording `delete` calls
+///   `patch_recording_in_cache`: it re-reads only THAT recording's rows and
+///   swaps them into a fresh snapshot that shares every other recording's vectors
+///   by `Arc` pointer — so recording one new memo no longer forces the next
+///   search to re-decode the entire library from SQLite. Bulk wipes
+///   (`clear_all_embeddings`, `clear_all_recordings`, the retention sweep) still
+///   drop the snapshot wholesale (the next query rebuilds), and any targeted
+///   reload that errors falls back to that same coarse drop — a stale vector that
+///   ranks wrongly is never an acceptable outcome.
 /// - **Bounded.** If the corpus exceeds a fixed vector-count cap it is *not*
 ///   cached; those (rare, very large) libraries fall back to reading from SQLite
 ///   each query, keeping memory bounded regardless of archive size.
@@ -395,7 +404,7 @@ impl Catalog {
         .await?;
         let mut chunks = Vec::with_capacity(chunk_rows.len());
         for row in chunk_rows {
-            chunks.push(row_to_cached_vector(&row)?);
+            chunks.push(Arc::new(row_to_cached_vector(&row)?));
         }
 
         let legacy_rows = sqlx::query(
@@ -406,7 +415,7 @@ impl Catalog {
         .await?;
         let mut legacy = Vec::with_capacity(legacy_rows.len());
         for row in legacy_rows {
-            legacy.push(row_to_cached_vector(&row)?);
+            legacy.push(Arc::new(row_to_cached_vector(&row)?));
         }
 
         let corpus = Arc::new(EmbeddingCorpus { chunks, legacy });
@@ -435,6 +444,94 @@ impl Catalog {
         };
         if self.embedding_cache_gen.load(Ordering::Acquire) == gen_at_miss {
             *guard = Some(corpus);
+        }
+    }
+
+    /// Decode just ONE recording's vectors (its chunks + legacy whole-recording
+    /// row) from SQLite — the targeted read behind `patch_recording_in_cache`, so
+    /// a single embed/delete touches only this recording's blobs instead of the
+    /// whole corpus.
+    async fn load_recording_vectors(
+        &self,
+        id: &RecordingId,
+    ) -> Result<(Vec<Arc<CachedVector>>, Vec<Arc<CachedVector>>)> {
+        let chunk_rows = sqlx::query(
+            "SELECT ec.recording_id AS id, ec.vector AS vector, r.meeting_id AS meeting_id \
+             FROM embedding_chunks ec JOIN recordings r ON r.id = ec.recording_id \
+             WHERE ec.recording_id = ?",
+        )
+        .bind(id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        let mut chunks = Vec::with_capacity(chunk_rows.len());
+        for row in chunk_rows {
+            chunks.push(Arc::new(row_to_cached_vector(&row)?));
+        }
+
+        let legacy_rows = sqlx::query(
+            "SELECT e.id AS id, e.vector AS vector, r.meeting_id AS meeting_id \
+             FROM embeddings e JOIN recordings r ON r.id = e.id WHERE e.id = ?",
+        )
+        .bind(id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        let mut legacy = Vec::with_capacity(legacy_rows.len());
+        for row in legacy_rows {
+            legacy.push(Arc::new(row_to_cached_vector(&row)?));
+        }
+        Ok((chunks, legacy))
+    }
+
+    /// Patch a SINGLE recording's vectors into the warm embedding cache instead of
+    /// dropping the whole snapshot (the old coarse invalidation re-decoded every
+    /// blob from SQLite on the next query). Reads only this recording's rows, then
+    /// copy-on-writes a fresh corpus that shares every OTHER recording's vectors by
+    /// `Arc` pointer. Used after a single embed / delete; bulk ops (clear-all,
+    /// retention sweep) still invalidate coarsely.
+    ///
+    /// Cold cache → left cold (the next query rebuilds from SQLite, now including
+    /// this change). Over the cap after the patch → drops to uncached. On any read
+    /// error → falls back to a full invalidation so a stale vector can never be
+    /// served. The generation bump makes a full rebuild that snapshotted an older
+    /// generation back off, exactly as coarse invalidation did.
+    async fn patch_recording_in_cache(&self, id: &RecordingId) {
+        let (new_chunks, new_legacy) = match self.load_recording_vectors(id).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(id = %id.as_str(), error = %e, "embedding cache: targeted reload failed; dropping snapshot");
+                self.invalidate_embedding_cache();
+                return;
+            }
+        };
+        let id_str = id.as_str();
+        let mut guard = match self.embedding_cache.write() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        // Bump under the lock so a rebuild that snapshotted an older generation
+        // (it may have read SQLite before this change committed) declines to cache.
+        self.embedding_cache_gen.fetch_add(1, Ordering::Release);
+        let Some(corpus) = guard.as_ref() else {
+            return; // cold: next query rebuilds from SQLite, including this change
+        };
+        let mut chunks: Vec<Arc<CachedVector>> = corpus
+            .chunks
+            .iter()
+            .filter(|cv| cv.id != id_str)
+            .cloned()
+            .collect();
+        chunks.extend(new_chunks);
+        let mut legacy: Vec<Arc<CachedVector>> = corpus
+            .legacy
+            .iter()
+            .filter(|cv| cv.id != id_str)
+            .cloned()
+            .collect();
+        legacy.extend(new_legacy);
+        if Self::cap_allows_caching(chunks.len() + legacy.len()) {
+            *guard = Some(Arc::new(EmbeddingCorpus { chunks, legacy }));
+        } else {
+            *guard = None; // grew past the cap → fall back to uncached
         }
     }
 
@@ -1221,9 +1318,9 @@ impl Catalog {
         .execute(&self.pool)
         .await?;
 
-        // A vector changed on disk — drop the in-memory snapshot so the next
-        // search rebuilds it (a stale cached vector would rank wrongly).
-        self.invalidate_embedding_cache();
+        // A vector changed — patch just this recording into the warm cache
+        // (no whole-corpus re-decode; a stale cached vector would rank wrongly).
+        self.patch_recording_in_cache(id).await;
         Ok(())
     }
 
@@ -1272,8 +1369,9 @@ impl Catalog {
             .await?;
         }
         tx.commit().await?;
-        // A recording's chunk vectors were replaced — drop the snapshot.
-        self.invalidate_embedding_cache();
+        // A recording's chunk vectors were replaced — patch just it into the warm
+        // cache instead of dropping the whole snapshot.
+        self.patch_recording_in_cache(id).await;
         Ok(())
     }
 
@@ -2056,9 +2154,10 @@ impl Catalog {
             .execute(&self.pool)
             .await?;
         // The cascade took this recording's embeddings, voiceprints, and dismissed
-        // suggestions with it — drop the search snapshot, then recompute any named
-        // voice that just lost a sample so its centroid + count stay accurate.
-        self.invalidate_embedding_cache();
+        // suggestions with it — patch its (now-empty) vectors out of the warm
+        // cache, then recompute any named voice that just lost a sample so its
+        // centroid + count stay accurate.
+        self.patch_recording_in_cache(id).await;
         for nid in affected {
             self.recompute_named_centroid(&nid).await?;
         }
@@ -5030,17 +5129,20 @@ mod tests {
         db.upsert_chunk_embeddings(&a.id, &[vec![0.0, 1.0, 0.0]])
             .await
             .unwrap();
+        // Incremental patching keeps the cache WARM but updates the two changed
+        // recordings in place (the old behavior dropped the whole snapshot). Still
+        // two vectors cached; the point is they're the NEW ones, proven next.
         assert_eq!(
             db.cached_vector_count(),
-            None,
-            "the re-embed invalidated the snapshot"
+            Some(2),
+            "the re-embed patched the snapshot in place, not dropped it"
         );
 
         let after = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
         assert_eq!(
             after[0].1.as_str(),
             b.id.as_str(),
-            "the changed vector flips the ranking — no stale cache"
+            "the changed vector flips the ranking — the patch is not stale"
         );
 
         // clear_all_embeddings (ReembedAll) must also invalidate.
@@ -5064,10 +5166,11 @@ mod tests {
         db.upsert_embedding(&a.id, &[0.0, 1.0, 0.0]).await.unwrap();
         assert_eq!(
             db.cached_vector_count(),
-            None,
-            "upsert_embedding invalidates the snapshot"
+            Some(1),
+            "upsert_embedding patches the one recording in place (still warm)"
         );
-        // A delete cascades embeddings away, so it must invalidate as well.
+        // A delete cascades the recording's embeddings away — the patch removes it
+        // from the warm cache (here that empties it, but the snapshot stays warm).
         db.semantic_search(&[1.0, 0.0, 0.0], 10, -1.0)
             .await
             .unwrap();
@@ -5075,8 +5178,8 @@ mod tests {
         db.delete(&a.id).await.unwrap();
         assert_eq!(
             db.cached_vector_count(),
-            None,
-            "delete invalidates the snapshot"
+            Some(0),
+            "delete patches the recording out (warm, now empty), not a full drop"
         );
     }
 
@@ -5099,11 +5202,11 @@ mod tests {
         // then let an invalidation land before the store.
         let gen_at_miss = db.embedding_cache_gen.load(Ordering::Acquire);
         let raced_corpus = Arc::new(EmbeddingCorpus {
-            chunks: vec![CachedVector {
+            chunks: vec![Arc::new(CachedVector {
                 id: a.id.as_str().to_string(),
                 meeting_id: None,
                 vector: Some(vec![1.0, 0.0, 0.0]),
-            }],
+            })],
             legacy: vec![],
         });
         db.invalidate_embedding_cache(); // the racing write bumps the generation
@@ -5118,11 +5221,11 @@ mod tests {
         // guard isn't just refusing to ever cache).
         let gen_now = db.embedding_cache_gen.load(Ordering::Acquire);
         let fresh_corpus = Arc::new(EmbeddingCorpus {
-            chunks: vec![CachedVector {
+            chunks: vec![Arc::new(CachedVector {
                 id: a.id.as_str().to_string(),
                 meeting_id: None,
                 vector: Some(vec![1.0, 0.0, 0.0]),
-            }],
+            })],
             legacy: vec![],
         });
         db.store_corpus_if_current(fresh_corpus, gen_now);
