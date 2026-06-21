@@ -2504,6 +2504,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -2773,6 +2774,7 @@ async fn reimport_from_disk(state: &AppState, dry_run: bool) -> Response {
             title_model: None,
             tag_model: None,
             diarization_model: None,
+            mean_confidence: None,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -3193,6 +3195,7 @@ mod tests {
             title_model: None,
             tag_model: None,
             diarization_model: None,
+            mean_confidence: None,
             tags: vec![],
             speaker_names: vec![],
         };

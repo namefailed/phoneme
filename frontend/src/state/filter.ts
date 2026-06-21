@@ -32,6 +32,11 @@ export type UiFilter = Omit<ListFilter, "kind" | "favorite"> & {
   /** Tag-presence filter, independent of `kind`/`tag_id`. `toWireFilter` maps it
    *  onto the daemon's `tagged` flag (true = tagged only, false = untagged only). */
   tagState?: TagState;
+  /** Low-confidence filter (confidence-driven re-do): show only recordings flagged
+   *  low confidence. UI-only as a boolean — `toWireFilter` turns it into the
+   *  daemon's numeric `low_confidence_below` using the configured threshold passed
+   *  in, so the SQL comparison and the badge agree. */
+  lowConfidence?: boolean;
   /** UI-only "More like this" mode: when set, the list shows recordings
    *  semantically similar to this recording (by its stored vectors) instead
    *  of the normal filtered list. Takes precedence over `search`. */
@@ -53,7 +58,7 @@ export const filterStore = new Store<UiFilter>({});
  * filters in SQL *before* pagination. Filtering client-side after pagination
  * made pages of the chosen kind come back mostly (or entirely) empty.
  */
-export function toWireFilter(f: UiFilter): ListFilter {
+export function toWireFilter(f: UiFilter, lowConfidenceThreshold?: number): ListFilter {
   const wire: ListFilter = {
     limit: f.limit,
     offset: f.offset,
@@ -71,6 +76,13 @@ export function toWireFilter(f: UiFilter): ListFilter {
   // the kind/tag_id filters it combines with.
   if (f.tagState === "tagged") wire.tagged = true;
   else if (f.tagState === "untagged") wire.tagged = false;
+  // Low-confidence: the UI boolean becomes the daemon's numeric threshold so the
+  // SQL `mean_confidence < t` comparison uses the configured value. Without a
+  // threshold (config not loaded) the filter is simply dropped rather than
+  // guessing a number — the list shows everything, never an empty page.
+  if (f.lowConfidence && typeof lowConfidenceThreshold === "number") {
+    wire.low_confidence_below = lowConfidenceThreshold;
+  }
   return wire;
 }
 

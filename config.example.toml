@@ -82,6 +82,17 @@ api_key = ""
 # your own names/jargon to improve how often Whisper gets them right.
 initial_prompt = "Voice memo. Common markers: Action Item:, Task:, To-do:, Follow up:, Decision:, Idea:, Question:, Reminder:."
 
+# `low_confidence_threshold` — confidence-driven re-do. When a transcript's MEAN
+# per-word confidence falls below this (0..1), the recording is flagged "low
+# confidence": an amber badge in the library list, a one-click "Improve…"
+# re-transcribe, and a "Low confidence" sidebar filter. Default 0.6; set 0 to
+# disable flagging. The per-word confidence only exists for providers that return
+# it — local whisper.cpp does; the OpenAI/Groq cloud transcription endpoints do
+# NOT, so cloud transcripts (and recordings made before this existed) get no
+# aggregate and are never flagged, whatever this is set to. Only the main
+# [whisper] block's value is read (the preview/dictation blocks ignore it).
+low_confidence_threshold = 0.6
+
 
 # -----------------------------------------------------------------------------
 # [preview_whisper] — OPTIONAL independent provider for the LIVE PREVIEW only

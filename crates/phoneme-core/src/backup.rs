@@ -349,6 +349,7 @@ mod tests {
             title_model: None,
             tag_model: None,
             diarization_model: None,
+            mean_confidence: Some(0.82),
             tags: vec![],
             speaker_names: vec![],
         }

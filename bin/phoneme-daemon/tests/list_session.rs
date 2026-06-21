@@ -44,6 +44,7 @@ fn meeting_track(meeting_id: &str, track: &str) -> Recording {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     }

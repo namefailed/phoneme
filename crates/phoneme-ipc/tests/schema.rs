@@ -65,6 +65,7 @@ fn list_recordings_request_roundtrips() {
         favorite: Some(true),
         in_place: None,
         tagged: None,
+        low_confidence_below: None,
     };
     roundtrip(&Request::ListRecordings { filter });
 }

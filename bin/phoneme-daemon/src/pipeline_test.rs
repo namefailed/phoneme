@@ -54,6 +54,7 @@ async fn seed_recording(
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -103,6 +104,7 @@ async fn seed_in_place_recording(
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -243,6 +245,7 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -367,6 +370,7 @@ async fn seed_meeting_track(
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -1392,6 +1396,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -2798,6 +2803,7 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };

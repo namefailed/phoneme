@@ -2380,6 +2380,22 @@ pub async fn run(
         tracing::warn!(id = %id.as_str(), "failed to persist transcript words: {e}");
     }
 
+    // Confidence-driven re-do (Tier 1): aggregate the per-word ASR confidences we
+    // just stored into one per-recording mean, the signal behind the
+    // low-confidence badge + filter. Computed from `words` already in hand — never
+    // a model re-run. `compute` returns `None` (→ stored NULL) when no word carries
+    // a confidence: an empty word set, or a provider that returns none (the
+    // OpenAI/Groq cloud transcription endpoints), so older rows and cloud
+    // transcripts degrade silently to "no aggregate, no badge". A retranscribe
+    // always rewrites the aggregate (including back to NULL) so it can never go
+    // stale against the new words. Best-effort: a failure costs only the badge.
+    let confidence_mean =
+        phoneme_core::ConfidenceAggregate::compute(&words, cfg.whisper.low_confidence_threshold)
+            .map(|agg| agg.mean);
+    if let Err(e) = state.catalog.update_confidence(&id, confidence_mean).await {
+        tracing::warn!(id = %id.as_str(), "failed to persist confidence aggregate: {e}");
+    }
+
     // When a Transform changed the transcript, re-derive a "cleaned" timing
     // variant (the raw words realigned to the cleaned text) so Timeline/Synced can
     // match the panel instead of showing the raw ASR. The raw timing just stored

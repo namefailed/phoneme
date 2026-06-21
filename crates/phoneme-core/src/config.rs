@@ -1172,6 +1172,28 @@ pub struct WhisperConfig {
     /// power-user / strong-box choice; the weak-box default never spawns it.
     #[serde(default)]
     pub use_own_bundled_server: bool,
+    /// Mean per-word confidence at or above which a transcript is considered fine
+    /// (`0..=1`). When a recording's computed `mean_confidence` falls **below**
+    /// this, it's flagged "low confidence": the library shows an unobtrusive badge
+    /// and the user can filter to these and one-click re-transcribe (Tier 1/2 of
+    /// confidence-driven re-do). Default `0.6`.
+    ///
+    /// Only the main `[whisper]` block's value is read — the preview / dictation
+    /// blocks clone this struct but never aggregate confidence, so theirs is inert.
+    /// The aggregate itself is computed from the per-word confidences the provider
+    /// returns, so this knob only matters for providers that emit them (the local
+    /// whisper.cpp path); cloud transcription endpoints that return none leave the
+    /// aggregate NULL and are never flagged, whatever the threshold. A value of
+    /// `0.0` effectively disables flagging (no real confidence is below 0).
+    #[serde(default = "default_low_confidence_threshold")]
+    pub low_confidence_threshold: f32,
+}
+
+/// Default for [`WhisperConfig::low_confidence_threshold`]: `0.6`. A sensible
+/// middle ground for whisper.cpp per-word probabilities — low enough that a clean
+/// recording isn't flagged, high enough to catch genuinely shaky transcripts.
+fn default_low_confidence_threshold() -> f32 {
+    0.6
 }
 
 impl std::fmt::Debug for WhisperConfig {
@@ -1190,6 +1212,7 @@ impl std::fmt::Debug for WhisperConfig {
             .field("model", &self.model)
             .field("api_url", &self.api_url)
             .field("use_own_bundled_server", &self.use_own_bundled_server)
+            .field("low_confidence_threshold", &self.low_confidence_threshold)
             .finish()
     }
 }
@@ -1209,6 +1232,7 @@ impl PartialEq for WhisperConfig {
             && self.model == other.model
             && self.api_url == other.api_url
             && self.use_own_bundled_server == other.use_own_bundled_server
+            && self.low_confidence_threshold == other.low_confidence_threshold
     }
 }
 
@@ -1611,14 +1635,14 @@ impl InPlaceConfig {
     /// The spoken-command table the dictation engine should actually use.
     ///
     /// An **empty** `voice_commands` map means "use the built-ins", so this
-    /// returns [`dictation::default_voice_commands`] in that case and the user's
+    /// returns [`crate::dictation::default_voice_commands`] in that case and the user's
     /// own map otherwise. A non-empty map fully replaces the defaults (it is not
     /// merged), so a user who wants to extend the set copies the defaults in
     /// first — matching how every other "empty = built-in" knob in the config
     /// behaves and keeping the override semantics obvious.
     ///
     /// Only entries with a recognized action survive: an unknown action would
-    /// dispatch to nothing in [`dictation::apply_voice_commands`], so it is
+    /// dispatch to nothing in [`crate::dictation::apply_voice_commands`], so it is
     /// dropped here defensively (the load-time pass in
     /// [`InPlaceConfig::sanitize_voice_commands`] already removed and warned
     /// about them, but a programmatically-built config goes through here too).
@@ -1640,7 +1664,7 @@ impl InPlaceConfig {
     }
 
     /// Drop any `voice_commands` entry whose action is not one of the recognized
-    /// values ([`dictation::VOICE_COMMAND_ACTIONS`]), logging a warning per
+    /// values ([`crate::dictation::VOICE_COMMAND_ACTIONS`]), logging a warning per
     /// dropped entry. Called once on config load so a typo'd action (e.g.
     /// `"newpara"`) is surfaced and ignored rather than silently doing nothing
     /// at every dictation — and crucially without failing the whole load.
@@ -3486,6 +3510,7 @@ impl Default for Config {
                 model: String::new(),
                 api_url: String::new(),
                 use_own_bundled_server: false,
+                low_confidence_threshold: default_low_confidence_threshold(),
             },
             // Default: live preview shares the main whisper provider (no separate
             // server). Users opt into a dedicated fast model / API via Settings.

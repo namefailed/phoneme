@@ -346,7 +346,7 @@ let config: Record<string, unknown> = {
     mode: "bundled_download", external_url: "http://127.0.0.1:5809", model_path: "",
     bundled_server_port: 5809, bundled_server_args: [], timeout_secs: 3600,
     initial_prompt: "Voice memo. Common markers: Action Item:, Task:, To-do:, Follow up:, Decision:, Idea:, Question:, Reminder:.", provider: "local", api_key: "", model: "", api_url: "",
-    use_own_bundled_server: false,
+    use_own_bundled_server: false, low_confidence_threshold: 0.6,
   },
   in_place: {
     cleanup: "fast", full_pipeline: false, type_first: false, save_to_library: true,

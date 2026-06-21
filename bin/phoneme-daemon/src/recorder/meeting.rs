@@ -253,6 +253,7 @@ impl DaemonRecorder {
                 title_model: None,
                 tag_model: None,
                 diarization_model: None,
+                mean_confidence: None,
                 tags: vec![],
                 speaker_names: vec![],
             };
@@ -959,6 +960,7 @@ mod tests {
             title_model: None,
             tag_model: None,
             diarization_model: None,
+            mean_confidence: None,
             tags: vec![],
             speaker_names: vec![],
         };

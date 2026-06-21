@@ -58,6 +58,12 @@ export class ActionRowElement extends LitElement {
 
   @property({ type: String }) recordingId = "";
   @property({ type: Boolean }) playing = false;
+  /** Whether this recording is flagged low-confidence (mean ASR confidence below
+   *  the configured threshold). When true the action row shows an amber
+   *  "Improve…" button that opens the same Re-run flow, pre-aimed at a
+   *  re-transcribe with a (optionally larger) model — Tier 2 of confidence-driven
+   *  re-do. Reuses the existing RetranscribeRecording path; no parallel route. */
+  @property({ type: Boolean }) lowConfidence = false;
   @property({ type: Object }) cbs!: ActionRowCallbacks;
   @state() private speed = readPlaybackSpeed();
   @state() private speedMenuOpen = false;
@@ -269,6 +275,9 @@ export class ActionRowElement extends LitElement {
             ${PLAYBACK_SPEEDS.map((s) => html`<button class="view-btn th-menu-item ${s === this.speed ? "active" : ""}" @click=${() => this.pickSpeed(s)}>${s}×</button>`)}
           </div>
         </span>
+        ${this.lowConfidence
+          ? html`<button class="lowconf-improve" title="This transcript came back low confidence — re-transcribe it (optionally with a larger model) to improve it" @click=${this.openRerun}>! Improve…</button>`
+          : null}
         <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
         <span class="export-trigger-wrap" style="position: relative; display: inline-block;">
           <button class="export-trigger" title="Export this recording — transcript text, timed captions, or all of its data" @click=${this.toggleExportMenu}>⬇ Export ${CARET_ICO}</button>
@@ -292,14 +301,20 @@ export class ActionRowElement extends LitElement {
  *  tracks the waveform player. */
 export class ActionRow {
   private element: ActionRowElement;
-  constructor(container: HTMLElement, id: string, cbs: ActionRowCallbacks) {
+  constructor(container: HTMLElement, id: string, cbs: ActionRowCallbacks, lowConfidence = false) {
     this.element = document.createElement('ph-action-row') as ActionRowElement;
     this.element.recordingId = id;
     this.element.cbs = cbs;
+    this.element.lowConfidence = lowConfidence;
     container.appendChild(this.element);
   }
 
   setPlayState(playing: boolean) {
     this.element.playing = playing;
+  }
+
+  /** Update the low-confidence flag (e.g. after a retranscribe re-aggregates). */
+  setLowConfidence(lowConfidence: boolean) {
+    this.element.lowConfidence = lowConfidence;
   }
 }

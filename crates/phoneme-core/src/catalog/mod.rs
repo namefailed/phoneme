@@ -456,6 +456,9 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         title_model: row.try_get("title_model").unwrap_or(None),
         tag_model: row.try_get("tag_model").unwrap_or(None),
         diarization_model: row.try_get("diarization_model").unwrap_or(None),
+        // Mean per-word ASR confidence (nullable). `unwrap_or(None)` keeps older
+        // rows that predate the column NULL — no badge, never flagged.
+        mean_confidence: row.try_get("mean_confidence").unwrap_or(None),
         tags: Vec::new(),
         // Populated separately (joined from `speaker_names`) by list/get/list_by_meeting.
         speaker_names: Vec::new(),

@@ -367,6 +367,17 @@ mark.search-hit {
   border-color: var(--err);
   color: var(--err);
 }
+/* "Improve…" affordance shown only on a low-confidence recording (Tier 2). Amber
+   like the list badge — a prompt, not an error — and it opens the same Re-run flow. */
+.action-row button.lowconf-improve {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.action-row button.lowconf-improve:hover {
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-color: var(--warn);
+  color: var(--warn);
+}
 
 /* Split button (primary action + caret) — e.g. "Re-transcribe ▾". The group
    shares the same surface, border, and shadow as the other action buttons so
@@ -2007,6 +2018,27 @@ body.phoneme-hide-header ph-header-bar {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  vertical-align: middle;
+}
+
+/* Low-confidence badge (confidence-driven re-do): a small amber "!" pip prefixed
+   to the transcript preview when the recording's mean ASR confidence is below the
+   configured threshold. Unobtrusive — absent entirely when confidence is good or
+   unknown (older rows / cloud transcripts have no aggregate). Uses --warn (amber),
+   distinct from the red failure pills, since the transcript is intact and usable. */
+.rec-lowconf-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  border-radius: 50%;
+  font-size: 0.7143rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--bg-deep);
+  background: var(--warn);
   vertical-align: middle;
 }
 

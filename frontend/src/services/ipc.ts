@@ -84,6 +84,13 @@ export type Recording = {
    *  Null for older rows or recordings that weren't auto-tagged; the provenance
    *  line falls back to inferring the step from pending `tag_suggestions`. */
   tag_model?: string | null;
+  /** Mean per-word ASR confidence in 0..1, computed when transcription completed
+   *  (the signal behind the low-confidence badge + filter). Null for recordings
+   *  transcribed before this existed, for providers that return no per-word
+   *  confidence (the OpenAI/Groq cloud transcription endpoints emit none), and
+   *  for empty transcripts — a null aggregate shows no badge and is never
+   *  flagged, so older rows and cloud transcripts degrade silently. */
+  mean_confidence?: number | null;
   /** Tags associated with this recording */
   tags?: Array<{ id: number; name: string; color?: string | null }>;
   /** Custom display names for this recording's diarized speaker labels, e.g.
@@ -222,6 +229,13 @@ export type ListFilter = {
    *  in SQL before pagination. Independent of `tag_id` (which scopes to a single
    *  tag). Powers the sidebar's "Untagged" / "Tagged" rows. */
   tagged?: boolean | null;
+  /** Server-side low-confidence filter: when set, only recordings whose stored
+   *  `mean_confidence` is non-null AND strictly below this value. Applied in SQL
+   *  before pagination. The value is the configured
+   *  `[whisper].low_confidence_threshold`; the UI sets it (via the sidebar
+   *  "Low confidence" row) rather than letting the user pick the number. A null
+   *  aggregate never matches, so older rows / cloud transcripts are excluded. */
+  low_confidence_below?: number | null;
 };
 
 /**

@@ -394,6 +394,16 @@ export class SectionWhisper {
           </span>
         </div>
         <div class="settings-field">
+          <label>Low-confidence threshold</label>
+          <div>${renderField(
+            { key: "whisper.low_confidence_threshold", label: "", kind: "number" },
+            this.config.whisper.low_confidence_threshold ?? 0.6,
+          )}</div>
+          <span style="${HELP}">
+            A transcript whose <b>mean per-word confidence</b> falls below this (0–1) is flagged <b>low confidence</b> — an amber badge in the list, a one-click <b>Improve…</b> re-transcribe, and a "Low confidence" filter. Default <b>0.6</b>; set <b>0</b> to disable flagging. Only local <code>whisper.cpp</code> returns per-word confidence — cloud transcription providers that don't are never flagged.
+          </span>
+        </div>
+        <div class="settings-field">
           <label>Language</label>
           <div>${renderField(
             {

@@ -66,8 +66,9 @@ impl Catalog {
                  error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
                  transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
                  cleanup_model, diarized, user_edited, favorite, tag_suggestions, summary,
-                 summary_model, title, title_is_auto, title_model, tag_model, diarization_model
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 summary_model, title, title_is_auto, title_model, tag_model, diarization_model,
+                 mean_confidence
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -100,6 +101,34 @@ impl Catalog {
         .bind(r.title_model.as_deref())
         .bind(r.tag_model.as_deref())
         .bind(r.diarization_model.as_deref())
+        .bind(r.mean_confidence)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Set (or clear) the mean per-word ASR confidence aggregate for a recording.
+    ///
+    /// Called by the pipeline after every transcribe/retranscribe, from the
+    /// already-available word list — never a model re-run. `Some(mean)` stores the
+    /// computed mean (see [`crate::ConfidenceAggregate`]); `None` clears it back to
+    /// NULL, which is what a provider with no per-word confidence (the OpenAI/Groq
+    /// cloud transcription endpoints) or an empty transcript writes — so a
+    /// retranscribe that drops to such a provider correctly un-flags the recording
+    /// instead of leaving a stale aggregate. A NULL aggregate shows no badge and
+    /// never matches the low-confidence filter.
+    pub async fn update_confidence(
+        &self,
+        id: &RecordingId,
+        mean_confidence: Option<f32>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET mean_confidence = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(mean_confidence)
+        .bind(id.as_str())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -727,6 +756,17 @@ impl Catalog {
             }
             None => {}
         }
+        // Low-confidence filter: only recordings with a non-NULL mean confidence
+        // strictly below the threshold (carried in the filter, set by the daemon
+        // from `[whisper].low_confidence_threshold`). The `IS NOT NULL` guard keeps
+        // older rows and cloud transcripts (no per-word confidence → NULL) out of
+        // the result, so the filter never wrongly flags them. Applied in SQL before
+        // LIMIT/OFFSET, like the other predicates, via a bound `?` parameter.
+        if filter.low_confidence_below.is_some() {
+            sql.push_str(
+                " AND recordings.mean_confidence IS NOT NULL AND recordings.mean_confidence < ?",
+            );
+        }
         if filter.since.is_some() {
             sql.push_str(" AND recordings.started_at >= ?");
         }
@@ -767,6 +807,11 @@ impl Catalog {
         }
         if let Some(s) = filter.status {
             q = q.bind(s.as_str().to_string());
+        }
+        // Bound in WHERE order: the low-confidence threshold clause sits between the
+        // tag-presence filter and the date-range clauses above.
+        if let Some(thresh) = filter.low_confidence_below {
+            q = q.bind(thresh);
         }
         if let Some(t) = filter.since {
             q = q.bind(t.to_rfc3339());

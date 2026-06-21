@@ -16,6 +16,7 @@ import {
 } from "../../utils/format";
 import { groupRecordings } from "./grouping";
 import { getContrastColor, safeTagColor } from "./TagChips";
+import { isLowConfidence, lowConfidenceThreshold, confidencePercent } from "../../utils/confidence";
 import "../shared/styles.css";
 import "./styles.css";
 
@@ -267,6 +268,14 @@ export class RecordingsListElement extends LitElement {
     return rows.filter((r) => !!r.meeting_id);
   }
 
+  /** Build the wire filter from the UI filter, injecting the configured
+   *  low-confidence threshold so the daemon's `mean_confidence < t` SQL uses the
+   *  real value (and matches the badge). Centralizes the `toWireFilter` call so
+   *  both the first-page and load-more paths stay in sync. */
+  private wireFilter(f: UiFilter) {
+    return toWireFilter(f, lowConfidenceThreshold(this.config));
+  }
+
   /** Apply the sidebar tag filter (a single tag, or the Tagged/Untagged presence
    *  toggle) client-side. The plain list path already enforces these in SQL, but
    *  the semantic-search and "more like this" paths don't carry the filter to the
@@ -277,6 +286,14 @@ export class RecordingsListElement extends LitElement {
     if (f.tag_id != null) out = out.filter((r) => (r.tags ?? []).some((t) => t.id === f.tag_id));
     if (f.tagState === "tagged") out = out.filter((r) => (r.tags ?? []).length > 0);
     else if (f.tagState === "untagged") out = out.filter((r) => (r.tags ?? []).length === 0);
+    // Low-confidence is applied in SQL on the plain list path (no-op here), but the
+    // semantic/like paths don't carry it to the backend — re-apply it client-side
+    // so the sidebar "Low confidence" row narrows a search/▸similar too. Matches
+    // the badge: only a non-null mean strictly below the configured threshold.
+    if (f.lowConfidence) {
+      const t = lowConfidenceThreshold(this.config);
+      out = out.filter((r) => isLowConfidence(r.mean_confidence, t));
+    }
     return out;
   }
 
@@ -338,8 +355,9 @@ export class RecordingsListElement extends LitElement {
         this.reachedEnd = true;
       } else {
         // The kind/favorite filter goes server-side (SQL, pre-pagination) so
-        // every page is full of the chosen kind — see `toWireFilter`.
-        rows = await listRecordings({ ...toWireFilter(f), limit: this.pageSize, offset: 0 });
+        // every page is full of the chosen kind — see `toWireFilter`. The
+        // low-confidence threshold is injected from the loaded config.
+        rows = await listRecordings({ ...this.wireFilter(f), limit: this.pageSize, offset: 0 });
         this.reachedEnd = rows.length < this.pageSize;
       }
       rows = this.filterByKind(rows, f.kind);
@@ -372,7 +390,7 @@ export class RecordingsListElement extends LitElement {
       const f = filterStore.get();
       const nextOffset = this.offset + this.pageSize;
       const rows = this.filterByKind(
-        await listRecordings({ ...toWireFilter(f), limit: this.pageSize, offset: nextOffset }),
+        await listRecordings({ ...this.wireFilter(f), limit: this.pageSize, offset: nextOffset }),
         f.kind,
       );
       this.offset = nextOffset;
@@ -1002,6 +1020,22 @@ export class RecordingsListElement extends LitElement {
       ? html`<span class="rec-track-badge rec-track-badge--ico" title=${sourceLabel} aria-label=${sourceLabel}>${sourceIcon}</span> `
       : nothing;
 
+    // Low-confidence badge (confidence-driven re-do, Tier 1): an unobtrusive "may
+    // need a closer look" flag prefixed to the transcript preview, only when the
+    // recording's stored mean confidence is below the configured threshold. A
+    // recording with no aggregate (older row, cloud transcript, empty transcript)
+    // is never flagged, so the badge stays absent when confidence is good/unknown.
+    const lowConfThreshold = lowConfidenceThreshold(this.config);
+    const isLowConf = isLowConfidence(r.mean_confidence, lowConfThreshold);
+    const lowConfPct = confidencePercent(r.mean_confidence);
+    const lowConfTitle =
+      lowConfPct !== null
+        ? `Low transcription confidence (${lowConfPct}% mean) — consider re-transcribing`
+        : "Low transcription confidence — consider re-transcribing";
+    const lowConfBadge = isLowConf
+      ? html`<span class="rec-lowconf-badge" title=${lowConfTitle} aria-label=${lowConfTitle}>!</span> `
+      : nothing;
+
     // Semantic-search relevance chip: only present when this row came from a
     // semantic search (`relevanceById` is populated). Shows the calibrated 0..1
     // score as a percentage so the user sees how strong each match is.
@@ -1044,7 +1078,7 @@ export class RecordingsListElement extends LitElement {
         r.title && !visibleCols.includes("title")
           ? html`<span class="rec-preview-title">${r.title}</span><span class="rec-preview-sep" aria-hidden="true">·</span>`
           : nothing
-      }${relevanceChip}${trackBadge}<span class="rec-preview-text" .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
+      }${relevanceChip}${lowConfBadge}${trackBadge}<span class="rec-preview-text" .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 
     const cells = visibleCols.map((c) => cellMap[c] || nothing);

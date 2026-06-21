@@ -159,6 +159,13 @@ export class SidebarElement extends LitElement {
     filterStore.set({ ...this.filterState, kind });
   }
 
+  /** Toggle the "Low confidence" filter (confidence-driven re-do). Independent of
+   *  kind/tag — it COMBINES with them — and clicking the active row turns it off.
+   *  The list maps it onto the daemon's numeric threshold at query time. */
+  private toggleLowConfidence() {
+    filterStore.set({ ...this.filterState, lowConfidence: !this.filterState.lowConfidence });
+  }
+
   /** A Library type-filter row. Active when its kind matches (independent of tag).
    *  Carries the same right-anchored count badge as the tag rows once the
    *  per-kind totals have loaded. */
@@ -193,6 +200,12 @@ export class SidebarElement extends LitElement {
               ${this.renderKindItem("single", "🎙️", "Voice Notes")}
               ${this.renderKindItem("meeting", "👥", "Meetings")}
               ${this.renderKindItem("in_place", "⌨️", "In-Place")}
+              <div class="sidebar-item ${f.lowConfidence ? "active" : ""}"
+                @click=${() => this.toggleLowConfidence()}
+                title="Recordings flagged low transcription confidence — candidates for a re-transcribe">
+                <span class="sidebar-icon" style="color: var(--warn);">!</span>
+                <span class="sidebar-label">Low confidence</span>
+              </div>
             </div>
           ` : ""}
 

@@ -29,6 +29,7 @@ A fully-commented `config.example.toml` and `.env.example` live at the **repo ro
 | `model` | string | `""` | Cloud model id |
 | `api_url` | string | `""` | Custom provider base URL |
 | `use_own_bundled_server` | bool | `false` | Only meaningful on `[in_place].stt` — opt a **dedicated dictation whisper-server** into supervision (see `[in_place]` below). Ignored on the main `[whisper]` block (the main server always runs). |
+| `low_confidence_threshold` | f32 | `0.6` | **Confidence-driven re-do.** A recording whose **mean per-word confidence** (stored in `recordings.mean_confidence`, computed when transcription completes) falls **below** this `0..1` value is flagged *low confidence*: an amber badge in the list, a one-click **Improve…** re-transcribe, and a *Low confidence* library filter (`ListFilter.low_confidence_below`). Set `0` to disable flagging. Per-word confidence only exists for providers that return it — local `whisper.cpp` does; the `openai`/`groq` cloud transcription endpoints do **not**, so cloud transcripts (and pre-feature recordings) get a `NULL` aggregate and are never flagged. Only the main `[whisper]` block's value is read (preview/dictation blocks clone the field but ignore it). |
 
 ---
 

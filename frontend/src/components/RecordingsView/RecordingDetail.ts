@@ -27,6 +27,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { applyMoreLikeThis } from "../../state/filter";
 import { speakerDisplayName, speakersForRename, renameSpeakerInTranscript, applySpeakerNames } from "./mergeMeeting";
 import { ActionRow, readPlaybackSpeed } from "./ActionRow";
+import { isLowConfidence, lowConfidenceThreshold } from "../../utils/confidence";
 import { TagChips } from "./TagChips";
 import { TranscriptDiff } from "./TranscriptDiff";
 import { TranscriptEditor } from "./TranscriptEditor";
@@ -98,6 +99,10 @@ export class RecordingDetail {
   /** The 24-hour-time setting, for the header date (K). Loaded from config and
    *  kept current via the config:saved event. */
   private use24h = false;
+  /** The low-confidence threshold (`[whisper].low_confidence_threshold`), loaded
+   *  from config and kept current via `config:saved`. Drives the action row's
+   *  "Improve…" affordance for a low-confidence recording (Tier 2). */
+  private lowConfThreshold = lowConfidenceThreshold(null);
   /** Serializes speaker-rename commits. Each commit reads `this.recording.
    *  transcript`, rewrites it, and writes it back across two awaits. Tabbing
    *  through the speakers modal can fire several blur commits at once; without
@@ -117,9 +122,14 @@ export class RecordingDetail {
     this.container = container;
     this.onRefresh = onRefresh;
     this.renderEmpty();
-    void invoke<any>("read_config").then((c) => { this.use24h = !!c?.interface?.format_24h; }).catch(() => { /* keep 12h default */ });
+    void invoke<any>("read_config").then((c) => {
+      this.use24h = !!c?.interface?.format_24h;
+      this.lowConfThreshold = lowConfidenceThreshold(c);
+    }).catch(() => { /* keep defaults */ });
     window.addEventListener("config:saved", (e) => {
-      this.use24h = !!(e as CustomEvent).detail?.interface?.format_24h;
+      const c = (e as CustomEvent).detail;
+      this.use24h = !!c?.interface?.format_24h;
+      this.lowConfThreshold = lowConfidenceThreshold(c);
     });
   }
 
@@ -363,7 +373,7 @@ export class RecordingDetail {
           const badge = this.container.querySelector<HTMLElement>(`#wf-speed-${r.id}`);
           if (badge) badge.textContent = `${rate}×`;
         },
-      });
+      }, isLowConfidence(r.mean_confidence, this.lowConfThreshold));
       this.player.setOnPlayStateChange((playing) => row.setPlayState(playing));
     }
 

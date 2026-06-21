@@ -80,6 +80,15 @@ const EXACT: Record<string, string[]> = {
     "bias",
     "dictionary",
   ],
+  "whisper.low_confidence_threshold": [
+    "low confidence",
+    "confidence",
+    "accuracy threshold",
+    "re-transcribe",
+    "improve transcription",
+    "flag",
+    "quality",
+  ],
 };
 
 /** All intent keywords for a field's config path (`data-key`). */

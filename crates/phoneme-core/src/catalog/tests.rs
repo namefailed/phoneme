@@ -330,6 +330,7 @@ fn embedded_recording(meeting_id: Option<&str>) -> Recording {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     }
@@ -1206,6 +1207,7 @@ async fn test_insert_and_get() {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -1268,6 +1270,7 @@ async fn original_transcript_preserved_across_user_edit() {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -1338,6 +1341,7 @@ async fn notes_round_trip_and_survive_transcription() {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -1493,6 +1497,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -1545,6 +1550,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         title_model: None,
         tag_model: None,
         diarization_model: None,
+        mean_confidence: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -3227,5 +3233,74 @@ async fn soft_delete_migration_applies_and_deleted_at_filters() {
     assert!(
         db.list_named_voices().await.unwrap().is_empty(),
         "deleted_at IS NOT NULL is filtered from listing"
+    );
+}
+
+#[tokio::test]
+async fn mean_confidence_round_trips_and_clears() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = embedded_recording(None);
+    db.insert(&r).await.unwrap();
+
+    // Fresh insert: no aggregate yet (NULL), the graceful default.
+    assert_eq!(db.get(&r.id).await.unwrap().unwrap().mean_confidence, None);
+
+    // Store a mean, then read it back through the DTO.
+    db.update_confidence(&r.id, Some(0.42)).await.unwrap();
+    let mc = db.get(&r.id).await.unwrap().unwrap().mean_confidence;
+    assert!(mc.is_some_and(|m| (m - 0.42).abs() < 1e-6), "got {mc:?}");
+
+    // A retranscribe that drops to a no-confidence provider clears it back to NULL.
+    db.update_confidence(&r.id, None).await.unwrap();
+    assert_eq!(db.get(&r.id).await.unwrap().unwrap().mean_confidence, None);
+}
+
+#[tokio::test]
+async fn low_confidence_filter_excludes_null_and_high() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+    // Three recordings: one low (0.4), one high (0.9), one with no aggregate
+    // (NULL — an older row or a cloud transcript).
+    let low = embedded_recording(None);
+    db.insert(&low).await.unwrap();
+    db.update_confidence(&low.id, Some(0.4)).await.unwrap();
+
+    let high = embedded_recording(None);
+    db.insert(&high).await.unwrap();
+    db.update_confidence(&high.id, Some(0.9)).await.unwrap();
+
+    let unknown = embedded_recording(None);
+    db.insert(&unknown).await.unwrap();
+    // Leave mean_confidence NULL.
+
+    // Filter below 0.6: only the low one — NULL and high are excluded, so older
+    // rows / cloud transcripts are never wrongly flagged.
+    let filter = ListFilter {
+        low_confidence_below: Some(0.6),
+        ..Default::default()
+    };
+    let hits = db.list(&filter).await.unwrap();
+    assert_eq!(hits.len(), 1, "only the below-threshold recording matches");
+    assert_eq!(hits[0].id.as_str(), low.id.as_str());
+
+    // No filter: all three come back.
+    assert_eq!(db.list(&ListFilter::default()).await.unwrap().len(), 3);
+
+    // Exactly at the threshold is NOT low (strict `<`).
+    db.update_confidence(&low.id, Some(0.6)).await.unwrap();
+    let hits = db.list(&filter).await.unwrap();
+    assert!(hits.is_empty(), "mean == threshold is not below it");
+}
+
+#[tokio::test]
+async fn insert_restored_round_trips_mean_confidence() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let mut r = embedded_recording(None);
+    r.mean_confidence = Some(0.73);
+    db.insert_restored(&r).await.unwrap();
+    let back = db.get(&r.id).await.unwrap().unwrap().mean_confidence;
+    assert!(
+        back.is_some_and(|m| (m - 0.73).abs() < 1e-6),
+        "got {back:?}"
     );
 }

@@ -11,6 +11,19 @@ trust boundary.*
 
 ### Transcripts
 
+- [x] **Confidence-driven re-do** — Phoneme now aggregates the per-word ASR
+  confidence it already captures into one **mean confidence** per recording
+  (computed when transcription completes — no model re-run — and stored in the new
+  nullable `recordings.mean_confidence` column + the `Recording` DTO). A transcript
+  whose mean falls below the configurable `[whisper].low_confidence_threshold`
+  (default **0.6**) is flagged **low confidence**: an unobtrusive amber badge in the
+  library list, a one-click **Improve…** button in the detail action row that opens
+  the existing re-transcribe flow (optionally with a larger model), and a **"Low
+  confidence"** sidebar filter (server-side via the new `low_confidence_below`
+  list filter, so it composes with pagination). Graceful by design: providers that
+  return no per-word confidence (the OpenAI/Groq cloud transcription endpoints) and
+  recordings made before this existed get a `NULL` aggregate — no badge, never
+  flagged, no crash. Set the threshold to `0` to disable flagging.
 - [x] **User-editable dictation voice commands** — the spoken editing phrases
   ("new line", "new paragraph", "scratch that") are now a customizable
   phrase → action map under **Settings → Dictation → Voice commands** (and

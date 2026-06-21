@@ -1,0 +1,14 @@
+-- Per-recording ASR confidence aggregate: the mean of the stored per-word
+-- confidences, computed once when transcription completes (see the pipeline's
+-- confidence-aggregate step). It powers the low-confidence badge + filter — a
+-- "this transcript may need a closer look / a re-transcribe" signal — without
+-- re-running the model.
+--
+-- Nullable, and NULL is the graceful-degradation switch: a recording predating
+-- this column, one whose provider returns no per-word confidence (the OpenAI/
+-- Groq cloud transcription endpoints emit none), or one with no words at all
+-- stays NULL. A NULL aggregate renders no badge and never matches the
+-- low-confidence filter, so older rows and cloud transcripts degrade silently.
+-- NULL and 0.0 are distinct: 0.0 means "measured, and very low", NULL means
+-- "no measurement", mirroring the per-word `transcript_words.confidence`.
+ALTER TABLE recordings ADD COLUMN mean_confidence REAL;

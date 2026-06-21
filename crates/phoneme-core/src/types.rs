@@ -501,6 +501,17 @@ pub struct Recording {
     /// `diarized` is true and the UI shows a plain "diarized".
     #[serde(default)]
     pub diarization_model: Option<String>,
+    /// The mean per-word ASR confidence in `0..=1`, computed from the recording's
+    /// stored [`TranscriptWord::confidence`] scores when transcription completed
+    /// (see [`ConfidenceAggregate`]). The signal behind the low-confidence badge
+    /// and filter. `None` — and stored NULL — for recordings transcribed before
+    /// this existed, for providers that return no per-word confidence (the
+    /// OpenAI/Groq cloud transcription endpoints emit none), and for empty
+    /// transcripts; a `None` aggregate shows no badge and never matches the
+    /// low-confidence filter, so older rows and cloud transcripts degrade
+    /// silently.
+    #[serde(default)]
+    pub mean_confidence: Option<f32>,
     /// Tags attached to this recording. Populated by `Catalog::list`/`get`;
     /// not a column on the recordings table (joined from `recording_tags`).
     #[serde(default)]
@@ -619,6 +630,80 @@ pub struct TranscriptWord {
     pub confidence: Option<f32>,
 }
 
+/// The per-recording ASR confidence summary, computed from the stored per-word
+/// [`TranscriptWord::confidence`] scores when transcription completes (no model
+/// re-run). It turns the raw per-word layer — already captured, stored, and sent
+/// over IPC, but never aggregated — into one "how sure was the transcriber?"
+/// number plus a count of weak words, so the UI can flag a recording that may
+/// want a closer look or a re-transcribe.
+///
+/// Only words that actually carry a confidence (`Some`) count toward the mean
+/// and the low-word fraction. Words with `None` (whisper-family segment-only
+/// logprobs, cloud transcripts that emit no per-word score) are skipped, not
+/// treated as 0.0 — a misleading "lowest confidence". When **no** word carries a
+/// score (an empty word set, or a provider that returns none), [`Self::compute`] yields
+/// `None`: there is nothing to summarize, and the recording's stored aggregate
+/// stays NULL (no badge, no filter match) — the graceful-degradation path for
+/// older rows and cloud providers.
+///
+/// [`Self::compute`]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ConfidenceAggregate {
+    /// Mean of the per-word confidences that carried a score, in `0..=1`. The
+    /// headline number stored on the recording as `mean_confidence`.
+    pub mean: f32,
+    /// How many words carried a confidence score (the denominator of `mean`).
+    /// Words with no score are excluded.
+    pub scored_words: u32,
+    /// How many scored words fell strictly below the low-confidence threshold —
+    /// the "weak words" count behind the badge tooltip.
+    pub low_words: u32,
+}
+
+impl ConfidenceAggregate {
+    /// Summarize a recording's words against `threshold` (the configured
+    /// `[whisper].low_confidence_threshold`, in `0..=1`).
+    ///
+    /// Returns `None` — "no aggregate" — when no word carries a confidence
+    /// score: an empty slice, or a provider that emits none. That `None` is what
+    /// keeps the stored `mean_confidence` NULL for older rows and cloud
+    /// transcripts, so they show no badge and never match the low-confidence
+    /// filter. A word whose score is exactly `0.0` is a real measurement and
+    /// counts; only `None` is skipped.
+    pub fn compute(words: &[TranscriptWord], threshold: f32) -> Option<Self> {
+        let mut sum = 0.0f64;
+        let mut scored: u32 = 0;
+        let mut low: u32 = 0;
+        for w in words {
+            if let Some(c) = w.confidence {
+                sum += c as f64;
+                scored += 1;
+                if c < threshold {
+                    low += 1;
+                }
+            }
+        }
+        if scored == 0 {
+            return None;
+        }
+        Some(Self {
+            mean: (sum / scored as f64) as f32,
+            scored_words: scored,
+            low_words: low,
+        })
+    }
+
+    /// Whether this recording is "low confidence" against `threshold`: its mean
+    /// word confidence is strictly below it. The same comparison the stored
+    /// `mean_confidence` and the [`ListFilter::low_confidence_below`] filter use,
+    /// so the badge and the filter agree. A recording with no aggregate (`None`,
+    /// never summarized) is never low-confidence — callers hold an `Option<Self>`
+    /// and simply skip the badge.
+    pub fn is_low(&self, threshold: f32) -> bool {
+        self.mean < threshold
+    }
+}
+
 /// Recording-type filter for [`ListFilter::kind`]: single voice notes (no
 /// `meeting_id`) vs. meeting tracks (a `meeting_id` set). Mirrors the GUI
 /// Library filter and the CLI `phoneme list --kind` values; "all" is simply
@@ -633,7 +718,10 @@ pub enum ListKind {
 }
 
 /// Filter for `Catalog::list` and the CLI `phoneme list` command.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+// `Eq` is intentionally NOT derived: `low_confidence_below` is an `f32`, which is
+// only `PartialEq` (NaN ≠ NaN). `ListFilter` is compared with `==` and stored in
+// `Request`, neither of which needs total equality.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ListFilter {
     /// Maximum rows to return; `None` for no cap.
     pub limit: Option<u32>,
@@ -678,6 +766,19 @@ pub struct ListFilter {
     /// Serde-defaulted: older clients that omit it still deserialize.
     #[serde(default)]
     pub tagged: Option<bool>,
+    /// Low-confidence filter: when `Some(t)`, keep only recordings whose stored
+    /// `mean_confidence` is non-NULL **and strictly below** `t` — the
+    /// confidence-driven "needs a closer look" view. Applied in SQL like the
+    /// other predicates so it composes with `limit`/`offset`. The daemon sets
+    /// `t` from the configured `[whisper].low_confidence_threshold` when the
+    /// user turns the filter on (the value travels here rather than the catalog
+    /// reading config, keeping `Catalog::list` config-free and saved searches
+    /// self-contained). `None` = no constraint. A NULL aggregate never matches,
+    /// so older rows and cloud transcripts (no per-word confidence) are excluded
+    /// — never wrongly flagged. Serde-defaulted so older clients that omit it
+    /// still deserialize.
+    #[serde(default)]
+    pub low_confidence_below: Option<f32>,
 }
 
 /// Per-Library-kind recording counts, returned by `Request::KindCounts` and
@@ -928,5 +1029,88 @@ mod tests {
                 || path.contains('/')
                 || path.contains('\\')
         );
+    }
+
+    /// Build a `TranscriptWord` carrying just a confidence (the only field the
+    /// aggregate reads); the rest is filler.
+    fn word(confidence: Option<f32>) -> TranscriptWord {
+        TranscriptWord {
+            start_ms: 0,
+            end_ms: 100,
+            text: "x".into(),
+            leading_space: true,
+            speaker: None,
+            confidence,
+        }
+    }
+
+    #[test]
+    fn confidence_aggregate_empty_is_none() {
+        // No words at all → nothing to summarize → no aggregate (stored NULL).
+        assert_eq!(ConfidenceAggregate::compute(&[], 0.6), None);
+    }
+
+    #[test]
+    fn confidence_aggregate_all_none_is_none() {
+        // A provider that returns no per-word confidence (whisper-family
+        // segment-only logprobs, OpenAI/Groq cloud transcription) → no aggregate,
+        // so the recording is never flagged. This is the cloud graceful-degradation
+        // path.
+        let words = [word(None), word(None), word(None)];
+        assert_eq!(ConfidenceAggregate::compute(&words, 0.6), None);
+    }
+
+    #[test]
+    fn confidence_aggregate_skips_none_words() {
+        // Words with no score are excluded from BOTH the mean and the count — not
+        // treated as 0.0. Mean of [0.8, 0.4] = 0.6 over two scored words; the two
+        // `None` words don't drag it down.
+        let words = [word(Some(0.8)), word(None), word(Some(0.4)), word(None)];
+        let agg = ConfidenceAggregate::compute(&words, 0.6).expect("some words scored");
+        assert!((agg.mean - 0.6).abs() < 1e-6, "mean was {}", agg.mean);
+        assert_eq!(agg.scored_words, 2);
+        // Only 0.4 is strictly below 0.6.
+        assert_eq!(agg.low_words, 1);
+    }
+
+    #[test]
+    fn confidence_aggregate_counts_zero_as_real_measurement() {
+        // 0.0 is a genuine "very low" measurement, distinct from `None`: it counts
+        // toward the mean and the low-word tally.
+        let words = [word(Some(0.0)), word(Some(1.0))];
+        let agg = ConfidenceAggregate::compute(&words, 0.6).expect("scored");
+        assert!((agg.mean - 0.5).abs() < 1e-6, "mean was {}", agg.mean);
+        assert_eq!(agg.scored_words, 2);
+        assert_eq!(agg.low_words, 1, "0.0 is below threshold, 1.0 is not");
+    }
+
+    #[test]
+    fn confidence_aggregate_is_low_uses_strict_less_than() {
+        // A clean transcript above the threshold is not low; one below is.
+        let high = ConfidenceAggregate::compute(&[word(Some(0.9)), word(Some(0.8))], 0.6).unwrap();
+        assert!(!high.is_low(0.6));
+        let low = ConfidenceAggregate::compute(&[word(Some(0.5)), word(Some(0.55))], 0.6).unwrap();
+        assert!(low.is_low(0.6));
+        // Exactly at the threshold is NOT low (strict `<`), matching the SQL filter
+        // and the badge.
+        let edge = ConfidenceAggregate::compute(&[word(Some(0.6)), word(Some(0.6))], 0.6).unwrap();
+        assert!(!edge.is_low(0.6), "mean == threshold is not low");
+    }
+
+    #[test]
+    fn confidence_aggregate_threshold_zero_flags_nothing() {
+        // A 0.0 threshold disables flagging: no real confidence is below 0, so the
+        // low-word count is 0 even for a weak transcript.
+        let agg = ConfidenceAggregate::compute(&[word(Some(0.1)), word(Some(0.2))], 0.0).unwrap();
+        assert_eq!(agg.low_words, 0);
+        assert!(!agg.is_low(0.0));
+    }
+
+    #[test]
+    fn list_filter_low_confidence_defaults_off() {
+        // An older client (or a config) that omits `low_confidence_below` still
+        // deserializes, with the filter off.
+        let f: ListFilter = serde_json::from_str("{}").unwrap();
+        assert_eq!(f.low_confidence_below, None);
     }
 }

@@ -260,6 +260,37 @@ usable transcript:
 > [Re-run menu](#-the-re-run-menu), instead of having a failure quietly swallowed.
 > Only **Transcription Failed** and **Hook Failed** are true terminal failures.
 
+## ⚠️ Low-confidence flagging (confidence-driven re-do)
+
+Whisper reports how sure it is about each word it transcribes. Phoneme rolls those
+per-word scores up into one **mean confidence** for the recording when
+transcription finishes (no extra work — it reuses what the transcriber already
+returned). When that mean falls below a threshold, the recording is flagged **low
+confidence** — a hint that it's worth a closer look or a re-transcribe:
+
+- **In the list**: a small amber **`!`** badge sits in front of the transcript
+  preview. Hover it for the mean confidence percent. It's deliberately quiet —
+  there's no badge at all when confidence is good (or unknown).
+- **In the detail pane**: an amber **Improve…** button appears in the action row.
+  One click opens the normal [Re-run menu](#-the-re-run-menu) ready to
+  re-transcribe — optionally with a **larger model**, which is the usual fix for a
+  shaky transcript.
+- **As a filter**: a **Low confidence** row in the sidebar's Library section shows
+  only flagged recordings, so you can sweep through and improve them in a batch. It
+  combines with the kind, tag, and date filters.
+
+The threshold is **Settings → Transcription → Low-confidence threshold**
+(`[whisper].low_confidence_threshold` in config, `0`–`1`, default **0.6**). Set it
+to `0` to turn flagging off entirely.
+
+> [!NOTE]
+> Only providers that return per-word confidence can be flagged. Local
+> **whisper.cpp** does; the **OpenAI** and **Groq** cloud transcription endpoints
+> do **not**. A recording transcribed by a provider that returns no per-word
+> confidence — and any recording made before this feature existed — simply has no
+> confidence figure: it shows no badge and never appears in the Low-confidence
+> filter, rather than being wrongly flagged.
+
 ## 🔁 The Re-run menu
 
 Each recording has a **Re-run** menu for reprocessing without re-recording: **Re-transcribe** (optionally a different model, optionally skip cleanup), **Re-run cleanup** (one-off provider/model/prompt), **Regenerate summary**, and **Re-fire hook**. Overrides apply to that single run and are never saved to config. See [Smart Cleanup](smart_cleanup.md) and [Providers & Models](providers_and_models.md#one-time-overrides-re-run-menu).
