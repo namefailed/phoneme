@@ -65,6 +65,18 @@ pub async fn get_words(
     Ok(Json(value))
 }
 
+/// `GET /api/recordings/:id/chapters` — fetch the recording's auto-chapters in
+/// chronological order. May be an empty array — a normal state (no timing to
+/// chapter, or the auto-chapter step never ran).
+pub async fn get_chapters(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, RestError> {
+    let id = require_id(&id)?;
+    let value = daemon::forward(&state.pipe_name, request_map::get_chapters(id)).await?;
+    Ok(Json(value))
+}
+
 /// `GET /api/recordings/:id/similar?limit=` — "more like this" using the
 /// recording's stored vectors as the query.
 pub async fn more_like_this(

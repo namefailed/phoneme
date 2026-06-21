@@ -166,6 +166,9 @@ fn is_retry_safe(req: &Request) -> bool {
         | ListMeetingDigests
         | GetSegments { .. }
         | GetWords { .. }
+        // Pure read of a recording's stored auto-chapters; idempotent like
+        // GetSegments.
+        | GetChapters { .. }
         | ListTranscriptVersions { .. }
         | GetTranscriptVersion { .. }
         | GetOriginalTranscript { .. }
@@ -241,6 +244,10 @@ fn is_retry_safe(req: &Request) -> bool {
         // Entity extraction — awaits an LLM call like SuggestTags; single-attempt
         // so a blind re-send after a lost reply can't fire the model twice.
         | SuggestEntities { .. }
+        // Auto-chapter generation — awaits an LLM call like SuggestEntities;
+        // single-attempt so a blind re-send after a lost reply can't fire the model
+        // twice.
+        | SuggestChapters { .. }
         | ApproveTagSuggestion { .. }
         | DismissTagSuggestion { .. }
         | ClearAllTagSuggestions
@@ -506,6 +513,15 @@ mod tests {
             start_ms: 0,
             end_ms: 1_000,
             out_path: None,
+        }));
+
+        // Chapters: the read is retry-safe (like GetSegments); generating on
+        // demand awaits an LLM call (like SuggestEntities) and must not blind-retry.
+        assert!(is_retry_safe(&Request::GetChapters {
+            id: phoneme_core::RecordingId::new(),
+        }));
+        assert!(!is_retry_safe(&Request::SuggestChapters {
+            id: phoneme_core::RecordingId::new(),
         }));
     }
 }

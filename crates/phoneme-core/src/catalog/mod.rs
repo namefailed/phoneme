@@ -380,6 +380,7 @@ fn replace_ignore_case(haystack: &str, needle: &str, replacement: &str) -> (usiz
 }
 
 pub mod ann;
+mod chapters;
 mod embeddings;
 pub use embeddings::AnnHealth;
 mod entities;
@@ -538,6 +539,9 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         // The entity-extraction model (nullable). `unwrap_or(None)` keeps older
         // rows that predate the column NULL.
         entities_model: row.try_get("entities_model").unwrap_or(None),
+        // The auto-chapter model (nullable). `unwrap_or(None)` keeps older rows
+        // that predate the column NULL.
+        chapters_model: row.try_get("chapters_model").unwrap_or(None),
         title: row.try_get("title").unwrap_or(None),
         title_is_auto: row.try_get("title_is_auto").unwrap_or(true),
         title_model: row.try_get("title_model").unwrap_or(None),

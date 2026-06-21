@@ -86,6 +86,11 @@ pub fn get_words(id: RecordingId) -> Request {
     Request::GetWords { id, variant: None }
 }
 
+/// `GET /api/recordings/:id/chapters` → [`Request::GetChapters`].
+pub fn get_chapters(id: RecordingId) -> Request {
+    Request::GetChapters { id }
+}
+
 /// `GET /api/search` → [`Request::SemanticSearch`].
 pub fn search(q: &SearchQuery) -> Request {
     Request::SemanticSearch {
@@ -330,6 +335,10 @@ mod tests {
         match get_segments(id.clone()) {
             Request::GetSegments { id: got, .. } => assert_eq!(got, id),
             other => panic!("expected GetSegments, got {other:?}"),
+        }
+        match get_chapters(id.clone()) {
+            Request::GetChapters { id: got } => assert_eq!(got, id),
+            other => panic!("expected GetChapters, got {other:?}"),
         }
     }
 

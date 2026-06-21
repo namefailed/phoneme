@@ -407,6 +407,7 @@ fn embedded_recording(meeting_id: Option<&str>) -> Recording {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1287,6 +1288,7 @@ async fn test_insert_and_get() {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1353,6 +1355,7 @@ async fn original_transcript_preserved_across_user_edit() {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1427,6 +1430,7 @@ async fn notes_round_trip_and_survive_transcription() {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1586,6 +1590,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1642,6 +1647,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -3778,6 +3784,7 @@ fn entity_test_recording() -> Recording {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -3973,6 +3980,86 @@ async fn deleting_a_recording_cascades_its_entities() {
     db.delete(&r.id).await.expect("delete");
     // The FK ON DELETE CASCADE took the entity rows with the recording.
     assert!(db.list_all_entities().await.expect("list all").is_empty());
+}
+
+// ── Auto-chapters ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn chapters_replace_round_trip_and_cascade() {
+    use crate::types::Chapter;
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = entity_test_recording();
+    db.insert(&r).await.unwrap();
+
+    // No chapters yet is a normal (empty) state, not an error.
+    assert!(db.chapters_for(&r.id).await.unwrap().is_empty());
+
+    let first = vec![
+        Chapter {
+            start_ms: 0,
+            end_ms: 5000,
+            title: "Intro".into(),
+            summary: Some("Kick-off and agenda".into()),
+        },
+        Chapter {
+            start_ms: 5000,
+            end_ms: 12000,
+            title: "Design".into(),
+            summary: None,
+        },
+    ];
+    db.replace_chapters(&r.id, &first).await.unwrap();
+    assert_eq!(db.chapters_for(&r.id).await.unwrap(), first);
+
+    // A re-run replaces wholesale — fewer rows must not leave stale tail chapters.
+    let second = vec![Chapter {
+        start_ms: 0,
+        end_ms: 3000,
+        title: "Only one now".into(),
+        summary: None,
+    }];
+    db.replace_chapters(&r.id, &second).await.unwrap();
+    assert_eq!(db.chapters_for(&r.id).await.unwrap(), second);
+
+    // An empty slice clears them.
+    db.replace_chapters(&r.id, &[]).await.unwrap();
+    assert!(db.chapters_for(&r.id).await.unwrap().is_empty());
+
+    db.replace_chapters(&r.id, &first).await.unwrap();
+    db.delete(&r.id).await.unwrap();
+    assert!(
+        db.chapters_for(&r.id).await.unwrap().is_empty(),
+        "chapters must be cascade-deleted with their recording"
+    );
+}
+
+#[tokio::test]
+async fn set_chapters_model_lands_on_get() {
+    use crate::types::Chapter;
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = entity_test_recording();
+    db.insert(&r).await.unwrap();
+
+    // Older row carries no chapter model.
+    assert_eq!(db.get(&r.id).await.unwrap().unwrap().chapters_model, None);
+
+    db.set_chapters_model(&r.id, "phi3:mini").await.unwrap();
+    db.replace_chapters(
+        &r.id,
+        &[Chapter {
+            start_ms: 0,
+            end_ms: 1000,
+            title: "A".into(),
+            summary: None,
+        }],
+    )
+    .await
+    .unwrap();
+
+    let fetched = db.get(&r.id).await.unwrap().unwrap();
+    assert_eq!(fetched.chapters_model.as_deref(), Some("phi3:mini"));
+    // Chapters are NOT carried on the Recording DTO — they are fetched lazily.
+    assert_eq!(db.chapters_for(&r.id).await.unwrap().len(), 1);
 }
 
 // ── ANN (approximate nearest-neighbour) index ───────────────────────────────

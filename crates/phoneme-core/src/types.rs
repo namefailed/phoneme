@@ -533,6 +533,12 @@ pub struct Recording {
     /// extracted. Mirrors [`Self::summary_model`].
     #[serde(default)]
     pub entities_model: Option<String>,
+    /// The LLM model the auto-chapter step used for this recording, if it ran.
+    /// `None` for older rows or recordings that were never chaptered. Mirrors
+    /// [`Self::entities_model`]. Chapters themselves are fetched lazily (the
+    /// `GetChapters` IPC / `Catalog::chapters_for`), not carried on this DTO.
+    #[serde(default)]
+    pub chapters_model: Option<String>,
     /// Display title for the recording — auto-generated (heuristic or LLM) or
     /// set by the user. `None` until generated; the UI falls back to the
     /// `started_at` timestamp.
@@ -639,6 +645,38 @@ pub struct EntityFacet {
     pub value: String,
     /// How many recordings mention this `(kind, value)`.
     pub count: i64,
+}
+
+/// One auto-chapter: a time range over a recording's transcript plus a short
+/// title (and an optional one-line summary), derived by the LLM auto-chapter
+/// enrichment step from the recording's segment timing.
+///
+/// Times are **milliseconds from the start of the track's audio**, like
+/// [`TranscriptSegment`]. Boundaries are anchored to the recording's real
+/// segment start times (the daemon snaps each model-supplied `start_ms` to the
+/// nearest segment start and derives each chapter's `end_ms` from the next
+/// chapter's start — see the daemon's `parse_chapters`), so a chapter row always
+/// lines up with the audio. Stored in the `chapters` table, keyed per recording
+/// and ordered by `idx`; an empty chapter list is a normal state (the recording
+/// has no timing to chapter, or the step never ran), not an error. Fetched
+/// lazily by the view (the `GetChapters` IPC), not carried on the [`Recording`]
+/// DTO.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Chapter {
+    /// Chapter start, in milliseconds from the start of the track's audio (an
+    /// existing segment start time the model picked, snapped to the nearest real
+    /// segment start by the daemon).
+    pub start_ms: i64,
+    /// Chapter end, in milliseconds from the start of the track's audio. Derived
+    /// daemon-side as the next chapter's `start_ms` (the last chapter ends at the
+    /// recording's `duration_ms`), never taken from the model.
+    pub end_ms: i64,
+    /// The chapter's title — a short topic label.
+    pub title: String,
+    /// An optional one-line summary of what the chapter covers, or `None` when
+    /// the model gave none.
+    #[serde(default)]
+    pub summary: Option<String>,
 }
 
 /// A whole-meeting digest: one LLM-generated synthesis across **all** tracks of a

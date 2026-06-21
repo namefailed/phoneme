@@ -34,6 +34,7 @@ fn sample_recording(id: RecordingId) -> Recording {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,

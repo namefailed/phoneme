@@ -733,6 +733,31 @@ pub enum Request {
         /// The recording to extract entities for.
         id: RecordingId,
     },
+    /// Run the LLM auto-chapter step for one recording on demand (regardless of
+    /// whether the recipe includes a `chapters` step). Mirrors
+    /// [`Request::SuggestEntities`]: it awaits the step — Ok `null` arrives after
+    /// the model replies. Streams [`DaemonEvent::LlmActivity`] (Tagging stage)
+    /// while running; the time-ranged chapters land on the recording (replacing any
+    /// previous set) and [`DaemonEvent::ChaptersUpdated`] fires (or
+    /// `ChaptersFailed`). Errors: `invalid_config` when the recording has no
+    /// transcript yet. A recording with no transcript *segments* (no timing to
+    /// chapter) is a clean no-op, not an error. GUI ✨ Generate-chapters button,
+    /// `phoneme chapters <id>`.
+    SuggestChapters {
+        /// The recording to generate chapters for.
+        id: RecordingId,
+    },
+    /// Fetch one recording's auto-chapters in chronological order. Ok = JSON array
+    /// (possibly empty) of `Chapter` objects: `start_ms`/`end_ms` offsets into the
+    /// track's audio, a `title`, and an optional one-line `summary`. An empty list
+    /// is a normal state — the recording has no timing to chapter, or the
+    /// auto-chapter step never ran — not an error (an unknown id likewise yields an
+    /// empty list, not `not_found`, matching [`Request::GetSegments`]). A pure read
+    /// powering the Chapters detail view and `phoneme show --chapters`.
+    GetChapters {
+        /// The recording whose chapters to fetch.
+        id: RecordingId,
+    },
     /// Approve one suggested tag: create the tag if needed, attach it, and
     /// remove the name from the recording's suggestion list. Ok = the tag
     /// object `{"id":n,"name":…,"color":…}`; emits
@@ -1729,6 +1754,25 @@ pub enum DaemonEvent {
     /// user-skip sentinel when skipped. Mirrors [`DaemonEvent::TagFailed`].
     EntitiesFailed {
         /// The recording whose entity-extraction step failed.
+        id: RecordingId,
+        /// Human-readable reason (endpoint, model, parse error, skip).
+        error: String,
+    },
+    /// A recording's auto-chapters were (re)generated and stored — the result of
+    /// `SuggestChapters` or the auto-pipeline chapter step. The Chapters view
+    /// re-fetches (`GetChapters`) to show the new rows. Mirrors
+    /// [`DaemonEvent::EntitiesUpdated`].
+    ChaptersUpdated {
+        /// The recording whose chapters changed.
+        id: RecordingId,
+    },
+    /// Auto-chapter generation failed. Best-effort like the other optional
+    /// enrichment steps: the recording keeps its transcript and stays usable (no
+    /// chapters added); this only surfaces the failure for the toast. `error`
+    /// carries the user-skip sentinel when skipped. Mirrors
+    /// [`DaemonEvent::EntitiesFailed`].
+    ChaptersFailed {
+        /// The recording whose auto-chapter step failed.
         id: RecordingId,
         /// Human-readable reason (endpoint, model, parse error, skip).
         error: String,

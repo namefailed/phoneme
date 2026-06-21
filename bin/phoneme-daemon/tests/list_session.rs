@@ -41,6 +41,7 @@ fn meeting_track(meeting_id: &str, track: &str) -> Recording {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,

@@ -46,7 +46,8 @@ use phoneme_core::config::{
 use phoneme_core::error::Result;
 use phoneme_core::transcription::DiarizationTrack;
 use phoneme_core::{
-    Catalog, Embedder, Entity, HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus,
+    Catalog, Chapter, Embedder, Entity, HookMetadata, HookPayload, HookRunner, RecordingId,
+    RecordingStatus, TranscriptSegment,
 };
 use phoneme_ipc::{DaemonEvent, PipelineStage};
 use std::sync::Arc;
@@ -1614,6 +1615,351 @@ async fn run_entities_step(
     extract_entities_with(state, id, transcript, llm_cfg, prompt).await
 }
 
+// ── Auto-chapters ──────────────────────────────────────────────────────────────
+// The auto-chapter enrichment is the entity step's twin, with one twist: a chapter
+// is a *time range*, so the model must be anchored to the recording's real segment
+// start times rather than emitting free-form milliseconds (it would hallucinate
+// them). The step feeds the model a numbered segment list with `start_ms` anchors,
+// asks it to pick boundaries from those anchors, then `parse_chapters` snaps every
+// returned start to the nearest real segment start, sorts, derives each `end_ms`
+// from the next start (the last ends at the recording's `duration_ms`), and drops
+// overlaps. Reuses the Tagging stage for the live stream and folds a real failure
+// into `TagFailed`, exactly like entities.
+
+/// The built-in instruction the auto-chapter step uses when the recording has no
+/// `chapters` Playbook entry (a user deleted it). Asks for a JSON array of
+/// `{start_ms,title,summary}` where each `start_ms` is one of the supplied segment
+/// start times — never a free-form value — so [`parse_chapters`] can anchor the
+/// boundaries to the audio. Kept in code (not a config section) because there is no
+/// `[chapters]` section; the Playbook `chapters` entry is the editable source of
+/// truth (mirrors [`DEFAULT_ENTITY_PROMPT`]).
+pub(crate) const DEFAULT_CHAPTERS_PROMPT: &str = "Divide this transcript into topic chapters. You are given the transcript as a numbered list of segments, each prefixed with its start time in milliseconds in [brackets]. Reply with ONLY a JSON array of objects, each {\"start_ms\":<one of the bracketed segment start times>,\"title\":\"short topic label\",\"summary\":\"one-line description\"}, in chronological order. Choose boundaries where the topic genuinely shifts; start the first chapter at the earliest segment. The start_ms MUST be copied exactly from one of the bracketed start times — never invent a millisecond value. Output at most 20 chapters, no preamble, no code fences.";
+
+/// Hard cap on how many chapters one run stores, mirroring [`MAX_ENTITIES`]. Keeps
+/// a chatty model from flooding the child table and the timeline view.
+const MAX_CHAPTERS: usize = 20;
+
+/// Build the effective LLM config for the auto-chapter step, mirroring
+/// [`entities_llm_config`]: resolve the `chapters` Playbook entry's LLM half
+/// against `[llm_post_process]` (inherit-on-blank), falling back to the bare
+/// cleanup connection when no `chapters` entry exists, so the on-demand path always
+/// has a usable provider.
+pub fn chapters_llm_config(cfg: &Config) -> LlmPostProcessConfig {
+    match entry_config_for_target(cfg, "chapters") {
+        Some((llm_cfg, _)) => llm_cfg,
+        None => cfg.llm_post_process.clone(),
+    }
+}
+
+/// One parsed `{start_ms, title, summary}` shape from the model's JSON reply,
+/// before snapping/validation. Every field is optional except a title-bearing
+/// entry needs a `title`; a missing `start_ms` drops the entry (it can't be
+/// anchored).
+#[derive(serde::Deserialize)]
+struct RawChapter {
+    start_ms: Option<i64>,
+    title: Option<String>,
+    #[serde(default)]
+    summary: Option<String>,
+}
+
+/// Build the model input: a numbered segment list, each line prefixed with its
+/// `start_ms` anchor in `[brackets]`, so the model can only choose boundaries from
+/// real segment starts. Mirrors how the timeline view groups segments, but flat
+/// and timestamped for the LLM.
+fn chapters_prompt_input(segments: &[TranscriptSegment]) -> String {
+    let mut buf = String::new();
+    for (i, s) in segments.iter().enumerate() {
+        // One line per segment: index, the bracketed start_ms anchor, the text.
+        buf.push_str(&format!("{}. [{}] {}\n", i + 1, s.start_ms, s.text.trim()));
+    }
+    buf
+}
+
+/// Snap a model-returned `start_ms` to the nearest real segment start. The segment
+/// starts are sorted ascending (segments come from the catalog in `idx`/timeline
+/// order); a binary search finds the insertion point and the closer of the two
+/// neighbours wins. `starts` is assumed non-empty (the caller short-circuits an
+/// empty segment set before parsing).
+fn snap_to_nearest_start(target: i64, starts: &[i64]) -> i64 {
+    match starts.binary_search(&target) {
+        Ok(i) => starts[i],
+        Err(i) => {
+            if i == 0 {
+                starts[0]
+            } else if i >= starts.len() {
+                starts[starts.len() - 1]
+            } else {
+                let lo = starts[i - 1];
+                let hi = starts[i];
+                if target - lo <= hi - target {
+                    lo
+                } else {
+                    hi
+                }
+            }
+        }
+    }
+}
+
+/// Parse the auto-chapter reply into anchored, validated [`Chapter`] ranges — the
+/// load-bearing correctness step.
+///
+/// `segments` is the recording's real timeline (already in start order); the model
+/// is never trusted to emit timing. The flow:
+/// 1. Scan every `[` for the first JSON array of `{start_ms,title,...}` objects
+///    that yields at least one valid chapter (the robust scan
+///    [`parse_entities`] uses, so bracket-bearing prose doesn't poison it). Each
+///    element is deserialized separately, so one malformed object never rejects the
+///    batch.
+/// 2. Drop entries with a blank title or a missing `start_ms` (it can't be
+///    anchored).
+/// 3. **Snap** each `start_ms` to the nearest real segment start, so a boundary
+///    always lands on the audio even if the model copied a value imperfectly.
+/// 4. Sort by the snapped start and **de-duplicate** snapped starts (two model
+///    boundaries snapping to the same segment collapse to one — keep the first,
+///    so out-of-order/overlapping inputs can't produce a zero/negative-width
+///    chapter).
+/// 5. Derive each `end_ms` from the next chapter's start; the last ends at
+///    `duration_ms` (clamped so it's never before its own start).
+/// 6. Cap at `max`.
+///
+/// Returns an empty vec when nothing usable parses (no JSON array, all-blank
+/// titles, all starts past the audio) — the caller keeps any prior chapters on an
+/// empty parse, exactly like entities.
+fn parse_chapters(
+    raw: &str,
+    segments: &[TranscriptSegment],
+    duration_ms: i64,
+    max: usize,
+) -> Vec<Chapter> {
+    if segments.is_empty() {
+        return Vec::new();
+    }
+    let starts: Vec<i64> = segments.iter().map(|s| s.start_ms).collect();
+    let cleaned = raw.trim();
+    let candidates: Vec<RawChapter> = cleaned
+        .char_indices()
+        .filter(|(_, c)| *c == '[')
+        .find_map(|(start, _)| {
+            let elems = serde_json::Deserializer::from_str(&cleaned[start..])
+                .into_iter::<Vec<serde_json::Value>>()
+                .next()?
+                .ok()?;
+            let parsed: Vec<RawChapter> = elems
+                .into_iter()
+                .filter_map(|v| serde_json::from_value::<RawChapter>(v).ok())
+                .collect();
+            // A valid candidate array has at least one entry carrying both a
+            // start_ms and a non-blank title — otherwise it's a stray earlier array
+            // (e.g. `[1, 2]`), keep scanning.
+            if parsed.iter().any(|c| {
+                c.start_ms.is_some() && c.title.as_ref().is_some_and(|t| !t.trim().is_empty())
+            }) {
+                Some(parsed)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    // Snap + collect (start, title, summary), dropping un-anchorable / untitled.
+    let mut snapped: Vec<(i64, String, Option<String>)> = Vec::new();
+    for c in candidates {
+        let Some(raw_start) = c.start_ms else {
+            continue;
+        };
+        let title = c.title.unwrap_or_default().trim().to_string();
+        if title.is_empty() {
+            continue;
+        }
+        let start = snap_to_nearest_start(raw_start, &starts);
+        let summary = c
+            .summary
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        snapped.push((start, title, summary));
+    }
+    // Sort by snapped start; de-dup colliding starts (keep the first, so a stable
+    // chapter survives and no zero-width range is produced).
+    snapped.sort_by_key(|(start, _, _)| *start);
+    snapped.dedup_by_key(|(start, _, _)| *start);
+    snapped.truncate(max);
+
+    // Derive each end_ms from the next chapter's snapped start; the last chapter
+    // ends at the recording duration. Both are clamped so an end is never before its
+    // own start (the sort + dedup already guarantee strictly increasing starts, but
+    // a duration shorter than the last start — a truncated/odd recording — would
+    // otherwise produce a backwards last range).
+    let n = snapped.len();
+    let mut out: Vec<Chapter> = Vec::with_capacity(n);
+    for i in 0..n {
+        let (start, ref title, ref summary) = snapped[i];
+        let end = if i + 1 < n {
+            snapped[i + 1].0.max(start)
+        } else {
+            duration_ms.max(start)
+        };
+        out.push(Chapter {
+            start_ms: start,
+            end_ms: end,
+            title: title.clone(),
+            summary: summary.clone(),
+        });
+    }
+    out
+}
+
+/// Extract auto-chapters for `id` and persist them (replacing any previous set),
+/// emitting `ChaptersUpdated` so the UI shows the new chapter rows. The legacy/IPC
+/// path reads the `chapters` Playbook entry (or the built-in default prompt when
+/// absent). Non-fatal like [`extract_entities`]: returns `Some(error)` only when
+/// the step actually failed (an LLM call error) — an empty transcript, no segments
+/// (no timing to chapter), a missing provider, a user-skip, or "nothing parsed"
+/// are all clean non-failures (`None`).
+pub async fn extract_chapters(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    transcript: &str,
+) -> Option<String> {
+    let (llm_cfg, prompt) = match entry_config_for_target(cfg, "chapters") {
+        Some(pair) => pair,
+        None => (
+            chapters_llm_config(cfg),
+            DEFAULT_CHAPTERS_PROMPT.to_string(),
+        ),
+    };
+    extract_chapters_with(state, id, transcript, llm_cfg, &prompt).await
+}
+
+/// The auto-chapter core, parameterized by a resolved LLM config + prompt so the
+/// legacy/IPC path ([`extract_chapters`]) and the recipe executor share one
+/// implementation — same provider mint, streaming, parse, persistence, events, and
+/// skip/empty/error classification as the entity path it mirrors.
+///
+/// Unlike entities, this loads the recording's segments (timing) fresh from the
+/// catalog: chapters anchor to segment starts, and the executor passes around the
+/// *prose* transcript, not segments — which are persisted earlier in the transcribe
+/// phase, so they're available by the time enrichments run. A recording with no
+/// segments can't be chaptered: short-circuit to a clean non-failure (`None`),
+/// like [`extract_entities_with`] does on an empty transcript. The model is fed the
+/// numbered segment list (with `start_ms` anchors), not the raw `transcript` — but
+/// an empty `transcript` still short-circuits first, matching the entity path.
+pub(crate) async fn extract_chapters_with(
+    state: &AppState,
+    id: &RecordingId,
+    transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    prompt: &str,
+) -> Option<String> {
+    if transcript.trim().is_empty() {
+        return None;
+    }
+    // Chapters need the recording's real segment timing + duration; both come from
+    // the catalog (segments land in the transcribe phase, before enrichments run).
+    let segments = match state.catalog.segments_for(id).await {
+        Ok(segs) => segs,
+        Err(e) => {
+            tracing::warn!(error = %e, "auto-chapter: failed to load segments");
+            return None;
+        }
+    };
+    if segments.is_empty() {
+        // No timing to chapter — a normal non-failure (the recording predates
+        // segment capture, or its provider returned none). Mirrors the empty-
+        // transcript short-circuit; the view shows a "re-run Transcribe" hint.
+        tracing::info!(id = %id.as_str(), "auto-chapter: no segments, nothing to chapter");
+        return None;
+    }
+    let duration_ms = match state.catalog.get(id).await {
+        Ok(Some(rec)) => rec.duration_ms,
+        // No row (deleted mid-run) or a read error: fall back to the last segment's
+        // end so the final chapter still has a sane end_ms rather than failing.
+        _ => segments.last().map(|s| s.end_ms).unwrap_or(0),
+    };
+    let llm = match llm_provider_for_run(state, &llm_cfg).await {
+        Some(llm) => llm,
+        None => {
+            tracing::warn!(
+                provider = %llm_cfg.provider,
+                "auto-chapter requested but no usable LLM provider is configured"
+            );
+            return None;
+        }
+    };
+    let model_input = chapters_prompt_input(&segments);
+    match run_llm_stage(
+        state,
+        id,
+        // No dedicated chapters stage — reuse Tagging for the live activity stream,
+        // exactly as entities does; the ChaptersUpdated/Failed events carry the
+        // structured result.
+        PipelineStage::Tagging,
+        &*llm,
+        prompt,
+        &model_input,
+    )
+    .await
+    {
+        Ok(reply) => {
+            let chapters = parse_chapters(&reply, &segments, duration_ms, MAX_CHAPTERS);
+            if chapters.is_empty() {
+                // Keep any prior chapters (and their model) on an empty parse — the
+                // same keep-prior-on-empty behavior the entity path uses. The model
+                // column is written only below, after this guard, so it never
+                // advances past the chapters actually stored.
+                tracing::info!(id = %id.as_str(), "auto-chapter produced nothing");
+                return None;
+            }
+            if let Err(e) = state.catalog.set_chapters_model(id, &llm_cfg.model).await {
+                tracing::warn!(error = %e, "failed to persist chapters model");
+            }
+            match state.catalog.replace_chapters(id, &chapters).await {
+                Ok(()) => {
+                    tracing::info!(id = %id.as_str(), count = chapters.len(), "chapters saved");
+                    state
+                        .events
+                        .emit(DaemonEvent::ChaptersUpdated { id: id.clone() });
+                }
+                Err(e) => tracing::warn!(error = %e, "failed to persist chapters"),
+            }
+            None
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "auto-chapter LLM call failed");
+            let skipped = stage_skipped(&e);
+            let msg = e.to_string();
+            state.events.emit(DaemonEvent::ChaptersFailed {
+                id: id.clone(),
+                error: msg.clone(),
+            });
+            if skipped {
+                None
+            } else {
+                Some(msg)
+            }
+        }
+    }
+}
+
+/// Run the auto-chapter step from the recipe executor: emit the
+/// `PipelineStageChanged(Tagging)` the UI reads, then run the shared
+/// [`extract_chapters_with`] core. Mirrors [`run_entities_step`].
+async fn run_chapters_step(
+    state: &AppState,
+    id: &RecordingId,
+    transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    prompt: &str,
+) -> Option<String> {
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Tagging,
+    });
+    extract_chapters_with(state, id, transcript, llm_cfg, prompt).await
+}
+
 /// Write a recording's terminal status at the end of the pipeline: `Done` on a
 /// clean run, or the earliest failed optional step's status — and in that case
 /// persist its message on the row (`error_kind` = the status string,
@@ -1732,6 +2078,14 @@ enum ResolvedStep {
     /// Carries the entry-resolved LLM config + prompt from the `entities`
     /// Playbook entry. The entity counterpart of [`ResolvedStep::Tags`].
     Entities {
+        llm_cfg: LlmPostProcessConfig,
+        prompt: String,
+    },
+    /// Enrichment writing time-ranged topic chapters over the recording. Carries
+    /// the entry-resolved LLM config + prompt from the `chapters` Playbook entry.
+    /// Like [`ResolvedStep::Entities`] but the result is anchored to the
+    /// recording's segment timing (see [`extract_chapters_with`]).
+    Chapters {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
     },
@@ -1908,6 +2262,10 @@ fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
                         prompt: entry.llm.prompt.clone(),
                     }),
                     "entities" => steps.push(ResolvedStep::Entities {
+                        llm_cfg: entry_llm_config(cfg, &entry.llm),
+                        prompt: entry.llm.prompt.clone(),
+                    }),
+                    "chapters" => steps.push(ResolvedStep::Chapters {
                         llm_cfg: entry_llm_config(cfg, &entry.llm),
                         prompt: entry.llm.prompt.clone(),
                     }),
@@ -2208,6 +2566,21 @@ async fn run_enrichment_steps(
                     .await;
                 if let Some(msg) =
                     run_entities_step(state, id, transcript, llm_cfg.clone(), prompt).await
+                {
+                    step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
+                }
+            }
+            ResolvedStep::Chapters { llm_cfg, prompt } => {
+                // Same status/stage reuse + TagFailed folding as entities (the
+                // transcript is intact, only this enrichment didn't land). The
+                // dedicated ChaptersUpdated/Failed events carry the result; chapters
+                // anchor to the segments persisted in the transcribe phase.
+                let _ = state
+                    .catalog
+                    .update_status(id, RecordingStatus::Tagging)
+                    .await;
+                if let Some(msg) =
+                    run_chapters_step(state, id, transcript, llm_cfg.clone(), prompt).await
                 {
                     step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
                 }

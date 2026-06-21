@@ -17,6 +17,7 @@ Commands:
   summarize         Generate (or regenerate) an LLM summary of a recording
   suggest-tags      Re-run the LLM tag-suggestion step on a recording on demand
   suggest-entities  Re-run the LLM entity-extraction step on a recording on demand
+  chapters          Generate a recording's topic chapters (or view stored ones with --show)
   notes             Get or set a recording's free-form notes
   edit              Edit a recording's transcript and/or metadata (title, favorite)
   find-replace      Find-and-replace literal text across a recording's transcript

@@ -2569,6 +2569,23 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             target: "entities".into(),
             hook: PlaybookHook::default(),
         },
+        // Auto-chapters — a REAL enrichment (target `chapters`, backed by the
+        // `chapters` child table), like `entities`. Off by default (not in the
+        // `default` recipe): add it to a recipe to auto-chapter every recording, or
+        // run it on demand from the detail pane / `phoneme chapters`. The model is
+        // anchored to the recording's real segment start times (the daemon snaps the
+        // boundaries), so chapters always line up with the audio.
+        PlaybookEntry {
+            id: "chapters".into(),
+            name: "Auto-chapters".into(),
+            description: "Divide the recording into time-ranged topic chapters, anchored to the transcript timing — a clickable topic timeline in the detail pane.".into(),
+            builtin: true,
+            kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
+            llm: llm("Divide this transcript into topic chapters. You are given the transcript as a numbered list of segments, each prefixed with its start time in milliseconds in [brackets]. Reply with ONLY a JSON array of objects, each {\"start_ms\":<one of the bracketed segment start times>,\"title\":\"short topic label\",\"summary\":\"one-line description\"}, in chronological order. Choose boundaries where the topic genuinely shifts; start the first chapter at the earliest segment. The start_ms MUST be copied exactly from one of the bracketed start times — never invent a millisecond value. Output at most 20 chapters, no preamble, no code fences."),
+            target: "chapters".into(),
+            hook: PlaybookHook::default(),
+        },
         PlaybookEntry {
             id: "todo_capture".into(),
             name: "Capture to-dos".into(),

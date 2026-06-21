@@ -992,6 +992,55 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        Request::SuggestChapters { id } => {
+            // On-demand auto-chapter generation (the UI's ✨ Generate-chapters
+            // button). Runs the same step as the auto pipeline, regardless of recipe
+            // membership; awaits the model like SuggestEntities. The step itself
+            // short-circuits to a clean no-op when the recording has no segments (no
+            // timing to chapter), so that case is not an error here.
+            let cfg = state.config.load();
+            match state.catalog.get(&id).await {
+                Ok(Some(rec)) => {
+                    let transcript = rec.transcript.unwrap_or_default();
+                    if transcript.trim().is_empty() {
+                        Response::Err(IpcError {
+                            kind: IpcErrorKind::InvalidConfig,
+                            message: "recording has no transcript to chapter yet".into(),
+                        })
+                    } else {
+                        // Read the migrated `chapters` enrichment entry so editing it
+                        // in the Playbook changes what an on-demand re-run does; fall
+                        // back to the built-in default chapter prompt when absent.
+                        match crate::pipeline::entry_config_for_target(&cfg, "chapters") {
+                            Some((llm_cfg, prompt)) => {
+                                crate::pipeline::extract_chapters_with(
+                                    state,
+                                    &id,
+                                    &transcript,
+                                    llm_cfg,
+                                    &prompt,
+                                )
+                                .await;
+                            }
+                            None => {
+                                crate::pipeline::extract_chapters(state, &cfg, &id, &transcript)
+                                    .await;
+                            }
+                        }
+                        ok_null()
+                    }
+                }
+                Ok(None) => not_found(format!("no recording {}", id.as_str())),
+                Err(e) => err_response(&e),
+            }
+        }
+        // Like `GetSegments`, an unknown id yields an empty list (not `NotFound`):
+        // "no chapters" is a normal state (the recording has no timing to chapter,
+        // or the auto-chapter step never ran).
+        Request::GetChapters { id } => match state.catalog.chapters_for(&id).await {
+            Ok(chapters) => serialize_response(chapters),
+            Err(e) => err_response(&e),
+        },
         Request::ApproveTagSuggestion { id, name } => {
             // Create-or-fetch the tag, attach it, then drop the suggestion.
             match state.catalog.add_tag(&name, None).await {
@@ -2772,6 +2821,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -3045,6 +3095,7 @@ async fn reimport_from_disk(state: &AppState, dry_run: bool) -> Response {
             summary: None,
             summary_model: None,
             entities_model: None,
+            chapters_model: None,
             title: None,
             title_is_auto: true,
             title_model: None,
@@ -3492,6 +3543,7 @@ mod tests {
             summary: None,
             summary_model: None,
             entities_model: None,
+            chapters_model: None,
             title: None,
             title_is_auto: true,
             title_model: None,

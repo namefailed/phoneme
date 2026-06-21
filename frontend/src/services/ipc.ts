@@ -339,6 +339,25 @@ export async function getSegments(
   return await tauriInvoke<TranscriptSegment[]>("get_segments", { id, variant });
 }
 
+/** One auto-chapter: a time range over a recording's transcript plus a short
+ *  title (and an optional one-line summary), derived by the LLM from the
+ *  segment timing. `start_ms`/`end_ms` are offsets into the track's audio; the
+ *  daemon anchors each `start_ms` to a real segment start, so a chapter row
+ *  lines up with the audio. */
+export type Chapter = {
+  start_ms: number;
+  end_ms: number;
+  title: string;
+  summary?: string | null;
+};
+
+/** A recording's auto-chapters in chronological order. An empty list is a
+ *  normal state (no timing to chapter, or the auto-chapter step never ran), so
+ *  the view shows a generate affordance rather than treating it as an error. */
+export async function getChapters(id: string): Promise<Chapter[]> {
+  return await tauriInvoke<Chapter[]>("get_chapters", { id });
+}
+
 /** One machine transcript word with its audio-relative timing.
  *  `idx` is the 0-based timeline order across the whole recording;
  *  `start_ms`/`end_ms` are offsets into the track's audio file; `speaker`
@@ -914,6 +933,13 @@ export async function suggestTags(id: string): Promise<void> {
  *  when ready. Entity counterpart of {@link suggestTags}. */
 export async function suggestEntities(id: string): Promise<void> {
   await tauriInvoke("suggest_entities", { id });
+}
+
+/** Ask the LLM to generate topic chapters for a recording now (on demand). The
+ *  time-ranged chapters land on the recording; a `chapters_updated` event fires
+ *  when ready. Chapter counterpart of {@link suggestEntities}. */
+export async function suggestChapters(id: string): Promise<void> {
+  await tauriInvoke("suggest_chapters", { id });
 }
 
 /** Approve one suggested tag: creates the tag if needed, attaches it, and

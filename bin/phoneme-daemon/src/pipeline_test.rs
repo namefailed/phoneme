@@ -51,6 +51,7 @@ async fn seed_recording(
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -104,6 +105,7 @@ async fn seed_in_place_recording(
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -248,6 +250,7 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -376,6 +379,7 @@ async fn seed_meeting_track(
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1405,6 +1409,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1959,6 +1964,182 @@ fn parse_entities_skips_a_bad_element_and_keeps_the_good_ones() {
     );
 }
 
+// ── parse_chapters (the load-bearing chapter validator) ────────────────────────
+
+/// Build a minimal `TranscriptSegment` carrying just the timing `parse_chapters`
+/// reads; text/speaker are filler.
+#[cfg(test)]
+fn cseg(start_ms: i64, end_ms: i64) -> phoneme_core::TranscriptSegment {
+    phoneme_core::TranscriptSegment {
+        start_ms,
+        end_ms,
+        text: "seg".into(),
+        speaker: None,
+    }
+}
+
+/// `parse_chapters` happy path: a clean array snaps each start to the nearest real
+/// segment start, derives each end from the next start, and the last ends at the
+/// recording duration.
+#[test]
+fn parse_chapters_snaps_starts_and_fills_ends() {
+    use crate::pipeline::parse_chapters;
+    use phoneme_core::Chapter;
+
+    let segs = [
+        cseg(0, 1000),
+        cseg(1000, 5000),
+        cseg(5000, 9000),
+        cseg(9000, 12000),
+    ];
+    // The model returns near-but-imperfect millis; each snaps to the closest start.
+    let raw = r#"[
+        {"start_ms": 10, "title": "Intro", "summary": "kick-off"},
+        {"start_ms": 4900, "title": "Design"},
+        {"start_ms": 8800, "title": "Wrap-up", "summary": "next steps"}
+    ]"#;
+    let chapters = parse_chapters(raw, &segs, 12000, 20);
+    assert_eq!(
+        chapters,
+        vec![
+            Chapter {
+                start_ms: 0,
+                end_ms: 5000,
+                title: "Intro".into(),
+                summary: Some("kick-off".into())
+            },
+            Chapter {
+                start_ms: 5000,
+                end_ms: 9000,
+                title: "Design".into(),
+                summary: None
+            },
+            Chapter {
+                start_ms: 9000,
+                end_ms: 12000,
+                title: "Wrap-up".into(),
+                summary: Some("next steps".into())
+            },
+        ]
+    );
+}
+
+/// JSON wrapped in prose and in a code fence is found (the same scan entities use),
+/// and a stray non-chapter array earlier in the reply is skipped.
+#[test]
+fn parse_chapters_scans_prose_and_code_fences() {
+    use crate::pipeline::parse_chapters;
+    let segs = [cseg(0, 2000), cseg(2000, 4000)];
+
+    let prose = parse_chapters(
+        "Sure! [note 1] Here: [{\"start_ms\":0,\"title\":\"A\"},{\"start_ms\":2000,\"title\":\"B\"}] done.",
+        &segs,
+        4000,
+        20,
+    );
+    assert_eq!(prose.len(), 2);
+    assert_eq!(prose[0].title, "A");
+    assert_eq!(prose[1].title, "B");
+
+    let fenced = parse_chapters(
+        "```json\n[{\"start_ms\":0,\"title\":\"Only\"}]\n```",
+        &segs,
+        4000,
+        20,
+    );
+    assert_eq!(fenced.len(), 1);
+    assert_eq!(fenced[0].start_ms, 0);
+    assert_eq!(fenced[0].end_ms, 4000); // last → duration
+}
+
+/// Out-of-order model output is sorted by snapped start, and two boundaries that
+/// snap to the same segment collapse to one (no zero-width chapter).
+#[test]
+fn parse_chapters_sorts_and_dedupes_colliding_starts() {
+    use crate::pipeline::parse_chapters;
+    let segs = [cseg(0, 3000), cseg(3000, 6000), cseg(6000, 9000)];
+
+    // Reversed order + two near 6000 (collapse) + one near 0.
+    let raw = r#"[
+        {"start_ms": 6010, "title": "Third"},
+        {"start_ms": 5990, "title": "Dup of third"},
+        {"start_ms": 20, "title": "First"}
+    ]"#;
+    let chapters = parse_chapters(raw, &segs, 9000, 20);
+    // Sorted by snapped start; the two 6000-snaps collapse to the first encountered
+    // *after sorting* — both have start 6000, dedup keeps one.
+    assert_eq!(chapters.len(), 2);
+    assert_eq!(chapters[0].start_ms, 0);
+    assert_eq!(chapters[0].title, "First");
+    assert_eq!(chapters[0].end_ms, 6000);
+    assert_eq!(chapters[1].start_ms, 6000);
+    assert_eq!(chapters[1].end_ms, 9000);
+    // Strictly increasing, no zero/negative-width range.
+    assert!(chapters.iter().all(|c| c.end_ms > c.start_ms));
+}
+
+/// The cap bounds the chapter count; entries past it are dropped.
+#[test]
+fn parse_chapters_respects_the_cap() {
+    use crate::pipeline::parse_chapters;
+    let segs: Vec<_> = (0..30).map(|i| cseg(i * 1000, i * 1000 + 1000)).collect();
+    let items: Vec<String> = (0..30)
+        .map(|i| format!("{{\"start_ms\":{},\"title\":\"C{}\"}}", i * 1000, i))
+        .collect();
+    let raw = format!("[{}]", items.join(","));
+    let chapters = parse_chapters(&raw, &segs, 30000, 5);
+    assert_eq!(chapters.len(), 5);
+}
+
+/// A blank/whitespace title or a missing `start_ms` drops that entry; the valid
+/// siblings survive (element-by-element parse, like entities).
+#[test]
+fn parse_chapters_drops_untitled_and_unanchored_entries() {
+    use crate::pipeline::parse_chapters;
+    let segs = [cseg(0, 2000), cseg(2000, 4000)];
+
+    let raw = r#"[
+        {"start_ms": 0, "title": "  "},
+        {"title": "no start"},
+        {"start_ms": 2000, "title": "Keep"}
+    ]"#;
+    let chapters = parse_chapters(raw, &segs, 4000, 20);
+    assert_eq!(chapters.len(), 1);
+    assert_eq!(chapters[0].title, "Keep");
+    assert_eq!(chapters[0].start_ms, 2000);
+    assert_eq!(chapters[0].end_ms, 4000);
+}
+
+/// No segments → no chapters (a recording with no timing can't be chaptered), even
+/// when the model returns a well-formed array. Garbage / empty input is also empty.
+#[test]
+fn parse_chapters_empty_when_no_segments_or_garbage() {
+    use crate::pipeline::parse_chapters;
+    let segs = [cseg(0, 1000)];
+
+    // No segments at all short-circuits to empty regardless of the reply.
+    assert!(parse_chapters("[{\"start_ms\":0,\"title\":\"X\"}]", &[], 1000, 20).is_empty());
+    // Garbage / no JSON array → empty.
+    assert!(parse_chapters("no json here", &segs, 1000, 20).is_empty());
+    assert!(parse_chapters("", &segs, 1000, 20).is_empty());
+    // An array with no usable chapter (all untitled / unanchored) → empty.
+    assert!(parse_chapters("[{\"title\":\"\"}]", &segs, 1000, 20).is_empty());
+}
+
+/// A start past every segment snaps to the last segment start; a duration shorter
+/// than that start is clamped so the last chapter never runs backwards.
+#[test]
+fn parse_chapters_clamps_last_end_to_start() {
+    use crate::pipeline::parse_chapters;
+    let segs = [cseg(0, 1000), cseg(5000, 6000)];
+    // Model start way past the audio → snaps to 5000; duration (4000) is *before*
+    // that, so end is clamped up to the start, never below it.
+    let chapters = parse_chapters("[{\"start_ms\":99999,\"title\":\"Tail\"}]", &segs, 4000, 20);
+    assert_eq!(chapters.len(), 1);
+    assert_eq!(chapters[0].start_ms, 5000);
+    assert_eq!(chapters[0].end_ms, 5000); // clamped: max(4000, 5000)
+}
+
 /// End-to-end on-demand entity extraction against a mocked LLM: the model
 /// returns a JSON entity array, and `extract_entities` parses it, stores the
 /// typed entities (`set_entities`), records the model (`set_entities_model`), and
@@ -2019,6 +2200,7 @@ async fn extract_entities_persists_typed_entities_from_mock_llm() {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -2128,6 +2310,7 @@ fn step_label(step: &crate::pipeline::ResolvedStep) -> &'static str {
         Summary { .. } => "summary",
         Tags { .. } => "tags",
         Entities { .. } => "entities",
+        Chapters { .. } => "chapters",
         UnsupportedEnrichment { .. } => "unsupported",
         Hook { .. } => "hook",
     }
@@ -3025,6 +3208,7 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -3102,6 +3286,7 @@ fn meeting_track(meeting_id: &str, track: &str, transcript: Option<&str>) -> Rec
         summary: None,
         summary_model: None,
         entities_model: None,
+        chapters_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,

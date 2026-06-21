@@ -5,6 +5,7 @@
 //! `crate::exit`'s table.
 
 pub mod ask;
+pub mod chapters;
 pub mod cleanup;
 pub mod clip;
 pub mod completions;

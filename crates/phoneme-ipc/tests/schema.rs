@@ -342,6 +342,43 @@ fn entity_request_roundtrips() {
 }
 
 #[test]
+fn chapters_requests_and_events_roundtrip() {
+    // On-demand generate (await-style) + the pure read.
+    roundtrip(&Request::SuggestChapters {
+        id: RecordingId::new(),
+    });
+    roundtrip(&Request::GetChapters {
+        id: RecordingId::new(),
+    });
+    // The result + failure events (the chapter twins of EntitiesUpdated/Failed).
+    roundtrip(&DaemonEvent::ChaptersUpdated {
+        id: RecordingId::new(),
+    });
+    roundtrip(&DaemonEvent::ChaptersFailed {
+        id: RecordingId::new(),
+        error: "no provider".into(),
+    });
+}
+
+#[test]
+fn chapter_wire_shape_roundtrips() {
+    // The GetChapters payload (Vec<Chapter>) crosses the pipe as the generic
+    // Ok(Value); pin the Chapter wire shape itself, with and without a summary.
+    roundtrip(&phoneme_core::Chapter {
+        start_ms: 0,
+        end_ms: 5000,
+        title: "Intro".into(),
+        summary: Some("kick-off".into()),
+    });
+    roundtrip(&phoneme_core::Chapter {
+        start_ms: 5000,
+        end_ms: 12000,
+        title: "No summary".into(),
+        summary: None,
+    });
+}
+
+#[test]
 fn meeting_digest_requests_and_events_roundtrip() {
     // The on-demand digest re-run request (with and without a one-shot model
     // override) and the read request.

@@ -51,6 +51,8 @@ pub enum Command {
     SuggestTags(SuggestTagsArgs),
     /// Re-run the LLM entity-extraction step on a recording on demand.
     SuggestEntities(SuggestEntitiesArgs),
+    /// Generate a recording's topic chapters (or view stored ones with --show).
+    Chapters(ChaptersArgs),
     /// Get or set a recording's free-form notes.
     Notes(NotesArgs),
     /// Edit a recording's transcript and/or metadata (title, favorite).
@@ -342,6 +344,14 @@ pub struct SuggestTagsArgs {
 #[derive(Debug, clap::Args)]
 pub struct SuggestEntitiesArgs {
     pub id: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ChaptersArgs {
+    pub id: String,
+    /// Print the stored chapters without regenerating them.
+    #[arg(long)]
+    pub show: bool,
 }
 
 #[derive(Debug, clap::Args)]

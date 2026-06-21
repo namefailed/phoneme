@@ -356,6 +356,21 @@ Errors when the recording has no transcript yet (exit 6) or the id is unknown
 phoneme suggest-entities 20260519T143500823
 ```
 
+### 🗂 `phoneme chapters <ID>`
+
+Generate a recording's topic chapters on demand and print them (the CLI face of
+the Chapters detail view). The command sends the recording's timed segments to
+the model, awaits it, stores the resulting chapters (each boundary snapped to a
+real segment start), then prints the time-coded list. Pass `--show` to print the
+stored chapters without regenerating. A recording with no timing prints an empty
+list; errors when there's no transcript to chapter (exit 6) or the id is unknown
+(exit 7).
+
+```bash
+phoneme chapters 20260519T143500823          # generate + print
+phoneme chapters 20260519T143500823 --show   # print stored chapters only
+```
+
 ### ✏️ `phoneme edit <ID>`
 
 Edit a recording's transcript and/or metadata. Any combination of the edits

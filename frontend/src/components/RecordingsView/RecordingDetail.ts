@@ -38,6 +38,7 @@ import { NotesEditor } from "./NotesEditor";
 import { WaveformPlayer } from "./WaveformPlayer";
 import { TimelineView } from "./TimelineView";
 import { SyncedTranscript } from "./SyncedTranscript";
+import { ChaptersView } from "./ChaptersView";
 
 /**
  * The right pane: one recording, fully editable. This file owns the detail
@@ -80,6 +81,8 @@ export class RecordingDetail {
   private timeline: TimelineView | null = null;
   /** The mounted Synced-transcript peek (clickable word flow), when open. */
   private synced: SyncedTranscript | null = null;
+  /** The mounted Chapters peek (clickable topic timeline), when open. */
+  private chapters: ChaptersView | null = null;
   /** Meeting id when this pane is half of a dual-timeline split — the timeline
    *  views with the same group mirror seeks and scrolling across panes. */
   private syncGroup: string | null = null;
@@ -233,6 +236,8 @@ export class RecordingDetail {
     this.timeline = null;
     this.synced?.dispose();
     this.synced = null;
+    this.chapters?.dispose();
+    this.chapters = null;
     this.openTimelinePeek = null;
     this.pendingTimeline = false;
     this.syncGroup = null;
@@ -290,6 +295,8 @@ export class RecordingDetail {
     this.timeline = null;
     this.synced?.dispose();
     this.synced = null;
+    this.chapters?.dispose();
+    this.chapters = null;
     this.openTimelinePeek = null;
     const r = this.recording;
     const stats = wordCountSummary(r.transcript ?? "");
@@ -333,6 +340,7 @@ export class RecordingDetail {
           <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="timeline-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 4px;"></div>
           <div id="synced-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
+          <div id="chapters-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 4px;"></div>
           <div class="transcript-history">
             <div class="th-group th-left">
               <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷️ Speakers</button>
@@ -344,6 +352,7 @@ export class RecordingDetail {
                   <button class="view-btn th-menu-item" id="view-summary" title="AI summary of this recording">📝 Summary</button>
                   <button class="view-btn th-menu-item" id="view-timeline" title="The transcript as a clickable timeline — click a line to jump playback there">🕒 Timeline</button>
                   <button class="view-btn th-menu-item" id="view-synced" title="The machine transcript as clickable words — click any word to jump playback there; the word under the playhead stays highlighted (read-only)">🔤 Synced</button>
+                  <button class="view-btn th-menu-item" id="view-chapters" title="Topic chapters — click a chapter to jump playback there; the chapter under the playhead stays highlighted">🗂 Chapters</button>
                 </div>
               </span>
               <span class="th-dropdown">
@@ -422,7 +431,7 @@ export class RecordingDetail {
     //   • summary    — AI summary (generated on demand if absent)
     // Exactly one of {editor, original, unedited, summary} is visible at a time.
     const editorEl = this.container.querySelector<HTMLElement>("#editor");
-    type PeekKind = "original" | "unedited" | "summary" | "timeline" | "synced";
+    type PeekKind = "original" | "unedited" | "summary" | "timeline" | "synced" | "chapters";
     const peeks: Record<PeekKind, { btn: HTMLButtonElement | null; el: HTMLElement | null; idle: string }> = {
       original: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-original"),
@@ -448,6 +457,11 @@ export class RecordingDetail {
         btn: this.container.querySelector<HTMLButtonElement>("#view-synced"),
         el: this.container.querySelector<HTMLElement>("#synced-peek"),
         idle: "🔤 Synced",
+      },
+      chapters: {
+        btn: this.container.querySelector<HTMLButtonElement>("#view-chapters"),
+        el: this.container.querySelector<HTMLElement>("#chapters-peek"),
+        idle: "🗂 Chapters",
       },
     };
 
@@ -569,11 +583,28 @@ export class RecordingDetail {
       mountSynced();
     });
 
-    // The waveform playhead drives both views' active highlight (the timeline's
-    // active segment and the synced view's active word).
+    // Chapters peek: the recording's topic chapters as a clickable, time-coded
+    // list. Click a chapter to seek this pane's waveform; the chapter under the
+    // playhead stays highlighted. Generated on demand from the empty state.
+    const mountChapters = () => {
+      if (!this.chapters) {
+        this.chapters = new ChaptersView(peeks.chapters.el!, r.id, {
+          onSeek: (seconds) => this.player.seekTo(seconds),
+        });
+      }
+      openPeek("chapters");
+    };
+    peeks.chapters.btn?.addEventListener("click", () => {
+      if (activePeek === "chapters") return resetPeek();
+      mountChapters();
+    });
+
+    // The waveform playhead drives every view's active highlight (the timeline's
+    // active segment, the synced view's active word, the chapter under the head).
     this.player.setOnTimeUpdate((t) => {
       this.timeline?.setPlaybackTime(t);
       this.synced?.setPlaybackTime(t);
+      this.chapters?.setPlaybackTime(t);
       // Keep the clip control's "Use playhead" buttons aimed at the live position.
       this.clipExport?.setPlayhead(t);
     });
@@ -599,9 +630,9 @@ export class RecordingDetail {
       const versionsTrigger = this.container.querySelector<HTMLButtonElement>("#versions-trigger");
       const versionsMenu = this.container.querySelector<HTMLElement>("#versions-menu");
       const historyRow = this.container.querySelector<HTMLElement>(".transcript-history");
-      const VIEWS: PeekKind[] = ["summary", "timeline", "synced"];
+      const VIEWS: PeekKind[] = ["summary", "timeline", "synced", "chapters"];
       const VERSIONS: PeekKind[] = ["original", "unedited"]; // Compare is a modal, not a peek
-      const LABELS: Record<PeekKind, string> = { summary: "Summary", timeline: "Timeline", synced: "Synced", original: "Original", unedited: "Unedited" };
+      const LABELS: Record<PeekKind, string> = { summary: "Summary", timeline: "Timeline", synced: "Synced", chapters: "Chapters", original: "Original", unedited: "Unedited" };
 
       const onDocClick = (e: MouseEvent) => {
         if (!historyRow?.contains(e.target as Node)) closeMenus();

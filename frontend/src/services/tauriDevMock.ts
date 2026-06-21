@@ -197,6 +197,45 @@ const SEGMENTS: Record<string, Seg[]> = {
   m6a: M6_MIC, m6b: M6_SYS,
 };
 
+/** One mock auto-chapter (drives get_chapters / suggest_chapters). */
+type Chap = { start_ms: number; end_ms: number; title: string; summary?: string | null };
+
+/** Map of track id → its stored chapters, derived from the segment starts so the
+ *  dev rows seek to real offsets. Seeded on a couple of tracks; others start
+ *  empty (the "Generate chapters" affordance), and `suggest_chapters` fills them
+ *  from the segment timeline on demand. */
+const CHAPTERS: Record<string, Chap[]> = {
+  m1a: [
+    { start_ms: 0, end_ms: 8000, title: "Intro & agenda", summary: "Kicking off and setting the agenda." },
+    { start_ms: 8000, end_ms: 20000, title: "Roadmap discussion", summary: "Walking through the project roadmap." },
+  ],
+};
+
+/** Synthesize chapters from a track's segments (the dev mock's stand-in for the
+ *  daemon's LLM step): group the segment starts into a few coarse spans so the
+ *  rows seek to real offsets. */
+function mockChaptersFor(trackId: string): Chap[] {
+  const segs = SEGMENTS[trackId] ?? [];
+  if (!segs.length) return [];
+  const titles = ["Opening", "Main discussion", "Wrap-up"];
+  const per = Math.max(1, Math.ceil(segs.length / titles.length));
+  const out: Chap[] = [];
+  for (let i = 0; i < segs.length; i += per) {
+    const chunk = segs.slice(i, i + per);
+    const idx = out.length;
+    if (idx >= titles.length) break;
+    out.push({
+      start_ms: chunk[0].start_ms,
+      end_ms: chunk[chunk.length - 1].end_ms,
+      title: titles[idx],
+      summary: chunk[0].text.slice(0, 60),
+    });
+  }
+  // Fill each end from the next start so they tile, like the daemon does.
+  for (let i = 0; i < out.length - 1; i++) out[i].end_ms = out[i + 1].start_ms;
+  return out;
+}
+
 /** A meeting track recording: shares `meeting_id` + `meeting_name`, tagged with
  *  its `track`, transcript derived from its segments. */
 function track(
@@ -733,6 +772,19 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       }
       return undefined;
     }
+    // ── Auto-chapters (the 🗂 Chapters view): synthesize chapters from the
+    //    track's segment timeline so the rows seek to real offsets, then broadcast
+    //    so the view live-refreshes. ──
+    case "suggest_chapters": {
+      if (id) {
+        CHAPTERS[id] = mockChaptersFor(id);
+        const r = RECORDINGS.find((x) => x.id === id);
+        if (r) r.chapters_model = "phi3:mini";
+        emitDaemon({ event: "chapters_updated", id });
+      }
+      return undefined;
+    }
+    case "get_chapters": return id ? (CHAPTERS[id] ?? []) : [];
     // ── Whole-meeting digest (the merged-view digest card): store a canned digest
     //    and broadcast so the parent reloads + clears the "Generating…" state.
     //    The event carries `meeting_id` (not a recording id) per events.ts. ──

@@ -386,6 +386,7 @@ mod tests {
             summary: Some("short summary".into()),
             summary_model: Some("phi3:mini".into()),
             entities_model: None,
+            chapters_model: None,
             title: Some("My Title".into()),
             title_is_auto: false,
             title_model: None,

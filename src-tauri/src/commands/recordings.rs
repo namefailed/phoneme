@@ -124,6 +124,16 @@ pub async fn get_segments(
     forward(&bridge, Request::GetSegments { id, variant }).await
 }
 
+/// Fetch one recording's auto-chapters in chronological order — a JSON array
+/// (possibly empty) of `{ start_ms, end_ms, title, summary }`. An empty list is
+/// normal (the recording has no timing to chapter, or the auto-chapter step never
+/// ran). Powers the Chapters detail view.
+#[tauri::command]
+pub async fn get_chapters(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::GetChapters { id }).await
+}
+
 /// Fetch one recording's machine transcript words in timeline order — the
 /// finer per-word layer beneath `get_segments`. Returns a JSON array (possibly
 /// empty) of `{ idx, start_ms, end_ms, text, speaker, confidence }`, ordered by
@@ -1023,6 +1033,15 @@ pub async fn suggest_tags(bridge: Br<'_>, id: String) -> Result<Value, CommandEr
 pub async fn suggest_entities(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::SuggestEntities { id }).await
+}
+
+/// Run the LLM auto-chapter step for one recording on demand. The time-ranged
+/// chapters land on the recording and arrive via the `ChaptersUpdated` daemon
+/// event. Chapter counterpart of `suggest_entities`.
+#[tauri::command]
+pub async fn suggest_chapters(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SuggestChapters { id }).await
 }
 
 /// Approve one suggested tag (create if needed + attach + drop the suggestion).
