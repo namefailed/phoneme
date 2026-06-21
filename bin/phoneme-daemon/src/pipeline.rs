@@ -118,6 +118,10 @@ pub(crate) async fn apply_model_override(
     match configured.provider {
         TranscriptionBackend::Local => {
             tracing::info!(model = %model, "re-transcribe: applying one-job whisper model override");
+            // Capture the supervisor's spawn generation BEFORE requesting the swap,
+            // so the readiness wait below can tell the freshly-respawned server
+            // (loading our model) apart from the old one it replaces.
+            let override_gen = state.whisper_ports.main_generation();
             // Publish the override; the supervisor swaps the server's model.
             state.whisper_model_override.set(Some(model.clone()));
             // Pin the per-job model_path so the activity label and the stored
@@ -136,6 +140,7 @@ pub(crate) async fn apply_model_override(
             ) {
                 let poll_state = state.clone();
                 let poll_cfg = whisper_cfg.clone();
+                let fresh_state = state.clone();
                 wait_for_whisper_ready(
                     move || {
                         let cfg = poll_state.config.load();
@@ -144,6 +149,7 @@ pub(crate) async fn apply_model_override(
                             .apply(&cfg, &poll_cfg)
                             .server_base_url()
                     },
+                    move || fresh_state.whisper_ports.main_generation() != override_gen,
                     WHISPER_READY_TIMEOUT,
                 )
                 .await;
@@ -371,7 +377,11 @@ fn ensure_default_recipe_steps(cfg: &mut phoneme_core::Config, want: &[&str]) {
 /// port probe on every spawn). Never errors: on timeout it logs and returns,
 /// letting the normal transcribe attempt (and the queue worker's
 /// `WhisperUnreachable` retry) take over.
-async fn wait_for_whisper_ready(base_url: impl Fn() -> String, timeout: Duration) {
+async fn wait_for_whisper_ready(
+    base_url: impl Fn() -> String,
+    is_fresh: impl Fn() -> bool,
+    timeout: Duration,
+) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
@@ -385,10 +395,16 @@ async fn wait_for_whisper_ready(base_url: impl Fn() -> String, timeout: Duration
     let deadline = std::time::Instant::now() + timeout;
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     loop {
+        // Accept readiness only once the supervisor has actually (re)spawned the
+        // server (`is_fresh` — its spawn generation advanced past the override) AND
+        // it answers health. Without the freshness gate, the old server still up in
+        // the swap gap could answer 200 and we'd transcribe with the wrong model.
         let health = format!("{}/health", base_url().trim_end_matches('/'));
-        if let Ok(resp) = client.get(&health).send().await {
-            if resp.status().is_success() {
-                return;
+        if is_fresh() {
+            if let Ok(resp) = client.get(&health).send().await {
+                if resp.status().is_success() {
+                    return;
+                }
             }
         }
         if std::time::Instant::now() >= deadline {
@@ -2280,10 +2296,15 @@ pub async fn run(
         .await?;
 
     // Record the compounding chain: raw ASR as idx 0, then each Transform step's
-    // output. Only when at least one Transform ran, so a plain transcribe leaves no
-    // versions (the Compare-versions UI treats "none" as the normal single-output
-    // case). Best-effort: a failure costs only the chain view.
-    if !step_versions.is_empty() {
+    // output. When at least one Transform ran we store the full chain; when none did
+    // (a plain transcribe, or a retranscribe with cleanup opted out) we write an
+    // empty set to clear any prior chain. Always rewriting it keeps the stored chain
+    // in step with the live transcript this run just wrote — otherwise a retranscribe
+    // could leave a stale chain behind and Revert could resurrect a previous run's
+    // text. Best-effort: a failure costs only the chain view.
+    let versions = if step_versions.is_empty() {
+        Vec::new()
+    } else {
         let mut versions = Vec::with_capacity(step_versions.len() + 1);
         versions.push(phoneme_core::catalog::TranscriptVersion {
             idx: 0,
@@ -2293,13 +2314,14 @@ pub async fn run(
             text: raw_transcript.clone(),
         });
         versions.extend(step_versions);
-        if let Err(e) = state
-            .catalog
-            .replace_transcript_versions(&id, &versions)
-            .await
-        {
-            tracing::warn!(id = %id.as_str(), "failed to persist transcript versions: {e}");
-        }
+        versions
+    };
+    if let Err(e) = state
+        .catalog
+        .replace_transcript_versions(&id, &versions)
+        .await
+    {
+        tracing::warn!(id = %id.as_str(), "failed to persist transcript versions: {e}");
     }
 
     // Persist the provider's segment timeline (replacing any previous one —

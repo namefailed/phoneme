@@ -948,6 +948,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::ReassignSegmentSpeaker { id, idx, new_label } => {
             match state.catalog.reassign_segment(&id, idx, new_label).await {
                 Ok(()) => {
+                    clear_cleaned_timing(state, &id).await;
                     state
                         .events
                         .emit(DaemonEvent::SpeakerNameUpdated { id: id.clone() });
@@ -966,6 +967,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             .await
         {
             Ok(()) => {
+                clear_cleaned_timing(state, &id).await;
                 state
                     .events
                     .emit(DaemonEvent::SpeakerNameUpdated { id: id.clone() });
@@ -984,6 +986,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             .await
         {
             Ok(()) => {
+                clear_cleaned_timing(state, &id).await;
                 state
                     .events
                     .emit(DaemonEvent::SpeakerNameUpdated { id: id.clone() });
@@ -2902,6 +2905,28 @@ async fn speaker_name_propagation(
     }
 }
 
+/// Drop any "cleaned" timing layer (TL-CONSISTENCY) for a recording. A transcript
+/// edit or a speaker correction invalidates it — the cleaned layer was aligned to
+/// the pre-change text/labels — so clearing it makes the Synced/Timeline views fall
+/// back to the (now-correct) raw layer until a retranscribe rebuilds the cleaned one.
+/// Best-effort: a failure just leaves a stale cleaned layer.
+async fn clear_cleaned_timing(state: &AppState, id: &phoneme_core::RecordingId) {
+    if let Err(e) = state
+        .catalog
+        .replace_words_variant(id, "cleaned", &[])
+        .await
+    {
+        tracing::warn!(id = %id.as_str(), error = %e, "failed to clear cleaned words");
+    }
+    if let Err(e) = state
+        .catalog
+        .replace_segments_variant(id, "cleaned", &[])
+        .await
+    {
+        tracing::warn!(id = %id.as_str(), error = %e, "failed to clear cleaned segments");
+    }
+}
+
 /// Post-edit upkeep shared by `UpdateTranscript` and `FindReplace`: re-flow the
 /// per-word and per-segment timing layers onto `new_text` (so the Synced/Timeline
 /// views follow the edit), re-embed the new text for semantic search, then emit
@@ -2930,25 +2955,10 @@ async fn reflow_and_reembed_after_edit(
                 tracing::warn!(id = %id, error = %e, "re-align: could not load words; leaving timing layers untouched");
             }
         }
-        // Any "cleaned" timing layer (TL-CONSISTENCY) was aligned to the pre-edit
-        // text; the raw layer above is now re-flowed onto `new_text`, so a separate
-        // cleaned layer would be redundant at best and stale at worst (manual edit,
-        // find-replace, and revert-to-version all land here). Drop it so the
-        // Synced/Timeline views fall back to the freshly re-flowed raw.
-        if let Err(e) = state
-            .catalog
-            .replace_words_variant(id, "cleaned", &[])
-            .await
-        {
-            tracing::warn!(id = %id, error = %e, "re-align: failed to clear cleaned words");
-        }
-        if let Err(e) = state
-            .catalog
-            .replace_segments_variant(id, "cleaned", &[])
-            .await
-        {
-            tracing::warn!(id = %id, error = %e, "re-align: failed to clear cleaned segments");
-        }
+        // The raw layer above is now re-flowed onto `new_text`, so the cleaned
+        // layer (aligned to the pre-edit text) is stale — drop it. Manual edit,
+        // find-replace, and revert-to-version all land here.
+        clear_cleaned_timing(state, id).await;
     }
 
     let embedder = state.embedder.read().await.as_ref().cloned();

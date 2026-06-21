@@ -183,6 +183,19 @@ fn mask_config_secrets(v: &mut Value) {
             *key = Value::String(MASKED_SECRET.to_string());
         }
     }
+    // Webhook custom headers routinely carry secrets (an `Authorization: Bearer …`
+    // token, an API key header), so mask each non-empty value the same way.
+    if let Some(obj) = v
+        .get_mut("webhook")
+        .and_then(|s| s.get_mut("custom_headers"))
+        .and_then(|h| h.as_object_mut())
+    {
+        for (_, val) in obj.iter_mut() {
+            if val.as_str().is_some_and(|s| !s.is_empty()) {
+                *val = Value::String(MASKED_SECRET.to_string());
+            }
+        }
+    }
     // Playbook entries each carry their own LLM key (`playbook[].llm.api_key`).
     if let Some(arr) = v.get_mut("playbook").and_then(|p| p.as_array_mut()) {
         for entry in arr {
@@ -250,6 +263,26 @@ fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
         incoming
             .webhook
             .set_hmac_secret(current.webhook.hmac_secret_str().to_owned());
+    }
+    // Webhook custom-header values arrive masked too; restore each still-masked
+    // value from the on-disk config by key (drop the entry if the key no longer
+    // exists on disk, so the placeholder is never persisted).
+    let masked_headers: Vec<String> = incoming
+        .webhook
+        .custom_headers
+        .iter()
+        .filter(|(_, v)| v.as_str() == MASKED_SECRET)
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in masked_headers {
+        match current.webhook.custom_headers.get(&k) {
+            Some(cur) => {
+                incoming.webhook.custom_headers.insert(k, cur.clone());
+            }
+            None => {
+                incoming.webhook.custom_headers.remove(&k);
+            }
+        }
     }
     // Playbook entries: restore each entry's masked llm.api_key from the on-disk
     // config by id, so saving without retyping a key keeps it.
@@ -345,6 +378,9 @@ mod tests {
         stt.set_api_key("SECRET-dictation");
         cfg.in_place.stt = Some(stt);
         cfg.webhook.set_hmac_secret("SECRET-hmac");
+        cfg.webhook
+            .custom_headers
+            .insert("Authorization".to_string(), "SECRET-header".to_string());
         // A built-in Playbook entry carries its own per-entry LLM key. Locate the
         // `cleanup` entry by id (not index) so the test stays correct if the seed
         // order ever changes, and record its array position for the assertions.
@@ -367,6 +403,10 @@ mod tests {
         assert_eq!(json["preview_whisper"]["api_key"], MASKED_SECRET);
         assert_eq!(json["in_place"]["stt"]["api_key"], MASKED_SECRET);
         assert_eq!(json["webhook"]["hmac_secret"], MASKED_SECRET);
+        assert_eq!(
+            json["webhook"]["custom_headers"]["Authorization"],
+            MASKED_SECRET
+        );
         assert_eq!(
             json["playbook"][cleanup_idx]["llm"]["api_key"],
             MASKED_SECRET
@@ -402,6 +442,10 @@ mod tests {
             "SECRET-dictation"
         );
         assert_eq!(incoming.webhook.hmac_secret_str(), "SECRET-hmac");
+        assert_eq!(
+            incoming.webhook.custom_headers["Authorization"],
+            "SECRET-header"
+        );
         assert_eq!(
             incoming
                 .playbook

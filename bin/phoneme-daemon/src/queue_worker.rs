@@ -83,6 +83,11 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
     // when this changes; a stat() is orders of magnitude cheaper than a full TOML
     // parse plus validation on every pipeline run, which is the hot path.
     let mut config_mtime: Option<SystemTime> = None;
+    // Whether the first post-run config check has run. Tracked separately from
+    // config_mtime so "no check yet" is distinct from "the file is genuinely
+    // absent" — otherwise, with no config file on disk, every run would re-load,
+    // re-migrate, and retry the write (mtime stays None forever).
+    let mut config_checked = false;
 
     loop {
         if *shutdown.borrow() {
@@ -250,15 +255,21 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                 let current_mtime = phoneme_core::config::resolved_config_path()
                     .and_then(|p| std::fs::metadata(p).ok())
                     .and_then(|m| m.modified().ok());
-                let changed = match (config_mtime, current_mtime) {
-                    (Some(prev), Some(cur)) => cur != prev,
-                    // No previous mtime recorded yet — treat as changed so the
-                    // first post-run pass always validates the live config.
-                    (None, _) => true,
-                    // Config file missing (e.g. a default in-memory config); skip.
-                    (_, None) => false,
+                let changed = if !config_checked {
+                    // First post-run pass always validates the live config.
+                    true
+                } else {
+                    match (config_mtime, current_mtime) {
+                        (Some(prev), Some(cur)) => cur != prev,
+                        // File still absent (a default in-memory config) — skip;
+                        // we already validated once on the first pass.
+                        (None, None) => false,
+                        // File appeared, or was removed — either way, reload.
+                        (None, Some(_)) | (Some(_), None) => true,
+                    }
                 };
                 if changed {
+                    config_checked = true;
                     config_mtime = current_mtime;
                     match crate::load_config() {
                         Ok(mut cfg) => {

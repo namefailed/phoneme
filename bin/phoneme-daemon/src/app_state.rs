@@ -31,7 +31,7 @@ use phoneme_core::{
     webhook::WebhookClient, Catalog, Config, InboxQueue, LlmPostProcessor, Transcriber,
 };
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Resolved paths derived from `Config`. Created once at startup.
@@ -264,7 +264,10 @@ pub struct WhisperModelOverride {
 impl WhisperModelOverride {
     /// Current override model path, if any.
     pub fn get(&self) -> Option<String> {
-        self.model.lock().expect("model-override mutex poisoned").clone()
+        self.model
+            .lock()
+            .expect("model-override mutex poisoned")
+            .clone()
     }
 
     /// Set (`Some`) or clear (`None`) the override and wake the supervisor.
@@ -298,6 +301,12 @@ pub struct WhisperEffectivePorts {
     /// The optional dedicated in-place / dictation server's port; 0 = not
     /// running (the default — it only runs when the power-user opt-in is on).
     dictation: AtomicU16,
+    /// Bumped each time the main server publishes a live port (i.e. on every
+    /// (re)spawn). A model-override readiness waiter checks this has advanced past
+    /// the value it captured before requesting the swap, so a stale 200 from the
+    /// old server (still answering in the gap before the supervisor restarts) can't
+    /// satisfy the wait.
+    main_generation: AtomicU64,
 }
 
 impl WhisperEffectivePorts {
@@ -320,6 +329,19 @@ impl WhisperEffectivePorts {
     /// Publish (`Some`) or clear (`None`) the main server's live port.
     pub fn set_main(&self, port: Option<u16>) {
         self.main.store(port.unwrap_or(0), Ordering::Relaxed);
+        // Publishing a fresh port means a (re)spawn just happened — bump the
+        // generation so a model-override waiter can tell this server apart from
+        // the one it replaces.
+        if port.is_some() {
+            self.main_generation.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    /// The main server's spawn generation, bumped on every (re)publish of its live
+    /// port. Lets a model-override waiter confirm the server actually restarted
+    /// since the override was requested.
+    pub fn main_generation(&self) -> u64 {
+        self.main_generation.load(Ordering::Acquire)
     }
 
     /// Publish (`Some`) or clear (`None`) the preview server's live port.
