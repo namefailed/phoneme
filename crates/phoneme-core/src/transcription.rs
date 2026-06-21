@@ -1,16 +1,16 @@
 //! Transcription providers.
 //!
 //! [`TranscriptionProvider`] abstracts the backend that turns recorded audio
-//! into text. The concrete provider is chosen from `[whisper]` config at
-//! transcription time by [`Transcriber::provider`], which reuses one shared
-//! HTTP client so the connection pool stays warm across recordings.
+//! into text. The concrete provider comes from `[whisper]` config, picked at
+//! transcription time by [`Transcriber::provider`], which hands every provider
+//! one shared HTTP client so the connection pool stays warm across recordings.
 //!
 //! [`OpenAiCompatProvider`] speaks the OpenAI `/v1/audio/transcriptions`
-//! multipart contract — one shape covering local whisper.cpp, OpenAI, Groq,
-//! and any Custom endpoint (they are wire compatible). The bespoke-protocol
-//! backends have their own implementations: [`DeepgramProvider`] (raw-body
-//! `/v1/listen`), [`AssemblyAiProvider`] (upload → create → poll), and
-//! `ElevenLabsProvider`.
+//! multipart contract — one shape that covers local whisper.cpp, OpenAI, Groq,
+//! and any Custom endpoint, since they're all wire compatible. The backends
+//! with their own protocols get their own impls: [`DeepgramProvider`]
+//! (raw-body `/v1/listen`), [`AssemblyAiProvider`] (upload → create → poll),
+//! and `ElevenLabsProvider`.
 
 use crate::config::{TranscriptionBackend, WhisperConfig};
 use crate::diarization::{LocalDiarizer, LocalDiarizerCache};
@@ -26,17 +26,17 @@ use std::time::Duration;
 use tokio::fs;
 
 /// A transcription result: the formatted text plus the provider's segment
-/// timing, when it produced any. The segments power the timeline features
+/// timing, where it produced any. The segments power the timeline features
 /// (per-track timing, transcript↔waveform seek, the chronological meeting
 /// merge); providers without timing data return an empty `segments`.
 ///
 /// `words` is the finer per-word timing layer (transcript↔waveform word seek,
-/// confidence highlighting). It is independent of `segments`: a provider may
-/// emit one, both, or neither. Providers/paths with no per-word data return an
-/// empty `words` — the substrate degrades gracefully rather than failing.
+/// confidence highlighting). It's independent of `segments`: a provider may
+/// emit one, both, or neither. Providers and paths with no per-word data return
+/// an empty `words`, so the substrate degrades gracefully rather than failing.
 ///
-/// This is an internal core type — it never crosses the IPC boundary (the wire
-/// contract carries `TranscriptSegment`/`TranscriptWord`, not `Transcription`),
+/// This is an internal core type. It never crosses the IPC boundary — the wire
+/// contract carries `TranscriptSegment`/`TranscriptWord`, not `Transcription` —
 /// so it derives no `serde` traits and new fields need no `#[serde(default)]`.
 #[derive(Debug, Clone, Default)]
 pub struct Transcription {
@@ -48,20 +48,20 @@ pub struct Transcription {
     /// it), or empty for providers/paths with no per-word data.
     pub words: Vec<TranscriptWord>,
     /// Whether the local fixed-speaker (`DiarizationTrack::FixedSpeaker`)
-    /// labelling actually ran on this result — i.e. the `OpenAiCompatProvider`
+    /// labelling actually ran on this result — that is, the `OpenAiCompatProvider`
     /// short-circuit wrapped the segments under a single `[Speaker 1]` turn.
     ///
-    /// It is `true` ONLY on that one path; every other construction (diarized,
-    /// plain text, the cloud providers, native whisper, the `DiarizationTrack`
-    /// hint being ignored, or an empty/segment-less mic track) leaves it
-    /// `false`. The daemon gates its "You" speaker-name write on this flag, so a
-    /// cloud STT backend (which ignores the hint) or a silent mic track never
-    /// gets an orphaned/mislabelled `speaker_names` row.
+    /// Only that one path sets it `true`. Every other construction leaves it
+    /// `false`: diarized, plain text, the cloud providers, native whisper, the
+    /// `DiarizationTrack` hint being ignored, or an empty/segment-less mic track.
+    /// The daemon gates its "You" speaker-name write on this flag, so a cloud STT
+    /// backend (which ignores the hint) or a silent mic track never gets an
+    /// orphaned or mislabelled `speaker_names` row.
     pub fixed_speaker_applied: bool,
     /// Per-speaker centroid voiceprints, keyed by the same integer labels as the
-    /// transcript and `speaker_names`. Populated ONLY on the local-diarization
-    /// paths (cloud providers and plain text leave it empty); the pipeline
-    /// persists them for cross-recording named-speaker recognition (#9).
+    /// transcript and `speaker_names`. Only the local-diarization paths populate
+    /// it; cloud providers and plain text leave it empty. The pipeline persists
+    /// them for cross-recording named-speaker recognition (#9).
     pub speaker_voiceprints: Vec<crate::diarization::SpeakerVoiceprint>,
 }
 
@@ -75,16 +75,17 @@ impl Transcription {
     }
 }
 
-/// How a transcription should handle speaker labelling for one recording —
-/// the daemon's per-recording track awareness, derived from the catalog row
-/// (Meeting Mode) and passed into [`TranscriptionProvider::transcribe_with_segments`].
+/// How a transcription should handle speaker labelling for one recording.
+/// This is the daemon's per-recording track awareness, derived from the catalog
+/// row (Meeting Mode) and passed into
+/// [`TranscriptionProvider::transcribe_with_segments`].
 ///
 /// The default is [`Diarize`](Self::Diarize), so a normal single recording (and
-/// a meeting's system/loopback track) behaves exactly as before. The mic track
-/// of a meeting captures a single voice — the user's — so running the diarizer
-/// on it only burns time and risks splitting one speaker into spurious
-/// `[Speaker N]` turns; [`FixedSpeaker`](Self::FixedSpeaker) skips diarization
-/// entirely and labels the whole track as that one speaker instead.
+/// a meeting's system/loopback track) behaves the usual way. A meeting's mic
+/// track captures a single voice — the user's — so running the diarizer on it
+/// only burns time and risks splitting one speaker into spurious `[Speaker N]`
+/// turns. [`FixedSpeaker`](Self::FixedSpeaker) skips diarization entirely and
+/// labels the whole track as that one speaker instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DiarizationTrack {
     /// Run the configured diarization pass (normal recordings and the meeting
@@ -92,16 +93,16 @@ pub enum DiarizationTrack {
     #[default]
     Diarize,
     /// Skip diarization and label every segment as this one fixed speaker (the
-    /// meeting mic track → `"You"`). The whisper segments are wrapped under a
+    /// meeting mic track → `"You"`). The whisper segments get wrapped under a
     /// single `[Speaker 1]` turn so the existing `[Speaker N]` machinery — the
     /// `diarized` detection and the merged-meeting view — keeps working; the
     /// daemon then writes a `speaker_names` row naming label 1 after `label`.
     FixedSpeaker(&'static str),
-    /// Skip diarization entirely and leave the transcript as plain prose — no
+    /// Skip diarization entirely and leave the transcript as plain prose, with no
     /// `[Speaker N]` markers at all. The opt-in "treat single recordings as one
     /// speaker" setting (`[diarization].solo_one_speaker`) selects this for a
     /// solo, non-meeting recording so a single voice is never split into phantom
-    /// speakers, regardless of what the diarizer would have found.
+    /// speakers, whatever the diarizer would have found.
     Plain,
 }
 
@@ -115,16 +116,16 @@ pub trait TranscriptionProvider: Send + Sync {
 
     /// Like [`transcribe`](Self::transcribe), but also returns the provider's
     /// segment timing when it has any. The default wraps `transcribe` with no
-    /// segments, so simple providers — and the live-preview path, which only
-    /// wants text — are unaffected; providers with real timing data override
-    /// this and implement `transcribe` as its text projection.
+    /// segments, leaving simple providers — and the live-preview path, which only
+    /// wants text — unaffected; providers with real timing data override this and
+    /// implement `transcribe` as its text projection.
     ///
     /// `track` carries the recording's Meeting-Mode track awareness (see
-    /// [`DiarizationTrack`]). Only the local OpenAI-compatible path acts on it
-    /// (its `FixedSpeaker` branch skips diarization and labels the whole track
-    /// as one speaker); every other provider ignores it and runs its normal
-    /// flow — a meeting mic track on a cloud STT backend is an edge case not
-    /// worth a per-API special case.
+    /// [`DiarizationTrack`]). Only the local OpenAI-compatible path acts on it:
+    /// its `FixedSpeaker` branch skips diarization and labels the whole track as
+    /// one speaker. Every other provider ignores it and runs its normal flow — a
+    /// meeting mic track on a cloud STT backend is an edge case not worth a
+    /// per-API special case.
     async fn transcribe_with_segments(
         &self,
         audio_path: &Path,
@@ -137,22 +138,22 @@ pub trait TranscriptionProvider: Send + Sync {
         ))
     }
 
-    /// Returns true if the provider runs directly within the current process (i.e. whisper-rs).
+    /// True if the provider runs directly inside the current process (whisper-rs).
     fn is_native(&self) -> bool {
         false
     }
 }
 
 /// Owns the process-wide HTTP client and builds a [`TranscriptionProvider`]
-/// per request from the live config. Cloning is cheap — the inner
+/// per request from the live config. Cloning is cheap: the inner
 /// `reqwest::Client` is reference-counted, so every minted provider shares one
 /// warm connection pool instead of rebuilding it per recording.
 ///
-/// It also owns the process-wide [`LocalDiarizerCache`]: the local diarization
-/// pipeline (~500 MB of ONNX models, seconds to load) is loaded lazily on the
-/// first recording that needs it and then shared by every minted provider —
-/// the same warm-resource pattern as the HTTP pool. The daemon's config-apply
-/// paths reach it through [`diarizer_cache`](Self::diarizer_cache) to drop the
+/// It also owns the process-wide [`LocalDiarizerCache`]. The local diarization
+/// pipeline (~500 MB of ONNX models, seconds to load) loads lazily on the first
+/// recording that needs it and is then shared by every minted provider — the
+/// same warm-resource pattern as the HTTP pool. The daemon's config-apply paths
+/// reach it through [`diarizer_cache`](Self::diarizer_cache) to drop the
 /// pipeline when `[diarization]` config changes.
 #[derive(Debug, Clone)]
 pub struct Transcriber {
@@ -179,10 +180,10 @@ impl Transcriber {
         &self.diarizer
     }
 
-    /// Select and construct the transcription provider described by `[whisper]`
-    /// config, sharing this transcriber's warm HTTP client.
+    /// Build the transcription provider described by `[whisper]` config, sharing
+    /// this transcriber's warm HTTP client.
     ///
-    /// `server_base_url()` resolves the correct endpoint for both external and
+    /// `server_base_url()` resolves the right endpoint for both external and
     /// bundled whisper-server modes.
     pub fn provider(
         &self,
@@ -190,28 +191,28 @@ impl Transcriber {
         diarization: &crate::config::DiarizationConfig,
     ) -> Box<dyn TranscriptionProvider> {
         let timeout = Duration::from_secs(whisper.timeout_secs);
-        // Local (pyannote) diarization is a separate ONNX pass over the audio —
-        // it doesn't require *local* transcription, only segment timestamps. So
-        // enable it for every OpenAI-compatible backend (local whisper.cpp,
-        // OpenAI, Groq, Custom), each of which returns segments via verbose_json.
-        // Cloud diarization (Deepgram/AssemblyAI) is intrinsic to those APIs and
-        // only applies when that same provider does the transcription.
+        // Local (pyannote) diarization is a separate ONNX pass over the audio. It
+        // doesn't need *local* transcription, only segment timestamps, so it
+        // works for every OpenAI-compatible backend (local whisper.cpp, OpenAI,
+        // Groq, Custom), each of which returns segments via verbose_json. Cloud
+        // diarization (Deepgram/AssemblyAI) is intrinsic to those APIs and only
+        // applies when that same provider does the transcription.
         //
-        // `Some` doubles as the old enabled flag and carries the shared
-        // pipeline cache plus the `[diarization]` config the run is keyed
-        // under, so every minted provider reuses one loaded pipeline.
+        // `Some` doubles as the enabled flag and carries the shared pipeline
+        // cache plus the `[diarization]` config the run is keyed under, so every
+        // minted provider reuses one loaded pipeline.
         let local_diar = (diarization.provider == crate::config::DiarizationBackend::Local)
             .then(|| LocalDiarizer::new(self.diarizer.clone(), diarization.clone()));
         // Custom-vocabulary hint shared by every whisper-family HTTP provider.
-        // `None` when empty so the request wire format is unchanged.
+        // `None` when empty so the request wire format stays unchanged.
         let prompt = non_empty(&whisper.initial_prompt);
         match whisper.provider {
             TranscriptionBackend::Local => {
                 #[cfg(feature = "native-whisper")]
                 {
-                    // `model_path` is a plain String — this block used to
-                    // pattern-match it as an Option, which broke the feature
-                    // build (cfg'd-out code is never type-checked).
+                    // `model_path` is a plain String, not an Option — match it as
+                    // such, since cfg'd-out code is never type-checked and a
+                    // mismatch here only surfaces under this feature build.
                     let native_path = whisper.model_path.trim();
                     if !native_path.is_empty() {
                         if let Ok(provider) = crate::native_whisper::NativeWhisperProvider::new(
@@ -231,7 +232,7 @@ impl Transcriber {
                         None,
                         timeout,
                         local_diar,
-                        // whisper.cpp always supports verbose_json — capture
+                        // whisper.cpp always supports verbose_json, so capture
                         // segment timing even with diarization off.
                         true,
                     )
@@ -245,10 +246,10 @@ impl Transcriber {
                     non_empty(whisper.api_key.expose_secret()),
                     Some(model_or(&whisper.model, "whisper-1")),
                     timeout,
-                    // whisper-1 returns segments with verbose_json; enables local
-                    // diarization on OpenAI transcripts. Segment capture rides on
-                    // the same flag — gpt-4o-transcribe rejects verbose_json, so
-                    // it is never requested unconditionally here.
+                    // whisper-1 returns segments with verbose_json, which is what
+                    // enables local diarization on OpenAI transcripts. Segment
+                    // capture rides on the same flag; gpt-4o-transcribe rejects
+                    // verbose_json, so it's never requested unconditionally here.
                     local_diar,
                     false,
                 )
@@ -291,7 +292,8 @@ impl Transcriber {
                 timeout,
             )),
             // Any OpenAI-compatible endpoint the user points at via `api_url`
-            // (key/model optional — many self-hosted servers need neither).
+            // (key and model both optional; many self-hosted servers need
+            // neither).
             TranscriptionBackend::Custom => Box::new(
                 OpenAiCompatProvider::new(
                     self.http.clone(),
@@ -300,10 +302,10 @@ impl Transcriber {
                     non_empty(&whisper.model),
                     timeout,
                     // Custom OpenAI-compatible endpoints that return verbose_json
-                    // segments get local diarization too; ones that don't simply
-                    // fall back to the plain transcript (no hard failure). Like
+                    // segments get local diarization too; ones that don't fall
+                    // back to the plain transcript without a hard failure. As with
                     // OpenAI/Groq, verbose_json is only requested when diarization
-                    // asks for it — an arbitrary endpoint may not accept it.
+                    // asks for it, since an arbitrary endpoint may not accept it.
                     local_diar,
                     false,
                 )
@@ -349,7 +351,7 @@ struct OpenAiResponse {
     text: String,
     segments: Option<Vec<OpenAiSegment>>,
     /// Per-word timing, present only when the request asked for
-    /// `timestamp_granularities[]=word`. The OpenAI/Groq cloud returns it HERE,
+    /// `timestamp_granularities[]=word`. The OpenAI/Groq cloud returns it here,
     /// flat at the top level; whisper.cpp instead nests it under each
     /// `segments[].words[]`. The parse reads whichever the provider used, so
     /// both yield the finer word layer.
@@ -380,7 +382,7 @@ struct OpenAiWord {
 
 /// Cap a third-party error response body before it flows into an `Error` (and
 /// from there into the daemon log and IPC error messages), so a hostile or
-/// chatty endpoint can't flood them. 500 characters is ample to diagnose a real
+/// chatty endpoint can't flood them. 500 characters is plenty to diagnose a real
 /// failure.
 fn truncate_error_body(body: String) -> String {
     const MAX_CHARS: usize = 500;
@@ -410,14 +412,14 @@ pub struct OpenAiCompatProvider {
     /// disables it. Minted by `Transcriber::provider`.
     local_diarize: Option<LocalDiarizer>,
     /// Request `verbose_json` (segment timing) even when local diarization is
-    /// off. Always true for the bundled/local whisper.cpp server, which is
-    /// known to support it; cloud + Custom endpoints only get verbose_json
-    /// when diarization needs it, since some OpenAI-compatible backends (e.g.
+    /// off. Always true for the bundled/local whisper.cpp server, which is known
+    /// to support it; cloud and Custom endpoints only get verbose_json when
+    /// diarization needs it, since some OpenAI-compatible backends (e.g.
     /// `gpt-4o-transcribe`) reject the verbose format.
     request_segments: bool,
     /// Custom-vocabulary hint sent as the OpenAI `prompt` field (`[whisper]
-    /// initial_prompt`): biases the transcriber toward names/jargon. `None` (or
-    /// empty) omits it entirely, keeping the wire format unchanged.
+    /// initial_prompt`), to bias the transcriber toward names and jargon. `None`
+    /// (or empty) omits it entirely, keeping the wire format unchanged.
     prompt: Option<String>,
 }
 
@@ -465,7 +467,8 @@ impl OpenAiCompatProvider {
 
     /// Attach a custom-vocabulary `prompt` (`[whisper] initial_prompt`). Builder
     /// style so the all-args `new` stays unchanged for the test call sites; the
-    /// daemon's `Transcriber::provider` chains this on. `None`/empty is a no-op.
+    /// daemon's `Transcriber::provider` chains this on. `None` or empty is a
+    /// no-op.
     pub fn with_prompt(mut self, prompt: Option<String>) -> Self {
         self.prompt = prompt;
         self
@@ -509,26 +512,25 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         }
         // Custom-vocabulary hint (`[whisper] initial_prompt`): the OpenAI `prompt`
         // field, which whisper.cpp's server, OpenAI, and Groq all accept and use
-        // to bias decoding toward the supplied names/jargon. Omitted when empty so
-        // the wire format is unchanged for users who don't set one.
+        // to bias decoding toward the supplied names and jargon. Omitted when
+        // empty so the wire format is unchanged for users who don't set one.
         if let Some(prompt) = &self.prompt {
             form = form.text("prompt", prompt.clone());
         }
-        // Force the JSON response shape (`{ "text": ... }`) that OpenAiResponse
-        // decodes below. OpenAI/Groq already default to this, but a Custom
-        // OpenAI-compatible proxy may default to plain text or verbose_json,
-        // which would fail the decode. whisper.cpp's server also accepts (and
-        // defaults to) json. verbose_json adds the segment timing that local
-        // diarization and the persisted timeline both consume — requested
-        // whenever either wants it (always for the local server; see
-        // `request_segments`).
+        // Pin the JSON response shape (`{ "text": ... }`) that OpenAiResponse
+        // decodes below. OpenAI/Groq default to it, but a Custom OpenAI-compatible
+        // proxy may default to plain text or verbose_json, either of which would
+        // fail the decode; whisper.cpp's server accepts (and defaults to) json
+        // too. verbose_json adds the segment timing that local diarization and the
+        // persisted timeline both consume, so request it whenever either wants it
+        // (always for the local server; see `request_segments`).
         if self.local_diarize.is_some() || self.request_segments {
             form = form.text("response_format", "verbose_json");
             // Ask for both granularities: `segment` powers the segment timeline,
-            // `word` adds the top-level `words[]` array for the finer word
-            // layer. The OpenAI API accepts the param repeated; whisper.cpp's
-            // server honors it too, and an endpoint that ignores `word` simply
-            // omits the array (we degrade to no words).
+            // `word` adds the top-level `words[]` array for the finer word layer.
+            // The OpenAI API accepts the param repeated, and whisper.cpp's server
+            // honors it too; an endpoint that ignores `word` just omits the array
+            // and we degrade to no words.
             form = form.text("timestamp_granularities[]", "segment");
             form = form.text("timestamp_granularities[]", "word");
         } else {
@@ -536,7 +538,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         }
 
         // Accept `api_url` as either a host base (…/v1) or the full endpoint, so a
-        // Custom/proxy URL already ending in the path isn't doubled into a 404.
+        // Custom/proxy URL that already ends in the path isn't doubled into a 404.
         let base = self.base_url.trim_end_matches('/');
         let url = if base.ends_with("/v1/audio/transcriptions") {
             base.to_string()
@@ -574,8 +576,8 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             .map_err(|e| Error::Internal(format!("decoding transcription response: {e}")))?;
 
         // Consume the segments into the timeline shape, pulling out any per-word
-        // timings whisper.cpp nested inside each one as we go (the cloud returns
-        // a flat top-level `words[]` instead — handled just below).
+        // timings whisper.cpp nested inside each one as we go. (The cloud returns
+        // a flat top-level `words[]` instead, handled just below.)
         let mut nested_words: Vec<OpenAiWord> = Vec::new();
         let segs: Vec<crate::diarization::TextSegment> = parsed
             .segments
@@ -594,20 +596,20 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             .collect();
 
         // Decode the per-word layer once, then attach it to whichever
-        // transcription path we take below (words are independent of speaker
+        // transcription path we take below. Words are independent of speaker
         // attribution, so the same set rides both the diarized and undiarized
-        // result). Prefer the cloud's flat top-level `words[]`; fall back to the
+        // result. Prefer the cloud's flat top-level `words[]`; fall back to the
         // segment-nested words whisper.cpp emits.
         let words = words_from_response(parsed.words, nested_words);
 
         // Meeting mic track: this is a single voice (the user's), so skip the
         // diarizer entirely and wrap the whole transcript under one fixed
-        // `[Speaker 1]` label. This is the track-aware short-circuit — it runs
-        // BEFORE the `local_diarize` branch, so the speakrs pass never loads or
-        // runs for a mic track even when local diarization is configured. The
-        // daemon names label 1 after `label` (a `speaker_names` "You" row) once
-        // the transcript is persisted, leaving the canonical `[Speaker N]`
-        // markers in the text so every downstream parser is unchanged.
+        // `[Speaker 1]` label. This track-aware short-circuit runs ahead of the
+        // `local_diarize` branch, so the speakrs pass never loads or runs for a
+        // mic track even when local diarization is configured. Once the transcript
+        // is persisted the daemon names label 1 after `label` (a `speaker_names`
+        // "You" row), leaving the canonical `[Speaker N]` markers in the text so
+        // every downstream parser is unchanged.
         if let DiarizationTrack::FixedSpeaker(_label) = track {
             if !segs.is_empty() {
                 let (text, segments) = crate::diarization::label_all_as(&segs, 1);
@@ -618,11 +620,11 @@ impl TranscriptionProvider for OpenAiCompatProvider {
                         ..w
                     })
                     .collect();
-                // The ONLY path that sets `fixed_speaker_applied`: the segments
-                // were actually wrapped under `[Speaker 1]` here, so the daemon
-                // can safely seed the "You" name. A segment-less/empty mic track
-                // falls through below with the flag left `false`, so no orphan
-                // "You" row is written.
+                // The one path that sets `fixed_speaker_applied`: the segments
+                // really were wrapped under `[Speaker 1]` here, so the daemon can
+                // safely seed the "You" name. A segment-less/empty mic track falls
+                // through below with the flag left `false`, so no orphan "You" row
+                // is written.
                 return Ok(Transcription {
                     text,
                     segments,
@@ -634,12 +636,12 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         }
 
         // `Plain` opts a solo recording out of diarization entirely (the
-        // `solo_one_speaker` setting): fall through to the undiarized path below
-        // so it reads as plain prose, never split into `[Speaker N]` turns.
+        // `solo_one_speaker` setting): fall through to the undiarized path below so
+        // it reads as plain prose, never split into `[Speaker N]` turns.
         if track != DiarizationTrack::Plain {
             if let Some(diarizer) = &self.local_diarize {
                 if !segs.is_empty() {
-                    // Hand the per-word timing to diarization too: when whisper
+                    // Hand the per-word timing to diarization too. When whisper
                     // returned words, the diarizer attributes speakers per word off
                     // the frame matrix and threads the speaker labels back into
                     // these words; with no words it falls back to segment-level
@@ -683,12 +685,12 @@ fn secs_to_ms(secs: f64) -> i64 {
 /// The two server families disagree on where word timings live: the OpenAI/Groq
 /// cloud returns a single flat `words[]` at the top level, while whisper.cpp's
 /// server nests them inside each segment (`segments[].words[]`, already
-/// flattened in timeline order by the caller into `segment_words`). We prefer
-/// the top-level array when it actually carried words, and otherwise fall back
-/// to the segment-nested ones — so both shapes yield the finer word layer rather
-/// than the local path silently persisting none. A whisper per-word
-/// `probability` rides along as `confidence`; the cloud omits it (`None`).
-/// Empty-text words (whitespace-only tokens) are dropped.
+/// flattened in timeline order by the caller into `segment_words`). Prefer the
+/// top-level array when it actually carried words, otherwise fall back to the
+/// segment-nested ones, so both shapes yield the finer word layer rather than
+/// the local path silently persisting none. A whisper per-word `probability`
+/// rides along as `confidence`; the cloud omits it (`None`). Empty-text words
+/// (whitespace-only tokens) are dropped.
 fn words_from_response(
     top_level: Option<Vec<OpenAiWord>>,
     segment_words: Vec<OpenAiWord>,
@@ -713,26 +715,26 @@ fn words_from_response(
 }
 
 /// Run local diarization for a transcript and return the speaker-labeled text,
-/// the per-segment timeline, and the (speaker-tagged) per-word layer, falling
-/// back to `plain_text` (with unlabeled segments and words — the timing is still
-/// good) when diarization fails or finds ≤1 speaker.
+/// the per-segment timeline, and the (speaker-tagged) per-word layer. Falls back
+/// to `plain_text` with unlabeled segments and words — the timing is still good
+/// — when diarization fails or finds at most one speaker.
 ///
 /// When `words` is non-empty (the local whisper path requested
-/// `timestamp_granularities[]=word`), speakers are attributed **per word** off
-/// the diarizer's per-frame activation matrix: each word's frames are summed per
+/// `timestamp_granularities[]=word`), speakers are attributed per word off the
+/// diarizer's per-frame activation matrix: each word's frames are summed per
 /// speaker column, argmax wins, and consecutive same-speaker words are grouped
-/// into turns for the text and the persisted timeline. When `words` is empty
-/// (cloud STT routed here, or whisper returned segments only) it falls back to
-/// the segment-level `label_segments` attribution, so behavior is unchanged for
-/// those inputs and a one-word-per-segment transcript reproduces the old labels.
+/// into turns for the text and the persisted timeline. With `words` empty (cloud
+/// STT routed here, or whisper returned segments only) it falls back to the
+/// segment-level `label_segments` attribution, so behavior is unchanged for those
+/// inputs and a one-word-per-segment transcript reproduces the old labels.
 ///
-/// The returned `words` carry their resolved `[Speaker N]` label (when ≥2
-/// speakers were found); on any fallback they are returned with their timing and
-/// confidence intact but no speaker.
+/// The returned `words` carry their resolved `[Speaker N]` label when ≥2 speakers
+/// were found; on any fallback they come back with their timing and confidence
+/// intact but no speaker.
 ///
-/// The CPU-bound model inference is run on a blocking thread so it never stalls
-/// the async runtime. `diarizer` carries the process-wide pipeline cache, so
-/// only the first recording (per config) pays the model load.
+/// The CPU-bound model inference runs on a blocking thread so it never stalls the
+/// async runtime. `diarizer` carries the process-wide pipeline cache, so only the
+/// first recording (per config) pays the model load.
 pub(crate) async fn diarize_transcript(
     audio_path: &std::path::Path,
     segments: Vec<crate::diarization::TextSegment>,
@@ -742,8 +744,8 @@ pub(crate) async fn diarize_transcript(
 ) -> Transcription {
     // Diarization failing must not cost the timeline its timing data, so the
     // fallback carries the whisper segments with no speaker attribution. The
-    // words ride along with their timing/confidence but no speaker label (we
-    // never produced one), mirroring the undiarized provider paths.
+    // words ride along with their timing and confidence but no speaker label
+    // (none was ever produced), mirroring the undiarized provider paths.
     let unlabeled =
         |text: String, segments: &[crate::diarization::TextSegment], words: Vec<TranscriptWord>| {
             Transcription {
@@ -784,10 +786,10 @@ pub(crate) async fn diarize_transcript(
         }
     };
 
-    // The per-word path is taken only when whisper actually returned words; with
-    // segments-only input the frame matrix has nothing word-shaped to attribute
-    // and we use the legacy segment-level path so those transcripts are byte-for
-    // -byte unchanged.
+    // Take the per-word path only when whisper actually returned words. With
+    // segments-only input the frame matrix has nothing word-shaped to attribute,
+    // so fall to the segment-level path, which keeps those transcripts
+    // byte-for-byte unchanged.
     if !words.is_empty() {
         if let Some(diarized) =
             diarize_per_word(&words, &diar, crate::diarization::WORD_MIN_TURN_SECS)
@@ -795,18 +797,18 @@ pub(crate) async fn diarize_transcript(
             return diarized;
         }
         // `diarize_per_word` returns `None` for the ≤1-speaker gate; fall through
-        // to plain text (keeping segment timing) exactly as the segment path does.
+        // to plain text (keeping segment timing), exactly as the segment path does.
         return unlabeled(plain_text, &segments, words);
     }
 
     diarize_per_segment(&segments, &diar.spans, plain_text, words)
 }
 
-/// Segment-level attribution (the path for segments-only / cloud-routed inputs
-/// and the fallback): label each whisper segment by the turn it overlaps most,
+/// Segment-level attribution: the path for segments-only / cloud-routed inputs
+/// and the fallback. Label each whisper segment by the turn it overlaps most,
 /// build the `[Speaker N]` text and timeline from that single attribution, and
-/// gate ≤1-speaker transcripts to plain text. The `words` are returned with no
-/// speaker (this path never attributes them).
+/// gate ≤1-speaker transcripts to plain text. The `words` come back with no
+/// speaker, since this path never attributes them.
 fn diarize_per_segment(
     segments: &[crate::diarization::TextSegment],
     spans: &[crate::diarization::SpeakerSpan],
@@ -821,9 +823,9 @@ fn diarize_per_segment(
     };
 
     let (labeled, num_speakers) = crate::diarization::label_segments(segments, spans);
-    // Surface the assignment result so "why isn't this diarized?" is answerable
-    // from the log: a recording is only labeled when ≥2 distinct speakers are
-    // found (a single voice reads better as plain prose, so it stays unlabeled).
+    // Log the assignment result so "why isn't this diarized?" is answerable from
+    // the log. A recording is labeled only when ≥2 distinct speakers are found; a
+    // single voice reads better as plain prose, so it stays unlabeled.
     tracing::info!(
         turns = spans.len(),
         speakers = num_speakers,
@@ -850,9 +852,9 @@ fn diarize_per_segment(
         };
     }
 
-    // Build the formatted text and the persisted timeline from the SAME
-    // per-segment attribution, so the stored `speaker` labels always agree
-    // with the `[Speaker N]` markers in the text.
+    // Build the formatted text and the persisted timeline from one and the same
+    // per-segment attribution, so the stored `speaker` labels always agree with
+    // the `[Speaker N]` markers in the text.
     let mut text = String::new();
     let mut current: Option<usize> = None;
     let mut out_segments = Vec::with_capacity(labeled.len());
@@ -890,7 +892,7 @@ fn diarize_per_segment(
 /// Word-level attribution: assign each word a speaker from the per-frame
 /// activation matrix, group consecutive same-speaker words into turns, and build
 /// the `[Speaker N]` text, the persisted segment timeline, and the speaker-tagged
-/// word layer from that single pass — so all three agree. Returns `None` for the
+/// word layer from that one pass, so all three agree. Returns `None` for the
 /// ≤1-speaker gate (the caller then emits plain text), so a single-voice
 /// recording reads as prose just like the segment path.
 fn diarize_per_word(
@@ -931,11 +933,11 @@ fn diarize_per_word(
     }
 
     // `assign_words` skips empty/whitespace words (mirroring `label_segments`),
-    // so its output aligns with the non-empty source words, NOT all of `words`.
+    // so its output aligns with the non-empty source words, not all of `words`.
     // Filter the source words by the same predicate to pair label↔confidence
-    // safely even if the provider ever stops pre-dropping empties. Group
-    // consecutive same-speaker words into turns, emitting text + a per-turn
-    // segment + the tagged word in lockstep so all three agree.
+    // safely even if the provider ever stops pre-dropping empties. Then group
+    // consecutive same-speaker words into turns, emitting the text, a per-turn
+    // segment, and the tagged word in lockstep so all three agree.
     let non_empty: Vec<&TranscriptWord> =
         words.iter().filter(|w| !w.text.trim().is_empty()).collect();
     debug_assert_eq!(
@@ -976,7 +978,7 @@ fn diarize_per_word(
         } else {
             // Same speaker: rejoin with a space only when whisper marked this
             // token as a word start, so subword tokens ("over"+"ste"+"pped") and
-            // punctuation ("weapon"+"?") don't gain spurious spaces.
+            // punctuation ("weapon"+"?") don't pick up spurious spaces.
             if src.leading_space {
                 text.push(' ');
             }
@@ -1009,7 +1011,7 @@ fn diarize_per_word(
 
 /// Provider for Deepgram's prerecorded speech-to-text API (`/v1/listen`).
 ///
-/// Deepgram is **not** OpenAI-compatible: it authenticates with
+/// Deepgram isn't OpenAI-compatible: it authenticates with
 /// `Authorization: Token <key>`, takes the raw audio as the request body, and
 /// returns the transcript nested under `results.channels[].alternatives[]`.
 #[derive(Clone)]
@@ -1166,12 +1168,12 @@ impl TranscriptionProvider for DeepgramProvider {
             .and_then(|c| c.alternatives.into_iter().next())
             .ok_or_else(|| Error::Internal("Deepgram response had no transcript".into()))?;
 
-        // Capture the per-word layer on BOTH paths — Deepgram returns word
-        // timing + confidence whether or not diarization is on, so the
-        // substrate must keep it even when the (undiarized) text falls back to
-        // plain prose. A word's speaker label is attached only when diarization
-        // actually produced multi-speaker turns (decided below); the undiarized
-        // word still carries timing + confidence with `speaker: None`.
+        // Capture the per-word layer on both paths. Deepgram returns word timing
+        // and confidence whether or not diarization is on, so the substrate must
+        // keep it even when the (undiarized) text falls back to plain prose. A
+        // word's speaker label is attached only when diarization actually produced
+        // multi-speaker turns (decided below); the undiarized word still carries
+        // timing and confidence with `speaker: None`.
         let dg_words = alt.words.unwrap_or_default();
         let plain_words: Vec<TranscriptWord> = dg_words
             .iter()
@@ -1208,11 +1210,10 @@ impl TranscriptionProvider for DeepgramProvider {
             return Ok(plain_with_words(alt.transcript));
         }
 
-        // Group the speaker-tagged words into turns, building the formatted
-        // text, the persisted segment timeline, and the per-word layer from the
-        // same pass so the stored `speaker` labels always agree with the
-        // `[Speaker N]` markers (Deepgram speakers are 0-based and stay that
-        // way in all three).
+        // Group the speaker-tagged words into turns, building the formatted text,
+        // the persisted segment timeline, and the per-word layer from one pass so
+        // the stored `speaker` labels always agree with the `[Speaker N]` markers.
+        // Deepgram speakers are 0-based and stay that way in all three.
         let mut final_transcript = String::new();
         let mut current_speaker: Option<u32> = None;
         let mut segments: Vec<TranscriptSegment> = Vec::new();
@@ -1276,8 +1277,8 @@ impl TranscriptionProvider for DeepgramProvider {
 ///
 /// Unlike the others this is a three-step flow: upload the audio
 /// (`POST /v2/upload`), request a transcript (`POST /v2/transcript`), then poll
-/// (`GET /v2/transcript/{id}`) until `status` is `completed`. Auth is the raw
-/// API key in the `Authorization` header (no scheme prefix). `timeout_secs`
+/// (`GET /v2/transcript/{id}`) until `status` is `completed`. Auth is the raw API
+/// key in the `Authorization` header, with no scheme prefix. `timeout_secs`
 /// bounds the overall poll budget.
 #[derive(Clone)]
 pub struct AssemblyAiProvider {
@@ -1378,11 +1379,10 @@ struct AaiTranscript {
     text: Option<String>,
     error: Option<String>,
     utterances: Option<Vec<AaiUtterance>>,
-    /// Top-level per-word array, returned independently of diarization (start/
-    /// end in **milliseconds**, with per-word `confidence` and a `speaker`
-    /// label when speaker labels were requested). Captured on every path so the
-    /// word substrate is populated even when the text falls back to plain
-    /// prose.
+    /// Top-level per-word array, returned independently of diarization (start and
+    /// end in milliseconds, with per-word `confidence` and a `speaker` label when
+    /// speaker labels were requested). Captured on every path so the word
+    /// substrate is populated even when the text falls back to plain prose.
     words: Option<Vec<AaiWord>>,
 }
 
@@ -1390,9 +1390,8 @@ struct AaiTranscript {
 struct AaiUtterance {
     speaker: String,
     text: String,
-    /// Utterance timing in **milliseconds** (AssemblyAI's native unit) —
-    /// optional so a missing field degrades to "no timeline", not a decode
-    /// error.
+    /// Utterance timing in milliseconds (AssemblyAI's native unit). Optional so a
+    /// missing field degrades to "no timeline", not a decode error.
     start: Option<i64>,
     end: Option<i64>,
 }
@@ -1400,8 +1399,8 @@ struct AaiUtterance {
 #[derive(Debug, Deserialize)]
 struct AaiWord {
     text: String,
-    /// Word timing in **milliseconds** (AssemblyAI's native unit) — optional so
-    /// a missing field degrades to a chained timeline, not a decode error.
+    /// Word timing in milliseconds (AssemblyAI's native unit). Optional so a
+    /// missing field degrades to a chained timeline, not a decode error.
     start: Option<i64>,
     end: Option<i64>,
     /// Per-word confidence (0..1), present on every AssemblyAI word.
@@ -1488,9 +1487,9 @@ impl TranscriptionProvider for AssemblyAiProvider {
                 match t.status.as_str() {
                     "completed" => {
                         // The per-word layer is top-level and independent of
-                        // diarization, so capture it once (already ms; carries
-                        // confidence and an optional speaker label) and attach
-                        // it to whichever text path we take below.
+                        // diarization, so capture it once (already ms, carrying
+                        // confidence and an optional speaker label) and attach it
+                        // to whichever text path we take below.
                         let mut words: Vec<TranscriptWord> = Vec::new();
                         for w in t.words.into_iter().flatten() {
                             let fallback = words.last().map(|p| p.end_ms).unwrap_or(0);
@@ -1529,9 +1528,9 @@ impl TranscriptionProvider for AssemblyAiProvider {
                             });
                         }
 
-                        // One segment per utterance, labels matching the
-                        // `[Speaker X]` markers (AssemblyAI uses "A"/"B"-style
-                        // speakers; both text and timeline carry them as-is).
+                        // One segment per utterance, with labels matching the
+                        // `[Speaker X]` markers. AssemblyAI uses "A"/"B"-style
+                        // speakers, and both text and timeline carry them as-is.
                         let mut final_transcript = String::new();
                         let mut segments: Vec<TranscriptSegment> = Vec::new();
                         for u in utterances {
@@ -1581,9 +1580,9 @@ impl TranscriptionProvider for AssemblyAiProvider {
 
 /// Provider for ElevenLabs Scribe speech-to-text (`/v1/speech-to-text`).
 ///
-/// ElevenLabs is **not** OpenAI-compatible: it authenticates with an
-/// `xi-api-key` header (no scheme prefix) and takes the audio plus a `model_id`
-/// field as multipart form data. The transcript is returned as `{ "text": ... }`.
+/// ElevenLabs isn't OpenAI-compatible: it authenticates with an `xi-api-key`
+/// header (no scheme prefix) and takes the audio plus a `model_id` field as
+/// multipart form data. The transcript comes back as `{ "text": ... }`.
 #[derive(Clone)]
 pub struct ElevenLabsProvider {
     http: reqwest::Client,
@@ -1695,7 +1694,7 @@ mod tests {
     }
 
     // Every cloud provider holds a plaintext API key but must never render it in
-    // `Debug` output (which can reach the daemon log or a panic backtrace).
+    // `Debug` output, which can reach the daemon log or a panic backtrace.
     #[test]
     fn openai_compat_provider_debug_redacts_api_key() {
         let p = OpenAiCompatProvider::new(
@@ -1799,10 +1798,11 @@ mod tests {
 
     #[test]
     fn whisper_cpp_verbose_json_nests_words_in_segments() {
-        // The shape whisper.cpp's server actually returns: NO top-level `words`,
+        // The shape whisper.cpp's server actually returns: no top-level `words`,
         // per-word timings nested under each segment (with a `probability` and a
-        // `t_dtw` we ignore). This guards the bug where the parser only read the
-        // top-level array, so every local-whisper recording stored zero words.
+        // `t_dtw` we ignore). Guards against a parser that reads only the
+        // top-level array, which would store zero words for every local-whisper
+        // recording.
         let body = r#"{
             "text": " The search bar.",
             "segments": [
@@ -1852,12 +1852,12 @@ mod tests {
     }
 
     // ── Per-word decode: each provider that emits words populates
-    //    `Transcription.words` with the right timing/confidence ──────────────
+    //    `Transcription.words` with the right timing and confidence ──────────
     //
-    // These exercise the real `transcribe_with_segments` path against a
-    // wiremock endpoint (same fake-server style as the pipeline integration
-    // test), so the assertions cover decode + ms conversion + the
-    // confidence-vs-`None` contract, not just the struct shapes.
+    // These exercise the real `transcribe_with_segments` path against a wiremock
+    // endpoint (same fake-server style as the pipeline integration test), so the
+    // assertions cover decode, ms conversion, and the confidence-vs-`None`
+    // contract, not just the struct shapes.
 
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1874,10 +1874,10 @@ mod tests {
     // ── Track-aware Meeting Mode: the FixedSpeaker mic-track short-circuit ───
     //
     // A meeting mic track must label the whole transcript as one fixed speaker
-    // WITHOUT running the diarizer. Proven two ways: the text carries the fixed
-    // `[Speaker 1]` label (which the diarized/merged-view parsers consume), and
-    // the diarization pipeline cache is never loaded — even though the provider
-    // was minted WITH local diarization enabled. A wrong fall-through to the
+    // without ever running the diarizer. Proven two ways: the text carries the
+    // fixed `[Speaker 1]` label (which the diarized/merged-view parsers consume),
+    // and the diarization pipeline cache is never loaded even though the provider
+    // was minted with local diarization enabled. A wrong fall-through to the
     // diarizer would (a) fail on this dummy wav and produce plain fallback text,
     // not the fixed label, and (b) touch the cache.
 
@@ -1902,7 +1902,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        // Local diarization ENABLED on the provider — the FixedSpeaker hint must
+        // Local diarization enabled on the provider; the FixedSpeaker hint must
         // still skip it. The shared cache must stay empty (never loaded).
         let cache = Arc::new(LocalDiarizerCache::new());
         let diarizer = LocalDiarizer::new(
@@ -1929,9 +1929,9 @@ mod tests {
             .await
             .unwrap();
 
-        // The whole track is one `[Speaker 1]` turn (the daemon renames label 1
-        // → "You" via a speaker_names row; the transcript keeps the canonical
-        // marker so every downstream parser is unchanged).
+        // The whole track is one `[Speaker 1]` turn. The daemon renames label 1
+        // to "You" via a speaker_names row; the transcript keeps the canonical
+        // marker so every downstream parser is unchanged.
         assert_eq!(t.text, "[Speaker 1]: hello everyone thanks for joining");
         assert_eq!(t.segments.len(), 2);
         assert!(
@@ -1952,8 +1952,8 @@ mod tests {
         );
     }
 
-    /// A `FixedSpeaker` hint on a provider that returns text but NO segments
-    /// can't wrap a `[Speaker 1]` turn, so the short-circuit (guarded by
+    /// A `FixedSpeaker` hint on a provider that returns text but no segments can't
+    /// wrap a `[Speaker 1]` turn, so the short-circuit (guarded by
     /// `!segs.is_empty()`) falls through and `fixed_speaker_applied` stays
     /// `false` — the signal the daemon uses to skip the orphan "You" write.
     #[tokio::test]
@@ -2009,7 +2009,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        // request_segments = true → verbose_json + word granularity requested.
+        // request_segments = true → verbose_json with word granularity requested.
         let provider = OpenAiCompatProvider::new(
             client(),
             server.uri(),
@@ -2044,11 +2044,10 @@ mod tests {
 
     #[tokio::test]
     async fn openai_compat_decodes_whisper_cpp_segment_nested_words() {
-        // whisper.cpp's server returns NO top-level `words[]`; it nests the
+        // whisper.cpp's server returns no top-level `words[]`; it nests the
         // per-word timings (with a `probability` and a `t_dtw` we ignore) inside
-        // each segment. This is the real shape behind the empty-Synced-view bug —
-        // the parser must flatten the nested layer and keep the probability as
-        // confidence.
+        // each segment. If the parser doesn't flatten the nested layer (and keep
+        // the probability as confidence) the Synced view comes up empty.
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/audio/transcriptions"))
@@ -2119,7 +2118,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        // diarize = false → the non-diarize path (the one that used to drop words).
+        // diarize = false → the non-diarize path, where words must still survive.
         let provider = DeepgramProvider::new(
             client(),
             server.uri(),
@@ -2213,13 +2212,13 @@ mod tests {
 
     // ── Word-level diarization: integration shape + fallback equivalence ─────
     //
-    // The real per-frame matrix needs the speakrs models, so the per-word
-    // matrix logic is exercised in `diarization.rs` against synthetic matrices.
-    // Here we pin (1) that the segment-level fallback path
+    // The real per-frame matrix needs the speakrs models, so the per-word matrix
+    // logic is exercised in `diarization.rs` against synthetic matrices. Here we
+    // pin two things. First, the segment-level fallback path
     // (`diarize_per_segment`) reproduces the legacy `assign_speakers` labels —
-    // which is what guarantees a segments-only / one-word-per-segment input is
-    // unchanged — and (2) the per-word turn builder's text/segment/word
-    // agreement off a hand-built `LocalDiarization`.
+    // that's what keeps a segments-only / one-word-per-segment input unchanged.
+    // Second, the per-word turn builder's text/segment/word agreement, off a
+    // hand-built `LocalDiarization`.
 
     use crate::diarization::{LocalDiarization, SpeakerSpan, TextSegment};
     use ndarray::Array2;
@@ -2241,8 +2240,8 @@ mod tests {
 
     #[test]
     fn fallback_segment_path_reproduces_legacy_assign_speakers_labels() {
-        // The fallback (no words) must produce the SAME `[Speaker N]` text the
-        // pure `assign_speakers` produces — this is the regression guard that a
+        // The fallback (no words) must produce the same `[Speaker N]` text that
+        // pure `assign_speakers` produces. This is the regression guard that a
         // segments-only transcript (and a one-word-per-segment transcript routed
         // through the fallback) is byte-for-byte unchanged.
         let segments = vec![
@@ -2310,7 +2309,7 @@ mod tests {
             hard_clusters: Array2::zeros((0, 0)),
             segmentations: ndarray::Array3::zeros((0, 0, 0)),
         };
-        // Place each word at the CENTER of its target frame so the ms→seconds
+        // Place each word at the center of its target frame so the ms→seconds
         // round-trip can't nudge it across a frame boundary. speakrs centers
         // frame f at frame_middle(f) = f*step + 0.5*FRAME_DURATION, which is the
         // mapping `frame_for_time` inverts.
@@ -2353,9 +2352,9 @@ mod tests {
 
     #[test]
     fn per_word_rejoins_subword_tokens_with_whisper_spacing() {
-        // whisper emits subword + punctuation tokens; only word-starts carry a
-        // leading space. The turn builder must rejoin by that flag, NOT insert a
-        // space before every token (the bug that produced "over ste pped ?").
+        // whisper emits subword and punctuation tokens; only word-starts carry a
+        // leading space. The turn builder must rejoin by that flag rather than
+        // insert a space before every token, which would give "over ste pped ?".
         let step = speakrs::pipeline::FRAME_STEP_SECONDS;
         let dur = speakrs::pipeline::FRAME_DURATION_SECONDS;
         // frames 0-1 → speaker 0, frames 2-3 → speaker 1.
@@ -2424,11 +2423,11 @@ mod tests {
 
     #[test]
     fn per_word_lone_short_flip_collapses_to_plain_prose() {
-        // The exact regression the user hit: a one-voice recording where a single
-        // short word ("it") momentarily scores to a 2nd speaker column. With
-        // realistic word durations, the WORD_MIN_TURN_SECS smoothing absorbs the
-        // flip, the speaker count collapses to 1, and `diarize_per_word` returns
-        // None → the caller renders plain prose instead of "[Speaker 2]: it".
+        // A one-voice recording where a single short word ("it") momentarily
+        // scores to a second speaker column. With realistic word durations the
+        // WORD_MIN_TURN_SECS smoothing absorbs the flip, the speaker count
+        // collapses to 1, and `diarize_per_word` returns None, so the caller
+        // renders plain prose instead of "[Speaker 2]: it".
         let step = speakrs::pipeline::FRAME_STEP_SECONDS;
         let dur = speakrs::pipeline::FRAME_DURATION_SECONDS;
         let wms = |s: f64, e: f64, t: &str| TranscriptWord {
@@ -2447,8 +2446,8 @@ mod tests {
             wms(1.0, 1.4, "think"),
             wms(1.4, 1.9, "so"),
         ];
-        // Column 1 active only on frames whose middle lands in the flip [0.8,1.0);
-        // column 0 active everywhere else — so raw attribution sees two speakers.
+        // Column 1 active only on frames whose middle lands in the flip [0.8,1.0),
+        // column 0 active everywhere else, so raw attribution sees two speakers.
         let num_frames = ((2.0 - 0.5 * dur) / step).ceil() as usize + 1;
         let m = Array2::from_shape_fn((num_frames, 2), |(f, s)| {
             let mid = f as f64 * step + 0.5 * dur;
@@ -2466,7 +2465,7 @@ mod tests {
             hard_clusters: Array2::zeros((0, 0)),
             segmentations: ndarray::Array3::zeros((0, 0, 0)),
         };
-        // Raw (smoothing off) DOES split — the flip is genuinely in the matrix.
+        // Raw (smoothing off) does split — the flip is genuinely in the matrix.
         assert!(
             diarize_per_word(&words, &diar, 0.0).is_some(),
             "raw per-word attribution sees the flip as a 2nd speaker"

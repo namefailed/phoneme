@@ -4,24 +4,25 @@
 //! finding, so it must never auto-spawn one. The daemon-reachability and
 //! pid checks are CLI-specific (`DaemonStatus`); everything else — config,
 //! audio dir, hook command, model file, whisper/ollama/provider probes —
-//! runs in-process via the SAME `phoneme_core::doctor` checks the GUI
-//! Doctor view uses, so both surfaces always agree. Failures print a
-//! category badge (`[critical]`/`[warning]`/`[info]`) plus explanation and
-//! fix hint; only non-optional, non-info failures make the run exit 1.
+//! runs in-process via the same `phoneme_core::doctor` checks the GUI Doctor
+//! view uses, so both surfaces always agree. Failures print a category badge
+//! (`[critical]`/`[warning]`/`[info]`) plus explanation and fix hint; only
+//! non-optional, non-info failures make the run exit 1.
 //!
 //! `--fix` asks the daemon to `RestartWhisper` when a failed check carries
 //! the `restart_whisper` fix action, waits for the respawn, and re-probes.
-//! `--rebuild-catalog` is the heavy, DESTRUCTIVE hammer: it shuts the daemon
-//! down (`Shutdown`), waits — bounded — for the pipe to actually vanish (the
-//! dying daemon holds the SQLite handles while finalizing), then DELETES
+//! `--rebuild-catalog` is the heavy, destructive hammer: it shuts the daemon
+//! down (`Shutdown`), waits (bounded) for the pipe to actually vanish — the
+//! dying daemon holds the SQLite handles while finalizing — then deletes
 //! catalog.db and its WAL sidecars so the next daemon start begins with an
-//! empty catalog. Transcripts, tags, notes and titles are DB-only and are
-//! lost; audio files are kept (the daemon does NOT reconstruct rows from audio
-//! on startup). It refuses to touch the files if the daemon won't exit.
+//! empty catalog. Transcripts, tags, notes and titles live only in the DB and
+//! are lost; audio files are kept, since the daemon does not reconstruct rows
+//! from audio on startup. It refuses to touch the files if the daemon won't
+//! exit.
 //!
-//! `--reimport` is the NON-destructive recovery path: it asks the running
+//! `--reimport` is the non-destructive recovery path: it asks the running
 //! daemon to scan the audio directory and re-link any `.wav` that has no
-//! catalog row (`ReimportFromDisk`) — re-creating the row from the file and
+//! catalog row (`ReimportFromDisk`), re-creating the row from the file and
 //! re-transcribing it. Nothing is ever deleted.
 
 use crate::args::DoctorArgs;
@@ -48,13 +49,13 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         let mut client_result = Client::connect_observe(cfg).await;
         if let Ok(ref mut c) = client_result {
             let _ = c.send(phoneme_ipc::Request::Shutdown).await;
-            // Shutdown only ACKNOWLEDGES — the daemon finalizes recordings and
-            // reaps children before it actually exits, holding the SQLite
-            // handles the whole time. Deleting the DB the moment the ACK
-            // arrives raced that teardown (the dying daemon could checkpoint
-            // the WAL back into a half-deleted file). Wait, bounded, for the
-            // pipe to vanish — the same liveness signal `daemon stop` uses —
-            // and refuse to touch the files if it never does.
+            // Shutdown only acknowledges; the daemon then finalizes recordings
+            // and reaps children before it actually exits, holding the SQLite
+            // handles the whole time. Deleting the DB the moment the ACK arrives
+            // races that teardown — the dying daemon can checkpoint the WAL back
+            // into a half-deleted file. Wait (bounded) for the pipe to vanish,
+            // the same liveness signal `daemon stop` uses, and refuse to touch
+            // the files if it never does.
             if !crate::commands::daemon_cmd::wait_for_pipe_death(
                 &cfg.daemon.pipe_name,
                 REBUILD_STOP_WAIT,
@@ -71,8 +72,8 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         }
 
         // Delete the catalog database. Resolve the data-local root the same way
-        // the daemon does — honoring PHONEME_DATA_LOCAL — so an overridden data
-        // directory is the one we touch instead of always deleting the default
+        // the daemon does, honoring PHONEME_DATA_LOCAL, so an overridden data
+        // directory is the one we touch — otherwise we'd delete the default
         // catalog.db out from under a daemon pointed elsewhere.
         if let Some(data_local) = resolve_data_local_dir() {
             let catalog_path = data_local.join("catalog.db");

@@ -9,10 +9,10 @@ pub fn reveal_file(path: String) -> Result<(), CommandError> {
     // (the only thing the UI ever reveals — a recording's WAV or the folder
     // itself) so a compromised WebView can't pop Explorer onto arbitrary paths.
     let cfg = config_io::read().map_err(|e| format!("config error: {e}"))?;
-    // Expand %VAR%/~ in the configured audio dir before comparing. The path the
-    // UI reveals is an absolute, already-expanded path, so a raw config string
+    // Expand %VAR% and ~ in the configured audio dir before comparing. The path
+    // the UI reveals is absolute and already expanded, so a raw config string
     // like "%USERPROFILE%\\Documents\\phoneme\\audio" would never match and the
-    // reveal would fail "path not permitted".
+    // reveal would fail with "path not permitted".
     let audio_dir_raw = cfg
         .expanded()
         .map(|c| c.recording.audio_dir)
@@ -79,7 +79,7 @@ pub fn tail_log(name: String, max_lines: usize) -> Result<String, CommandError> 
     let logs = dirs.data_local_dir().join("logs");
     let mut path = logs.join(&name);
     if !path.exists() {
-        // Newest rolled variant, or nothing yet. Accept ONLY `<name>` or
+        // Newest rolled variant, or nothing yet. Accept only `<name>` or
         // `<name>.<digits-and-dashes>` (the daily appender's
         // `daemon.log.YYYY-MM-DD`) so an odd-suffixed or symlinked file dropped
         // in the logs dir can't be selected and read.
@@ -161,11 +161,11 @@ pub fn open_file(path: String) -> Result<(), CommandError> {
 
 /// Open the user's hooks directory in the file manager, creating it if missing.
 ///
-/// The Doctor "Fix" button previously passed literal `%LOCALAPPDATA%`/`%APPDATA%`
-/// strings to `open_file`, which does no env-var expansion — so the path never
-/// existed and nothing opened. Resolve the real directory here instead: it lives
-/// under the per-user config dir (`config_dir()/hooks`), matching where the
-/// daemon's first-run copy writes the reference hooks.
+/// Resolves the directory here rather than routing through `open_file`, which
+/// does no env-var expansion: a literal `%LOCALAPPDATA%`/`%APPDATA%` string
+/// would never resolve to a real path and nothing would open. The hooks dir
+/// lives under the per-user config dir (`config_dir()/hooks`), matching where
+/// the daemon's first-run copy writes the reference hooks.
 #[tauri::command]
 pub fn open_hooks_folder() -> Result<(), CommandError> {
     let dirs = directories::ProjectDirs::from("", "", "phoneme")

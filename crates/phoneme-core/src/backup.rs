@@ -6,11 +6,11 @@
 //!   (`phoneme_core::Recording`) plus the tag list, exactly the JSON the daemon's
 //!   `ListRecordings` / `ListTags` produce.
 //! - **`audio/<YYYY-MM-DD>/<HHmmssMMM>.wav`** — every `.wav` under the audio dir,
-//!   each entry named RELATIVE to the audio dir so the day folder is preserved.
+//!   each entry named relative to the audio dir so the day folder is preserved.
 //!   Two recordings at the same ms-of-day on different days share a stem; naming
 //!   the entry from the day folder keeps them from collapsing to one entry and
-//!   clobbering each other on restore (the round-2 audit's data-loss fix —
-//!   regression-tested below).
+//!   clobbering each other on restore (a real data-loss case, regression-tested
+//!   below).
 //!
 //! [`write_to_zip`] is the writer the export uses; [`restore_from_zip`] is its
 //! inverse, driving `phoneme import-backup`. Restore is **idempotent**: a
@@ -21,8 +21,8 @@
 //! Restore fidelity is bounded by what the backup captured. The DTO columns and
 //! the tags round-trip; machine-truth side tables the export never wrote
 //! (`original_transcript` / `clean_transcript`, transcript segments + words,
-//! embeddings, voiceprints, AI-activity, custom speaker names) do not, and the
-//! restored recording is whatever the backup said it was — a re-transcribe
+//! embeddings, voiceprints, AI-activity, custom speaker names) do not, so the
+//! restored recording is whatever the backup said it was, and a re-transcribe
 //! regenerates the derived data.
 
 use crate::catalog::Catalog;
@@ -81,7 +81,7 @@ pub struct RestoreReport {
 ///
 /// Recordings live at `<audio_dir>/<YYYY-MM-DD>/<HHmmssMMM>.wav` and the stem is
 /// time-of-day only, so two recordings at the same ms-of-day on different days
-/// share a stem. Naming the entry from the path RELATIVE to `audio_dir` (with
+/// share a stem. Naming the entry from the path relative to `audio_dir` (with
 /// backslashes normalized to `/` for a portable archive) keeps the day folder,
 /// so the two never collide to one entry. Falls back to the bare filename if the
 /// path isn't under `audio_dir`.
@@ -186,7 +186,7 @@ pub fn write_to_zip(
 /// insert_restored`]), its audio entry (named from the id's day folder + stem)
 /// is copied into `audio_dir`, and its tags are re-created by name and attached.
 /// The stored `audio_path` is rewritten to point at the restored file under the
-/// TARGET audio dir, since the backup may be restored on a different machine.
+/// target audio dir, since the backup may be restored on a different machine.
 pub async fn restore_from_zip(
     zip_path: &Path,
     catalog: &Catalog,
@@ -228,13 +228,13 @@ pub async fn restore_from_zip(
         // Copy this recording's audio (if the backup carried it) to the target
         // audio dir, and capture where it landed so the row points at it.
         //
-        // Ordering is deliberate: audio FIRST, then the row. Row + file can't share
+        // Ordering is deliberate: audio first, then the row. Row + file can't share
         // one transaction (SQLite vs filesystem), so a crash between them must fail
         // safe. This order leaves at worst an orphan WAV with no row referencing it
         // — invisible, and self-healing: a re-run finds the id absent (the insert
         // never happened), re-extracts over the file, and inserts. The inverse
-        // (row first) would leave a VISIBLE row pointing at missing audio that a
-        // re-run skips (id now present) and never heals — strictly worse.
+        // (row first) would leave a visible row pointing at missing audio that a
+        // re-run skips (id now present) and never heals, which is strictly worse.
         let restored_audio_path = restore_audio_for(&mut archive, &rec.id, audio_dir)?;
 
         // Insert the row with the audio path rewritten to the restored location
@@ -429,7 +429,7 @@ mod tests {
         assert_eq!(g1.summary_model.as_deref(), Some("phi3:mini"));
         assert_eq!(g1.cleanup_model.as_deref(), Some("llama3.2:3b"));
         assert_eq!(g1.notes.as_deref(), Some("a note"));
-        // The audio path was rewritten to the restored file under the TARGET dir.
+        // The audio path was rewritten to the restored file under the target dir.
         let restored_a1 = dst_audio
             .join(r1.id.day_folder())
             .join(format!("{}.wav", r1.id.file_stem()));
@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(first.imported, 1);
         assert_eq!(first.skipped, 0);
 
-        // A hand edit AFTER the first import must survive a second import.
+        // A hand edit after the first import must survive a second import.
         dst.update_user_transcript(&r1.id, "edited since restore")
             .await
             .unwrap();
@@ -476,7 +476,7 @@ mod tests {
         assert_eq!(second.imported, 0, "the id already exists");
         assert_eq!(second.skipped, 1);
 
-        // Still exactly one row, and the post-restore edit was NOT clobbered.
+        // Still exactly one row, and the post-restore edit survived intact.
         let rows = dst.list(&Default::default()).await.unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].transcript.as_deref(), Some("edited since restore"));
@@ -484,17 +484,17 @@ mod tests {
 
     #[tokio::test]
     async fn same_ms_different_day_recordings_dont_collide() {
-        // The round-2 audit's data-loss case: two ids that share a ms-of-day stem
-        // but differ by day must each restore their own audio.
+        // The data-loss case: two ids that share a ms-of-day stem but differ by
+        // day must each restore their own audio.
         let tmp = tempfile::tempdir().unwrap();
         let src_audio = tmp.path().join("audio");
         let src = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
 
         // Force identical stems on different days by reusing the same datetime
         // shape — `from_datetime`'s monotonic suffix differs, so to truly collide
-        // stems we build ids that share the time-of-day portion. Use two real
-        // recordings whose file_stem happens to match is fragile; instead assert
-        // the entry NAMES differ, which is what guards the archive.
+        // stems we build ids that share the time-of-day portion. Relying on two
+        // real recordings whose `file_stem` happens to match would be fragile;
+        // instead assert the entry names differ, which is what guards the archive.
         let r_day1 = rec_at(2026, 5, 19, 14, 35, 0);
         let r_day2 = rec_at(2026, 5, 20, 14, 35, 0);
         src.insert_restored(&r_day1).await.unwrap();

@@ -4,9 +4,9 @@
 //! DER (collar-0, NIST-style) =
 //! `(missed + false_alarm + confusion) / total_reference_speech`, all in seconds.
 //! Before scoring, the hypothesis speakers are mapped onto the reference speakers
-//! by the *optimal* (max-total-overlap) one-to-one assignment, so the *labels*
-//! don't matter — `[Speaker 1]` vs `A` — only who is grouped with whom. Lower is
-//! better; 0.0 is a perfect match.
+//! by the optimal (max-total-overlap) one-to-one assignment, so the label strings
+//! don't matter (`[Speaker 1]` vs `A`); only who is grouped with whom. Lower is
+//! better, and 0.0 is a perfect match.
 //!
 //! This module is the pure metric (parse + score), unit-tested without any audio.
 //! A harness that runs the real diarizer on an audio fixture and scores it against
@@ -99,12 +99,12 @@ fn active(segs: &[DerSegment], a: f64, b: f64) -> HashSet<&str> {
 ///
 /// The timeline is split at every segment boundary from both sides; each
 /// elementary interval is then scored against the speaker mapping that maximizes
-/// total ref↔hyp overlap. That mapping is the *optimal* one-to-one assignment
-/// (max-weight bipartite matching, see `max_overlap_assignment`) — strict
-/// NIST DER, not a greedy approximation that can strand a speaker into confusion.
-/// Overlapping speech is handled NIST-style: per interval the error is
-/// `max(n_ref, n_hyp) - n_correct`. With no reference speech, `der` is 0.0 (any
-/// hypothesis speech is still reported under `false_alarm`).
+/// total ref↔hyp overlap. That mapping is the optimal one-to-one assignment
+/// (max-weight bipartite matching, see `max_overlap_assignment`), which gives
+/// strict NIST DER rather than a greedy approximation that can strand a speaker
+/// into confusion. Overlapping speech follows the NIST rule: per interval the
+/// error is `max(n_ref, n_hyp) - n_correct`. With no reference speech, `der` is
+/// 0.0, though any hypothesis speech is still reported under `false_alarm`.
 pub fn compute_der(reference: &[DerSegment], hypothesis: &[DerSegment]) -> DerReport {
     // Elementary-interval boundaries: every start/end from both sides, sorted.
     let mut bounds: Vec<f64> = reference
@@ -113,9 +113,9 @@ pub fn compute_der(reference: &[DerSegment], hypothesis: &[DerSegment]) -> DerRe
         .flat_map(|s| [s.start, s.end])
         .collect();
     bounds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    // Merge near-equal boundaries (float accumulation from RTTM start+dur can make
-    // 2.0+3.0 differ from a reference 5.0 by an epsilon) so a tiny spurious
-    // sub-interval isn't scored as missed/false-alarm (audit L3).
+    // Merge near-equal boundaries so a tiny spurious sub-interval doesn't get
+    // scored as missed/false-alarm. Float accumulation from RTTM start+dur can
+    // make e.g. 2.0+3.0 differ from a reference 5.0 by an epsilon.
     let mut deduped: Vec<f64> = Vec::with_capacity(bounds.len());
     for b in bounds {
         if deduped.last().is_none_or(|&last| (b - last).abs() > 1e-6) {
@@ -188,15 +188,15 @@ pub fn compute_der(reference: &[DerSegment], hypothesis: &[DerSegment]) -> DerRe
 /// This is the assignment NIST DER's confusion term depends on: each hypothesis
 /// speaker is paired with at most one reference speaker (and vice versa) so that
 /// the summed overlap of the chosen pairs is maximal. A greedy "take the biggest
-/// overlap first" pass is *not* optimal — it can lock a reference speaker to a
+/// overlap first" pass isn't optimal; it can lock a reference speaker to a
 /// hypothesis that another hypothesis needed more, stranding a speaker into
-/// confusion and inflating DER. We solve it exactly with the Hungarian
-/// (Kuhn–Munkres) algorithm on the small `ref × hyp` matrix; the speaker counts
+/// confusion and inflating DER. So we solve it exactly with the Hungarian
+/// (Kuhn–Munkres) algorithm on the small `ref × hyp` matrix. The speaker counts
 /// are tiny, so the `O(n^3)` cost is irrelevant.
 ///
-/// Only pairs with strictly positive overlap are kept in the result — a forced
-/// assignment onto a zero-overlap reference is meaningless and must not be
-/// treated as "correct".
+/// Only pairs with strictly positive overlap survive into the result. A forced
+/// assignment onto a zero-overlap reference is meaningless and shouldn't count as
+/// "correct".
 fn max_overlap_assignment<'a>(
     overlap: &std::collections::HashMap<(&'a str, &'a str), f64>,
 ) -> std::collections::HashMap<&'a str, &'a str> {
@@ -347,8 +347,8 @@ mod tests {
 
     #[test]
     fn one_speaker_split_across_two_reference_speakers_is_confusion() {
-        // Reference has two speakers; the diarizer heard ONE voice for both. One
-        // half maps correctly, the other is confusion.
+        // Reference has two speakers; the diarizer heard a single voice for both.
+        // One half maps correctly, the other is confusion.
         let reference = vec![seg(0.0, 5.0, "A"), seg(5.0, 10.0, "B")];
         let hypothesis = vec![seg(0.0, 10.0, "X")];
         let r = compute_der(&reference, &hypothesis);

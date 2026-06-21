@@ -1,24 +1,24 @@
 //! At-rest protection for secrets (API keys) in `config.toml`.
 //!
-//! Keys used to be written to disk in plaintext. This module encrypts them with
-//! the Windows Data Protection API (DPAPI, `CryptProtectData`) — keyed to the
-//! current **user** account, so only this user on this machine can decrypt them,
-//! and never written anywhere in the clear. The ciphertext is hex-encoded and
-//! tagged with [`PREFIX`] so reads can tell an encrypted value from a legacy
-//! plaintext one.
+//! This module encrypts API keys with the Windows Data Protection API (DPAPI,
+//! `CryptProtectData`) before they touch disk, so they're never stored in the
+//! clear. The encryption is keyed to the current user account, so only this user
+//! on this machine can decrypt them. The ciphertext is hex-encoded and tagged
+//! with [`PREFIX`] so reads can tell an encrypted value from a legacy plaintext
+//! one.
 //!
 //! Backwards/forwards compatible by design:
-//! - A legacy **plaintext** key (no prefix) reads back verbatim and is
-//!   re-encrypted on the next save — zero-touch migration.
-//! - An **empty** key stays empty (we never encrypt nothing, so "is a key set?"
-//!   checks and a clean config are preserved).
+//! - A legacy plaintext key (no prefix) reads back verbatim and gets re-encrypted
+//!   on the next save, so migration is zero-touch.
+//! - An empty key stays empty. We don't encrypt an empty value, which keeps
+//!   "is a key set?" checks and a clean config working.
 //! - Off Windows (CI, a non-Windows build) `protect` is a no-op passthrough so
 //!   the crate still compiles and round-trips in tests; a `dpapi:` value that
 //!   can't be decrypted there is treated as unset.
 //!
-//! This is the at-rest half of S-H2 (the WebView-masking half lives in the
-//! tray's `commands.rs`); the two compose — masking hides the (now-encrypted)
-//! key from the renderer, this keeps it off disk in the clear.
+//! This is the at-rest half of S-H2; the WebView-masking half lives in the tray's
+//! `commands.rs`. The two compose: masking hides the (now-encrypted) key from the
+//! renderer, and this keeps it off disk in the clear.
 
 /// Marker prefixing a DPAPI-encrypted, hex-encoded secret on disk. Versioned so
 /// the scheme can evolve without misreading old values.
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn legacy_plaintext_reads_back_verbatim() {
-        // Migration: a key written before DPAPI (no prefix) must round-trip on
+        // Migration: a key written before DPAPI (no prefix) has to round-trip on
         // read so existing configs keep working until the next save re-encrypts.
         assert_eq!(
             unprotect("sk-legacy-plaintext-key"),

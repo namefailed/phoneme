@@ -9,12 +9,12 @@
 //!   exit 0 — hotkey/script bindings. `toggle` is atomic on the daemon side,
 //!   and `start`/`toggle` take `--in-place` so a binding can start dictation.
 //! - **Blocking** (default hold mode, `--oneshot`, `--duration N`): open an
-//!   event subscription FIRST (a fast transcription can finish in the gap
-//!   between stop and a late subscribe — events are never replayed), then
-//!   send `RecordStart` on a second connection, stop on Enter/EOF for hold
-//!   mode, and wait for THIS recording's `TranscriptionDone` (print the
-//!   transcript, exit 0) or `TranscriptionFailed` (exit 4). Other
-//!   recordings' completions on the shared stream are ignored by id.
+//!   event subscription before doing anything else (a fast transcription can
+//!   finish in the gap between stop and a late subscribe, and events are never
+//!   replayed), then send `RecordStart` on a second connection, stop on
+//!   Enter/EOF for hold mode, and wait for this recording's `TranscriptionDone`
+//!   (print the transcript, exit 0) or `TranscriptionFailed` (exit 4). Other
+//!   recordings' completions on the shared stream are filtered out by id.
 
 use crate::args::{RecordAction, RecordArgs};
 use crate::client::Client;
@@ -87,11 +87,11 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         RecordMode::Hold
     };
 
-    // Subscribe BEFORE starting (and, for hold mode, before stopping) the
-    // recording. The daemon only delivers events to subscriptions that exist
-    // at emit time — a fast transcription (the in-place fast lane especially)
+    // Subscribe before starting (and, for hold mode, before stopping) the
+    // recording. The daemon only delivers events to subscriptions that exist at
+    // emit time, and a fast transcription (the in-place fast lane especially)
     // can emit TranscriptionDone in the gap between RecordStop and a late
-    // subscription, and the CLI then hangs until its timeout waiting for an
+    // subscription — the CLI would then hang until its timeout waiting for an
     // event that already happened. Subscribing consumes this connection's
     // request channel, so the start/stop control requests ride a second
     // connection opened next.
@@ -117,20 +117,20 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         Ok(v) => v,
         Err(code) => return code,
     };
-    // The subscription is now open for the whole take, so completion events
-    // from unrelated pipeline work (imports, retranscribes) can arrive too —
-    // only this recording's id may end the wait.
+    // The subscription is open for the whole take, so completion events from
+    // unrelated pipeline work (imports, retranscribes) can arrive too. Only
+    // this recording's id may end the wait.
     let rec_id = started
         .get("id")
         .and_then(|v| v.as_str())
         .map(str::to_owned);
 
     if matches!(mode, RecordMode::Hold) {
-        // Wait for the user to hit Enter / close stdin (normal stop) OR press
+        // Wait for the user to hit Enter / close stdin (normal stop) or press
         // Ctrl+C. Without the Ctrl+C arm an interrupt would tear the process
-        // down while the daemon kept recording indefinitely — the take would
-        // leak. On Ctrl+C we discard the in-progress recording (RecordCancel)
-        // and exit; a clean Enter/EOF stops and keeps it (RecordStop).
+        // down while the daemon kept recording indefinitely, leaking the take.
+        // On Ctrl+C we discard the in-progress recording (RecordCancel) and
+        // exit; a clean Enter/EOF stops and keeps it (RecordStop).
         use tokio::io::{AsyncBufReadExt, BufReader};
         let stdin = tokio::io::stdin();
         let mut reader = BufReader::new(stdin);
@@ -153,8 +153,8 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
     let timeout = std::time::Duration::from_secs(cfg.whisper.timeout_secs + 60);
     let start = std::time::Instant::now();
 
-    // `None` only if the daemon's RecordStart response had no id (it always
-    // does) — then fall back to accepting any completion, the old behavior.
+    // `rec_id` is `None` only if the daemon's RecordStart response carried no
+    // id (it always does); in that case fall back to accepting any completion.
     let is_ours =
         |id: &phoneme_core::RecordingId| rec_id.as_deref().is_none_or(|r| r == id.to_string());
 
@@ -241,13 +241,13 @@ mod tests {
         format!("phoneme-record-test-{label}-{pid}-{ns}")
     }
 
-    /// The blocking record path must have its event subscription open BEFORE
+    /// The blocking record path must have its event subscription open before
     /// the recording is started/stopped: a fast transcription completes right
     /// after the stop, and an event emitted before the subscription exists is
-    /// never replayed — the CLI then hangs to its timeout. The mock daemon
-    /// emits `TranscriptionDone` immediately after answering `RecordStart`,
-    /// and only to a subscriber that ALREADY existed when the start arrived —
-    /// exactly the window the old subscribe-after-stop ordering lost.
+    /// never replayed, so the CLI hangs to its timeout. The mock daemon emits
+    /// `TranscriptionDone` immediately after answering `RecordStart`, and only
+    /// to a subscriber that already existed when the start arrived — exactly the
+    /// window a subscribe-after-stop ordering would miss.
     #[tokio::test]
     async fn blocking_record_subscribes_before_starting() {
         let name = unique_pipe("order");
@@ -287,10 +287,10 @@ mod tests {
                                 Request::RecordStart { .. } => {
                                     // Absorb in-flight scheduling (the client's
                                     // SubscribeEvents bytes may still be landing),
-                                    // but never wait past the start RESPONSE:
-                                    // the old buggy ordering can't subscribe
-                                    // until this response is sent, so it can
-                                    // never satisfy this flag.
+                                    // but never wait past sending the start
+                                    // response: a subscribe-after-stop ordering
+                                    // can't subscribe until this response is out,
+                                    // so it could never satisfy this flag.
                                     for _ in 0..100 {
                                         if subscriber.lock().await.is_some() {
                                             subscribed_before_start.store(true, Ordering::SeqCst);

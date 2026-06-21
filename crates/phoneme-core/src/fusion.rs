@@ -4,22 +4,22 @@
 //!
 //! ## Why fuse instead of picking one?
 //!
-//! Vector search recalls by *meaning* ("the bit about the database migration"
+//! Vector search recalls by meaning ("the bit about the database migration"
 //! matches "we need to move the schema over") but can miss an exact term it has
-//! never seen — proper nouns, code identifiers, acronyms. Lexical FTS5 nails
-//! exact terms but is blind to paraphrase. The user wants to "utter the likeness
-//! of something I spoke about" *and* still find the recording when they remember
-//! the one distinctive word. Fusing both gives the union of their strengths.
+//! never seen: proper nouns, code identifiers, acronyms. Lexical FTS5 nails exact
+//! terms but is blind to paraphrase. A user wants to recall "the likeness of
+//! something I spoke about" and still find the recording when all they remember
+//! is the one distinctive word. Fusing both gives the union of their strengths.
 //!
 //! ## Reciprocal Rank Fusion (RRF)
 //!
 //! RRF combines ranked lists without needing the two scoring scales to be
-//! comparable (cosine ∈ ~`[0,1]` vs BM25 which is unbounded and sign-flipped).
-//! Each list contributes `1 / (k + rank)` per item; contributions sum across
-//! lists. An item ranked highly by *either* retriever floats up; an item ranked
-//! well by *both* floats highest. This is far more robust than the old approach
-//! of a single hard cosine floor, which silently dropped genuinely-relevant
-//! paraphrase hits whose cosine sat just under the threshold.
+//! comparable (cosine sits in ~`[0,1]`; BM25 is unbounded and sign-flipped).
+//! Each list contributes `1 / (k + rank)` per item, and contributions sum across
+//! lists. An item ranked highly by either retriever floats up; an item ranked
+//! well by both floats highest. That holds up far better than a single hard
+//! cosine floor, which drops a genuinely relevant paraphrase hit the moment its
+//! cosine sits just under the threshold.
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -33,10 +33,10 @@ pub const RRF_K: f32 = 60.0;
 /// Fuse multiple ranked lists into one ranking via Reciprocal Rank Fusion.
 ///
 /// Each input list is an ordered slice of item keys, best-first. The returned
-/// vector is `(key, fused_score)` sorted best-first. Keys absent from a list
-/// simply contribute nothing for that list (no penalty beyond the missing
-/// reward), which is exactly what we want: a strong semantic-only hit shouldn't
-/// be punished for not being a lexical hit.
+/// vector is `(key, fused_score)` sorted best-first. A key absent from a list
+/// just contributes nothing for that list (no penalty beyond the missing
+/// reward), which is what we want: a strong semantic-only hit shouldn't be
+/// punished for not also being a lexical hit.
 ///
 /// `weights`, if provided, scales each list's contribution (same length as
 /// `lists`); `None` weights every list equally. Weighting lets us, e.g., trust
@@ -67,8 +67,8 @@ where
     }
 
     let mut fused: Vec<(K, f32)> = scores.into_iter().collect();
-    // Sort by fused score descending; ties are left in arbitrary (HashMap) order,
-    // which is acceptable because tied items are, by definition, equally ranked.
+    // Sort by fused score descending. Ties keep whatever order the HashMap gave
+    // them, which is fine since tied items are by definition equally ranked.
     fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     fused
 }
@@ -76,21 +76,21 @@ where
 /// Calibrate a raw cosine similarity from `all-MiniLM-L6-v2` into a 0..1
 /// relevance score the UI can render as a percentage.
 ///
-/// Raw cosine from a mean-pooled sentence-transformer is *not* intuitively a
-/// percentage: for this model, an excellent paraphrase match lands around
-/// 0.55–0.75, a loosely-related one around 0.3–0.4, and unrelated text hovers
-/// near 0.1 (not 0 — the embeddings live in a cone, so even random sentences
-/// share a positive baseline). Showing the user "38% relevant" for what is
-/// actually a strong hit is misleading.
+/// Raw cosine from a mean-pooled sentence-transformer doesn't read as a
+/// percentage. For this model an excellent paraphrase match lands around
+/// 0.55–0.75, a loosely related one around 0.3–0.4, and unrelated text hovers
+/// near 0.1 rather than 0 (the embeddings live in a cone, so even random
+/// sentences share a positive baseline). Showing the user "38% relevant" for
+/// what is actually a strong hit would be misleading.
 ///
-/// We map cosine through a piecewise-linear ramp anchored at empirically
-/// reasonable thresholds for this model:
-/// - at/below [`COSINE_FLOOR`] → 0.0 (treated as noise)
-/// - at/above [`COSINE_CEIL`]  → 1.0 (an essentially-exact match)
+/// So map cosine through a piecewise-linear ramp anchored at thresholds that are
+/// empirically reasonable for this model:
+/// - at or below [`COSINE_FLOOR`] → 0.0 (treated as noise)
+/// - at or above [`COSINE_CEIL`]  → 1.0 (an essentially exact match)
 /// - linear in between.
 ///
 /// This stretches the model's useful band across the full 0–100% the user sees,
-/// so the chip reads "strong / medium / weak" the way a human would judge it.
+/// so the chip reads as strong, medium, or weak the way a human would judge it.
 pub fn calibrate_cosine(cosine: f32) -> f32 {
     let c = cosine.clamp(-1.0, 1.0);
     if c <= COSINE_FLOOR {
@@ -107,8 +107,8 @@ pub fn calibrate_cosine(cosine: f32) -> f32 {
 pub const COSINE_FLOOR: f32 = 0.15;
 
 /// Cosine at/above which a match is treated as essentially exact (calibrates to
-/// 100%). For this model, near-duplicate phrasings reach ~0.7+; we cap there so
-/// a genuinely strong paraphrase isn't perpetually stuck at "70%".
+/// 100%). For this model, near-duplicate phrasings reach ~0.7+; capping there
+/// keeps a genuinely strong paraphrase from being stuck forever at "70%".
 pub const COSINE_CEIL: f32 = 0.70;
 
 #[cfg(test)]

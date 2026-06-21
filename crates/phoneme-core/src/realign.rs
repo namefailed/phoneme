@@ -1,4 +1,4 @@
-//! Re-derive the per-word / per-segment timing layers from an EDITED transcript.
+//! Re-derive the per-word / per-segment timing layers from an edited transcript.
 //!
 //! The Synced (per-word) and Timeline (per-segment) views — and click-to-seek —
 //! are driven by `transcript_words` / `transcript_segments`, the "machine truth"
@@ -12,18 +12,18 @@
 //!   surrounding unchanged anchors.
 //! - **Deleted** words drop out.
 //!
-//! There is **no model run** — it reuses the audio's already-known word timings,
-//! so it's instant and works offline. Frame-accurate re-alignment of *edited*
-//! words against the audio (true forced alignment) needs an aligner model and is
-//! a roadmap item; for typed corrections, interpolation is indistinguishable in
+//! No model runs here — it reuses the audio's already-known word timings, so it's
+//! instant and works offline. Frame-accurate re-alignment of *edited* words
+//! against the audio (true forced alignment) needs an aligner model and is a
+//! roadmap item; for typed corrections, interpolation is indistinguishable in
 //! practice and free.
 //!
 //! ## Speaker attribution is preserved, never invented
 //!
 //! A word's speaker comes from its `[Speaker N]` block marker when that marker is
-//! the canonical numeric form; otherwise it **inherits** the matched original
-//! word's speaker index. So a renamed `[Alice]` block (whose words still carry
-//! the numeric index that `speaker_names` maps to "Alice") keeps displaying as
+//! the canonical numeric form; otherwise it inherits the matched original word's
+//! speaker index. So a renamed `[Alice]` block (whose words still carry the
+//! numeric index that `speaker_names` maps to "Alice") keeps displaying as
 //! "Alice". Re-attributing text to a different speaker by hand-editing a marker is
 //! intentionally out of scope here — that's the speaker-rename feature's job, and
 //! trying to honor it would let a stray keystroke silently rewrite attribution.

@@ -1,10 +1,10 @@
 //! Clap definitions for every `phoneme` subcommand and flag.
 //!
-//! This file is the single source of truth for the CLI surface — the
-//! doc-comments on the variants/fields below ARE the `--help` text, and
+//! This file is the single source of truth for the CLI surface: the
+//! doc-comments on the variants/fields below are the `--help` text, and
 //! `docs/developer-guide/cli_reference.md` is audited against it. Adding a
-//! command means: a variant here, a module under `commands/`, a dispatch arm
-//! in `main`, and a cli_reference entry (DOCS-ALWAYS).
+//! command means a variant here, a module under `commands/`, a dispatch arm in
+//! `main`, and a cli_reference entry (DOCS-ALWAYS).
 
 use clap::{Parser, Subcommand};
 
@@ -516,9 +516,10 @@ pub struct DeleteArgs {
 
 #[derive(Debug, clap::Args)]
 pub struct DoctorArgs {
-    /// DESTRUCTIVE: delete catalog.db so the daemon starts an empty catalog.
-    /// Transcripts, tags, notes and titles are DB-only and are LOST; audio
-    /// files are kept. To recover recordings non-destructively, use --reimport.
+    /// Destructive: delete catalog.db so the daemon starts an empty catalog.
+    /// Transcripts, tags, notes and titles live only in the DB and are lost;
+    /// audio files are kept. To recover recordings non-destructively, use
+    /// --reimport.
     #[arg(long)]
     pub rebuild_catalog: bool,
     /// Non-destructive: scan the audio directory and re-link any .wav file that

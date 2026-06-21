@@ -13,8 +13,8 @@ async fn fake_wav(dir: &TempDir) -> std::path::PathBuf {
     p
 }
 
-/// Local whisper.cpp shape: no API key, no model field — identical wire
-/// behaviour to the pre-trait `TranscriptionClient`.
+/// Local whisper.cpp shape: no API key and no model field, the plain
+/// OpenAI-compatible wire format.
 fn local_provider(base_url: impl Into<String>, timeout: Duration) -> OpenAiCompatProvider {
     OpenAiCompatProvider::new(
         reqwest::Client::new(),
@@ -92,9 +92,9 @@ async fn returns_unreachable_when_no_server() {
     let dir = TempDir::new().unwrap();
     let wav = fake_wav(&dir).await;
     // Unbound privileged port on localhost. On Linux this usually returns
-    // ECONNREFUSED immediately (→ WhisperUnreachable). On Windows the privileged
-    // port :1 sometimes stalls until the client timeout (→ WhisperTimeout).
-    // Either error semantically means "couldn't reach the server", so accept both.
+    // ECONNREFUSED immediately (WhisperUnreachable). On Windows port :1 sometimes
+    // stalls until the client timeout instead (WhisperTimeout). Both mean
+    // "couldn't reach the server", so accept either.
     let provider = local_provider("http://127.0.0.1:1", Duration::from_secs(2));
     let err = provider.transcribe(&wav, None).await.unwrap_err();
     assert!(
@@ -235,8 +235,8 @@ async fn sends_prompt_field_when_set() {
 
 #[tokio::test]
 async fn omits_prompt_field_when_empty() {
-    // No prompt set → the request must NOT carry a `prompt` field, keeping the
-    // wire format unchanged for users who never configure custom vocabulary.
+    // With no prompt set, the request must not carry a `prompt` field, keeping
+    // the wire format clean for users who never configure custom vocabulary.
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))

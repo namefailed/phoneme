@@ -3,13 +3,13 @@
 //!
 //! The single [`ShutdownCoordinator`] lives in `AppState`, so the IPC
 //! `Shutdown` handler, the Ctrl+C listener (`install_signals`), and `main`'s
-//! failure paths all flip the SAME flag — which is what makes `phoneme
+//! failure paths all flip the one shared flag, which is what makes `phoneme
 //! daemon stop` actually stop the daemon. Consumers (queue worker, whisper
 //! supervisors, retention loop, the IPC serve select) hold a
-//! [`ShutdownSignal`] (or a raw receiver) and wind down when it fires;
-//! `main` then finalizes any in-flight recording and awaits them. The
-//! trigger is sticky and idempotent — late subscribers see the flag already
-//! set, and a second trigger is harmless.
+//! [`ShutdownSignal`] (or a raw receiver) and wind down when it fires; `main`
+//! then finalizes any in-flight recording and awaits them. The trigger is
+//! sticky and idempotent: late subscribers see the flag already set, and a
+//! second trigger is harmless.
 
 use tokio::sync::watch;
 

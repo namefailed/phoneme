@@ -6,13 +6,13 @@
 //! sibling ([`crate::webhook`]) does the HTTP equivalent.
 //!
 //! The non-obvious parts are all about not hanging or leaking: the stdin write,
-//! the stdout drain, and the stderr drain all run concurrently with the wait
-//! UNDER the timeout, so a chatty hook that ignores a >64 KiB payload can't
+//! the stdout drain, and the stderr drain all run concurrently with the wait,
+//! inside the timeout, so a chatty hook that ignores a >64 KiB payload can't
 //! deadlock the pipe in either direction, and a timed-out child is explicitly
 //! killed (Tokio's `Drop` does not terminate the process on Windows).
-//! [`redact_secrets`] is a separate
-//! concern — it scrubs credential-shaped text out of subprocess output before it
-//! crosses the IPC trust boundary back to the GUI (the hook-test feature).
+//! [`redact_secrets`] is a separate concern — it scrubs credential-shaped text
+//! out of subprocess output before it crosses the IPC trust boundary back to the
+//! GUI (the hook-test feature).
 
 use crate::error::{Error, Result};
 use crate::types::HookPayload;
@@ -84,7 +84,7 @@ impl HookRunner {
         let started = Instant::now();
         let mut child = cmd.spawn()?;
 
-        // Feed stdin INSIDE the timed, concurrently-drained future — never as a
+        // Feed stdin from inside the timed, concurrently-drained future, not as a
         // standalone `write_all().await` before the drain starts. The payload
         // embeds the full transcript, which can be far larger than the OS pipe
         // buffer (~64 KB); a hook that ignores stdin and instead chats on
@@ -100,8 +100,8 @@ impl HookRunner {
         // more than the OS pipe buffer (~64 KB) would otherwise deadlock. The
         // `child` handle is deliberately kept out of the drain future (only
         // its pipe handles go in) so it survives for an explicit kill if the
-        // timeout fires — `wait_with_output` would consume it and leave no
-        // way to terminate a runaway process.
+        // timeout fires; `wait_with_output` would consume it and leave no way to
+        // terminate a runaway process.
         let mut stdout = child.stdout.take();
         let mut stderr = child.stderr.take();
         let mut stderr_buf = Vec::new();
@@ -140,8 +140,8 @@ impl HookRunner {
         let status = match timeout(self.timeout, wait_and_drain).await {
             Ok(r) => r?,
             Err(_) => {
-                // Tokio's `Drop` for `Child` does NOT terminate the process on
-                // Windows — without an explicit kill every hook timeout leaks
+                // Tokio's `Drop` for `Child` does not terminate the process on
+                // Windows, so without an explicit kill every hook timeout leaks
                 // a `powershell.exe`.
                 if let Err(e) = child.start_kill() {
                     tracing::error!("failed to kill runaway hook process: {e}");
@@ -227,10 +227,10 @@ const REDACTED: &str = "<redacted>";
 /// - `key=`/`api_key=`/`token=`/`password=`/`secret=` assignments — the key
 ///   name survives, the value is masked
 ///
-/// The result is additionally capped at [`REDACT_MAX_BYTES`] (8 KiB). The cap
-/// is applied AFTER masking, so a cut can never expose half a secret. This is
+/// The result is additionally capped at [`REDACT_MAX_BYTES`] (8 KiB). The cap is
+/// applied after masking, so a cut can never expose half a secret. This is
 /// best-effort hygiene against accidental echoes, not a parser for every
-/// credential format — prefer over-masking to leaking.
+/// credential format — when in doubt it over-masks rather than leak.
 pub fn redact_secrets(text: &str) -> String {
     // Compiled per call like the other small regexes in this crate — this runs
     // on user-initiated hook tests, never in a hot path.
@@ -241,8 +241,8 @@ pub fn redact_secrets(text: &str) -> String {
     // `{8,}` keeps prose like "bearer of bad news" intact; real bearer tokens
     // are far longer.
     let bearer = regex::Regex::new(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{8,}=*").unwrap();
-    // The value may be bare or quoted; the key name and the `=` are kept so
-    // the user can still tell WHICH assignment their script printed.
+    // The value may be bare or quoted; the key name and the `=` are kept so the
+    // user can still tell which assignment their script printed.
     let assigned = regex::Regex::new(
         r#"(?i)\b(api[_-]?key|key|token|password|secret)(\s*=\s*)("[^"]*"|'[^']*'|[^\s"']+)"#,
     )
@@ -283,16 +283,16 @@ mod tests {
         assert_eq!(a, vec!["-File", "C:/Program Files/x.ps1"]);
     }
 
-    /// A hook that NEVER reads stdin while flooding stdout, handed a payload far
-    /// larger than the OS pipe buffer, must still finish under the timeout — the
-    /// stdin write races the drain rather than blocking ahead of it. Before the
-    /// fix this deadlocked: we blocked writing the >64 KiB transcript while the
-    /// child blocked writing its undrained stdout, with no timeout escape, and
-    /// the serial queue worker awaiting the call stalled with it.
+    /// A hook that never reads stdin while flooding stdout, handed a payload far
+    /// larger than the OS pipe buffer, must still finish under the timeout: the
+    /// stdin write races the drain rather than blocking ahead of it. The failure
+    /// mode this guards against is a deadlock — writing the >64 KiB transcript
+    /// blocks while the child blocks writing its undrained stdout, with no
+    /// timeout escape, and the serial queue worker awaiting the call stalls too.
     #[tokio::test]
     async fn run_does_not_deadlock_on_large_payload_with_chatty_hook() {
         // A shell one-liner that ignores stdin entirely and prints ~200 KiB to
-        // stdout — comfortably past the ~64 KiB pipe buffer in BOTH directions.
+        // stdout — comfortably past the ~64 KiB pipe buffer in both directions.
         #[cfg(windows)]
         let command = "cmd /c \"for /L %i in (1,1,4000) do @echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"".to_string();
         #[cfg(not(windows))]
@@ -308,8 +308,8 @@ mod tests {
 
         let started = Instant::now();
         let result = runner.run(&payload).await;
-        // The hook exits 0, so this is Ok — the load-bearing assertion is that
-        // it RETURNED well under the timeout instead of hanging.
+        // The hook exits 0, so this is Ok — the assertion that matters is that it
+        // returned well under the timeout instead of hanging.
         assert!(result.is_ok(), "chatty hook should succeed: {result:?}");
         assert!(
             started.elapsed() < Duration::from_secs(20),
@@ -398,9 +398,9 @@ mod tests {
         }
     }
 
-    /// Ordinary hook chatter passes through byte-for-byte — including words
-    /// that merely CONTAIN a sensitive key name (`monkey=`, `max_tokens=`) and
-    /// short prose after "bearer".
+    /// Ordinary hook chatter passes through byte-for-byte, including words that
+    /// merely contain a sensitive key name (`monkey=`, `max_tokens=`) and short
+    /// prose after "bearer".
     #[test]
     fn redact_leaves_benign_text_untouched() {
         let benign = [
@@ -415,8 +415,8 @@ mod tests {
         }
     }
 
-    /// Output is hard-capped at REDACT_MAX_BYTES (plus the truncation marker),
-    /// cutting on a char boundary even for multi-byte text.
+    /// Output is hard-capped at [`REDACT_MAX_BYTES`] (plus the truncation
+    /// marker), cutting on a char boundary even for multi-byte text.
     #[test]
     fn redact_caps_output_length() {
         let huge = "x".repeat(REDACT_MAX_BYTES * 3);
@@ -433,7 +433,7 @@ mod tests {
         let out = redact_secrets(&unicode);
         assert!(out.len() <= REDACT_MAX_BYTES + "… <truncated>".len());
 
-        // A secret near the cut point is masked BEFORE truncation, so the cap
+        // A secret near the cut point is masked before truncation, so the cap
         // can never expose a half-cut token.
         let mut padded = "y".repeat(REDACT_MAX_BYTES - 20);
         padded.push_str(" sk-abcdef1234567890SECRET");

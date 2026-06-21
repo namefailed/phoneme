@@ -7,7 +7,7 @@
 //! CLI is a local client that reads the same config the daemon does, so it
 //! resolves the flag value here — id first, then case-insensitive name — and
 //! passes the resolved `id` over the wire. An unmatched value is a hard error
-//! (we do NOT silently fall back to the default pipeline) listing what's
+//! rather than a silent fall-back to the default pipeline, and it lists what's
 //! available, so a typo'd `--recipe` is caught at the call site instead of
 //! quietly running the wrong pipeline.
 

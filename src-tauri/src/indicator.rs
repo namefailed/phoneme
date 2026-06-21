@@ -1,43 +1,44 @@
 //! System-wide "recording indicator" overlay window.
 //!
 //! A second, frameless, always-on-top [`WebviewWindow`] (label
-//! [`INDICATOR_LABEL`]) — a small bottom-center pill that shows ONLY a recording
-//! cue while capture is live: an audio-reactive waveform (WhisperFlow-style — no
-//! record dot, no timer). Deliberately NO transcription text. It's for users who
-//! want a clear "you're recording" indicator WITHOUT the live-caption overlay,
-//! and it works even when live preview is fully off.
+//! [`INDICATOR_LABEL`]): a small bottom-center pill that shows nothing but a
+//! recording cue while capture is live — an audio-reactive waveform
+//! (WhisperFlow-style, no record dot, no timer). There is deliberately no
+//! transcription text. It's for users who want a clear "you're recording" cue
+//! without the live-caption overlay, and it works even when live preview is fully
+//! off.
 //!
-//! This is a faithful, independent MIRROR of the live-preview overlay (see
-//! [`crate::overlay`]): same machinery (frameless, decorations off, always-on-top,
-//! skip-taskbar, OPAQUE — a transparent always-on-top WebView2 window hard-crashes
-//! on Windows, so it's an opaque themed panel), reconciled against its own config
-//! flag `interface.recording_indicator`. It is entirely separate from the caption
-//! overlay: a different window label, a different config flag, and its own
-//! per-label `tauri-plugin-window-state` geometry — either, both, or neither can
-//! run at once.
+//! This is a faithful, independent mirror of the live-preview overlay (see
+//! [`crate::overlay`]): the same machinery (frameless, decorations off,
+//! always-on-top, skip-taskbar, opaque — a transparent always-on-top WebView2
+//! window hard-crashes on Windows, so it's an opaque themed panel), reconciled
+//! against its own config flag `interface.recording_indicator`. It is entirely
+//! separate from the caption overlay: a different window label, a different config
+//! flag, and its own per-label `tauri-plugin-window-state` geometry. Either, both,
+//! or neither can run at once.
 //!
 //! ## How recording state reaches it
-//! Nothing extra is needed: [`crate::events`] re-emits every daemon event with
+//! Nothing extra is needed. [`crate::events`] re-emits every daemon event with
 //! `app.emit("daemon-event", …)`, and Tauri's `Emitter::emit` broadcasts to
-//! **all** webviews. So the moment this window exists it receives the same
+//! every webview. So the moment this window exists it receives the same
 //! `recording_started` / `audio_level_sample` / `recording_stopped` stream the
-//! main window does, and `indicator.ts` drives show/hide + the waveform from it.
-//! No transcription/preview is involved.
+//! main window does, and `indicator.ts` drives show/hide plus the waveform from
+//! it. No transcription or preview is involved.
 //!
 //! ## Window lifecycle
-//! * Created **hidden** at startup when the setting is on (so the very first
-//!   recording can show it instantly without a cold window build), and on a
-//!   config save that flips the setting on.
-//! * Destroyed on a config save that flips it off.
-//! * `indicator.ts` shows it on `recording_started` and hides it on
-//!   `recording_stopped`/`cancelled`/`deleted` — Rust never forces visibility.
+//! - Created hidden at startup when the setting is on, so the first recording can
+//!   show it instantly without a cold window build, and again on a config save
+//!   that flips the setting on.
+//! - Destroyed on a config save that flips it off.
+//! - `indicator.ts` shows it on `recording_started` and hides it on
+//!   `recording_stopped`/`cancelled`/`deleted`. Rust never forces visibility.
 //!
 //! ## Position persistence
-//! The window is draggable (`indicator.ts` repositions it manually with
-//! `setPosition` on pointer drag — NOT a `data-tauri-drag-region`, whose OS modal
-//! move-loop can freeze an always-on-top window's shared event loop). Its position
-//! is remembered across runs by `tauri-plugin-window-state`, which saves/restores
-//! geometry per window label automatically. On first ever creation (no saved
+//! The window is draggable: `indicator.ts` repositions it manually with
+//! `setPosition` on pointer drag, not via a `data-tauri-drag-region` (its OS modal
+//! move-loop can freeze an always-on-top window's shared event loop). Position is
+//! remembered across runs by `tauri-plugin-window-state`, which saves and restores
+//! geometry per window label automatically. On the first ever creation (no saved
 //! state) we place it bottom-center of the primary monitor.
 
 use tauri::{AppHandle, Manager, WebviewWindowBuilder};
@@ -48,10 +49,10 @@ use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 pub const INDICATOR_LABEL: &str = "recording-indicator";
 
 /// Indicator width (logical px). Sized snugly to the centered audio waveform
-/// (13 bars × 3px + 3px gaps ≈ 75px) plus the card's 16px side padding — so the
+/// (13 bars × 3px + 3px gaps ≈ 75px) plus the card's 16px side padding, so the
 /// pill hugs the bars instead of leaving dead space around them. Fixed (the
 /// height is pinned too): a tiny status cue, not a resizable panel. Kept in sync
-/// with `indicator.css` (`.ri-card` padding + `.ri-wave` bar count/width).
+/// with `indicator.css` (`.ri-card` padding plus `.ri-wave` bar count/width).
 const INDICATOR_W: f64 = 112.0;
 /// Indicator height (logical px). Snug around the 22px waveform with a little
 /// vertical breathing room inside the rounded pill.
@@ -61,7 +62,7 @@ const BOTTOM_MARGIN: f64 = 96.0;
 /// Off-screen sentinel start position (mirrors [`crate::overlay`]): a never-saved
 /// window starts off every monitor so first-run placement is detectable as "not
 /// on any monitor", instead of guessing from coordinate signs (which mis-flagged
-/// monitors arranged left of / above the primary).
+/// monitors arranged left of or above the primary).
 const OFFSCREEN_SENTINEL: f64 = -32000.0;
 
 /// Whether the indicator window currently exists.
@@ -72,11 +73,11 @@ pub fn exists(app: &AppHandle) -> bool {
 /// Create the indicator window (hidden) if it doesn't already exist. Idempotent.
 ///
 /// The window is frameless, always-on-top, skips the taskbar, and is a fixed
-/// small size (NOT resizable — it's a tiny pill). It is OPAQUE, never transparent
-/// (a transparent + always-on-top + frameless WebView2 window hard-crashes the
-/// whole app on some Windows/WebView2 builds — see [`crate::overlay`]). It starts
-/// **hidden**; `indicator.ts` reveals it when a recording starts. Returns early
-/// (and logs) on failure so a broken indicator never blocks the app.
+/// small size (not resizable — it's a tiny pill). It is opaque, never transparent
+/// (a transparent always-on-top frameless WebView2 window hard-crashes the whole
+/// app on some Windows/WebView2 builds — see [`crate::overlay`]). It starts
+/// hidden; `indicator.ts` reveals it when a recording starts. Returns early (and
+/// logs) on failure so a broken indicator never blocks the app.
 pub fn ensure(app: &AppHandle) {
     if exists(app) {
         return;
@@ -95,17 +96,16 @@ pub fn ensure(app: &AppHandle) {
         // as "not on any monitor"; the window-state plugin overrides this with a
         // remembered position when one exists. See `place_default_if_unpositioned`.
         .position(OFFSCREEN_SENTINEL, OFFSCREEN_SENTINEL)
-        // Fixed small pill: pin BOTH axes by making min == max == the inner size,
+        // Fixed small pill: pin both axes by making min == max == the inner size,
         // so the user can't resize it into something odd. Position is still
         // remembered by tauri-plugin-window-state.
         .min_inner_size(INDICATOR_W, INDICATOR_H)
         .max_inner_size(INDICATOR_W, INDICATOR_H)
         .resizable(false)
         .decorations(false)
-        // NOT transparent: a transparent + always-on-top + frameless WebView2
-        // window hard-crashes the whole app on some Windows/WebView2 builds when
-        // shown. The indicator is an opaque themed pill instead — see
-        // indicator.css.
+        // Not transparent: a transparent always-on-top frameless WebView2 window
+        // hard-crashes the whole app on some Windows/WebView2 builds when shown.
+        // The indicator is an opaque themed pill instead — see indicator.css.
         .always_on_top(true)
         .skip_taskbar(true)
         // Don't steal focus when it pops up mid-recording.
@@ -122,8 +122,8 @@ pub fn ensure(app: &AppHandle) {
 
     // Force the correct fixed size even if `tauri-plugin-window-state` restored a
     // stale geometry from an older build (the programmatic restore bypasses the
-    // min/max above). Without this, a pre-existing 150×36 saved size would leave
-    // dead space around the snug 112×32 pill. Best-effort.
+    // min/max above). Without this, a saved 150×36 size from an earlier build
+    // would leave dead space around the snug 112×32 pill. Best-effort.
     let _ = window.set_size(tauri::LogicalSize::new(INDICATOR_W, INDICATOR_H));
 
     // First-run placement: the window-state plugin overwrites the off-screen
@@ -156,11 +156,11 @@ pub fn sync(app: &AppHandle, enabled: bool) {
 }
 
 /// Place the indicator at the bottom-center of its monitor's work area, but only
-/// when there's no remembered position to honor — detected by the window not
-/// sitting on any currently-connected monitor (the off-screen builder sentinel on
-/// first run, or a saved position whose monitor was unplugged). A restored
-/// position on ANY monitor (including ones arranged left of / above the primary,
-/// at negative coordinates) is respected. Best-effort.
+/// when there's no remembered position to honor. We detect that by the window not
+/// sitting on any currently-connected monitor: the off-screen builder sentinel on
+/// first run, or a saved position whose monitor was unplugged. A restored position
+/// on any monitor (including ones arranged left of or above the primary, at
+/// negative coordinates) is respected. Best-effort.
 fn place_default_if_unpositioned(window: &tauri::WebviewWindow) {
     if position_is_on_a_monitor(window) {
         return; // a remembered, on-screen position was restored — respect it

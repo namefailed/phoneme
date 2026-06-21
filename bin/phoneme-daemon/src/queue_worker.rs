@@ -9,23 +9,23 @@
 //! `QueueDepthChanged`.
 //!
 //! Failure policy owned here:
-//! - **Transient** STT failures (unreachable / timeout) requeue the SAME
-//!   item and retry with exponential backoff (30 s → 5 min), emitting
+//! - **Transient** STT failures (unreachable / timeout) requeue the same item
+//!   and retry with exponential backoff (30 s → 5 min), emitting
 //!   `WhisperStatusChanged { reachable: false }`; after
 //!   `MAX_TRANSIENT_ATTEMPTS` consecutive misses the item is declared failed
 //!   so a permanently dead server can't loop one recording forever. The
-//!   matching `{ reachable: true }` is emitted ONCE on the recovery edge (the
-//!   first run that completes after a down signal), so the UI's error icon
+//!   matching `{ reachable: true }` is emitted just once, on the recovery edge
+//!   (the first run that completes after a down signal), so the UI's error icon
 //!   clears even when recovery happens to land on a run with no transcript.
 //! - **Permanent** pipeline errors are already quarantined by the pipeline;
 //!   the worker just logs and moves on.
 //! - An inbox **claim error** (antivirus lock, NTFS hiccup) retries with the
 //!   same backoff rather than killing the worker.
 //!
-//! After every run the worker re-reads the config from disk — but only when
-//! the file's mtime actually changed (a stat per run instead of a TOML
-//! parse), invalidating the cached diarizer when `[diarization]` changed.
-//! This is the second config-apply point next to the `ReloadConfig` IPC.
+//! After every run the worker re-reads the config from disk, but only when the
+//! file's mtime actually changed (a stat per run instead of a TOML parse),
+//! invalidating the cached diarizer when `[diarization]` changed. This is the
+//! second config-apply point next to the `ReloadConfig` IPC.
 
 use crate::app_state::AppState;
 use crate::pipeline;
@@ -34,9 +34,9 @@ use phoneme_ipc::DaemonEvent;
 use std::time::{Duration, SystemTime};
 use tokio::sync::watch;
 
-/// Give up on an item after this many consecutive TRANSIENT transcribe
-/// failures (unreachable / timeout). High on purpose: with max backoff this is
-/// ~25 minutes of a dead server before an item is declared failed — Doctor's
+/// Give up on an item after this many consecutive transient transcribe
+/// failures (unreachable / timeout). High on purpose: with max backoff that's
+/// ~25 minutes of a dead server before an item is declared failed, and Doctor's
 /// restart usually heals it long before. Permanent errors never retry.
 pub(crate) const MAX_TRANSIENT_ATTEMPTS: u32 = 5;
 
@@ -52,9 +52,9 @@ pub(crate) enum TransientOutcome {
     GiveUp,
 }
 
-/// Classify a transient failure from the running attempt count. `attempts` is
-/// the count INCLUDING the failure just observed (i.e. post-increment); once it
-/// reaches `max` the item is given up, otherwise it is requeued for another try.
+/// Classify a transient failure from the running attempt count. `attempts`
+/// includes the failure just observed (post-increment); once it reaches `max`
+/// the item is given up, otherwise it's requeued for another try.
 pub(crate) fn classify_transient_outcome(attempts: u32, max: u32) -> TransientOutcome {
     if attempts >= max {
         TransientOutcome::GiveUp
@@ -70,18 +70,18 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
     // failing item eventually lands in failed/ instead of looping forever.
     let mut attempts: std::collections::HashMap<phoneme_core::RecordingId, u32> =
         std::collections::HashMap::new();
-    // Latches when we emit `WhisperStatusChanged { reachable: false }` so we can
-    // emit the matching `{ reachable: true }` exactly once on the recovery edge.
-    // Without this, a transient failure (down → error icon) that then clears via
-    // an idle period — rather than a completed transcription — never sends the
-    // recovery event, so the UI's error icon stays latched. `TranscriptionDone`
-    // happens to clear it on the success-with-output path, but a down server that
-    // simply starts answering health checks again, or a queue that drains to
-    // empty after the server heals, would otherwise leave it stuck.
+    // Latches when we emit `WhisperStatusChanged { reachable: false }` so the
+    // matching `{ reachable: true }` fires exactly once on the recovery edge.
+    // Without it, a transient failure (down → error icon) that then clears via an
+    // idle period rather than a completed transcription never sends the recovery
+    // event, leaving the UI's error icon latched. `TranscriptionDone` happens to
+    // clear it on the success-with-output path, but a down server that simply
+    // starts answering health checks again, or a queue that drains to empty after
+    // the server heals, would otherwise leave it stuck.
     let mut whisper_unreachable = false;
-    // Last-seen mtime of the config file. Config is only re-parsed from disk
-    // when this changes — a stat() is orders of magnitude cheaper than a full
-    // TOML parse + validation on every pipeline run (the common hot path).
+    // Last-seen mtime of the config file. Config is re-parsed from disk only
+    // when this changes; a stat() is orders of magnitude cheaper than a full TOML
+    // parse plus validation on every pipeline run, which is the hot path.
     let mut config_mtime: Option<SystemTime> = None;
 
     loop {
@@ -137,11 +137,11 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                         backoff = Duration::from_secs(30); // reset on success
                         attempts.remove(&rec_id);
                         // Recovery edge: a run completed, so whisper is reachable
-                        // again. Emit the matching `reachable: true` ONCE if we
-                        // had previously signalled it down — otherwise the error
+                        // again. Emit the matching `reachable: true` once, but only
+                        // if we'd previously signalled it down. Otherwise the error
                         // icon stays latched on the down→idle-without-transcription
-                        // path (recovery was only ever incidental via
-                        // `TranscriptionDone`).
+                        // path, where recovery is only ever incidental via
+                        // `TranscriptionDone`.
                         if whisper_unreachable {
                             whisper_unreachable = false;
                             state
@@ -155,9 +155,9 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                         state
                             .events
                             .emit(DaemonEvent::WhisperStatusChanged { reachable: false });
-                        // The pipeline left this transient failure CLAIMED (it
-                        // never reaches failed/) — put it back in pending so the
-                        // SAME recording retries after the backoff, instead of
+                        // The pipeline leaves this transient failure claimed (it
+                        // never reaches failed/), so put it back in pending and the
+                        // same recording retries after the backoff, rather than
                         // being silently lost while the worker moves on.
                         let tries = attempts.entry(rec_id.clone()).or_insert(0);
                         *tries += 1;
@@ -189,7 +189,7 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                             match state.inbox.requeue(&rec_id).await {
                                 // Reflect "waiting to retry" in the UI as Queued
                                 // rather than leaving a frozen "Transcribing"
-                                // through the backoff; the pipeline flips it back to
+                                // through the backoff. The pipeline flips it back to
                                 // Transcribing when the worker re-claims it.
                                 Ok(()) => {
                                     let _ = state
@@ -200,11 +200,11 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                                         )
                                         .await;
                                 }
-                                // Requeue itself failed — the item would otherwise
+                                // Requeue itself failed. The item would otherwise
                                 // sit in processing/ until the next daemon restart's
-                                // orphan recovery. Mark it failed (like the give-up
-                                // branch above) so it surfaces in the UI instead of
-                                // silently stalling.
+                                // orphan recovery, so mark it failed (like the
+                                // give-up branch above) and it surfaces in the UI
+                                // instead of silently stalling.
                                 Err(rq) => {
                                     tracing::error!(id = %rec_id.as_str(), error = %rq, "failed to requeue after transient error; marking failed");
                                     attempts.remove(&rec_id);
@@ -243,9 +243,9 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
 
                 // Reload config from disk only when the file was modified since
                 // the last check. A stat() is far cheaper than a full TOML parse
-                // + validation on every pipeline run, and the common case (no
-                // change) does zero work. This preserves both invalidation points:
-                // the ReloadConfig IPC (instant, triggered by the user) and this
+                // plus validation on every pipeline run, and the common case (no
+                // change) does zero work. Two invalidation points exist: the
+                // ReloadConfig IPC (instant, triggered by the user) and this
                 // post-run path (catches background edits between IPC calls).
                 let current_mtime = phoneme_core::config::resolved_config_path()
                     .and_then(|p| std::fs::metadata(p).ok())
@@ -255,7 +255,7 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                     // No previous mtime recorded yet — treat as changed so the
                     // first post-run pass always validates the live config.
                     (None, _) => true,
-                    // Config file missing (e.g. default in-memory config); skip.
+                    // Config file missing (e.g. a default in-memory config); skip.
                     (_, None) => false,
                 };
                 if changed {
@@ -268,8 +268,8 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                             crate::apply_runtime_defaults(&mut cfg);
                             // Config changed on disk: drop the cached local
                             // diarization pipeline if `[diarization]` changed
-                            // (backend switch / model path). One of the two daemon
-                            // invalidation points — the other is the ReloadConfig
+                            // (backend switch or model path). One of the two daemon
+                            // invalidation points; the other is the ReloadConfig
                             // IPC handler. A same-config reload never reaches here.
                             state
                                 .transcription
@@ -285,12 +285,12 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                 emit_queue_depth(&state).await;
             }
             None => {
-                // When the queue is empty and the whisper-unreachable latch is
-                // set, the recovery edge (a completed pipeline run) can never
-                // fire — so the UI's error icon stays stuck even after the
-                // server comes back. Probe the health endpoint here instead,
-                // matching the expected UX: the error clears because the server
-                // recovered, not because a recording happened to succeed.
+                // With an empty queue and the whisper-unreachable latch set,
+                // the recovery edge (a completed pipeline run) can never fire,
+                // so the UI's error icon stays stuck even after the server comes
+                // back. Probe the health endpoint here instead, which matches the
+                // UX we want: the error clears because the server recovered, not
+                // because a recording happened to succeed.
                 if whisper_unreachable {
                     let base_url = {
                         let cfg = state.config.load();

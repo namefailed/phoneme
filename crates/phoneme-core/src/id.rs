@@ -22,18 +22,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// A recording identifier: `YYYYMMDDTHHmmssNNN` (18 chars: 8 date + 1 `T` +
 /// 6 time + 3-digit per-process monotonic counter, mod 1000).
 ///
-/// The trailing 3 digits are NOT the actual subsecond field — they're a
-/// monotonic counter that disambiguates IDs generated within the same
-/// wall-clock second. The wall-clock prefix gives chronological ordering;
-/// the counter suffix guarantees process-wide uniqueness.
+/// The trailing 3 digits are not the real subsecond field — they're a monotonic
+/// counter that disambiguates ids generated within the same wall-clock second.
+/// The wall-clock prefix gives chronological ordering; the counter suffix gives
+/// process-wide uniqueness.
 ///
-/// Why not bump-on-collision with real ms? An earlier version tracked
-/// `(last_second_key, last_used_ms)` and bumped only on same-second hits.
-/// That raced: if another thread's call between our two calls had a different
-/// `second_key`, the RESET branch in that thread replaced `last_second_key`,
-/// then our next call ALSO went through RESET and reused `dt.subsec_millis`
-/// — producing a duplicate of the first ID. A pure monotonic counter
-/// sidesteps the entire race.
+/// Why a counter rather than bumping a real-millisecond value on collision?
+/// The bump-on-collision approach has to track `(last_second_key, last_used_ms)`
+/// and bump only on same-second hits, and that races. If another thread's call
+/// lands between our two calls with a different `second_key`, its reset branch
+/// replaces `last_second_key`; our next call then also takes the reset branch
+/// and reuses `dt.subsec_millis`, duplicating the first id. A plain monotonic
+/// counter has no shared millisecond state to race over.
 ///
 /// Example: `20260519T143500042`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -71,8 +71,8 @@ impl RecordingId {
     }
 
     /// Reconstruct an id from its canonical string form (e.g. when the user
-    /// pastes it on the CLI). The format isn't re-validated — RecordingIds
-    /// flow through the catalog and IPC layer as opaque strings already.
+    /// pastes it on the CLI). The format isn't re-validated, since ids already
+    /// flow through the catalog and IPC layer as opaque strings.
     ///
     /// Prefer [`RecordingId::parse`] for input that originates outside the
     /// process (CLI args, IPC payloads): an id that fails the length/shape
@@ -141,9 +141,9 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    // No TEST_LOCK or atomic reset needed any more: `from_datetime` bumps a
+    // These tests need no shared lock or counter reset: `from_datetime` bumps a
     // lock-free `AtomicU64` (relaxed fetch_add) for the disambiguating suffix,
-    // so concurrent callers always get distinct ids and tests can run in
+    // so concurrent callers always get distinct ids and the tests run in
     // parallel.
 
     #[test]

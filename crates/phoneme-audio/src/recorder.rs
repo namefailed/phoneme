@@ -38,9 +38,9 @@ fn block_has_content(block: &[i16]) -> bool {
 /// How the recorder should decide to stop.
 ///
 /// This is [`phoneme_core::RecordMode`], re-exported under the audio crate's
-/// historical name. There is one record-mode enum across the workspace (audit
-/// A-H4) instead of three structurally-identical copies (core, this crate, and
-/// the daemon). Variants: `Hold` (stop only on explicit `stop_and_finalize`),
+/// own name for it. The workspace keeps a single record-mode enum (audit A-H4)
+/// rather than three structurally identical copies in core, this crate, and the
+/// daemon. Variants: `Hold` (stop only on explicit `stop_and_finalize`),
 /// `Oneshot` (auto-stop on silence), `Duration { secs }` (auto-stop after N s).
 pub use phoneme_core::RecordMode as RecordingMode;
 
@@ -53,10 +53,10 @@ pub struct RecorderConfig {
     /// How the recording decides to stop (hold until told, stop on silence, or
     /// stop after a fixed duration). See [`RecordingMode`].
     pub mode: RecordingMode,
-    /// Hard ceiling on *freshly captured* length, in milliseconds. The recording
+    /// Hard ceiling on freshly captured length, in milliseconds. The recording
     /// always stops here even in Hold mode, and the buffer is truncated so the cap
     /// is never overshot. Prepended pre-roll (see [`Recorder::start_with_prepend`])
-    /// does NOT count toward this ceiling — it sits on top of the captured budget
+    /// doesn't count toward this ceiling — it sits on top of the captured budget
     /// (audit A3), so the cap always bounds the same amount of live audio whether
     /// or not pre-roll is enabled.
     pub max_duration_ms: u64,
@@ -89,9 +89,9 @@ pub struct RecordingResult {
     /// frame count).
     pub samples_written: usize,
     /// `true` when capture ended because the input device failed mid-recording
-    /// (e.g. the mic was unplugged) rather than a clean stop / auto-stop. The
+    /// (e.g. the mic was unplugged) rather than a clean stop or auto-stop. The
     /// audio captured up to the drop is still written to the WAV exactly as a
-    /// normal recording — this flag only lets the daemon surface WHY capture
+    /// normal recording — this flag only lets the daemon surface why capture
     /// ended (A1) so the user isn't left guessing. Always `false` for a normal
     /// user stop, an Oneshot/Duration auto-stop, or a clean end-of-stream.
     pub device_lost: bool,
@@ -188,18 +188,17 @@ impl Recorder {
         Self::start_with_prepend(source, cfg, on_done, Vec::new()).await
     }
 
-    /// Begin recording, seeding the output with `prepend` samples *before* live
-    /// capture begins. Used for the pre-roll feature: the daemon hands over the
-    /// last few hundred milliseconds of buffered microphone audio so the first
-    /// syllable isn't clipped. The prepended samples are treated as already-
-    /// captured audio — they are not fed to the silence detector (they're
-    /// historical, not "now") but do count toward the max-duration cap.
+    /// Begin recording, seeding the output with `prepend` samples ahead of live
+    /// capture. Used for the pre-roll feature: the daemon hands over the last few
+    /// hundred milliseconds of buffered microphone audio so the first syllable
+    /// isn't clipped. The prepended samples are treated as already-captured
+    /// audio — they're historical, not "now", so they skip the silence detector.
     ///
-    /// The prepended samples are NOT counted toward the `Duration { secs }`
-    /// auto-stop or the `max_duration_ms` ceiling (audit A3): a `Duration { secs }`
-    /// take yields `prepend.len() + secs * sample_rate` samples — i.e. `secs`
-    /// seconds of *fresh* capture with the pre-roll added on top — and `max_ms`
-    /// bounds only the fresh portion. A take with empty `prepend` is unaffected.
+    /// The prepend does not count toward the `Duration { secs }` auto-stop or the
+    /// `max_duration_ms` ceiling (audit A3): a `Duration { secs }` take yields
+    /// `prepend.len() + secs * sample_rate` samples — `secs` seconds of fresh
+    /// capture with the pre-roll added on top — and `max_ms` bounds only the
+    /// fresh portion. A take with empty `prepend` is unaffected.
     ///
     /// `prepend` must already be in the source's canonical format (16 kHz mono
     /// i16). An empty `prepend` is identical to [`Recorder::start`].
@@ -221,15 +220,15 @@ impl Recorder {
             // Length of the prepended pre-roll. Excluded from the Duration
             // auto-stop and the max_duration_ms ceiling (audit A3) so those limits
             // measure freshly captured audio only — the pre-roll rides on top. The
-            // thresholds below are offset by this so a take with no pre-roll
-            // behaves exactly as before.
+            // thresholds below are offset by this, so a take with no pre-roll
+            // behaves identically to a plain start.
             let preroll_len = samples.len();
             let mut detector = SilenceDetector::new(
                 cfg.silence_threshold_dbfs,
                 cfg.silence_window_ms,
                 audio_cfg.sample_rate.as_u32(),
             );
-            // max_samples and duration_samples are budgets for FRESH capture; the
+            // max_samples and duration_samples are budgets for fresh capture; the
             // checks compare `samples.len() - preroll_len` (the live portion)
             // against them, so the prepended pre-roll never trips a limit early.
             let max_samples =
@@ -244,10 +243,10 @@ impl Recorder {
             let mut cancelled = false;
             let mut is_paused = false;
             let mut should_drain = false;
-            // Set only on the `next_block` Err arm — a device failure
-            // (disconnect) — never on a Stop/Cancel command or a clean
-            // end-of-stream. Carried into `TaskOutput` so the daemon can tell
-            // the partial recording apart from a normal stop (A1).
+            // Set only on the `next_block` Err arm (a device failure /
+            // disconnect), never on a Stop/Cancel command or a clean
+            // end-of-stream. Carried into `TaskOutput` so the daemon can tell the
+            // partial recording apart from a normal stop (A1).
             let mut device_lost = false;
             let mut first_non_silent_at: Option<Instant> = None;
             // Set in the Pause/Resume arms; forwarded to the source after the
@@ -283,12 +282,12 @@ impl Recorder {
                     }
                     block = source.next_block() => {
                         // A capture-device failure (e.g. the mic was unplugged)
-                        // now surfaces as `Err` from `next_block` instead of
-                        // hanging. The source drains its buffered audio into
-                        // `samples` as `Ok(Some(_))` first and only then yields
-                        // the error, so DON'T propagate it — that would discard
-                        // the whole take. Log it and break, letting the loop fall
-                        // through and finalize the audio captured up to the drop.
+                        // surfaces as `Err` from `next_block` rather than hanging.
+                        // The source drains its buffered audio into `samples` as
+                        // `Ok(Some(_))` first and only then yields the error, so
+                        // propagating it would throw away the whole take. Log it
+                        // and break instead, letting the loop fall through and
+                        // finalize the audio captured up to the drop.
                         let block = match block {
                             Ok(b) => b,
                             Err(e) => {
@@ -311,7 +310,7 @@ impl Recorder {
                                     if cfg.mode == RecordingMode::Oneshot && detector.is_silent() {
                                         break;
                                     }
-                                    // Measure the FRESH portion (excluding the
+                                    // Measure the fresh portion (excluding the
                                     // prepended pre-roll) against the budgets so the
                                     // pre-roll rides on top of the requested length
                                     // rather than eating into it (audit A3).
@@ -356,7 +355,7 @@ impl Recorder {
                         samples.extend_from_slice(&b);
                     }
                 }
-                // Cap the FRESH portion at max_samples: a large OS buffer or long
+                // Cap the fresh portion at max_samples: a large OS buffer or long
                 // tail_grace period can push the drain past the configured maximum.
                 // The prepended pre-roll is excluded from the cap (audit A3),
                 // consistent with the mid-loop truncation above.

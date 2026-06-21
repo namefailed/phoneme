@@ -81,14 +81,14 @@ async fn main() -> Result<()> {
     reconcile_and_persist_config(&mut cfg);
     apply_runtime_defaults(&mut cfg);
 
-    // Install logging BEFORE building AppState so early warnings aren't dropped:
+    // Install logging before building AppState so early warnings aren't dropped:
     // job-object creation, the embedder load, and the first config-apply all
-    // happen inside `AppState::new` and used to log into the void because the
-    // subscriber wasn't up yet. The log dir + level come straight from the
-    // freshly-loaded config (the same resolution AppState uses), so we don't
-    // need a built state to configure the appender. The only thing still ahead
-    // of the subscriber is `load_config()`'s own one-time migration warning,
-    // which is inherently pre-logging (we need a config to configure logging).
+    // happen inside `AppState::new`, and without a subscriber up yet their logs
+    // would go nowhere. The log dir + level come straight from the freshly-loaded
+    // config (the same resolution AppState uses), so we don't need a built state
+    // to configure the appender. The only thing still ahead of the subscriber is
+    // `load_config()`'s own one-time migration warning, which is inherently
+    // pre-logging — we need a config before we can configure logging.
     let log_dir = app_state::ResolvedPaths::from_config_in(&cfg, None)?.log_dir;
     let _guard = logging::init(&cfg, &log_dir, args.foreground)?;
 
@@ -137,7 +137,7 @@ async fn main() -> Result<()> {
     let retroactive_state = state.clone();
     tokio::spawn(async move {
         // No embedder loaded → nothing to backfill (semantic search off or the
-        // model failed to load); same silent no-op as before.
+        // model failed to load); a silent no-op.
         if retroactive_state.embedder.read().await.is_none() {
             return;
         }
@@ -155,13 +155,13 @@ async fn main() -> Result<()> {
                     let Some(transcript) = r.transcript.as_ref() else {
                         continue;
                     };
-                    // Re-acquire the embedder PER ITEM rather than holding the
+                    // Re-acquire the embedder per item rather than holding the
                     // read guard across the whole loop: a large-library backfill
-                    // runs for minutes, and config reloads need the write lock —
-                    // clone the Arc and drop the guard so writers interleave
+                    // runs for minutes, and config reloads need the write lock,
+                    // so clone the Arc and drop the guard to let writers interleave
                     // between items. If the embedder is gone mid-backfill (the
-                    // user turned semantic search off), stop — the same
-                    // exit-when-unloaded behavior the up-front check gave.
+                    // user turned semantic search off), stop — same exit-when-
+                    // unloaded behavior as the up-front check.
                     let embedder = retroactive_state.embedder.read().await.as_ref().cloned();
                     let Some(embedder) = embedder else {
                         tracing::info!("backfill stopped: embedding model unloaded");
@@ -208,7 +208,7 @@ async fn main() -> Result<()> {
     // port; never touches the main server above.
     let preview_sup_state = state.clone();
     let preview_sup_signal = state.shutdown.signal.clone();
-    // Keep the handle so shutdown can AWAIT it — otherwise the process could exit
+    // Keep the handle so shutdown can await it — otherwise the process could exit
     // before run_preview kills its child, orphaning the 2nd whisper-server. Not
     // in the crash-detection select below: a preview-server crash must not take
     // down the daemon (preview is non-critical).
@@ -219,7 +219,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Fourth supervisor for the OPTIONAL second live-preview server (meeting
+    // Fourth supervisor for the optional second live-preview server (meeting
     // "both" mode opt-in). Idles unless `recording.meeting_preview_own_server` is
     // on with a dedicated local preview model; never touches the main or first
     // preview server. Kept (like the others) so shutdown awaits it and kills any
@@ -234,7 +234,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Third supervisor for the OPTIONAL dedicated dictation server. Idles unless
+    // Third supervisor for the optional dedicated dictation server. Idles unless
     // the user opts in (`[in_place].stt` local bundled + use_own_bundled_server);
     // the default/weak-box config never spawns it. Like the preview handle, kept
     // so shutdown can await it and kill any child it owns — never in the
@@ -286,7 +286,7 @@ async fn main() -> Result<()> {
     // a server failure rather than the Ctrl+C handler or an IPC Shutdown.
     state.shutdown.trigger();
 
-    // Finalize any in-flight recording FIRST, through the normal stop paths,
+    // Finalize any in-flight recording first, through the normal stop paths,
     // so a quit mid-recording never leaves a corrupt WAV: the file is closed
     // properly and enqueued in the durable inbox — the next daemon run picks
     // it up and transcribes it. (The queue worker is already winding down, so
@@ -323,7 +323,7 @@ async fn main() -> Result<()> {
     server_result
 }
 
-/// Read the daemon's config from disk. PURE: no migration, no persist, no
+/// Read the daemon's config from disk. Pure: no migration, no persist, no
 /// in-memory synthesis — just the parsed config.
 ///
 /// Canonical reader shared with the CLI: honors `PHONEME_CONFIG`, else the
@@ -336,17 +336,17 @@ pub fn load_config() -> anyhow::Result<phoneme_core::Config> {
     Ok(phoneme_core::Config::load_resolved()?)
 }
 
-/// Run the one-time config migrations on `cfg` IN PLACE and, if either actually
+/// Run the one-time config migrations on `cfg` in place and, if either actually
 /// changed something, persist the result so the on-disk config freezes in its
-/// migrated form. This is the explicit disk side-effect that used to hide inside
-/// `load_config`. Idempotent + self-healing: safe to call on every load path
-/// (startup, `ReloadConfig`, the queue worker's post-run reload); a no-op once
-/// the file is already migrated. A persist failure is non-fatal — the in-memory
-/// migration still applies and the next load retries.
+/// migrated form. This is the explicit disk side-effect, kept out of
+/// `load_config`. Idempotent and self-healing: safe to call on every load path
+/// (startup, `ReloadConfig`, the queue worker's post-run reload), and a no-op
+/// once the file is already migrated. A persist failure is non-fatal — the
+/// in-memory migration still applies and the next load retries.
 ///
-/// Runs BOTH migrations with a non-short-circuiting `|` so both always execute,
-/// playbook FIRST: it rebuilds the `default` recipe's step list from the legacy
-/// enable flags, then `migrate_hooks` APPENDS the migrated Hook steps.
+/// Runs both migrations with a non-short-circuiting `|` so both always execute,
+/// playbook first: it rebuilds the `default` recipe's step list from the legacy
+/// enable flags, then `migrate_hooks` appends the migrated Hook steps.
 pub fn reconcile_and_persist_config(cfg: &mut phoneme_core::Config) {
     if cfg.migrate_playbook() | cfg.migrate_hooks() {
         if let Err(e) = cfg.write_resolved() {
@@ -355,12 +355,12 @@ pub fn reconcile_and_persist_config(cfg: &mut phoneme_core::Config) {
     }
 }
 
-/// Apply IN-MEMORY-ONLY runtime defaults that must never be written back to
-/// `config.toml`. Currently: auto-default the live preview to the smallest LOCAL
+/// Apply in-memory-only runtime defaults that must never be written back to
+/// `config.toml`. Currently: auto-default the live preview to the smallest local
 /// whisper model when `[preview_whisper]` is unset and the main provider is a
-/// local bundled model (P1). Call this AFTER [`reconcile_and_persist_config`] so
+/// local bundled model (P1). Call this after [`reconcile_and_persist_config`] so
 /// the synthesized block is never caught by that persist. The model scan needs a
-/// real absolute file, so it derives against an EXPANDED view and copies the
+/// real absolute file, so it derives against an expanded view and copies the
 /// absolute-path block onto `cfg` (`expanded()` later no-ops on an already-
 /// absolute path). A no-op when the user set `preview_whisper`, the main is
 /// cloud/external, or no smaller local model exists.

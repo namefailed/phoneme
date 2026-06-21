@@ -10,13 +10,12 @@
 //! This module also owns the small coordination cells that let daemon state
 //! flow into otherwise daemon-agnostic code paths:
 //! - [`WhisperModelOverride`] — the one-job-scoped bundled-server model swap
-//!   used by model-override re-transcriptions (the #49 fix: the override
-//!   never touches the global config, so previews and other jobs never see
-//!   it);
+//!   used by model-override re-transcriptions; the override never touches the
+//!   global config, so previews and other jobs never see it.
 //! - [`WhisperEffectivePorts`] — the ports the bundled whisper-servers are
-//!   ACTUALLY listening on after any port fallback, published by the
+//!   actually listening on after any port fallback, published by the
 //!   supervisors and resolved by every consumer right where it builds a
-//!   provider;
+//!   provider.
 //! - the `processing` slot (in-flight recording + cancellation token, set by
 //!   the queue worker and cancelled by `CancelProcessing`), the
 //!   `pending_overrides` ledger, the `whisper_sem` permit that serializes
@@ -47,11 +46,10 @@ pub struct ResolvedPaths {
 impl ResolvedPaths {
     /// Resolve all per-user paths from config, with an optional explicit
     /// data-local directory that takes precedence over the `PHONEME_DATA_LOCAL`
-    /// env var. In-process
-    /// unit tests pass `Some(their_tempdir)` so they never touch the global env
-    /// var — the old `set_var` race that made the daemon suite unsafe to run
-    /// with more than one thread (forcing `--test-threads=1`). `None` keeps the
-    /// production behavior: env var if set, else the per-user data dir.
+    /// env var. In-process unit tests pass `Some(their_tempdir)` so they never
+    /// touch the global env var: setting it from one test races every other,
+    /// which is what forced the daemon suite to run single-threaded. `None`
+    /// keeps the production behavior: env var if set, else the per-user data dir.
     pub fn from_config_in(
         cfg: &Config,
         data_local_override: Option<PathBuf>,
@@ -111,17 +109,17 @@ pub struct AppState {
     pub webhook: WebhookClient,
     pub embedder: Arc<tokio::sync::RwLock<Option<Arc<phoneme_core::Embedder>>>>,
     /// Serializes access to the single (serial) whisper-server. The final
-    /// transcription pipeline acquires this permit (waiting if needed); the
+    /// transcription pipeline acquires this permit, waiting if needed; the
     /// streaming preview only runs a tick if it can acquire it *without*
-    /// waiting, and otherwise skips. This guarantees the heavy final
-    /// transcription is never starved by a flood of preview requests — the bug
-    /// that caused "Whisper timed out after 60s" on long recordings while the
+    /// waiting, and otherwise skips. This keeps the heavy final transcription
+    /// from being starved by a flood of preview requests — without it, a long
+    /// recording could time out ("Whisper timed out after 60s") while the
     /// preview hammered the server with a big model.
     pub whisper_sem: Arc<tokio::sync::Semaphore>,
-    /// Independent permit for the OPTIONAL second live-preview server (meeting
+    /// Independent permit for the optional second live-preview server (meeting
     /// "both" mode opt-in). The second meeting track's caption loop try-acquires
-    /// THIS instead of [`Self::whisper_sem`], so it transcribes CONCURRENTLY with
-    /// the first track (which keeps yielding to final transcription on
+    /// this rather than [`Self::whisper_sem`], so it transcribes concurrently
+    /// with the first track (which keeps yielding to final transcription on
     /// `whisper_sem`) instead of alternating on one permit. Only ever contended
     /// by that one loop, so it's effectively a dedicated gate for the 2nd server;
     /// idle (and the 2nd server unspawned) unless the user opts in.
@@ -137,72 +135,72 @@ pub struct AppState {
             )>,
         >,
     >,
-    /// A ONE-JOB-SCOPED override of the bundled whisper-server's model file,
+    /// A one-job-scoped override of the bundled whisper-server's model file,
     /// used by a model-override re-transcription. `None` (the default) means the
     /// supervisor runs the configured `whisper.model_path`.
     ///
     /// Why this exists instead of mutating the global config: a re-transcribe
-    /// with a different model must load that model for *only that one job*. The
-    /// previous approach wrote the model into the process-global config, which
-    /// the whisper supervisor independently polls and restarts on — and which
-    /// the queue worker then reverted with a blanket post-run reload, causing a
-    /// SECOND restart. Queued/preview transcriptions reading the same global
-    /// config raced the flapping server and mass-failed (#49). The override is
-    /// applied here, read by the supervisor as the authoritative model, and the
-    /// pipeline drives a single serialized restart-to-override / restore cycle
-    /// under `whisper_sem` so nothing else touches the server mid-swap.
+    /// with a different model must load that model for *only that one job*.
+    /// Writing the model into the process-global config doesn't work — the
+    /// whisper supervisor independently polls and restarts on it, the queue
+    /// worker then reverts it with a blanket post-run reload (a second restart),
+    /// and queued/preview transcriptions reading the same global config race the
+    /// flapping server and mass-fail. The override is applied here, read by the
+    /// supervisor as the authoritative model, and the pipeline drives a single
+    /// serialized restart-to-override / restore cycle under `whisper_sem` so
+    /// nothing else touches the server mid-swap.
     pub whisper_model_override: Arc<WhisperModelOverride>,
-    /// Per-recording REQUESTED whisper model overrides, keyed by recording id.
+    /// Per-recording requested whisper model overrides, keyed by recording id.
     /// The `RetranscribeRecording` handler records the request here at enqueue
     /// time; the pipeline removes and applies it when that job actually runs
     /// (serialized behind the queue + `whisper_sem`), so an override never takes
     /// effect while a *different* recording is mid-transcription. In-memory and
-    /// ephemeral — a daemon restart drops pending overrides (the job then re-runs
-    /// with the configured model), mirroring the prior behavior where the
-    /// global-config override didn't survive a restart either.
+    /// ephemeral: a daemon restart drops pending overrides and the job re-runs
+    /// with the configured model, which is fine since the global-config override
+    /// never survived a restart either.
     pub pending_overrides:
         Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
     /// Per-recording one-time Re-run overrides for the LLM/hook side — the hooks
     /// toggle, the post-processing opt-out, and the Re-run → "All" cleanup +
     /// summary + title values. Recorded by the `RetranscribeRecording` handler at
-    /// enqueue time and applied by `pipeline::run` to THAT job's config CLONE
+    /// enqueue time and applied by `pipeline::run` to that job's config clone
     /// only. Why a per-id ledger instead of a temporary global-config write: the
     /// whisper supervisor and the queue worker both reload the process-global
-    /// config, so a temp-global override raced a concurrent `ReloadConfig` (it
-    /// could be clobbered, or leak onto another queued job). This mirrors
+    /// config, so a temp-global override would race a concurrent `ReloadConfig`
+    /// and could be clobbered or leak onto another queued job. This mirrors
     /// `pending_overrides` (the whisper-model override) for the LLM/hook side.
     /// In-memory and ephemeral: a daemon restart drops them and the job re-runs
     /// with the configured pipeline.
     pub pending_all_overrides:
         Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, PendingRerun>>>,
-    /// Per-recording Playbook RECIPE override, keyed by recording id. Written when
+    /// Per-recording Playbook recipe override, keyed by recording id. Written when
     /// a recording is created via a custom hotkey whose binding names a non-empty
     /// `recipe_id`; consumed-and-removed by `pipeline::run`, which passes it to
     /// `resolve_recipe` instead of the hardcoded `default`. The recipe-id sibling
     /// of `pending_overrides` (the whisper-model override) and `pending_all_overrides`
     /// (the LLM/hook overrides): same per-id, in-memory, ephemeral contract — a
     /// daemon restart drops it and the job falls back to the `default` recipe.
-    /// `pipeline::run` removes the entry EARLY (next to the model/all-overrides
+    /// `pipeline::run` removes the entry early (next to the model/all-overrides
     /// removals, before transcription) so a permanently-failed/canceled recording
     /// can't leave a stale entry keyed by a dead id.
     pub pending_recipe:
         Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
     /// Per-recording focused-app side-channel, keyed by recording id. Written by
-    /// `recorder.rs` when a NON-fast-lane in-place dictation (full pipeline or a
+    /// `recorder.rs` when a non-fast-lane in-place dictation (full pipeline or a
     /// recipe-bearing binding) is enqueued and the foreground app at start was
     /// known; consumed-and-removed by `pipeline::run`, which feeds it to
     /// `in_place.resolve_type_mode` so the end-of-run typing honors the per-app
     /// type/paste/off override exactly like the dictation fast lane does (the
-    /// fast lane passes `focused_app` directly, so it's NOT populated there). The
+    /// fast lane passes `focused_app` directly, so it isn't populated there). The
     /// focused-app sibling of `pending_recipe` / `pending_overrides`: same per-id,
     /// in-memory, ephemeral contract — a daemon restart drops it and the run
     /// falls back to the global `type_mode`. `pipeline::run` removes the entry
-    /// EARLY (next to the recipe/model/all-overrides removals, before
+    /// early (next to the recipe/model/all-overrides removals, before
     /// transcription) so a permanently-failed / canceled recording can't leave a
     /// stale entry keyed by a dead id.
     pub pending_focused_app:
         Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
-    /// The ports the bundled whisper-servers are ACTUALLY listening on,
+    /// The ports the bundled whisper-servers are actually listening on,
     /// published by the supervisors on every (re)spawn. The configured
     /// `bundled_server_port`s are preferences: when a foreign process already
     /// holds one (the startup sweep kills every whisper-server on the box, so
@@ -215,7 +213,7 @@ pub struct AppState {
     pub whisper_ports: Arc<WhisperEffectivePorts>,
     /// Explicit whisper-server restart requests (the Doctor's "Fix"). Both
     /// supervisors select on this and bounce their child with the backoff
-    /// reset — the path that heals a HUNG server, which the exit-based
+    /// reset — the path that heals a hung server, which the exit-based
     /// auto-restart can't see.
     pub whisper_restart: Arc<tokio::sync::Notify>,
     /// "Skip the current step" requests from the queue UI. The in-flight LLM
@@ -292,10 +290,10 @@ pub struct WhisperEffectivePorts {
     main: AtomicU16,
     /// The dedicated live-preview server's port; 0 = not running.
     preview: AtomicU16,
-    /// The OPTIONAL second live-preview server's port (meeting "both" mode opt-in
-    /// — `recording.meeting_preview_own_server`); 0 = not running. Runs the same
-    /// preview model as `preview` on a distinct port so the two meeting tracks
-    /// can stream concurrently.
+    /// The optional second live-preview server's port (meeting "both" mode
+    /// opt-in — `recording.meeting_preview_own_server`); 0 = not running. Runs
+    /// the same preview model as `preview` on a distinct port so the two meeting
+    /// tracks can stream concurrently.
     preview2: AtomicU16,
     /// The optional dedicated in-place / dictation server's port; 0 = not
     /// running (the default — it only runs when the power-user opt-in is on).
@@ -360,7 +358,7 @@ impl WhisperEffectivePorts {
     ///
     /// Matching is by preferred port because `provider` may be `[whisper]`
     /// itself, `[preview_whisper]`, an `[in_place].stt` block the Settings UI
-    /// pointed at either server's configured port, or the DEDICATED dictation
+    /// pointed at either server's configured port, or the dedicated dictation
     /// server's own port — each must follow the same server wherever it landed.
     ///
     /// The dictation arm fires only when the config actually runs a dedicated
@@ -370,8 +368,8 @@ impl WhisperEffectivePorts {
     /// preserving the reuse contract.
     pub fn resolve(&self, cfg: &Config, provider: &phoneme_core::config::WhisperConfig) -> u16 {
         let preferred = provider.bundled_server_port;
-        // The dedicated dictation server is checked FIRST, but only when it's
-        // actually running and its port is distinct — so it never shadows the
+        // The dedicated dictation server is checked first, but only when it's
+        // actually running and its port is distinct, so it never shadows the
         // main/preview reuse case (an in_place.stt pointing at 5809/5810).
         if cfg.in_place_needs_own_server()
             && preferred != cfg.whisper.bundled_server_port
@@ -466,8 +464,8 @@ impl AppState {
     /// Like [`Self::new`], but with an explicit data-local directory that bypasses the
     /// process-global `PHONEME_DATA_LOCAL` env var. In-process unit tests pass
     /// their own temp dir so parallel tests don't clobber each other's data path
-    /// (the race that previously required `--test-threads=1`). Production calls
-    /// `new` (override `None`).
+    /// — that data-path race is what forces single-threaded test runs otherwise.
+    /// Production calls `new` (override `None`).
     pub async fn new_in(config: Config, data_local: Option<PathBuf>) -> anyhow::Result<Self> {
         let paths = if data_local.is_some() {
             // Explicit path: no env read, so no INIT_LOCK needed — fully parallel.
@@ -603,7 +601,7 @@ mod tests {
 
     #[test]
     fn preview_config_follows_the_preview_servers_port() {
-        // Each provider config maps to ITS server: a preview fallback must
+        // Each provider config maps to its own server: a preview fallback must
         // never redirect the main config, and vice versa.
         let cfg = two_server_config();
         let ports = WhisperEffectivePorts::default();
@@ -667,8 +665,8 @@ mod tests {
 
     #[test]
     fn dedicated_dictation_config_follows_its_own_port() {
-        // With the opt-in on, the dictation provider resolves to the THIRD
-        // server's live port — not the main or preview one.
+        // With the opt-in on, the dictation provider resolves to the third
+        // server's live port, not the main or preview one.
         let cfg = three_server_config();
         assert!(cfg.in_place_needs_own_server());
         let ports = WhisperEffectivePorts::default();
@@ -698,8 +696,8 @@ mod tests {
 
     #[test]
     fn without_optin_in_place_reuses_not_a_third_server() {
-        // The SAME stt port (5811), but the opt-in flag is OFF: the dictation
-        // arm must NOT fire — the port matches no running server and is left
+        // The same stt port (5811), but the opt-in flag is off: the dictation
+        // arm must not fire — the port matches no running server and is left
         // alone, exactly the reuse contract.
         let mut cfg = three_server_config();
         cfg.in_place.stt.as_mut().unwrap().use_own_bundled_server = false;

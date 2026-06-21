@@ -3,31 +3,31 @@
 //! ## Why chunk at all?
 //!
 //! The embedding model (`all-MiniLM-L6-v2`) truncates to 256 tokens and produces
-//! a *single* mean-pooled vector for whatever it's given. If we embed a whole
-//! transcript:
+//! one mean-pooled vector for whatever it's given. Embedding a whole transcript
+//! has two problems:
 //!
 //! - Anything past ~256 tokens is silently dropped — a five-minute note only
 //!   ever embeds its first ~150 words, so the back half is unsearchable.
 //! - Even within the window, mean-pooling a long passage smears many distinct
-//!   ideas into one averaged vector. A query that paraphrases *one* sentence
+//!   ideas into one averaged vector. A query that paraphrases a single sentence
 //!   ("the thing about the database migration") barely moves the cosine against
-//!   a vector that also averages in ten unrelated sentences. This is the core
-//!   reason "utter the likeness of something I said" underperforms today.
+//!   a vector that also averages in ten unrelated sentences. That's the main
+//!   reason "find something I said that sounds like this" underperforms today.
 //!
 //! ## The fix
 //!
 //! Split the transcript into overlapping, sentence-aware windows of a few
 //! sentences each, embed every window, and at query time score a recording by
-//! its **best-matching** chunk (max-sim). A spoken idea then competes on its own
+//! its best-matching chunk (max-sim). A spoken idea then competes on its own
 //! tight vector instead of being diluted by the rest of the note, and the
 //! overlap keeps an idea that straddles a sentence boundary from being split.
 //!
 //! These functions are deliberately pure (no model, no DB) so the chunking
 //! policy is unit-tested directly.
 
-/// Target number of word-ish tokens per chunk. A chunk is grown sentence by
-/// sentence until adding the next sentence would exceed this, so chunks land
-/// *around* this size while still breaking on sentence boundaries.
+/// Target number of word-ish tokens per chunk. A chunk grows sentence by
+/// sentence until adding the next one would exceed this, so chunks land around
+/// this size while still breaking on sentence boundaries.
 ///
 /// ~80 words is well inside the model's 256-token limit (English averages
 /// ~1.3 subword tokens/word, so ~80 words ≈ ~105 tokens — never truncated) yet

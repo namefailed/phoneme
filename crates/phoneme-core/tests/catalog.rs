@@ -345,7 +345,7 @@ async fn list_offset_paginates_without_overlap() {
     let full_ids: Vec<_> = full.iter().map(|r| r.id.clone()).collect();
     assert_eq!(ids, full_ids, "paged ids reconstruct the full ordered list");
 
-    // OFFSET without LIMIT skips the first N and returns the rest.
+    // An offset with no limit skips the first N and returns the rest.
     let skip_first = catalog
         .list(&ListFilter {
             offset: Some(1),
@@ -559,7 +559,7 @@ async fn list_all_tags_includes_unattached_tags() {
         "orphan tag must appear in list_all_tags"
     );
 
-    // Contrast: list_tags (filter-dropdown variant) must exclude the orphan.
+    // By contrast, list_tags (the filter-dropdown variant) excludes the orphan.
     let attached_only = catalog.list_tags().await.unwrap();
     let attached_names: Vec<&str> = attached_only.iter().map(|t| t.name.as_str()).collect();
     assert!(
@@ -587,16 +587,16 @@ async fn insert_done_recording_aged(catalog: &Catalog, days_ago: i64) -> Recordi
 
 #[tokio::test]
 async fn analyze_upcoming_retention_counts_only_terminal_rows_entering_window() {
-    // Pre-deletion warning math (was untested). For max_age_days=30, hours_ahead=72
-    // the "about to age out" window is started_at in [now-30d, now-27d): recordings
-    // 28–30 days old will cross the 30-day deletion threshold within the next 72h.
+    // The pre-deletion warning math. With max_age_days=30 and hours_ahead=72 the
+    // "about to age out" window is started_at in [now-30d, now-27d): recordings
+    // 28 to 30 days old cross the 30-day deletion threshold within the next 72h.
     let (_dir, catalog) = fresh_catalog().await;
 
     insert_done_recording_aged(&catalog, 29).await; // in window, terminal -> COUNTS
     insert_done_recording_aged(&catalog, 31).await; // already past max_age -> not "upcoming"
     insert_done_recording_aged(&catalog, 10).await; // far too new -> not counted
 
-    // In-progress recording inside the window must NOT count — only terminal
+    // An in-progress recording inside the window must not count: only terminal
     // statuses (done / transcribe_failed / hook_failed) are eligible for deletion.
     let started = Local::now() - Duration::try_days(28).unwrap();
     let mut in_progress = sample_recording(RecordingId::from_datetime(started));
@@ -615,7 +615,8 @@ async fn analyze_upcoming_retention_counts_only_terminal_rows_entering_window() 
         "only the terminal recording entering the 72h window should be counted"
     );
 
-    // No age policy => nothing is ever 'upcoming' (early return at max_age_days=None).
+    // With no age policy nothing is ever "upcoming" (the function returns early
+    // when max_age_days is None).
     let no_age = RetentionConfig {
         max_age_days: None,
         max_count: Some(5),
@@ -818,7 +819,7 @@ async fn attach_tag_is_idempotent() {
     catalog.insert(&rec).await.unwrap();
 
     catalog.attach_tag(&rec.id, tag.id).await.unwrap();
-    // Attaching a second time must not error (INSERT OR IGNORE) and must not create a duplicate.
+    // Attaching a second time must neither error (it's an INSERT OR IGNORE) nor add a duplicate.
     catalog.attach_tag(&rec.id, tag.id).await.unwrap();
 
     let tags = catalog.tags_for(&rec.id).await.unwrap();
@@ -1027,8 +1028,8 @@ async fn user_edit_preserves_clean_transcript() {
 }
 
 /// When LLM post-processing is active the pipeline stores the LLM-cleaned
-/// text as `transcript` but the raw Whisper output as `original_transcript`.
-/// This test simulates that by passing different values to `update_transcript`.
+/// text as `transcript` and the raw Whisper output as `original_transcript`.
+/// We simulate that here by passing different values to `update_transcript`.
 #[tokio::test]
 async fn llm_post_processing_does_not_overwrite_original_transcript() {
     let (_dir, catalog) = fresh_catalog().await;
@@ -1076,7 +1077,7 @@ async fn list_by_meeting_returns_both_tracks_ordered_by_track() {
     let (_dir, catalog) = fresh_catalog().await;
     let start = Local.with_ymd_and_hms(2026, 5, 19, 14, 0, 0).unwrap();
 
-    // Insert "system" first to prove ordering is by `track`, not insert order.
+    // Insert "system" first to prove ordering follows `track`, not insert order.
     let system = meeting_track(start, "sess-1", "system");
     let mic = meeting_track(start, "sess-1", "mic");
     catalog.insert(&system).await.unwrap();
@@ -1225,7 +1226,7 @@ async fn hybrid_search_filter_restricts_to_matching_recordings() {
 
     let q = [1.0f32, 0.0, 0.0];
 
-    // Unscoped: both surface (today's behavior, unchanged).
+    // Unscoped: both surface.
     let unscoped = catalog.hybrid_search("", &q, 10, -1.0, None).await.unwrap();
     assert_eq!(
         unscoped.len(),
@@ -1252,9 +1253,9 @@ async fn hybrid_search_filter_restricts_to_matching_recordings() {
 
 #[tokio::test]
 async fn hybrid_search_filter_ignores_query_pagination_fields() {
-    // The filter's `search`/`limit`/`offset`/`sort_desc` must NOT scope the
-    // candidate set — only its predicate fields do. A filter carrying a bogus
-    // `search` and a tiny `limit` must still return the in-scope recording.
+    // Only the filter's predicate fields scope the candidate set; its
+    // `search`/`limit`/`offset`/`sort_desc` do not. So a filter carrying a bogus
+    // `search` and a tiny `limit` still returns the in-scope recording.
     let (_dir, catalog) = fresh_catalog().await;
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
@@ -1484,7 +1485,7 @@ async fn find_replace_no_match_is_a_noop() {
         .unwrap();
     assert_eq!(out.replaced, 0);
     assert_eq!(out.transcript, "untouched text");
-    // No write: still NOT user-edited (the no-op never rewrote the row).
+    // No write happened, so it's still not user-edited (the no-op never rewrote the row).
     let got = catalog.get(&rec.id).await.unwrap().unwrap();
     assert_eq!(got.transcript.as_deref(), Some("untouched text"));
     assert!(!got.user_edited, "a no-match must not flip user_edited");
@@ -1671,7 +1672,7 @@ async fn recognize_speakers_for_skips_named_and_dismissed() {
         .unwrap()
         .is_empty());
 
-    // A third speaker also matching Alice IS suggested — until dismissed.
+    // A third speaker that also matches Alice still gets suggested, until dismissed.
     catalog
         .save_speaker_voiceprint(r2.as_str(), 3, &[0.96, 0.04, 0.0], 0)
         .await
@@ -1752,7 +1753,7 @@ async fn renaming_a_speaker_recomputes_the_previously_linked_voice() {
         .await
         .unwrap();
 
-    // Enroll as Alice, then re-name (the corrected-a-wrong-suggestion case) to Bob.
+    // Enroll as Alice, then re-name to Bob (correcting a wrong suggestion).
     catalog
         .enroll_speaker(r.as_str(), 1, "Alice")
         .await

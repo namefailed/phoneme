@@ -36,7 +36,7 @@ fn silent_input_for_full_window_triggers() {
 
 #[test]
 fn silent_input_below_window_does_not_trigger() {
-    // 500ms of silence; window is 1s → does NOT trigger yet.
+    // 500ms of silence; window is 1s → doesn't trigger yet.
     let mut det = SilenceDetector::new(-45.0, 1000, 16_000);
     det.push(&synth_silence(8_000));
     assert!(!det.is_silent());

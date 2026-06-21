@@ -113,11 +113,10 @@ mod tests {
 
     #[test]
     fn unknown_request_decodes_leniently_and_does_not_break_the_stream() {
-        // The resilience guarantee behind the run_doctor regression: a client
-        // ahead of this build sends a request variant we don't know. As a
-        // `ServerRequest` it must decode to `Unknown` (not a codec error that
-        // fuses the Framed stream), and a *subsequent* valid request on the same
-        // connection must still decode — i.e. one unknown request can't break
+        // A client ahead of this build sends a request variant we don't know.
+        // As a `ServerRequest` it must decode to `Unknown` rather than a codec
+        // error that fuses the Framed stream, and a later valid request on the
+        // same connection must still decode — one unknown request can't break
         // the client's other commands.
         use crate::schema::{Request, ServerRequest};
         let mut codec = JsonLineCodec::<ServerRequest>::new();

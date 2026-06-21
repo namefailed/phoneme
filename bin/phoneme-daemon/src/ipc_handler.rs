@@ -13,21 +13,21 @@
 //! closing it when the subscriber lags.
 //!
 //! `handle_request` is the single dispatch point for the whole wire contract
-//! (see `phoneme-ipc::schema` for the per-request documentation). Position
-//! in the chain: most handlers read/write the catalog directly and return;
-//! the ones that create transcription work (`RecordStop` via the recorder,
-//! `ImportRecording`, `RetranscribeRecording`) enqueue into the inbox for
-//! the queue worker. Handlers must stay fast — anything slow (hook re-fires,
-//! LLM cleanup/summary re-runs, import decoding) runs in a spawned task or
-//! on a blocking thread and reports through DaemonEvents, because one stalled
-//! handler would stall every queued request on that connection (and the
-//! tray's single-connection bridge with it).
+//! (see `phoneme-ipc::schema` for the per-request documentation). Most handlers
+//! read or write the catalog directly and return; the ones that create
+//! transcription work (`RecordStop` via the recorder, `ImportRecording`,
+//! `RetranscribeRecording`) enqueue into the inbox for the queue worker.
+//! Handlers have to stay fast: anything slow (hook re-fires, LLM cleanup/summary
+//! re-runs, import decoding) runs in a spawned task or on a blocking thread and
+//! reports through `DaemonEvent`s, since one stalled handler would stall every
+//! queued request on that connection, and the tray's single-connection bridge
+//! with it.
 //!
-//! Security invariants enforced here: `RefireHook` only runs commands already
-//! in the configured hook allowlist (S-C2); `HookTest` output is
-//! secret-redacted on both outcomes; `DeleteRecording` only unlinks audio
-//! under the configured audio dir; `ImportRecording` canonicalizes the path
-//! and enforces a size cap before decoding.
+//! A few security invariants live here. `RefireHook` only runs commands already
+//! in the configured hook allowlist (S-C2); `HookTest` output is secret-redacted
+//! on both outcomes; `DeleteRecording` only unlinks audio under the configured
+//! audio dir; `ImportRecording` canonicalizes the path and enforces a size cap
+//! before decoding.
 
 use crate::app_state::AppState;
 use phoneme_core::hook::redact_secrets;
@@ -43,22 +43,21 @@ use phoneme_ipc::{
 /// process begins to exit, so the caller always sees the acknowledgement.
 const SHUTDOWN_REPLY_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 
-/// Minimum *calibrated* relevance (0..1) a semantic-only hit must clear to
-/// surface. Hybrid search ranks by per-chunk best-match cosine fused (RRF)
-/// with the FTS5 lexical ranking, so this is no longer a fragile raw-cosine
-/// floor that silently dropped good paraphrase matches: a lexical (exact-term)
-/// hit is never filtered by this, and the score is calibrated so 0.12 ≈
-/// "barely related". See `catalog::hybrid_search`. `MoreLikeThis` applies the
-/// same floor to its pure-vector ranking so both search paths agree on what's
-/// too weak to show.
+/// Minimum calibrated relevance (0..1) a semantic-only hit must clear to
+/// surface. Hybrid search ranks by per-chunk best-match cosine fused (RRF) with
+/// the FTS5 lexical ranking, so this isn't a raw-cosine floor: a lexical
+/// (exact-term) hit is never filtered by it, and the score is calibrated so
+/// 0.12 ≈ "barely related". See `catalog::hybrid_search`. `MoreLikeThis` applies
+/// the same floor to its pure-vector ranking so both search paths agree on
+/// what's too weak to show.
 const SEMANTIC_MIN_RELEVANCE: f32 = 0.12;
 
 pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
     loop {
         // Read one request. An unrecognized-but-well-formed request (a client
         // ahead of this daemon during a rolling rebuild) is answered with an
-        // error and the connection is KEPT — a single unknown request must never
-        // tear down the pipe and break this client's other commands.
+        // error and the connection is kept open. A single unknown request should
+        // never tear down the pipe and break this client's other commands.
         let req = match conn.recv().await {
             Ok(Some(ServerRequest::Known(req))) => *req,
             Ok(Some(ServerRequest::Unknown { detail })) => {
@@ -84,24 +83,24 @@ pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
         };
         match req {
             Request::SubscribeEvents => {
-                // No ACK Response is sent. The client reframes its connection
-                // as a DaemonEvent stream the instant it writes
-                // SubscribeEvents — an ACK `Response` would be decoded by that
-                // reframed codec as a malformed `DaemonEvent`, abort the
-                // stream, and make every blocking `phoneme record` fail. Go
-                // straight into event streaming.
+                // No ACK Response is sent. The client reframes its connection as
+                // a `DaemonEvent` stream the instant it writes `SubscribeEvents`,
+                // so an ACK `Response` would be decoded by that reframed codec as
+                // a malformed `DaemonEvent`, abort the stream, and make every
+                // blocking `phoneme record` fail. Go straight into event
+                // streaming.
                 //
                 // Backpressure contract: this connection uses a broadcast
-                // receiver, which drops old events under lag rather than
-                // blocking the producer. On `Lagged(n)`, we tear down the
-                // subscription — the client sees the connection close and is
-                // expected to reconnect (which freshly re-subscribes) and
-                // re-fetch state via `ListRecordings`. Subscribers MUST treat
-                // a subscription close as "the world may have moved on; refetch."
+                // receiver, which drops old events under lag rather than blocking
+                // the producer. On `Lagged(n)` we tear down the subscription; the
+                // client sees the connection close and is expected to reconnect
+                // (which freshly re-subscribes) and re-fetch state via
+                // `ListRecordings`. Subscribers treat a subscription close as "the
+                // world may have moved on; refetch."
                 //
-                // Closing on lag is preferable to silently dropping events,
-                // which would leave the client's incremental UI state diverged
-                // from the catalog with no signal that anything's wrong.
+                // Closing on lag beats silently dropping events, which would leave
+                // the client's incremental UI state diverged from the catalog with
+                // no signal that anything's wrong.
                 let mut rx = state.events.subscribe();
                 loop {
                     match rx.recv().await {
@@ -116,7 +115,7 @@ pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
                                 lag = n,
                                 "event subscriber lagged; closing subscription so client re-syncs"
                             );
-                            return; // client reconnects, re-fetches ListRecordings
+                            return; // client reconnects, re-fetches ListRecordings.
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                     }
@@ -136,7 +135,7 @@ pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
 pub async fn handle_request(req: Request, state: &AppState) -> Response {
     match req {
         Request::Handshake { protocol_version } => {
-            // Cheap, config-free wire handshake (F3). Report our protocol + app
+            // Cheap, config-free wire handshake (F3). Report our protocol and app
             // version and whether the client's protocol matches ours. Never an
             // error: even an incompatible client gets a clear, parseable answer.
             Response::Ok(serde_json::json!({
@@ -187,13 +186,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         } => {
             match state.recorder.start(state, mode, in_place, source).await {
                 Ok(id) => {
-                    // Custom-hotkey overrides: a binding that named a recipe / STT
-                    // model stashes them against THIS recording's id, mirroring how
+                    // Custom-hotkey overrides: a binding that named a recipe or STT
+                    // model stashes them against this recording's id, mirroring how
                     // `RetranscribeRecording` populates the per-job ledgers. The
-                    // pipeline consumes (and removes) them in `run`. Empty/None =
-                    // the normal record path (global default recipe + configured
-                    // model), so non-custom recordings are untouched. See
-                    // `stash_hotkey_overrides`.
+                    // pipeline consumes (and removes) them in `run`. Empty or None
+                    // means the normal record path (global default recipe +
+                    // configured model), so non-custom recordings are untouched.
+                    // See `stash_hotkey_overrides`.
                     stash_hotkey_overrides(state, &id, recipe_id, whisper_model);
                     Response::Ok(serde_json::json!({ "id": id.to_string() }))
                 }
@@ -228,9 +227,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             source,
         } => {
             if state.recorder.current().await.is_some() {
-                // Stop half of the toggle: there is no NEW recording to attach the
+                // Stop half of the toggle: there is no new recording to attach the
                 // binding's overrides to (the active one was started with its own,
-                // if any), so the recipe/model fields are intentionally ignored here.
+                // if any), so the recipe/model fields are ignored here.
                 match state.recorder.stop(state).await {
                     Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
                     Err(e) => err_response(&e),
@@ -304,7 +303,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Err(e) => err_response(&e),
         },
         // S2: run a stored saved search by id server-side. Same recordings shape
-        // as ListRecordings — the catalog parses filter_json into a ListFilter
+        // as `ListRecordings`: the catalog parses `filter_json` into a `ListFilter`
         // and runs the normal list query.
         Request::RunSavedSearch { id } => match state.catalog.run_saved_search(&id).await {
             Ok(rows) => serialize_response(rows),
@@ -316,9 +315,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
-        // An unknown id yields an empty list, not NotFound — "no segments" is
-        // a normal state (pre-capture recordings, providers without timing)
-        // and callers treat the two identically.
+        // An unknown id yields an empty list, not `NotFound`: "no segments" is a
+        // normal state (pre-capture recordings, providers without timing) and
+        // callers treat the two identically.
         Request::GetSegments { id, variant } => {
             let v = variant.as_deref().unwrap_or("raw");
             match state.catalog.segments_for_variant(&id, v).await {
@@ -326,12 +325,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
-        // Like GetSegments, an unknown id yields an empty list (not NotFound):
-        // "no words" is a normal state (pre-capture recordings, providers
-        // without per-word timing). Each object carries an explicit 0-based
-        // `idx` (the array order) so the frontend can rely on it without
-        // re-deriving it from position — `TranscriptWord` itself stores no idx,
-        // so we attach it here via enumerate.
+        // Like `GetSegments`, an unknown id yields an empty list (not `NotFound`):
+        // "no words" is a normal state (pre-capture recordings, providers without
+        // per-word timing). Each object carries an explicit 0-based `idx` (the
+        // array order) so the frontend can rely on it without re-deriving it from
+        // position. `TranscriptWord` itself stores no idx, so we attach it here
+        // via enumerate.
         Request::GetWords { id, variant } => match state
             .catalog
             .words_for_variant(&id, variant.as_deref().unwrap_or("raw"))
@@ -396,7 +395,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             filter,
         } => {
             // Clamp the client-supplied limit so a huge value can't force an
-            // unbounded result allocation + JSON serialization over the pipe.
+            // unbounded result allocation and JSON serialization over the pipe.
             let limit = limit.min(MAX_SEARCH_RESULTS);
             // Clone the Arc and drop the read guard before embedding: ONNX
             // inference is CPU-bound and runs under a std Mutex inside the
@@ -453,18 +452,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             // Clamp the client-supplied limit (see SemanticSearch) so it can't
             // force an unbounded allocation.
             let limit = limit.min(MAX_SEARCH_RESULTS);
-            // No embedder needed: the source recording's STORED vectors are the
+            // No embedder needed: the source recording's stored vectors are the
             // query (that's the whole point — recall is free once indexed), so
-            // this works even while the embedding model isn't loaded. The
-            // catalog returns a clear "isn't indexed yet" error when the
-            // recording has no vectors; forward it verbatim for the UI/CLI.
+            // this works even while the embedding model isn't loaded. The catalog
+            // returns a clear "isn't indexed yet" error when the recording has no
+            // vectors; forward it verbatim for the UI/CLI.
             match state
                 .catalog
                 .more_like_this(&id, limit, SEMANTIC_MIN_RELEVANCE)
                 .await
             {
                 Ok(results) => {
-                    // Same `[{ recording, score }]` shape as SemanticSearch so
+                    // Same `[{ recording, score }]` shape as `SemanticSearch` so
                     // clients reuse the relevance-chip rendering unchanged.
                     let mut full_results = Vec::new();
                     for (rec_id, score) in results {
@@ -507,11 +506,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     message: "a re-embed is already running — wait for it to finish".into(),
                 })
             } else {
-                // Re-embed the WHOLE library with the current model, IN PLACE,
-                // one recording at a time — never an upfront global wipe. The old
-                // code did `clear_all_embeddings()` first, so a crash/kill/model-
-                // unload between the clear and the end of the background loop left
-                // the entire library permanently un-embedded with no recovery.
+                // Re-embed the whole library with the current model, in place, one
+                // recording at a time — never an upfront global wipe. Wiping first
+                // (a single `clear_all_embeddings()`) means a crash, kill, or
+                // model-unload between the clear and the end of the background loop
+                // leaves the entire library permanently un-embedded with no
+                // recovery.
                 //
                 // `embed_and_store` → `upsert_chunk_embeddings` replaces a single
                 // recording's chunks atomically (DELETE-then-INSERT in one tx), so
@@ -522,8 +522,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // Returns immediately; the work runs in the background.
                 let bg = state.clone();
                 tokio::spawn(async move {
-                    // Clear the in-flight flag on EVERY exit path (incl. the early
-                    // returns below) so a future ReembedAll isn't locked out.
+                    // Clear the in-flight flag on every exit path (including the
+                    // early returns below) so a future ReembedAll isn't locked out.
                     struct InFlightGuard(std::sync::Arc<std::sync::atomic::AtomicBool>);
                     impl Drop for InFlightGuard {
                         fn drop(&mut self) {
@@ -535,7 +535,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         return;
                     }
                     // Every recording with a transcript (no chunk-presence filter:
-                    // we want to OVERWRITE existing vectors, not skip them).
+                    // we want to overwrite existing vectors, not skip them).
                     let filter = phoneme_core::ListFilter::default();
                     match bg.catalog.list(&filter).await {
                         Ok(records) => {
@@ -555,14 +555,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                                 else {
                                     continue;
                                 };
-                                // Re-acquire the embedder PER ITEM: this loop runs
+                                // Re-acquire the embedder per item: this loop runs
                                 // for minutes on a big library, and holding the
                                 // read guard across it blocks every config-reload
-                                // write. Clone the Arc, drop the guard, then embed
-                                // — writers interleave between items. Gone mid-run
-                                // (semantic search turned off) = stop; recordings
-                                // already done keep their fresh vectors and the
-                                // rest keep their old (still-searchable) ones.
+                                // write. Clone the Arc, drop the guard, then embed,
+                                // so writers interleave between items. If it's gone
+                                // mid-run (semantic search turned off) we stop;
+                                // recordings already done keep their fresh vectors
+                                // and the rest keep their old (still-searchable)
+                                // ones.
                                 let embedder = bg.embedder.read().await.as_ref().cloned();
                                 let Some(embedder) = embedder else {
                                     tracing::info!(
@@ -586,9 +587,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::DeleteRecording { id, keep_audio } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
-                // Delete the catalog row first. If it fails, report the error
-                // and DON'T touch the audio — otherwise the client sees `Ok`,
-                // the WAV is gone, and the row lingers pointing at nothing.
+                // Delete the catalog row first. If it fails, report the error and
+                // leave the audio alone — otherwise the client sees `Ok`, the WAV
+                // is gone, and the row lingers pointing at nothing.
                 if let Err(e) = state.catalog.delete(&id).await {
                     return Response::Err(IpcError {
                         kind: error_to_kind(&e),
@@ -596,9 +597,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     });
                 }
                 if !keep_audio {
-                    // Defense-in-depth: only ever unlink files that live under
-                    // our own audio directory. The path comes from the catalog
-                    // (which we control), but guarding here means a poisoned or
+                    // Defense in depth: only ever unlink files that live under our
+                    // own audio directory. The path comes from the catalog (which
+                    // we control), but guarding here means a poisoned or
                     // hand-edited row can't turn a delete into "rm any file".
                     if audio_path_is_ours(&r.audio_path, &state.paths.audio_dir) {
                         // Best-effort — the file may already be gone. Log, don't fail.
@@ -627,9 +628,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             keep_audio,
         } => match state.catalog.list_by_meeting(&meeting_id).await {
             Ok(tracks) if !tracks.is_empty() => {
-                // Delete each track exactly like DeleteRecording: row first (an
+                // Delete each track exactly like `DeleteRecording`: row first (an
                 // error there leaves that track's audio untouched), then the WAV
-                // unless keep_audio — and only when it's under our audio dir. One
+                // unless keep_audio, and only when it's under our audio dir. One
                 // track failing doesn't abandon the rest; each removed track emits
                 // its own RecordingDeleted so every view drops it.
                 let total = tracks.len();
@@ -660,7 +661,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     deleted += 1;
                 }
                 // Report any failure to the client instead of silently returning
-                // Ok when some tracks were removed — matching DeleteRecording,
+                // Ok when some tracks were removed, matching `DeleteRecording`,
                 // which always surfaces a delete error. The removed tracks already
                 // emitted RecordingDeleted (so views drop them); a partial failure
                 // returns an error carrying the deleted/total counts so the client
@@ -689,9 +690,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         // S6: literal find-and-replace across the live transcript. The catalog
-        // does the replacement + persist (no-op + NotFound handled there); we
-        // run the same re-flow/re-embed/event upkeep as a hand edit — but ONLY
-        // when something actually changed, so a zero-match is a true no-op.
+        // does the replacement and persist (the no-op and NotFound cases are
+        // handled there); we run the same re-flow/re-embed/event upkeep as a hand
+        // edit, but only when something actually changed, so a zero-match is a
+        // true no-op.
         Request::FindReplace {
             id,
             find,
@@ -742,14 +744,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::SetRecordingTitle { id, title } => {
-            // A blank title means "clear back to auto" — same as None. `Some`
-            // marks the title user-owned, so the pipeline never overwrites it;
-            // `None` resets ownership and the next run generates a fresh one.
+            // A blank title means "clear back to auto", same as None. `Some` marks
+            // the title user-owned, so the pipeline never overwrites it; `None`
+            // resets ownership and the next run generates a fresh one.
             let title = title
                 .map(|t| t.trim().to_string())
                 .filter(|t| !t.is_empty());
             let is_auto = title.is_none();
-            // A user/CLI title write carries no model — pass `None`, which also
+            // A user/CLI title write carries no model, so pass `None`, which also
             // clears any stale auto-title model so a user title never shows one.
             match state
                 .catalog
@@ -779,11 +781,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             message: "recording has no transcript to tag yet".into(),
                         })
                     } else {
-                        // Read the migrated `tags` Enrichment ENTRY (provider /
-                        // model / prompt) so editing it in the Playbook changes
-                        // what an on-demand re-run does — the Playbook is the
-                        // source of truth. Fall back to the legacy `[auto_tag]`
-                        // section when no such entry exists (a user deleted it).
+                        // Read the migrated `tags` enrichment entry (provider,
+                        // model, prompt) so editing it in the Playbook changes what
+                        // an on-demand re-run does — the Playbook is the source of
+                        // truth. Fall back to the legacy `[auto_tag]` section when
+                        // no such entry exists (a user deleted it).
                         match crate::pipeline::entry_config_for_target(&cfg, "tags") {
                             Some((llm_cfg, prompt)) => {
                                 crate::pipeline::suggest_tags_with(
@@ -872,8 +874,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             speaker_label,
             name,
         } => {
-            // Speaker indices are 1-based (`[Speaker 1]`, …); reject a non-positive
-            // label rather than writing a row that can never match a marker.
+            // Speaker indices are 1-based (`[Speaker 1]`, …), so reject a
+            // non-positive label rather than writing a row that can never match a
+            // marker.
             if speaker_label < 1 {
                 return Response::Err(IpcError {
                     kind: IpcErrorKind::Internal,
@@ -886,11 +889,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 .await
             {
                 Ok(()) => {
-                    // Implicit enrollment (#9): naming a speaker folds its
-                    // captured voiceprint into the cross-recording library;
-                    // clearing the name un-enrolls it. Best-effort and a no-op
-                    // when no voiceprint was captured (cloud-diarized recordings)
-                    // — recognition is a convenience, never a reason to fail the
+                    // Implicit enrollment (#9): naming a speaker folds its captured
+                    // voiceprint into the cross-recording library; clearing the
+                    // name un-enrolls it. Best-effort, and a no-op when no
+                    // voiceprint was captured (cloud-diarized recordings) —
+                    // recognition is a convenience, never a reason to fail the
                     // rename.
                     let enrolled_id = if name.trim().is_empty() {
                         if let Err(e) = state
@@ -920,7 +923,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
 
                     // Name propagation (V5): when the speaker actually enrolled
                     // into the library, optionally back-fill that name onto the
-                    // SAME unnamed voice in other recordings, per policy. Naming
+                    // same unnamed voice in other recordings, per policy. Naming
                     // never fails over propagation — it's a convenience layered on
                     // top, so any error here is logged and swallowed.
                     let cfg = state.config.load();
@@ -938,10 +941,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         // ── In-recording speaker correction (U1) ─────────────────────────
-        // Each op keeps `transcript_segments` authoritative and rebuilds the
-        // prose `[Speaker N]:` markers in one transaction (catalog side), so
-        // every view the user sees agrees. They emit `SpeakerNameUpdated` so
-        // open clients refresh the recording (segments, names, prose).
+        // Each op keeps `transcript_segments` authoritative and rebuilds the prose
+        // `[Speaker N]:` markers in one transaction (catalog side), so every view
+        // the user sees agrees. They emit `SpeakerNameUpdated` so open clients
+        // refresh the recording (segments, names, prose).
         Request::ReassignSegmentSpeaker { id, idx, new_label } => {
             match state.catalog.reassign_segment(&id, idx, new_label).await {
                 Ok(()) => {
@@ -992,7 +995,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             let cfg = state.config.load();
             if cfg.diarization.recognize_speakers {
                 // V2 score normalization: when off (default), use the raw cosine
-                // bar exactly as before; when on, switch to the z-score bar.
+                // bar; when on, switch to the z-score bar.
                 let (mode, threshold) = voiceprint_scorer(&cfg.diarization);
                 match state
                     .catalog
@@ -1060,7 +1063,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
             // Clear every row (cascade takes tags/segments/words/embeddings), then
             // re-import from disk: with the table empty, every WAV is an orphan, so
-            // the existing reimport re-links them all as Queued. WAVs are never
+            // the existing reimport re-links them all as Queued. The WAVs are never
             // touched, so this is recoverable to the audio even though transcripts
             // and tags are lost (and re-derived by re-transcription).
             match state.catalog.clear_all_recordings().await {
@@ -1083,11 +1086,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             recipe_id,
         } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
-                // A per-recording model override is NO LONGER written into the
-                // process-global config. Doing so made the whisper supervisor
-                // (which polls the global config) restart the server, and the
-                // queue worker's blanket post-run reload restart it again — a
-                // thrash that mass-failed other queued/preview jobs reading the
+                // A per-recording model override is never written into the
+                // process-global config. Writing it there makes the whisper
+                // supervisor (which polls the global config) restart the server,
+                // and the queue worker's blanket post-run reload restart it again —
+                // a thrash that mass-fails other queued/preview jobs reading the
                 // same global config (#49). Instead we record the requested model
                 // against this recording id; the pipeline applies it to that one
                 // job only (a single serialized server model-swap for the local
@@ -1096,7 +1099,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 if let Some(m) = model {
                     let m = m.trim();
                     if m.is_empty() {
-                        // Empty = "use the configured model"; clear any stale
+                        // Empty means "use the configured model"; clear any stale
                         // request so a prior override can't leak onto this run.
                         state
                             .pending_overrides
@@ -1128,12 +1131,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     }
                 }
                 // The one-time LLM/hook overrides (hooks toggle, post-processing
-                // opt-out, and the Re-run → "All" cleanup/summary/title values)
-                // are ALSO recorded per-recording — NEVER written into the
-                // process-global config. A temp-global write here raced a
-                // concurrent ReloadConfig (it could be clobbered, or leak its
-                // forced-on pipeline onto another queued job). `pipeline::run`
-                // applies these to THIS job's config clone only. Mirrors the
+                // opt-out, and the Re-run → "All" cleanup/summary/title values) are
+                // also recorded per-recording, never written into the
+                // process-global config. A temp-global write here races a
+                // concurrent ReloadConfig: it could be clobbered, or leak its
+                // forced-on pipeline onto another queued job. `pipeline::run`
+                // applies these to this job's config clone only, mirroring the
                 // per-recording model override above.
                 let rerun = crate::app_state::PendingRerun {
                     run_hooks,
@@ -1178,14 +1181,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     }
                     Err(e) => {
                         // Enqueue failed: this job never reaches `pipeline::run`
-                        // (the sole place these per-recording ledgers are
-                        // otherwise claimed), so the entries we just stashed
-                        // would leak keyed by this id. Drop them on this terminal
-                        // path — honoring the "removed on every terminal path"
-                        // invariant — recovering from a poisoned lock like the
-                        // other pending_* sites do. `pending_focused_app` isn't
-                        // populated for a retranscribe, but a defensive remove
-                        // keeps the contract airtight.
+                        // (the sole place these per-recording ledgers are otherwise
+                        // claimed), so the entries we just stashed would leak keyed
+                        // by this id. Drop them on this terminal path — the "removed
+                        // on every terminal path" invariant — recovering from a
+                        // poisoned lock the way the other pending_* sites do.
+                        // `pending_focused_app` isn't populated for a retranscribe,
+                        // but a defensive remove keeps the contract airtight.
                         state
                             .pending_overrides
                             .lock()
@@ -1226,11 +1228,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 };
                 let cfg = state.config.load();
                 let timeout = std::time::Duration::from_secs(cfg.hook.timeout_secs);
-                // Post-cutover, the "configured hooks" are the `default` recipe's
-                // Hook-step commands (where migrate_hooks moved [hook].commands),
-                // each with the Phoneme path tokens expanded — same allowlist
-                // semantics as before. Webhook-only Hook steps have no command and
-                // are skipped (RefireHook only re-runs commands, as it always has).
+                // The "configured hooks" are the `default` recipe's Hook-step
+                // commands (where `migrate_hooks` moved `[hook].commands`), each
+                // with the Phoneme path tokens expanded — the allowlist semantics
+                // the rest of this arm relies on. Webhook-only Hook steps have no
+                // command and are skipped, since `RefireHook` only re-runs commands.
                 let configured: Vec<String> = {
                     use phoneme_core::config::{expand_cmd, PlaybookKind};
                     let mut cmds = Vec::new();
@@ -1248,10 +1250,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 };
                 drop(cfg);
                 let commands = if let Some(cmd) = command {
-                    // Security (S-C2): a caller may only re-fire a command that is
-                    // already in the configured hook allowlist — never an arbitrary
-                    // command handed in over IPC. The UI only ever sends a command
-                    // it picked from this same list, so legitimate flows are intact.
+                    // Security (S-C2): a caller may only re-fire a command already
+                    // in the configured hook allowlist, never an arbitrary command
+                    // handed in over IPC. The UI only ever sends a command it picked
+                    // from this same list, so legitimate flows are intact.
                     if !hook_command_allowed(&cmd, &configured) {
                         return Response::Err(IpcError {
                             kind: IpcErrorKind::Internal,
@@ -1263,16 +1265,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 } else {
                     configured
                 };
-                // Run the hook OFF the IPC connection. A hook can take up to
-                // its full timeout (30s default); running it inline froze the
-                // connection — and with it the single-connection Tauri bridge,
+                // Run the hook off the IPC connection. A hook can take up to its
+                // full timeout (30s default); running it inline would freeze the
+                // connection, and with it the single-connection Tauri bridge,
                 // stalling every other UI request. The outcome is reported via
                 // DaemonEvents, exactly like the queue pipeline.
                 //
-                // We deliberately do NOT re-enqueue (as RetranscribeRecording does):
-                // the queue pipeline always re-transcribes first, which would
-                // overwrite a user's manual transcript edit. RefireHook must
-                // re-run only the hook against the stored transcript.
+                // Deliberately no re-enqueue (unlike `RetranscribeRecording`): the
+                // queue pipeline always re-transcribes first, which would overwrite
+                // a user's manual transcript edit. `RefireHook` re-runs only the
+                // hook against the stored transcript.
                 let task_state = state.clone();
                 tokio::spawn(async move {
                     let hook_id = payload.id.clone();
@@ -1386,10 +1388,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::RunDoctor => {
             let cfg = state.config.load();
-            // Thread the bundled servers' LIVE ports into the backend probes so
-            // a startup port fallback can't make Doctor probe the dead
-            // configured port. The supervisors publish these in `whisper_ports`
-            // the same way the pipeline reads them via `apply`.
+            // Thread the bundled servers' live ports into the backend probes so a
+            // startup port fallback can't make Doctor probe the dead configured
+            // port. The supervisors publish these in `whisper_ports` the same way
+            // the pipeline reads them via `apply`.
             let ports = phoneme_core::doctor::EffectiveWhisperPorts {
                 main: state.whisper_ports.main(),
                 preview: state.whisper_ports.preview(),
@@ -1560,12 +1562,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
             Err(e) => err_response(&e),
         },
-        // Unlike RefireHook, HookTest intentionally runs a caller-supplied
-        // command: it is the Hook Manager's "test this command" affordance, used
-        // to validate a hook the user is editing but has not saved yet. That is a
-        // deliberate, user-initiated test — gated by the owner-only IPC pipe
-        // (S-C1) — so it is not an additional privilege-escalation channel and is
-        // not subject to the RefireHook allowlist (S-C2).
+        // Unlike `RefireHook`, `HookTest` intentionally runs a caller-supplied
+        // command: it's the Hook Manager's "test this command" affordance, used to
+        // validate a hook the user is editing but hasn't saved yet. That's a
+        // deliberate, user-initiated test, gated by the owner-only IPC pipe (S-C1),
+        // so it's not an extra privilege-escalation channel and isn't subject to
+        // the `RefireHook` allowlist (S-C2).
         Request::HookTest { custom_command } => {
             let command = custom_command.unwrap_or_else(|| {
                 state
@@ -1599,12 +1601,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 model: "test".into(),
                 metadata: HookMetadata::current(),
             };
-            // The test command is caller-supplied and its output is shown in
-            // the UI/CLI verbatim — a script that echoes its environment or a
-            // config file would hand any key it prints to the renderer. Mask
-            // credential-shaped values on BOTH outcomes before the text
-            // crosses the pipe: the Ok path carries stderr directly, and the
-            // HookFailed error embeds the stderr tail in its message.
+            // The test command is caller-supplied and its output is shown in the
+            // UI/CLI verbatim — a script that echoes its environment or a config
+            // file would hand any key it prints to the renderer. Mask
+            // credential-shaped values on both outcomes before the text crosses the
+            // pipe: the Ok path carries stderr directly, and the HookFailed error
+            // embeds the stderr tail in its message.
             match runner.run(&sample).await {
                 Ok(result) => Response::Ok(serde_json::json!({
                     "exit_code": result.exit_code,
@@ -1619,11 +1621,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::Shutdown => {
             tracing::info!("shutdown requested via IPC");
-            // Reply first, exit second: the trigger is delayed so the Ok
-            // response (written by `handle_connection` the moment this arm
-            // returns) reaches the pipe before the process starts tearing
-            // down — the caller (`phoneme daemon stop`, the tray's Quit) must
-            // never be left waiting on a reply that died with the daemon.
+            // Reply first, exit second: the trigger is delayed so the Ok response
+            // (written by `handle_connection` the moment this arm returns) reaches
+            // the pipe before the process starts tearing down. The caller (`phoneme
+            // daemon stop`, the tray's Quit) should never be left waiting on a reply
+            // that died with the daemon.
             let coordinator = state.shutdown.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(SHUTDOWN_REPLY_GRACE).await;
@@ -1712,8 +1714,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             tracing::info!("reloading config via IPC");
             match crate::load_config() {
                 Ok(mut cfg) => {
-                    // Same explicit sequence as startup: migrate+persist, then the
-                    // in-memory-only runtime defaults, before the daemon adopts it.
+                    // Same explicit sequence as startup: migrate and persist, then
+                    // the in-memory-only runtime defaults, before the daemon adopts
+                    // it.
                     crate::reconcile_and_persist_config(&mut cfg);
                     crate::apply_runtime_defaults(&mut cfg);
                     state.config.store(std::sync::Arc::new(cfg));
@@ -1773,24 +1776,24 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
 const MAX_SEARCH_RESULTS: usize = 1000;
 
 /// Stash a custom-hotkey recording's per-job overrides against its freshly minted
-/// recording id, so `pipeline::run` resolves the binding's recipe + transcribes
+/// recording id, so `pipeline::run` resolves the binding's recipe and transcribes
 /// with its model. Two ledgers, both already proven by `RetranscribeRecording`:
 ///
-///  • `whisper_model` → `pending_overrides` (the existing per-job model override
+///  - `whisper_model` → `pending_overrides` (the existing per-job model override
 ///    map): the pipeline applies it via `apply_model_override` for one job, then
 ///    restores — the same #49-safe path a model-override retranscribe uses.
-///  • `recipe_id` → `pending_recipe` (the parallel recipe ledger): the pipeline
+///  - `recipe_id` → `pending_recipe` (the parallel recipe ledger): the pipeline
 ///    passes it to `resolve_recipe`, falling back to the `default` recipe when the
 ///    id is empty or names a deleted recipe.
 ///
-/// Both are written ONLY when non-empty, so a normal (non-custom-hotkey) record —
-/// which sends `None` — leaves the recording on the global default recipe +
+/// Both are written only when non-empty, so a normal (non-custom-hotkey) record,
+/// which sends `None`, leaves the recording on the global default recipe and
 /// configured model. The maps are ephemeral: a daemon restart between stash and
-/// the pipeline claim drops the override and the job runs the default recipe +
+/// the pipeline claim drops the override and the job runs the default recipe and
 /// configured model (the documented `pending_overrides` contract). A leftover
 /// entry can't leak onto another recording (each `RecordingId` is unique), and the
-/// entries are claimed-and-removed on EVERY terminal path: `pipeline::run` removes
-/// both EARLY — alongside the model/all-overrides removals, before transcription —
+/// entries are claimed-and-removed on every terminal path: `pipeline::run` removes
+/// both early — alongside the model/all-overrides removals, before transcription —
 /// so a permanently-failed recording leaves nothing, and `DaemonRecorder::cancel`
 /// removes both in its single-recording arm so a recording canceled mid-capture
 /// (which never reaches `pipeline::run`) leaves nothing either.
@@ -1824,7 +1827,7 @@ fn stash_hotkey_overrides(
 
 /// Hard cap on the on-disk size of an importable file. The Tauri file dialog is
 /// the intended sole producer, but `ImportRecording` accepts an arbitrary client
-/// path — this bounds a bypass that could otherwise feed the decoder a
+/// path, so this bounds a bypass that could otherwise feed the decoder a
 /// pathologically large file and exhaust memory (the decoder buffers the whole
 /// file into a single `Vec<f32>`; see `phoneme-audio::decode`). 2 GiB is far
 /// beyond any realistic voice note while still leaving the decode duration cap
@@ -1839,10 +1842,10 @@ fn exceeds_import_size_cap(len: u64) -> bool {
 
 /// Whether `requested` matches a configured hook command (compared trimmed).
 ///
-/// The IPC `RefireHook` request lets a caller pass a command to run; without
-/// this check any process reaching the pipe could run an arbitrary command via
-/// the daemon. Restricting to the already-configured hooks turns it into "re-run
-/// one of my hooks" instead of an open exec channel. (audit S-C2)
+/// The IPC `RefireHook` request lets a caller pass a command to run; without this
+/// check any process reaching the pipe could run an arbitrary command via the
+/// daemon. Restricting to the already-configured hooks turns it into "re-run one
+/// of my hooks" instead of an open exec channel. (audit S-C2)
 fn hook_command_allowed(requested: &str, configured: &[String]) -> bool {
     let requested = requested.trim();
     !requested.is_empty() && configured.iter().any(|c| c.trim() == requested)
@@ -1850,11 +1853,11 @@ fn hook_command_allowed(requested: &str, configured: &[String]) -> bool {
 
 /// Returns `true` if `audio_path` is a normal path located under `audio_dir`.
 ///
-/// The path comes from our own catalog, so this is defense-in-depth: we reject
-/// any `..` component (which could climb out of the audio directory) and require
-/// the rest to be prefixed by `audio_dir` component-wise. Kept purely lexical so
-/// it is unit-testable without touching the filesystem and never deletes the
-/// wrong file just because canonicalization of an already-removed file failed.
+/// The path comes from our own catalog, so this is defense in depth: we reject any
+/// `..` component (which could climb out of the audio directory) and require the
+/// rest to be prefixed by `audio_dir` component-wise. Kept purely lexical so it's
+/// unit-testable without touching the filesystem and never deletes the wrong file
+/// just because canonicalization of an already-removed file failed.
 fn audio_path_is_ours(audio_path: &str, audio_dir: &std::path::Path) -> bool {
     use std::path::Component;
     let p = std::path::Path::new(audio_path);
@@ -1864,11 +1867,11 @@ fn audio_path_is_ours(audio_path: &str, audio_dir: &std::path::Path) -> bool {
     p.starts_with(audio_dir)
 }
 
-/// Doctor check for ORPHANED AUDIO: `.wav` files on disk that have no catalog
-/// row. They accumulate when recordings are deleted with "keep the audio file",
-/// and a `--reimport` would resurrect them — so surface the count rather than
-/// let it grow silently and surprise the user later. Reuses the re-import scan
-/// + `all_ids`, so it counts exactly what "Re-import from disk" would re-link.
+/// Doctor check for orphaned audio: `.wav` files on disk that have no catalog row.
+/// They accumulate when recordings are deleted with "keep the audio file", and a
+/// `--reimport` would resurrect them, so surface the count rather than let it grow
+/// silently and surprise the user later. Reuses the re-import scan and `all_ids`,
+/// so it counts exactly what "Re-import from disk" would re-link.
 async fn orphan_audio_check(state: &AppState) -> phoneme_core::doctor::CheckResult {
     let existing: std::collections::HashSet<phoneme_core::RecordingId> = state
         .catalog
@@ -1890,27 +1893,27 @@ async fn orphan_audio_check(state: &AppState) -> phoneme_core::doctor::CheckResu
     phoneme_core::doctor::orphan_audio_check_result(count)
 }
 
-/// Re-run ONLY the LLM post-processing ("cleanup") step on a recording's
+/// Re-run only the LLM post-processing ("cleanup") step on a recording's
 /// already-stored transcript, without re-transcribing the audio.
 ///
 /// Design mirrors `RefireHook`: validate up front on the IPC connection (the
 /// recording must exist and have a transcript), then do the slow work — the LLM
-/// call, which can take its full timeout — OFF the connection in a spawned task,
+/// call, which can take its full timeout — off the connection in a spawned task,
 /// reporting progress via the same `DaemonEvent`s the UI already consumes. This
 /// keeps the single-connection Tauri bridge responsive.
 ///
-/// Input baseline: the preserved **original** (raw Whisper) transcript when one
+/// Input baseline: the preserved original (raw Whisper) transcript when one
 /// exists, falling back to the live transcript for recordings predating that
-/// column. Running cleanup against the original — not the already-cleaned live
-/// text — keeps the operation idempotent (re-running with a different model
-/// re-cleans the same source rather than compounding edits) and lets us reuse
-/// `update_transcript`, which re-asserts the original alongside the new live
-/// text. The original column is therefore preserved by construction.
+/// column. Cleaning the original rather than the already-cleaned live text keeps
+/// the operation idempotent (re-running with a different model re-cleans the same
+/// source instead of compounding edits) and lets us reuse `update_transcript`,
+/// which re-asserts the original alongside the new live text. So the original
+/// column is preserved by construction.
 ///
-/// An optional `model` overrides the configured cleanup model for THIS run only;
-/// it is never written back to config (unlike `RetranscribeRecording`, which
-/// must restart the whisper server). The post-processing provider is built from
-/// a cloned config with just the model field swapped.
+/// An optional `model` overrides the configured cleanup model for this run only;
+/// it's never written back to config (unlike `RetranscribeRecording`, which must
+/// restart the whisper server). The post-processing provider is built from a
+/// cloned config with just the model field swapped.
 /// One-time, per-run overrides for [`rerun_cleanup`]. Each field falls back to
 /// the configured `[llm_post_process]` value when `None` and is never persisted.
 #[derive(Default)]
@@ -1945,14 +1948,14 @@ async fn rerun_cleanup(
         });
     }
 
-    // Resolve the BASE (llm_cfg, prompt) from the migrated `cleanup` Playbook
-    // ENTRY so editing it in the Playbook changes what an on-demand Re-run
-    // Cleanup does — the Playbook is the source of truth, exactly like the
-    // summary/tags re-runs read their migrated entries. `cleanup_entry_config`
-    // falls back to the legacy `[llm_post_process]` config + prompt when the
-    // entry is gone (a user deleted it), so behavior is never worse than today.
-    // The Re-run modal's one-time overrides then layer ON TOP and still win;
-    // none of this is persisted (the config is local to the spawned task).
+    // Resolve the base (llm_cfg, prompt) from the migrated `cleanup` Playbook
+    // entry so editing it in the Playbook changes what an on-demand Re-run Cleanup
+    // does — the Playbook is the source of truth, exactly like the summary/tags
+    // re-runs read their migrated entries. `cleanup_entry_config` falls back to the
+    // legacy `[llm_post_process]` config and prompt when the entry is gone (a user
+    // deleted it), so behavior is never worse than today. The Re-run modal's
+    // one-time overrides then layer on top and still win; none of this is persisted
+    // (the config is local to the spawned task).
     let CleanupOverrides {
         model,
         provider,
@@ -1961,10 +1964,10 @@ async fn rerun_cleanup(
         api_key,
     } = overrides;
     let (base_llm, base_prompt) = crate::pipeline::cleanup_entry_config(&state.config.load());
-    // Layer the one-shot model + prompt overrides via the SHARED helper that
+    // Layer the one-shot model + prompt overrides via the shared helper that
     // `rerun_summary` (and the tests) use, so the layering rule lives in exactly
-    // one place. A non-empty override wins; a blank/whitespace one is ignored —
-    // a blank prompt would strip the cleanup instructions.
+    // one place. A non-empty override wins; a blank/whitespace one is ignored,
+    // since a blank prompt would strip the cleanup instructions.
     let (mut llm_cfg, resolved_prompt) = crate::pipeline::apply_oneshot_overrides(
         base_llm,
         base_prompt,
@@ -1972,11 +1975,11 @@ async fn rerun_cleanup(
         prompt.as_deref(),
     );
     llm_cfg.prompt = resolved_prompt;
-    // Provider / endpoint / key overrides are cleanup-only (the summary re-run
-    // has no such fields) so they apply directly around the shared base. Note
-    // `cleanup_entry_config` already forced the step enabled — the GUI disables
-    // the Re-run Cleanup option when cleanup is off, and the provider check
-    // below still blocks a `none`/blank provider.
+    // Provider / endpoint / key overrides are cleanup-only (the summary re-run has
+    // no such fields), so they apply directly around the shared base.
+    // `cleanup_entry_config` already forced the step enabled — the GUI disables the
+    // Re-run Cleanup option when cleanup is off, and the provider check below still
+    // blocks a `none`/blank provider.
     if let Some(p) = provider {
         let p = p.trim();
         if !p.is_empty() {
@@ -2015,9 +2018,9 @@ async fn rerun_cleanup(
         });
     }
 
-    // Choose the cleanup INPUT: prefer the preserved original (raw machine
-    // output) so cleanup is idempotent; fall back to the current transcript for
-    // older rows that have no original stored.
+    // Choose the cleanup input: prefer the preserved original (raw machine output)
+    // so cleanup is idempotent; fall back to the current transcript for older rows
+    // that have no original stored.
     let source = match state.catalog.get_original_transcript(&id).await {
         Ok(Some(original)) if !original.is_empty() => original,
         // No original (or empty): fall back to the live transcript. Safe to
@@ -2027,13 +2030,12 @@ async fn rerun_cleanup(
 
     let task_state = state.clone();
     tokio::spawn(async move {
-        // Re-build the provider inside the task from the (already-validated)
-        // config so the heavy work — the network call to the LLM — happens off
-        // the IPC connection. We re-check `provider()` only to obtain the boxed
-        // provider; the None branch is unreachable in practice but handled
-        // defensively rather than unwrapped. Going through the run-resolver
-        // here (not at validation above) keeps the Ollama auto-launch off the
-        // IPC connection too.
+        // Re-build the provider inside the task from the already-validated config
+        // so the heavy work — the network call to the LLM — happens off the IPC
+        // connection. We re-check `provider()` only to obtain the boxed provider;
+        // the None branch is unreachable in practice but handled defensively rather
+        // than unwrapped. Going through the run-resolver here (not at validation
+        // above) keeps the Ollama auto-launch off the IPC connection too.
         let Some(provider) = crate::pipeline::llm_provider_for_run(&task_state, &llm_cfg).await
         else {
             return;
@@ -2087,12 +2089,12 @@ async fn rerun_cleanup(
                     tracing::warn!(error = %e, "rerun_cleanup: failed to update processing meta");
                 }
 
-                // A re-run was requested precisely because the prior cleanup
-                // failed — so clear the terminal CleanupFailed status now that it
+                // A re-run is often requested precisely because the prior cleanup
+                // failed, so clear the terminal CleanupFailed status now that it
                 // succeeded, otherwise the recording reads as failed forever even
                 // though it cleaned fine. `update_transcript` above already cleared
                 // the error_kind/error_message columns; only the status remained.
-                // Best-effort + scoped to CleanupFailed so a re-run never masks an
+                // Best-effort and scoped to CleanupFailed so a re-run never masks an
                 // unrelated terminal status (e.g. HookFailed).
                 if recording.status == RecordingStatus::CleanupFailed {
                     if let Err(e) = task_state
@@ -2110,9 +2112,9 @@ async fn rerun_cleanup(
                 crate::pipeline::reflow_cleaned_timing(&task_state, &id, &cleaned).await;
 
                 // PB-COMPOUND: the live transcript is now this cleanup's output, so
-                // the version chain must reflect it — otherwise Compare-versions /
-                // Revert keep showing the PRIOR run's cleanup text. Rebuild it as
-                // raw (idx 0) + this cleanup (idx 1); a manual re-clean collapses
+                // the version chain has to reflect it — otherwise Compare-versions
+                // and Revert keep showing the prior run's cleanup text. Rebuild it
+                // as raw (idx 0) + this cleanup (idx 1); a manual re-clean collapses
                 // any earlier multi-step chain since the live text is now solely
                 // this cleanup output. Best-effort.
                 let versions = vec![
@@ -2195,11 +2197,11 @@ async fn rerun_summary(
         });
     }
 
-    // Resolve the BASE (llm_cfg, prompt) from the migrated `summary` Playbook
-    // ENTRY so editing it in the Playbook changes what an on-demand re-run does
-    // — the Playbook is the source of truth. The Re-run modal's one-time
-    // overrides (a non-empty model / prompt) then layer ON TOP and still win.
-    // When no `summary` entry exists (a user deleted it) fall back to the legacy
+    // Resolve the base (llm_cfg, prompt) from the migrated `summary` Playbook entry
+    // so editing it in the Playbook changes what an on-demand re-run does — the
+    // Playbook is the source of truth. The Re-run modal's one-time overrides (a
+    // non-empty model / prompt) then layer on top and still win. When no `summary`
+    // entry exists (a user deleted it) fall back to the legacy
     // [summary]/[llm_post_process] path (`generate_summary`) so behavior is never
     // worse than today. `Resolution` carries whichever path we took to the probe
     // and the spawned task.
@@ -2215,9 +2217,9 @@ async fn rerun_summary(
             prompt: String,
             endpoint_hint: Option<String>,
         },
-        /// No `summary` entry — the legacy `[summary]` section drives this run
-        /// via `generate_summary`, with the one-shot overrides baked into `cfg`.
-        /// Boxed: `Config` is large and this is the rare path (clippy
+        /// No `summary` entry — the legacy `[summary]` section drives this run via
+        /// `generate_summary`, with the one-shot overrides baked into `cfg`. Boxed
+        /// because `Config` is large and this is the rare path (clippy
         /// large_enum_variant — keep the common `Entry` arm cheap to move).
         Legacy {
             cfg: Box<phoneme_core::config::Config>,
@@ -2226,9 +2228,9 @@ async fn rerun_summary(
 
     let resolution = match crate::pipeline::entry_config_for_target(&cfg, "summary") {
         Some((base_llm, base_prompt)) => {
-            // Layer the one-shot model + prompt overrides via the SHARED helper
-            // that `rerun_cleanup` (and the tests) use — the single source of
-            // truth for "non-empty override wins, blank is ignored".
+            // Layer the one-shot model + prompt overrides via the shared helper
+            // that `rerun_cleanup` (and the tests) use — the single source of truth
+            // for "non-empty override wins, blank is ignored".
             let (llm_cfg, entry_prompt) = crate::pipeline::apply_oneshot_overrides(
                 base_llm,
                 base_prompt,
@@ -2322,12 +2324,12 @@ async fn rerun_summary(
                     return;
                 }
                 // Clear a stale SummarizeFailed status now that the summary
-                // succeeded — otherwise the recording reads as failed forever
-                // even though the re-run worked. Best-effort + scoped to
+                // succeeded — otherwise the recording reads as failed forever even
+                // though the re-run worked. Best-effort and scoped to
                 // SummarizeFailed so a re-run never masks an unrelated terminal
-                // status. (The error_kind/error_message columns are left as-is;
-                // the list/detail "failed" state keys off `status`, which is now
-                // Done, so the recording no longer surfaces as failed.)
+                // status. The error_kind/error_message columns are left as-is; the
+                // list/detail "failed" state keys off `status`, which is now Done,
+                // so the recording no longer surfaces as failed.
                 if prev_status == RecordingStatus::SummarizeFailed {
                     if let Err(e) = task_state
                         .catalog
@@ -2359,10 +2361,10 @@ async fn import_recording(state: &AppState, path: String) -> Response {
     let requested = std::path::PathBuf::from(&path);
 
     // Canonicalize so the path we open is a fully-resolved, real filesystem
-    // location (resolves `..`, symlinks, and relative components). The dialog
-    // hands us absolute paths already; this hardens the arbitrary-client-path
-    // bypass by ensuring we never act on a half-resolved or traversal path.
-    // This inherently checks existence atomically, preventing TOCTOU issues.
+    // location (resolves `..`, symlinks, and relative components). The dialog hands
+    // us absolute paths already; this hardens the arbitrary-client-path bypass by
+    // ensuring we never act on a half-resolved or traversal path. It also checks
+    // existence atomically, which avoids a TOCTOU window.
     let input = match std::fs::canonicalize(&requested) {
         Ok(p) => p,
         Err(e) => {
@@ -2548,10 +2550,10 @@ async fn export_clip(
         }
     };
 
-    // Never write the clip over the recording's own source audio: clip_wav reads
+    // Never write the clip over the recording's own source audio: `clip_wav` reads
     // the whole source into memory then atomically replaces `dest`, so dest==src
     // would truncate the original to the slice while the catalog row still points
-    // here — irreversible data loss. Compare by resolved location so `./x.wav` vs
+    // here — irreversible data loss. Compare by resolved location so `./x.wav` vs.
     // the absolute path (and Windows separator/case differences) all match.
     let src_resolved = src.canonicalize().unwrap_or_else(|_| src.clone());
     let dest_resolved = dest
@@ -2627,8 +2629,8 @@ fn started_at_from_id(id: &phoneme_core::RecordingId) -> chrono::DateTime<chrono
 }
 
 /// Synchronously walk `audio_dir/<YYYY-MM-DD>/<HHmmssNNN>.wav`, collecting every
-/// `.wav` whose path reconstructs to a valid RecordingId. Blocking std::fs (run
-/// off the runtime by the caller); no new crate dependency. Unreadable dirs are
+/// `.wav` whose path reconstructs to a valid RecordingId. Blocking std::fs (the
+/// caller runs it off the runtime); no new crate dependency. Unreadable dirs are
 /// skipped rather than failing the whole scan.
 fn scan_audio_dir(audio_dir: &std::path::Path) -> Vec<ReimportCandidate> {
     let mut out = Vec::new();
@@ -2670,12 +2672,12 @@ fn scan_audio_dir(audio_dir: &std::path::Path) -> Vec<ReimportCandidate> {
     out
 }
 
-/// Re-link audio files that have no catalog row — the SAFE counterpart to the
+/// Re-link audio files that have no catalog row — the safe counterpart to the
 /// destructive `doctor --rebuild-catalog`. Scans the audio dir, and for every
 /// `.wav` whose RecordingId isn't already in the catalog inserts a `Queued` row
-/// pointing at the EXISTING file (no copy, original id + timestamp preserved)
+/// pointing at the existing file (no copy, original id and timestamp preserved)
 /// and enqueues it for the normal pipeline. Never deletes or mutates existing
-/// rows. `dry_run` returns the count + paths without writing anything.
+/// rows. `dry_run` returns the count and paths without writing anything.
 async fn reimport_from_disk(state: &AppState, dry_run: bool) -> Response {
     let existing: std::collections::HashSet<phoneme_core::RecordingId> =
         match state.catalog.all_ids().await {
@@ -2802,8 +2804,8 @@ fn error_to_kind(e: &phoneme_core::Error) -> IpcErrorKind {
 /// Wire-identical to spelling the `IpcError` out at the call site.
 /// The (mode, threshold) pair the voiceprint scorer should use for a diarization
 /// config — V2 score-norm aware. With norm `off` (default) it's the raw cosine
-/// bar; with `s_norm`/`as_norm` it's the z-score bar. Shared by recognition and
-/// V5 propagation so both judge "is this the same voice" the same way.
+/// bar; with `s_norm`/`as_norm` it's the z-score bar. Shared by recognition and V5
+/// propagation so both judge "is this the same voice" the same way.
 fn voiceprint_scorer(
     diar: &phoneme_core::config::DiarizationConfig,
 ) -> (phoneme_core::voiceprint::ScoreNorm, f32) {
@@ -2817,11 +2819,11 @@ fn voiceprint_scorer(
 }
 
 /// Run V5 name propagation for a just-enrolled named voice, returning the JSON the
-/// `SetSpeakerName` response carries. Routes on `diar.name_propagation`:
-/// `off` → no-op; `auto` → back-fill every candidate and report the count; `ask`
-/// → return the candidate list for the UI to confirm (apply nothing). Best-effort
-/// — any catalog error is logged and reported as an empty result, never failing
-/// the rename.
+/// `SetSpeakerName` response carries. Routes on `diar.name_propagation`: `off` is a
+/// no-op; `auto` back-fills every candidate and reports the count; `ask` returns
+/// the candidate list for the UI to confirm (applying nothing). Best-effort — any
+/// catalog error is logged and reported as an empty result, never failing the
+/// rename.
 async fn speaker_name_propagation(
     state: &AppState,
     named_voice_id: &str,
@@ -2869,7 +2871,7 @@ async fn speaker_name_propagation(
                     (Vec::new(), true)
                 }
             };
-            // Nudge clients to refresh ONLY the recordings actually back-filled —
+            // Nudge clients to refresh only the recordings actually back-filled,
             // not every candidate (many are skipped: already named, no voiceprint).
             let mut refreshed: std::collections::HashSet<phoneme_core::id::RecordingId> =
                 std::collections::HashSet::new();
@@ -2901,12 +2903,12 @@ async fn speaker_name_propagation(
 }
 
 /// Post-edit upkeep shared by `UpdateTranscript` and `FindReplace`: re-flow the
-/// per-word / per-segment timing layers onto `new_text` (so the Synced/Timeline
+/// per-word and per-segment timing layers onto `new_text` (so the Synced/Timeline
 /// views follow the edit), re-embed the new text for semantic search, then emit
 /// `TranscriptUpdated`. Best-effort throughout: the prose is already persisted by
 /// the caller, so a re-align or re-embed failure is logged, not surfaced. The
-/// re-flow is gated by `editor.resync_views_on_edit` (an opt-out for users who
-/// prefer the original machine timings).
+/// re-flow is gated by `editor.resync_views_on_edit`, an opt-out for users who
+/// prefer the original machine timings.
 async fn reflow_and_reembed_after_edit(
     state: &AppState,
     id: &phoneme_core::RecordingId,
@@ -2928,11 +2930,11 @@ async fn reflow_and_reembed_after_edit(
                 tracing::warn!(id = %id, error = %e, "re-align: could not load words; leaving timing layers untouched");
             }
         }
-        // Any "cleaned" timing layer (TL-CONSISTENCY) was aligned to the
-        // pre-edit text; the raw layer above is now re-flowed onto `new_text`, so
-        // a separate cleaned layer would be redundant at best and stale at worst
-        // (manual edit / find-replace / revert-to-version all land here). Drop it
-        // so the Synced/Timeline views fall back to the freshly re-flowed raw.
+        // Any "cleaned" timing layer (TL-CONSISTENCY) was aligned to the pre-edit
+        // text; the raw layer above is now re-flowed onto `new_text`, so a separate
+        // cleaned layer would be redundant at best and stale at worst (manual edit,
+        // find-replace, and revert-to-version all land here). Drop it so the
+        // Synced/Timeline views fall back to the freshly re-flowed raw.
         if let Err(e) = state
             .catalog
             .replace_words_variant(id, "cleaned", &[])
@@ -2966,8 +2968,8 @@ fn err_response(e: &phoneme_core::Error) -> Response {
     })
 }
 
-/// A `NotFound` error response. Callers format the message (the wording
-/// varies per request and is part of the wire contract); this pins the kind.
+/// A `NotFound` error response. Callers format the message — the wording varies
+/// per request and is part of the wire contract — and this pins the kind.
 fn not_found(message: String) -> Response {
     Response::Err(IpcError {
         kind: IpcErrorKind::NotFound,
@@ -3164,14 +3166,14 @@ mod tests {
         id
     }
 
-    /// THE #49 REGRESSION: a model-override re-transcription for a Local
-    /// (bundled) recording must NOT mutate the process-global whisper config.
-    /// The old code wrote the override model into the shared config, which the
-    /// whisper supervisor polls and restarts on — and which the queue worker's
-    /// post-run reload reverted, restarting it again. That double restart raced
-    /// every other queued/preview transcription (which read the same global
-    /// config) and mass-failed them. The override must instead be recorded for
-    /// just this one job in `pending_overrides`.
+    /// Guards #49: a model-override re-transcription for a Local (bundled)
+    /// recording must not mutate the process-global whisper config. Writing the
+    /// override model into the shared config makes the whisper supervisor (which
+    /// polls it) restart, and the queue worker's post-run reload reverts it and
+    /// restarts again. That double restart races every other queued/preview
+    /// transcription (which reads the same global config) and mass-fails them. The
+    /// override must instead be recorded for just this one job in
+    /// `pending_overrides`.
     #[tokio::test]
     async fn model_override_retranscribe_does_not_mutate_global_config() {
         let tmp = tempfile::tempdir().unwrap();
@@ -3183,7 +3185,7 @@ mod tests {
         let state = override_test_state(tmp.path(), cfg).await;
 
         let id = insert_done_recording(&state).await;
-        // Snapshot the configured model BEFORE the request.
+        // Snapshot the configured model before the request.
         let model_path_before = state.config.load().whisper.model_path.clone();
         let port_before = state.config.load().whisper.bundled_server_port;
 
@@ -3204,8 +3206,8 @@ mod tests {
             "retranscribe should be accepted"
         );
 
-        // The GLOBAL config is untouched — this is the crux of the fix. The
-        // supervisor never sees a model change here, so it never thrashes.
+        // The global config is untouched — the crux of the fix. The supervisor
+        // never sees a model change here, so it never thrashes.
         let after = state.config.load();
         assert_eq!(
             after.whisper.model_path, model_path_before,
@@ -3234,10 +3236,10 @@ mod tests {
         assert_eq!(rec.status, RecordingStatus::Queued);
     }
 
-    /// The Shutdown handler must REPLY before the daemon exits: the Ok is
-    /// produced immediately while the coordinator trigger lags by the grace
-    /// delay, so the caller (`phoneme daemon stop`, the tray's Quit) always
-    /// reads its acknowledgement off the pipe before teardown begins.
+    /// The Shutdown handler must reply before the daemon exits: the Ok is produced
+    /// immediately while the coordinator trigger lags by the grace delay, so the
+    /// caller (`phoneme daemon stop`, the tray's Quit) always reads its
+    /// acknowledgement off the pipe before teardown begins.
     #[tokio::test]
     async fn shutdown_replies_before_triggering_the_coordinator() {
         let tmp = tempfile::tempdir().unwrap();
@@ -3366,8 +3368,8 @@ mod tests {
         }
     }
 
-    /// HookTest output crosses the pipe to the tray/CLI, and the test command
-    /// is caller-supplied — a script that dumps its environment must not hand
+    /// HookTest output crosses the pipe to the tray/CLI, and the test command is
+    /// caller-supplied — a script that dumps its environment must not hand
     /// credentials to the renderer. Both outcomes are redacted: the Ok path's
     /// `stderr_tail` and the `HookFailed` message (which embeds stderr).
     #[tokio::test]

@@ -9,11 +9,10 @@
 //! Conservative by design: the default word list is the unambiguous noise
 //! ("um", "uh", "er", …). The longer phrase list ("you know", "i mean",
 //! "sort of", "kind of", "like") is gated behind [`FillerConfig::aggressive`]
-//! and OFF by default, because those carry real meaning — "I *like* it",
-//! "*kind of* blue" — and stripping them blindly mangles the text. The
-//! per-recording polish for the dictation fast lane lives in
-//! [`crate::dictation`]; this module is the pipeline-step form, configurable via
-//! `[filler]`.
+//! and off by default, because those carry real meaning ("I like it", "kind of
+//! blue") and stripping them blindly mangles the text. The per-recording polish
+//! for the dictation fast lane lives in [`crate::dictation`]; this module is the
+//! pipeline-step form, configurable via `[filler]`.
 
 use crate::config::FillerConfig;
 
@@ -21,17 +20,17 @@ use crate::config::FillerConfig;
 /// punctuation the removal leaves behind.
 ///
 /// What it does, in order:
-/// 1. remove configured filler **phrases** (multi-word, e.g. "you know") —
+/// 1. remove configured filler **phrases** (multi-word, e.g. "you know"), but
 ///    only when [`FillerConfig::aggressive`] is on, since the built-in phrases
 ///    are real words in other contexts;
 /// 2. remove configured filler **words** (single words, e.g. "um"), matched
-///    case-insensitively at word boundaries — never inside another word
-///    ("umbrella" keeps its "um");
+///    case-insensitively at word boundaries and never inside another word, so
+///    "umbrella" keeps its "um";
 /// 3. collapse the doubled spaces, drifted spaces-before-punctuation, and
-///    leading punctuation the removals can leave (" ," → ",", a leading ", "
-///    dropped).
+///    leading punctuation the removals can leave (" ," becomes ",", a leading
+///    ", " is dropped).
 ///
-/// Pure: no I/O, no global state, deterministic. Empty/whitespace input (or a
+/// Pure: no I/O, no global state, deterministic. Empty or whitespace input (or a
 /// transcript that was nothing but filler) returns an empty string.
 ///
 /// ```
@@ -43,10 +42,10 @@ use crate::config::FillerConfig;
 /// assert_eq!(strip_fillers("I like it", &cfg), "I like it");
 /// ```
 pub fn strip_fillers(text: &str, cfg: &FillerConfig) -> String {
-    // Phrases first (aggressive only): a phrase like "kind of" must be removed
-    // as a unit before the single-word pass, which would otherwise leave a
-    // stranded "of". Each phrase is matched on whole-word boundaries, case-
-    // insensitively, so "kind of" matches but "mankind office" never does.
+    // Phrases first (aggressive only): a phrase like "kind of" has to go as a
+    // unit before the single-word pass, which would otherwise leave a stranded
+    // "of". Each phrase is matched on whole-word boundaries, case-insensitively,
+    // so "kind of" matches but "mankind office" doesn't.
     let mut working = text.to_string();
     if cfg.aggressive {
         for phrase in &cfg.phrases {
@@ -56,9 +55,9 @@ pub fn strip_fillers(text: &str, cfg: &FillerConfig) -> String {
 
     // Single words: keep non-filler tokens; for a removed filler keep only any
     // trailing punctuation it carried ("uh," -> ",") so the surrounding comma or
-    // terminator survives — tidy() then reattaches it to the previous word and
+    // terminator survives. tidy() then reattaches it to the previous word and
     // collapses any doubling. Splitting on whitespace means a filler is only ever
-    // matched standalone, so "umbrella" / "there" are never touched.
+    // matched standalone, so "umbrella" and "there" are never touched.
     let kept: Vec<String> = working
         .split_whitespace()
         .filter_map(|word| {
@@ -83,7 +82,7 @@ pub fn strip_fillers(text: &str, cfg: &FillerConfig) -> String {
 
 /// Whether `word` (a whitespace-delimited token, punctuation and all) is one of
 /// the configured filler `words`, compared case-insensitively against its
-/// alphanumeric core — so "Um," and "UH." match "um"/"uh", but a token whose
+/// alphanumeric core, so "Um," and "UH." match "um" and "uh", but a token whose
 /// core differs ("umbrella") never does.
 fn is_filler_word(word: &str, words: &[String]) -> bool {
     let bare = word.trim_matches(|c: char| !c.is_alphanumeric());
@@ -95,7 +94,7 @@ fn is_filler_word(word: &str, words: &[String]) -> bool {
 
 /// Remove every whole-word, case-insensitive occurrence of `phrase` from `text`,
 /// leaving a single space where it stood (tidy() collapses it afterwards). A
-/// blank phrase is ignored. Whole-word so "sort of" matches "Sort of" but a
+/// blank phrase is ignored. Whole-word means "sort of" matches "Sort of" but a
 /// phrase never bites into the middle of a longer word.
 fn remove_phrase(text: &str, phrase: &str) -> String {
     let phrase = phrase.trim();
@@ -103,13 +102,13 @@ fn remove_phrase(text: &str, phrase: &str) -> String {
         return text.to_string();
     }
     // `to_lowercase()` can change a string's byte length (e.g. 'İ' U+0130 -> 'i' +
-    // combining dot, 2 bytes -> 3), so byte offsets found in a lowercased copy are
-    // NOT valid indices into the original `text` and slicing it with them panics.
-    // Build the lowercase form char-by-char and, in lockstep, a map from each
-    // lower-text byte offset back to the original-text byte offset it came from
-    // (plus a final sentinel mapping lower_text.len() -> text.len()). Building the
-    // lowercase side ourselves keeps the two perfectly aligned regardless of any
-    // length-changing or context-sensitive folding.
+    // combining dot, 2 bytes -> 3), so a byte offset found in a lowercased copy
+    // isn't a valid index into the original `text`, and slicing `text` with it
+    // panics on a non-char boundary. Build the lowercase form char-by-char and,
+    // in lockstep, a map from each lower-text byte offset back to the
+    // original-text byte offset it came from (plus a final sentinel mapping
+    // lower_text.len() -> text.len()). Constructing the lowercase side ourselves
+    // keeps the two aligned through any length-changing or context-sensitive fold.
     let mut lower_text = String::with_capacity(text.len());
     let mut lower_to_orig: Vec<usize> = Vec::with_capacity(text.len() + 1);
     for (ob, c) in text.char_indices() {
@@ -132,8 +131,8 @@ fn remove_phrase(text: &str, phrase: &str) -> String {
     while let Some(rel) = lower_text[search..].find(&lower_phrase) {
         let start = search + rel;
         let end = start + plen;
-        // Whole-word: the char before/after the match must be a boundary, never
-        // alphanumeric — otherwise it is a substring of a bigger word, skip it.
+        // Whole-word: the char before and after the match must be a boundary,
+        // never alphanumeric. Otherwise it's a substring of a bigger word, so skip.
         let before_ok = start == 0
             || !lower_text[..start]
                 .chars()
@@ -158,15 +157,15 @@ fn remove_phrase(text: &str, phrase: &str) -> String {
 }
 
 /// Collapse the whitespace and punctuation artifacts a filler removal leaves:
-/// runs of spaces → one, a space before `,`/`.`/`!`/`?`/`;`/`:` dropped, a
-/// leading orphan separator (", yeah" once the opener was stripped) removed,
-/// and the result trimmed. Mirrors `dictation::normalize_spacing`'s intent so
+/// runs of spaces become one, a space before `,`/`.`/`!`/`?`/`;`/`:` is dropped,
+/// a leading orphan separator (", yeah" once the opener was stripped) is removed,
+/// and the result is trimmed. Mirrors `dictation::normalize_spacing`'s intent so
 /// the output never reads as " , word" or "word  word".
 fn tidy(text: &str) -> String {
     const PUNCT: [char; 6] = [',', '.', '!', '?', ';', ':'];
     // One pass over whitespace-joined tokens: drop a space before punctuation, and
     // collapse a run of punctuation (possibly space-separated) down to the first
-    // mark — so a filler removed between commas ("it was, , done") and a reattached
+    // mark, so a filler removed between commas ("it was, , done") and a reattached
     // separator ("so , yeah") both read cleanly.
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = String::with_capacity(collapsed.len());
@@ -176,7 +175,7 @@ fn tidy(text: &str) -> String {
             if out.ends_with(' ') {
                 out.pop();
             }
-            // Already sitting on a punctuation mark → this one is redundant.
+            // Already sitting on a punctuation mark, so this one is redundant.
             if last_nonspace.is_some_and(|p| PUNCT.contains(&p)) {
                 continue;
             }
@@ -253,8 +252,8 @@ mod tests {
             aggressive: true,
             ..FillerConfig::default()
         };
-        // "mankind office" contains "kind of" as a substring across words only
-        // by letters, not whole words — it must survive untouched.
+        // "mankind office" contains "kind of" only as a cross-word letter run,
+        // not as whole words, so it must survive untouched.
         assert_eq!(
             strip_fillers("mankind official stuff", &cfg),
             "mankind official stuff"
@@ -264,8 +263,9 @@ mod tests {
     #[test]
     fn remove_phrase_handles_length_changing_lowercase() {
         // 'İ' (U+0130, 2 bytes) lowercases to "i̇" (3 bytes), so phrase-match byte
-        // offsets in the lowercased copy exceed the original's — slicing the
-        // original with them used to panic on a non-char boundary. (regression)
+        // offsets in the lowercased copy run past the original's; slicing the
+        // original with them would panic on a non-char boundary if the offsets
+        // weren't mapped back.
         let cfg = FillerConfig {
             aggressive: true,
             ..FillerConfig::default()

@@ -115,8 +115,9 @@ struct PreRoll {
 }
 
 /// Which kind of preview loop a [`PreviewTask`] is, so a meeting source-swap can
-/// tear down ONLY the caption loop(s) and leave the cheap waveform loop running
-/// (otherwise the first toggle permanently kills the "it hears me" pill).
+/// tear down just the caption loop(s) and leave the cheap waveform loop running.
+/// Tearing down both would permanently kill the "it hears me" pill on the first
+/// toggle.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PreviewKind {
     /// A `TranscriptionPartial` caption loop (whisper). Stopped on a source-swap.
@@ -194,7 +195,7 @@ fn preroll_enabled(cfg: &phoneme_core::Config) -> bool {
 /// Only in-place dictations are ever eligible. Of those, `[in_place].full_pipeline`
 /// already routes the recording through the full pipeline (transcribe → recipe →
 /// type). The added gate is `has_recipe`: a custom-hotkey in-place binding that
-/// names a NON-EMPTY recipe must run the full pipeline too, because the fast lane
+/// names a non-empty recipe must run the full pipeline too, because the fast lane
 /// never enters `pipeline::run` and so would silently drop the recipe. Pure, so
 /// the routing decision is unit-testable without a live recorder.
 fn wants_fast_lane(in_place: bool, full_pipeline: bool, has_recipe: bool) -> bool {
@@ -205,13 +206,13 @@ fn wants_fast_lane(in_place: bool, full_pipeline: bool, has_recipe: bool) -> boo
 /// transcription the instant it is ready, ahead of the queued full pipeline.
 ///
 /// Only in-place dictations with `[in_place].type_first` qualify, and only when
-/// they have NO recipe. A recipe reshapes the text (summarize, polish, …), so
+/// they have no recipe. A recipe reshapes the text (summarize, polish, …), so
 /// the quick raw transcription is the wrong thing to type; a recipe-bearing
-/// in-place recording instead gets its single insertion at the END of the
+/// in-place recording instead gets its single insertion at the end of the
 /// pipeline (the recipe's result — see `pipeline::pipeline_should_type`). This
-/// gate is the exact inverse condition `pipeline_should_type` suppresses on, so
-/// the text lands exactly once on every in-place path. Pure, so the decision is
-/// unit-testable without a live recorder.
+/// gate is the exact inverse of the condition `pipeline_should_type` suppresses
+/// on, so the text lands exactly once on every in-place path. Pure, so the
+/// decision is unit-testable without a live recorder.
 fn wants_type_first(in_place: bool, type_first: bool, has_recipe: bool) -> bool {
     in_place && type_first && !has_recipe
 }
@@ -244,7 +245,7 @@ impl DaemonRecorder {
     /// whenever the daemon is idle (startup, after a recording finishes).
     ///
     /// When pre-roll is disabled this is a no-op, so the default path keeps the
-    /// microphone closed between recordings exactly as before.
+    /// microphone closed between recordings.
     pub async fn ensure_preroll(&self, state: &AppState) {
         let cfg = state.config.load();
         if !preroll_enabled(&cfg) {
@@ -406,10 +407,10 @@ impl DaemonRecorder {
             .join(id.day_folder())
             .join(format!("{}.wav", id.file_stem()));
 
-        // Capture the foreground app for in-place dictations, at START — this is
+        // Capture the foreground app for in-place dictations, at start — this is
         // the window the user is dictating into, before the brief recording can
         // shift focus. The process stem keys the per-app type/paste/off override;
-        // the window title is read ONLY when app-aware context is opted in and
+        // the window title is read only when app-aware context is opted in and
         // the app isn't denylisted (privacy-first — off by default reads nothing).
         // Both Win32 calls and `config.load()` are synchronous (no await), so
         // doing this under the `active` guard is sound.
@@ -455,7 +456,7 @@ impl DaemonRecorder {
 
         // Resolve the capture source: a custom hotkey can override the global
         // `[recording].source` per-binding (`source_override`). Record which it was
-        // on the row's `track` so the list's Source column reflects the REAL source
+        // on the row's `track` so the list's Source column reflects the real source
         // instead of assuming "single == microphone". Loaded once here and reused
         // for the capture stream below.
         let app_cfg = state.config.load();
@@ -514,8 +515,8 @@ impl DaemonRecorder {
         // audio to prepend; this also releases the microphone (or returns it) before we reopen
         // it for the recording. Empty when pre-roll is disabled (default path).
         let (prepend, preroll_source) = self.take_preroll_samples().await;
-        // Pre-roll is captured with the GLOBAL source (and only ever the
-        // microphone). If a per-keybind override switched THIS recording to a
+        // Pre-roll is captured with the global source (and only ever the
+        // microphone). If a per-keybind override switched this recording to a
         // different source, that buffered audio is from the wrong device — drop it
         // and open a fresh stream for the override source below, so the recording
         // actually captures (and is labelled as) the source the binding asked for.
@@ -548,13 +549,13 @@ impl DaemonRecorder {
             // `RecorderConfig::mode` is `phoneme_core::RecordMode` (re-exported
             // by phoneme-audio as `RecordingMode`), so no conversion is needed.
             mode,
-            // The auto-stop budget measures FRESHLY captured audio only: the
+            // The auto-stop budget measures freshly captured audio only: the
             // recorder excludes the prepended pre-roll from both the
-            // `Duration { secs }` auto-stop and this `max_duration_ms` ceiling
-            // (audit A3). So a `max_duration_secs` of N yields N seconds of live
-            // capture with the pre-roll lead-in added on top — the requested length
-            // is never shortened by pre-roll, and the cap bounds the same amount of
-            // speech whether or not pre-roll is enabled.
+            // `Duration { secs }` auto-stop and this `max_duration_ms` ceiling.
+            // So a `max_duration_secs` of N yields N seconds of live capture with
+            // the pre-roll lead-in added on top — the requested length is never
+            // shortened by pre-roll, and the cap bounds the same amount of speech
+            // whether or not pre-roll is enabled.
             max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
             silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
             silence_window_ms: state.config.load().recording.silence_window_ms,
@@ -589,16 +590,16 @@ impl DaemonRecorder {
         let level_snapshot = recorder.snapshot_handle();
         *self.handle.lock().await = Some(recorder);
 
-        // Spawn a task to auto-finalize when the recorder task ends on its OWN —
+        // Spawn a task to auto-finalize when the recorder task ends on its own:
         // a self-terminating mode hitting its stop condition (Oneshot silence /
-        // Duration elapsed), OR, for any mode incl. Hold, the capture device
-        // failing mid-recording (A1: the mic was unplugged). `on_done` fires
-        // whenever the loop ends, so this single task covers both: it calls
-        // `stop`, which finalizes the partial take and (when the source flagged
-        // a device loss) emits `DeviceLost`. A normal user `RecordStop`/cancel
-        // consumes the recorder first, so this task then finds the slot empty
-        // and `stop` returns `NotRecording` — a benign "already stopped", not a
-        // failure, so it's swallowed rather than logged.
+        // Duration elapsed), or, for any mode including Hold, the capture device
+        // failing mid-recording (the mic was unplugged). `on_done` fires whenever
+        // the loop ends, so this single task covers both: it calls `stop`, which
+        // finalizes the partial take and (when the source flagged a device loss)
+        // emits `DeviceLost`. A normal user `RecordStop`/cancel consumes the
+        // recorder first, so this task then finds the slot empty and `stop`
+        // returns `NotRecording` — a benign "already stopped", not a failure, so
+        // it's swallowed rather than logged.
         let daemon_recorder = self.clone();
         let state_clone = state.clone();
         tokio::spawn(async move {
@@ -617,16 +618,16 @@ impl DaemonRecorder {
         // tick only transcribes when it can `try_acquire` the single serial
         // whisper permit, so the dictation's own transcribe always wins it and
         // an in-flight tick simply skips. The dictation stop path tears this
-        // preview down WITHOUT awaiting (see `stop`), so a preview tick can
+        // preview down without awaiting (see `stop`), so a preview tick can
         // never delay the paste ("constantly listening, never pastes").
         // Streaming-type (`stream_type`, computed above before `focused_app`
         // moved into the active slot): force the preview loop on; it then types
         // committed words live and the stop reconcile patches them to the final.
-        // ALWAYS reset the rolling typed state at the start of EVERY recording
-        // (not just streaming ones), so the stop path can use "is it non-empty?"
-        // as the did-we-stream signal — robust even if the user toggles
-        // stream_type mid-recording (audit M3) and clearing any leaked write from
-        // a prior dictation (audit M2).
+        // Reset the rolling typed state at the start of every recording (not just
+        // streaming ones), so the stop path can use "is it non-empty?" as the
+        // did-we-stream signal. That stays correct even if the user toggles
+        // stream_type mid-recording, and it clears any leaked write from a prior
+        // dictation.
         *state.stream_typed.lock().await = String::new();
         self.start_preview(state, id.clone(), preview_snapshot, false, stream_type)
             .await;
@@ -655,7 +656,7 @@ impl DaemonRecorder {
     /// text lands before the pipeline finishes. See `in_place.rs`.
     pub async fn stop(&self, state: &AppState) -> Result<RecordingId> {
         // Take the active slot and the recorder handle in one short critical
-        // section, then drop both guards BEFORE any slow await. The preview
+        // section, then drop both guards before any slow await. The preview
         // teardown below can block on an in-flight transcription tick (up to
         // the provider timeout), and holding `active` through it would stall
         // every status/control IPC (RecordStatus, pause, cancel, …) for that
@@ -681,8 +682,8 @@ impl DaemonRecorder {
         // lane (`spawn_fast_lane`) can grab it right away. Abort skips the
         // loop's own temp-WAV cleanup, so we remove this recording's preview WAV
         // best-effort below. Normal recordings/meetings keep the graceful,
-        // await-based teardown (which deletes its own temp WAV) — do NOT abort
-        // them or their preview WAVs leak.
+        // await-based teardown (which deletes its own temp WAV); aborting those
+        // would leak their preview WAVs.
         self.stop_preview(active.in_place).await;
         if active.in_place {
             let preview_wav =
@@ -705,13 +706,13 @@ impl DaemonRecorder {
         // `[in_place].full_pipeline` opts back in — transcribe → polish →
         // type, with persistence off the latency path. See `in_place.rs`.
         //
-        // A custom-hotkey in-place binding that names a NON-EMPTY recipe is the
+        // A custom-hotkey in-place binding that names a non-empty recipe is the
         // exception: the fast lane never enters `pipeline::run`, so its recipe
-        // would never execute. Such a recording takes the FULL pipeline instead
+        // would never execute. Such a recording takes the full pipeline instead
         // (so the recipe runs and reshapes the text), and the pipeline's
         // end-of-run typing then inserts the recipe's result in place — exactly
         // the `full_pipeline = true` flow, just opted into per-binding. The
-        // recipe ledger is only PEEKED here; `pipeline::run` claims-and-removes
+        // recipe ledger is only peeked here; `pipeline::run` claims and removes
         // it (and the model override) the same way it does for a normal queued
         // recording.
         let in_place_cfg = state.config.load().in_place.clone();
@@ -725,12 +726,12 @@ impl DaemonRecorder {
         let fast_lane = wants_fast_lane(active.in_place, in_place_cfg.full_pipeline, has_recipe);
         if fast_lane {
             // A genuine fast-lane dictation never reaches `pipeline::run`, the
-            // sole place the per-recording ledgers are claimed. Claim them HERE
+            // sole place the per-recording ledgers are claimed. Claim them here
             // so nothing leaks keyed by this (soon-dead) id: the model override
             // (if the binding carried one) is threaded into the fast-lane
-            // transcription, and any stray recipe entry — there is none for a
-            // true fast lane, since a recipe forces the full pipeline above, but
-            // a defensive remove keeps the contract airtight — is dropped.
+            // transcription, and any stray recipe entry is dropped. A true fast
+            // lane never has a recipe entry — a recipe forces the full pipeline
+            // above — but the defensive remove keeps the contract airtight.
             let fast_lane_model = state
                 .pending_overrides
                 .lock()
@@ -750,8 +751,8 @@ impl DaemonRecorder {
                 fast_lane_model,
             );
         } else {
-            // A NON-fast-lane in-place dictation (full pipeline, or a
-            // recipe-bearing binding) types its result from the END of
+            // A non-fast-lane in-place dictation (full pipeline, or a
+            // recipe-bearing binding) types its result from the end of
             // `pipeline::run`. The fast lane passes `focused_app` directly to its
             // typing; the pipeline can't see this recording's foreground app, so
             // stash it in the side-channel keyed by id — `pipeline::run` claims it
@@ -770,14 +771,14 @@ impl DaemonRecorder {
             }
             // Full-pipeline dictation with `type_first`: the text shouldn't
             // wait for the queue, so a type-only pass types the quick
-            // transcription NOW, alongside the normal enqueue below — the
+            // transcription right away, alongside the normal enqueue below — the
             // pipeline still runs every step for the library copy, but skips
             // its own end-of-run typing so the text lands exactly once.
             //
-            // A RECIPE-bearing in-place binding is excluded: its recipe reshapes
+            // A recipe-bearing in-place binding is excluded: its recipe reshapes
             // the text (summarize, polish, …), so the quick raw transcription is
-            // the WRONG thing to type. For it the pipeline owns the single
-            // insertion of the recipe's RESULT at the end (see
+            // the wrong thing to type. For it the pipeline owns the single
+            // insertion of the recipe's result at the end (see
             // `pipeline_should_type`) — type-first here would either land the
             // raw text twice or land the raw text instead of the recipe output.
             if wants_type_first(active.in_place, in_place_cfg.type_first, has_recipe) {
@@ -816,10 +817,10 @@ impl DaemonRecorder {
             audio_path: active.audio_path.to_string_lossy().into_owned(),
             meeting_id: None,
         });
-        // A1: capture ended because the input device failed mid-recording (the
-        // mic was unplugged). The partial take above was saved + enqueued
-        // exactly as normal; this extra event only lets the UI tell the user WHY
-        // it stopped, linking to the saved partial via `id`. Emitted only on a
+        // Capture ended because the input device failed mid-recording (the mic
+        // was unplugged). The partial take above was saved and enqueued exactly
+        // as normal; this extra event just lets the UI tell the user why it
+        // stopped, linking to the saved partial via `id`. Emitted only on a
         // genuine device loss — a normal stop / auto-stop leaves it false.
         if result.device_lost {
             tracing::warn!(id = %active.id, ms = result.duration_ms, "recording ended: capture device lost (saved the partial)");
@@ -840,7 +841,7 @@ impl DaemonRecorder {
     /// Cancel the current recording: discard samples, delete catalog row, no
     /// WAV, no inbox.
     pub async fn cancel(&self, state: &AppState) -> Result<RecordingId> {
-        // What cancel found to tear down, moved OUT of the state mutexes so
+        // What cancel found to tear down, moved out of the state mutexes so
         // the slow awaits below (preview teardown, recorder cancel) run with
         // no lock held — same reasoning as `stop`.
         enum Taken {
@@ -894,9 +895,9 @@ impl DaemonRecorder {
                 // Clear the rolling streaming-type state so a cancelled
                 // streaming-type dictation can't leak its live-typed words into a
                 // later recording's reconcile (the stop path keys "did we stream?"
-                // off this being non-empty). We deliberately do NOT auto-backspace
-                // the already-typed text on cancel: the focus may have moved since
-                // the words were typed, so a blind backspace could delete from the
+                // off this being non-empty). Deliberately no auto-backspace of the
+                // already-typed text on cancel: the focus may have moved since the
+                // words were typed, so a blind backspace could delete from the
                 // wrong window (the same wrong-window risk the stop reconcile guards
                 // against, and the focus guard lives in another lane). Any live text
                 // the user already saw typed is intentionally left in place; only the
@@ -925,7 +926,7 @@ impl DaemonRecorder {
                     .unwrap_or_else(|e| e.into_inner())
                     .remove(&active.id);
                 // The focused-app side-channel is only ever populated for a
-                // NON-fast-lane in-place dictation at enqueue time, so a cancel
+                // non-fast-lane in-place dictation at enqueue time, so a cancel
                 // here normally has nothing to drop — but mirror the recipe /
                 // overrides removals defensively so no terminal path can leak it.
                 state
@@ -1109,8 +1110,8 @@ pub(crate) mod tests {
         cfg.recording.audio_dir = tmp.join("audio").to_string_lossy().into_owned();
         // Disable idle pre-roll: it opens a real microphone via cpal, which
         // crashes (STATUS_ACCESS_VIOLATION) on a headless CI runner with no audio
-        // device — the long-standing CI failure. Tests use synthetic sources and
-        // must never touch real capture hardware.
+        // device. Tests use synthetic sources and must never touch real capture
+        // hardware.
         cfg.recording.pre_roll_ms = 0;
         // Explicit data-local (no global `set_var`) so parallel tests don't race
         // on the shared `PHONEME_DATA_LOCAL` env var — see `AppState::new_in`.
@@ -1121,9 +1122,9 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn stop_keeps_status_queries_responsive_during_preview_teardown() {
-        // `stop` must not hold the active-recording lock across the
-        // preview teardown — a slow in-flight preview tick (here a stand-in
-        // task that takes 1.5 s to wind down) used to block every status and
+        // `stop` must not hold the active-recording lock across the preview
+        // teardown — a slow in-flight preview tick (here a stand-in task that
+        // takes 1.5 s to wind down) would otherwise block every status and
         // control IPC for its whole duration.
         let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
         let tmp = tempfile::tempdir().unwrap();
@@ -1165,17 +1166,17 @@ pub(crate) mod tests {
         assert!(stopped.is_ok(), "stop must still succeed: {stopped:?}");
     }
 
-    /// The fast-lane routing rule (custom-hotkey FIX 1): a NON-EMPTY recipe on an
-    /// in-place binding forces the full pipeline (so the recipe runs), while a
-    /// plain in-place dictation (no recipe, default `full_pipeline = false`) keeps
-    /// the fast lane. Normal recordings are never fast-laned, and the explicit
+    /// The fast-lane routing rule: a non-empty recipe on an in-place binding
+    /// forces the full pipeline (so the recipe runs), while a plain in-place
+    /// dictation (no recipe, default `full_pipeline = false`) keeps the fast
+    /// lane. Normal recordings are never fast-laned, and the explicit
     /// `full_pipeline = true` opt-in already leaves the fast lane.
     #[test]
     fn wants_fast_lane_routes_recipe_in_place_to_the_full_pipeline() {
-        // Plain in-place dictation, no recipe → fast lane (today's behaviour).
+        // Plain in-place dictation, no recipe → fast lane.
         assert!(wants_fast_lane(true, false, false));
-        // In-place dictation carrying a recipe → FULL pipeline (FIX 1): the fast
-        // lane never runs `pipeline::run`, so a recipe must not be fast-laned.
+        // In-place dictation carrying a recipe → full pipeline: the fast lane
+        // never runs `pipeline::run`, so a recipe must not be fast-laned.
         assert!(!wants_fast_lane(true, false, true));
         // Explicit `full_pipeline` opt-in always leaves the fast lane.
         assert!(!wants_fast_lane(true, true, false));
@@ -1185,21 +1186,22 @@ pub(crate) mod tests {
         assert!(!wants_fast_lane(false, false, true));
     }
 
-    /// The type-first gate (double-type fix): a "type the quick text now" pass
-    /// fires ONLY for an in-place dictation with `type_first` set AND no recipe.
-    /// A recipe-bearing in-place recording is excluded — it gets its single
-    /// insertion (the recipe's RESULT) at the end of the pipeline instead, so a
-    /// type-first pass here would land the text twice (or land the raw text
-    /// instead of the recipe output). This is the exact inverse of the condition
+    /// The type-first gate: a "type the quick text now" pass fires only for an
+    /// in-place dictation with `type_first` set and no recipe. A recipe-bearing
+    /// in-place recording is excluded — it gets its single insertion (the
+    /// recipe's result) at the end of the pipeline instead, so a type-first pass
+    /// here would land the text twice (or land the raw text instead of the recipe
+    /// output). This is the exact inverse of the condition
     /// `pipeline::pipeline_should_type` suppresses on, so the text lands once on
     /// every in-place path.
     #[test]
     fn wants_type_first_excludes_recipe_bearing_in_place() {
         // Plain in-place dictation with type_first, no recipe → type-first fires.
         assert!(wants_type_first(true, true, false));
-        // Recipe-bearing in-place: NO type-first regardless of the flag — the
-        // pipeline owns the sole insertion of the recipe's result. (These are the
-        // two states that double-typed / typed the raw text before the fix.)
+        // Recipe-bearing in-place: no type-first regardless of the flag — the
+        // pipeline owns the sole insertion of the recipe's result. Without this
+        // guard these two states double-type, or type the raw text instead of
+        // the recipe output.
         assert!(!wants_type_first(true, true, true));
         // type_first off → never a type-first pass.
         assert!(!wants_type_first(true, false, false));
@@ -1208,21 +1210,20 @@ pub(crate) mod tests {
         assert!(!wants_type_first(false, true, false));
     }
 
-    /// LEDGER LEAK (custom-hotkey FIX 2): a genuine fast-lane in-place recording
-    /// never enters `pipeline::run` — the sole place the per-recording ledgers are
-    /// claimed — so `stop()` itself must claim-and-remove them. A binding that
-    /// carried only a Whisper-model override (no recipe → still the fast lane)
-    /// must leave NO `pending_overrides` / `pending_recipe` entry keyed by its
-    /// (now-dead) id once `stop()` returns. The detached fast-lane transcription
-    /// that `stop()` spawns is irrelevant here: the claim is synchronous, before
-    /// the spawn.
+    /// Ledger-leak guard: a genuine fast-lane in-place recording never enters
+    /// `pipeline::run` — the sole place the per-recording ledgers are claimed —
+    /// so `stop()` itself must claim and remove them. A binding that carried only
+    /// a Whisper-model override (no recipe → still the fast lane) must leave no
+    /// `pending_overrides` / `pending_recipe` entry keyed by its (now-dead) id
+    /// once `stop()` returns. The detached fast-lane transcription that `stop()`
+    /// spawns is irrelevant here: the claim is synchronous, before the spawn.
     #[tokio::test]
     async fn fast_lane_in_place_leaves_no_pending_ledger_entry() {
         let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(tmp.path()).await;
 
-        // Start an IN-PLACE synthetic recording (default `[in_place].full_pipeline
+        // Start an in-place synthetic recording (default `[in_place].full_pipeline
         // = false`, no recipe → the fast lane).
         let id = state
             .recorder
@@ -1231,7 +1232,7 @@ pub(crate) mod tests {
             .expect("start synthetic in-place recording");
 
         // The binding carried a per-recording Whisper-model override only — the
-        // exact case FIX 2 must not leak (a recipe would force the full pipeline).
+        // exact case that must not leak (a recipe would force the full pipeline).
         state
             .pending_overrides
             .lock()
@@ -1253,10 +1254,10 @@ pub(crate) mod tests {
         );
     }
 
-    /// LEDGER LEAK (custom-hotkey FIX, cancel path): a custom-hotkey recording
-    /// canceled mid-capture never reaches `pipeline::run` — the sole place the
+    /// Ledger-leak guard, cancel path: a custom-hotkey recording canceled
+    /// mid-capture never reaches `pipeline::run` — the sole place the
     /// per-recording ledgers are otherwise claimed — so `cancel()` itself must
-    /// drop them. After a cancel, NO `pending_overrides` / `pending_recipe` entry
+    /// drop them. After a cancel, no `pending_overrides` / `pending_recipe` entry
     /// keyed by the (now-deleted) id may survive. Mirrors
     /// `fast_lane_in_place_leaves_no_pending_ledger_entry` for the cancel arm.
     #[tokio::test]

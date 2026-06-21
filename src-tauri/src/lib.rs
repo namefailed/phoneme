@@ -1,36 +1,36 @@
 //! Phoneme tray app — the Tauri 2 desktop shell around `phoneme-daemon`.
 //!
-//! The tray does no recording or transcription itself; it spawns and talks
+//! The tray does no recording or transcription itself. It spawns and talks
 //! to the daemon (`auto_spawn` + `bridge`), forwards the WebView's `invoke`
 //! calls as IPC requests (`commands`, `similar`), re-emits the daemon's
 //! event stream to every webview (`events`), and owns the desktop chrome:
 //! tray icon + menu (`tray`), the system-wide live-preview overlay window
 //! (`overlay`), global hotkeys, and the first-run wizard's downloads with
-//! pinned checksums (`wizard`, `checksums`). Config is read/written
+//! pinned checksums (`wizard`, `checksums`). Config is read and written
 //! atomically by `config_io`; `doctor` re-exports the shared check
 //! implementations from phoneme-core.
 //!
 //! Boot sequence (`run`):
 //! 1. Build the tokio runtime, read config, `auto_spawn` the daemon, and
-//!    try one bridge connect — failure is tolerated, the `BridgeSlot`
-//!    lazily reconnects on the first action.
+//!    try one bridge connect. A failure here is fine: the `BridgeSlot`
+//!    reconnects lazily on the first action.
 //! 2. Window chrome: window-state plugin (geometry remembered, visibility
-//!    deliberately NOT), titlebar strip, show-on-startup, tray icon.
+//!    deliberately not), titlebar strip, show-on-startup, tray icon.
 //! 3. Register the global hotkeys (record / meeting / in-place) via the
 //!    shared `commands::register_hotkeys`, and pre-create the hidden
-//!    overlay when enabled — none of this needs the daemon, only config,
-//!    so a down-at-launch daemon costs nothing but the bridge.
-//! 4. Attach the daemon event stream (`events::spawn`) — immediately when
+//!    overlay when enabled. None of this needs the daemon, only config, so
+//!    a down-at-launch daemon costs nothing but the bridge.
+//! 4. Attach the daemon event stream (`events::spawn`): immediately when
 //!    the bridge is up, otherwise from a background retry loop the moment
 //!    it connects, so the UI never stays event-dead until a restart.
-//! 5. Hand the invoke handler the full command surface and run; the exit
-//!    hook sends the daemon a last-resort `Shutdown` honoring
+//! 5. Hand the invoke handler the full command surface and run. The exit
+//!    hook sends the daemon a last-resort `Shutdown`, honoring
 //!    `interface.quit_stops_daemon` and the tray Quit chain's
 //!    already-stopped flag (see `tray`).
 //!
-//! The hotkey handler is sync: it peeks the slot (`current()`), kicks a
-//! background connect when empty, and spawns the actual request — pressing
-//! a hotkey must never block on a dial.
+//! The hotkey handler is sync: it peeks the slot (`current()`), kicks off a
+//! background connect when empty, and spawns the actual request. Pressing a
+//! hotkey must never block on a dial.
 
 mod auto_spawn;
 mod bridge;
@@ -77,7 +77,8 @@ pub fn run() {
     // The slot is what commands talk to: it retries the connect lazily, so a
     // daemon that was down at launch heals on the first action.
     let bridge = BridgeSlot::new(bridge);
-    // Clone before builder chain — setup closure takes ownership of `bridge`.
+    // Clone before the builder chain, since the setup closure takes ownership of
+    // `bridge`.
     let exit_bridge = bridge.clone();
 
     let builder = tauri::Builder::default()
@@ -90,20 +91,21 @@ pub fn run() {
                 }
             }
         })
-        // Remember window positions/sizes but NEVER visibility: the overlay is
-        // created hidden and shown only by recording events / the Preview
+        // Remember window positions and sizes but never visibility: the overlay
+        // is created hidden and shown only by recording events or the Preview
         // button, and the main window's visibility belongs to the tray logic.
-        // (With VISIBLE tracked, a state save taken while the overlay was up
-        // made it pop open on every app start.)
+        // (If visibility were tracked, a state save taken while the overlay was up
+        // would make it pop open on every app start.)
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                // Track everything EXCEPT visibility and decorations. VISIBLE made
-                // the overlay pop open on every start. DECORATIONS would persist a
-                // "strip system titlebar" → recreate the window frameless on the
-                // next launch, and Windows can't re-add a native frame at runtime,
-                // so the title bar never came back even after turning the setting
-                // off. Decorations are owned by tauri.conf (`decorations: true`)
-                // plus the live `setDecorations` strip in App.ts instead.
+                // Track everything except visibility and decorations. Tracking
+                // VISIBLE makes the overlay pop open on every start. Tracking
+                // DECORATIONS persists a stripped system titlebar and recreates the
+                // window frameless on the next launch, and Windows can't re-add a
+                // native frame at runtime, so the title bar would never come back
+                // even after turning the setting off. Decorations are owned by
+                // tauri.conf (`decorations: true`) plus the live `setDecorations`
+                // strip in App.ts instead.
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         & !tauri_plugin_window_state::StateFlags::VISIBLE
@@ -125,9 +127,9 @@ pub fn run() {
 
                     let slot = app.state::<BridgeSlot>().inner().clone();
                     if slot.current().is_none() {
-                        // Daemon was down at launch — kick a background connect
-                        // so the NEXT hotkey press has a bridge to talk to
-                        // (this handler is sync; it can't await the connect).
+                        // Daemon was down at launch, so kick off a background
+                        // connect; the next hotkey press then has a bridge to talk
+                        // to (this handler is sync and can't await the connect).
                         let retry = slot.clone();
                         tauri::async_runtime::spawn(async move {
                             let _ = retry.get_or_connect().await;
@@ -139,7 +141,7 @@ pub fn run() {
 
                         // If the fired shortcut is the (enabled) meeting hotkey,
                         // toggle a meeting on press and we're done. Meetings are
-                        // always toggle — Hold mode makes no sense for them.
+                        // always toggle; Hold mode makes no sense for them.
                         let meeting_combo = if current_config.meeting_hotkey.enabled {
                             current_config.meeting_hotkey.combo.parse::<Shortcut>().ok()
                         } else {
@@ -228,19 +230,20 @@ pub fn run() {
                         }
 
                         // Custom keybinds (`config.hotkeys`): match the fired combo
-                        // against each enabled binding and dispatch its action +
-                        // mode, carrying the binding's recipe + whisper-model so the
-                        // daemon resolves THAT recipe / model for the recording it
-                        // creates. Checked after the TWO built-ins handled above
-                        // (meeting + in-place) — so a custom binding can't shadow
-                        // those — but BEFORE the main-record fallthrough below.
-                        // The main-record hotkey is that fallthrough, so a custom
-                        // binding sharing the main-record combo wins over it
-                        // (this loop `return`s before the fallthrough is reached).
-                        // `Meeting` bindings toggle a meeting (its recipe/model
-                        // apply per-track via the daemon's normal meeting path, not
-                        // the single-recording ledger — scoped out here, same as the
-                        // built-in meeting hotkey).
+                        // against each enabled binding and dispatch its action and
+                        // mode, carrying the binding's recipe and whisper-model so
+                        // the daemon resolves that recipe and model for the
+                        // recording it creates. Checked after the two built-ins
+                        // handled above (meeting and in-place), so a custom binding
+                        // can't shadow those, but before the main-record
+                        // fallthrough below. The main-record hotkey is that
+                        // fallthrough, so a custom binding sharing the main-record
+                        // combo wins over it (this loop `return`s before the
+                        // fallthrough is reached). `Meeting` bindings toggle a
+                        // meeting; their recipe/model apply per-track via the
+                        // daemon's normal meeting path, not the single-recording
+                        // ledger (scoped out here, same as the built-in meeting
+                        // hotkey).
                         use phoneme_core::config::{HotkeyAction, HotkeyMode};
                         for binding in &current_config.hotkeys {
                             if !binding.enabled {
@@ -261,7 +264,7 @@ pub fn run() {
                                 let m = binding.whisper_model.trim();
                                 (!m.is_empty()).then(|| m.to_string())
                             };
-                            // Per-binding capture source (None = the global
+                            // Per-binding capture source (None means the global
                             // [recording].source). Meeting bindings ignore it.
                             let source = binding.source;
                             let action = binding.action;
@@ -270,15 +273,15 @@ pub fn run() {
                             let bridge = bridge.clone();
                             match action {
                                 HotkeyAction::Meeting => {
-                                    // A meeting binding ignores recipe_id /
-                                    // whisper_model / source: a meeting toggles via
-                                    // the daemon's normal multi-track path, which
-                                    // records both tracks and applies recipe/model
-                                    // per-track itself rather than through the
-                                    // single-recording ledger. Warn so a user who
-                                    // set them on a meeting binding isn't silently
-                                    // surprised they had no effect (the field docs
-                                    // note this too).
+                                    // A meeting binding ignores recipe_id,
+                                    // whisper_model, and source: a meeting toggles
+                                    // via the daemon's normal multi-track path,
+                                    // which records both tracks and applies
+                                    // recipe/model per-track itself rather than
+                                    // through the single-recording ledger. Warn so a
+                                    // user who set them on a meeting binding isn't
+                                    // silently surprised they had no effect (the
+                                    // field docs note this too).
                                     if !binding.recipe_id.trim().is_empty()
                                         || !binding.whisper_model.trim().is_empty()
                                         || binding.source.is_some()
@@ -291,7 +294,8 @@ pub fn run() {
                                             "meeting hotkey binding ignores recipe_id / whisper_model / source (meetings resolve these per-track via the daemon, not the single-recording ledger)"
                                         );
                                     }
-                                    // Meetings are always toggle (Hold makes no sense).
+                                    // Meetings are always toggle (Hold makes no
+                                    // sense).
                                     if event.state() == ShortcutState::Pressed {
                                         tauri::async_runtime::spawn(async move {
                                             if let Err(e) = bridge
@@ -415,11 +419,10 @@ pub fn run() {
         .manage(bridge.clone())
         .setup(move |app| {
             let _tray = tray::install(app.handle())?;
-            // None of the startup chrome below actually needs the daemon —
-            // it only needs CONFIG. It used to live inside the bridge if-let,
-            // so a down-at-launch daemon also cost the titlebar pref, the
-            // startup window, every global hotkey, and the overlay (its
-            // wider blast radius). Read config directly instead.
+            // None of the startup chrome below needs the daemon, only config, so
+            // read config directly rather than gating it behind a live bridge. A
+            // down-at-launch daemon then costs nothing here — not the titlebar
+            // pref, the startup window, the global hotkeys, or the overlay.
             let startup_cfg = phoneme_core::Config::read_or_default();
 
             if startup_cfg.interface.strip_titlebar {
@@ -441,16 +444,16 @@ pub fn run() {
             // startup and config-save/profile-switch stay in lockstep.
             commands::register_hotkeys(app.handle(), &startup_cfg);
 
-            // Pre-create the system-wide live-preview overlay (hidden) when
-            // the setting is on, so the first recording can reveal it with no
-            // cold-start lag. No-op when the setting is off — the window is
-            // only built when the user opts in. `overlay.ts` then drives its
-            // visibility from the daemon event stream.
+            // Pre-create the system-wide live-preview overlay (hidden) when the
+            // setting is on, so the first recording can reveal it with no
+            // cold-start lag. No-op when the setting is off; the window is built
+            // only when the user opts in. `overlay.ts` then drives its visibility
+            // from the daemon event stream.
             overlay::sync(app.handle(), startup_cfg.interface.preview_overlay);
 
             // Pre-create the recording-indicator window (hidden) when its setting
-            // is on — a separate, independent always-on-top pill (record dot +
-            // waveform + timer, no captions) that `indicator.ts` shows while
+            // is on: a separate, independent always-on-top pill (record dot,
+            // waveform, timer, no captions) that `indicator.ts` shows while
             // recording. No-op when off. Independent of the caption overlay above.
             indicator::sync(app.handle(), startup_cfg.interface.recording_indicator);
 
@@ -603,12 +606,12 @@ pub fn run() {
 
     builder.run(move |_app, event| {
         if let tauri::RunEvent::Exit = event {
-            // Last-resort daemon stop for exits that bypass the tray menu's
-            // Quit chain (which already sent Shutdown and waited — see
+            // Last-resort daemon stop for exits that bypass the tray menu's Quit
+            // chain (which already sent Shutdown and waited — see
             // `tray::stop_daemon_for_exit`). Gated on the same
             // `interface.quit_stops_daemon` knob: when it's off, the daemon
             // deliberately outlives every tray exit (headless setups). Peek
-            // without connecting — there is no point dialing a daemon just to
+            // without connecting, since there's no point dialing a daemon just to
             // tell it to shut down.
             let cfg = phoneme_core::Config::read_or_default();
             if tray::should_stop_daemon_on_exit(

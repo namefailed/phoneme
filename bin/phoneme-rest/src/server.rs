@@ -20,7 +20,7 @@ use crate::{handlers, sse};
 fn host_is_loopback(host: &str) -> bool {
     let h = host.trim();
     // IPv6 literals are bracketed (`[::1]:port`); everything else splits on the
-    // LAST colon to drop an optional port without mangling an IPv6 address.
+    // last colon to drop an optional port without mangling an IPv6 address.
     let name = if let Some(rest) = h.strip_prefix('[') {
         rest.split(']').next().unwrap_or("")
     } else {
@@ -38,22 +38,23 @@ fn origin_is_loopback(origin: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Reject browser cross-origin / DNS-rebinding attacks against the loopback API.
+/// Reject browser cross-origin and DNS-rebinding attacks against the loopback
+/// API.
 ///
-/// The server binds to loopback, but a *browser* on the same machine can still
+/// The server binds to loopback, but a browser on the same machine can still
 /// reach it: a malicious page can POST to it (CSRF), open an `EventSource` to
 /// exhaust SSE slots, or rebind a hostname it controls to `127.0.0.1` and read
-/// responses (DNS rebinding). All such requests carry a foreign `Host`
-/// (rebinding) or `Origin` (cross-site fetch/EventSource) header — a browser
-/// cannot forge those — so:
-/// * any request whose `Host` is present and NOT loopback is refused (rebinding);
-/// * any request whose `Origin` is present and NOT loopback is refused (CSRF /
-///   cross-origin SSE). The check applies to ALL methods, not just `POST`, so a
-///   cross-origin `GET /api/events` EventSource cannot exhaust SSE slots.
+/// responses (DNS rebinding). Every such request carries a foreign `Host`
+/// (rebinding) or `Origin` (cross-site fetch/EventSource) header that a browser
+/// can't forge, so:
+/// - a request whose `Host` is present and not loopback is refused (rebinding);
+/// - a request whose `Origin` is present and not loopback is refused (CSRF or
+///   cross-origin SSE). The check covers every method, not just `POST`, so a
+///   cross-origin `GET /api/events` EventSource can't exhaust SSE slots.
 ///
-/// Non-browser local clients (curl, the CLI) omit both headers and are unaffected.
-/// A same-origin browser dashboard either omits `Origin` on same-origin GET or
-/// sends a loopback Origin, so neither path is blocked.
+/// Non-browser local clients (curl, the CLI) omit both headers and are
+/// unaffected. A same-origin browser dashboard either omits `Origin` on a
+/// same-origin GET or sends a loopback Origin, so neither path is blocked.
 async fn loopback_guard(req: Request, next: Next) -> Response {
     if let Some(host) = req
         .headers()
@@ -78,8 +79,8 @@ async fn loopback_guard(req: Request, next: Next) -> Response {
 
 /// State shared by every handler: the daemon pipe to forward IPC over.
 ///
-/// Cheap to clone (just a `String`); axum clones it per request. We hold the
-/// pipe *name* rather than a live connection because the bridge connects
+/// Cheap to clone (just a `String`), which axum does per request. It holds the
+/// pipe name rather than a live connection because the bridge connects
 /// per-request (see [`crate::daemon`]).
 #[derive(Clone, Debug)]
 pub struct AppState {
@@ -430,7 +431,7 @@ mod tests {
         assert_eq!(json["status"], "ok");
     }
 
-    /// A request carrying a NON-loopback `Host` (the DNS-rebinding signature) is
+    /// A request carrying a non-loopback `Host` (the DNS-rebinding signature) is
     /// refused with 403 before any IPC is forwarded.
     #[tokio::test]
     async fn spoofed_host_is_403_and_not_forwarded() {

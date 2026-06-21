@@ -37,16 +37,16 @@ fn cue_text(seg: &TranscriptSegment) -> String {
     }
 }
 
-/// Escape a WebVTT cue payload. WebVTT cue text is parsed as HTML by the
-/// `<track>` element, so `&`, `<`, `>` must become entity references or a label
-/// like `R&D` mis-parses and a stray `<` opens a phantom tag. Escaping `>` also
-/// neutralizes a literal `-->` inside the text (it becomes `--&gt;`), which a
-/// parser could otherwise mistake for a cue-timing line. The ampersand is
-/// replaced first so the entities it introduces aren't double-escaped.
+/// Escape a WebVTT cue payload. The `<track>` element parses WebVTT cue text as
+/// HTML, so `&`, `<`, `>` have to become entity references; otherwise a label like
+/// `R&D` mis-parses and a stray `<` opens a phantom tag. Escaping `>` also defuses
+/// a literal `-->` inside the text (it turns into `--&gt;`), which a parser could
+/// otherwise mistake for a cue-timing line. Replace the ampersand first so the
+/// entities it introduces aren't double-escaped.
 ///
-/// SRT is deliberately NOT escaped: it is a plain-text format whose players
-/// render `&`, `<`, `>` literally, so entity-encoding there would corrupt the
-/// output rather than protect it.
+/// SRT is left unescaped on purpose: it's a plain-text format whose players render
+/// `&`, `<`, `>` literally, so entity-encoding there would corrupt the output
+/// rather than protect it.
 fn escape_vtt(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -180,8 +180,8 @@ mod tests {
         let mut s = seg(0, 1000, "Hi.");
         s.speaker = Some(String::new());
         let out = segments_to_srt(&[s]);
-        // Text line must be bare — no "Name: " prefix.  The timestamp lines
-        // legitimately contain colons, so we check only the final text line.
+        // Text line should be bare, with no "Name: " prefix. The timestamp lines
+        // legitimately contain colons, so check only the final text line.
         assert!(out.ends_with("Hi.\n"));
         let text_line = out.lines().last().unwrap_or("");
         assert!(
@@ -247,9 +247,9 @@ mod tests {
 
     #[test]
     fn vtt_escapes_html_metacharacters_in_cue_text() {
-        // `&`, `<`, `>` must be entity-encoded so the `<track>` HTML parser
-        // doesn't mangle "R&D" or open a phantom tag on a stray `<`; escaping
-        // `>` also defuses a literal `-->` in the text into `--&gt;`.
+        // `&`, `<`, `>` get entity-encoded so the `<track>` HTML parser doesn't
+        // mangle "R&D" or open a phantom tag on a stray `<`; escaping `>` also
+        // defuses a literal `-->` in the text into `--&gt;`.
         let segs = [seg_speaker(0, 1000, "shipped <b>R&D</b> --> done", "R&D")];
         let out = segments_to_vtt(&segs);
         assert!(out.contains("R&amp;D: shipped &lt;b&gt;R&amp;D&lt;/b&gt; --&gt; done"));
@@ -258,8 +258,8 @@ mod tests {
 
     #[test]
     fn srt_leaves_metacharacters_literal() {
-        // SRT is plain text — players render `&`/`<`/`>` verbatim, so entity
-        // encoding would corrupt it. The cue text must stay byte-for-byte.
+        // SRT is plain text: players render `&`/`<`/`>` verbatim, so entity
+        // encoding would corrupt it. The cue text should pass through unchanged.
         let segs = [seg(0, 1000, "R&D <tag>")];
         let out = segments_to_srt(&segs);
         assert!(out.contains("R&D <tag>"), "SRT should stay literal:\n{out}");

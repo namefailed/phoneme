@@ -188,8 +188,8 @@ impl MeetingTrack {
 /// One persisted AI-activity session — a finished streaming LLM stage (cleanup,
 /// summary, or a re-run of either), as exposed by `Catalog` and shown in the
 /// GUI's 🧠 "AI Activity" popout. Mirrors the live `LlmActivity` event's content
-/// but for a completed session, so the log survives app restarts (the live
-/// stream was previously in-memory only).
+/// but for a completed session, so the log survives app restarts; the live
+/// stream itself is in-memory only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AiActivityEntry {
     /// Auto-increment row id; also the stable list key for the UI.
@@ -242,7 +242,7 @@ pub struct SavedSearch {
 /// hand-edited) still deserializes.
 ///
 /// [`Self::into_list_filter`] is the Rust mirror of the frontend's
-/// `toWireFilter`; the two MUST stay in step.
+/// `toWireFilter`; the two have to stay in step.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedSearchFilter {
     /// Maximum rows to return; `None` for no cap.
@@ -383,7 +383,7 @@ pub struct SpeakerSuggestion {
     pub score: f32,
 }
 
-/// A back-fill candidate (V5): an *unnamed* speaker in some OTHER recording whose
+/// A back-fill candidate (V5): an *unnamed* speaker in some other recording whose
 /// voiceprint matches a named voice closely enough to be the same person. Naming a
 /// speaker can propagate that name onto these — automatically under the `auto`
 /// policy, or after the UI confirms under `ask`.
@@ -496,7 +496,7 @@ pub struct Recording {
     /// for older rows or recordings that were never auto-tagged.
     #[serde(default)]
     pub tag_model: Option<String>,
-    /// The diarizer's model when a CLOUD diarizer ran (Deepgram/AssemblyAI). The
+    /// The diarizer's model when a cloud diarizer ran (Deepgram/AssemblyAI). The
     /// local speakrs diarizer has no model name, so this stays `None` even when
     /// `diarized` is true and the UI shows a plain "diarized".
     #[serde(default)]

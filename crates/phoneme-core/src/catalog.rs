@@ -10,12 +10,12 @@
 //!
 //! - **Status is a string column.** [`RecordingStatus`] round-trips through
 //!   stable lowercase strings (`"transcribing"`, `"hook_failed"`, …) via
-//!   `parse_status`/`as_str`; a status the parser doesn't know errors the whole
-//!   query, so every variant must have an arm.
+//!   `parse_status`/`as_str`. A status the parser doesn't recognize errors the
+//!   whole query, so every variant needs an arm.
 //! - **Machine truth vs. user edits.** `original_transcript` (raw ASR) and
-//!   `clean_transcript` (pipeline output) are preserved so a hand edit to the
-//!   live `transcript` is reversible, and segments are stored separately and
-//!   replaced wholesale on every (re)transcribe — user edits never rewrite them.
+//!   `clean_transcript` (pipeline output) are kept so a hand edit to the live
+//!   `transcript` stays reversible. Segments live in their own tables and are
+//!   replaced wholesale on every (re)transcribe; user edits never rewrite them.
 //! - **Search is hybrid.** Lexical FTS5 and per-chunk vector cosine are computed
 //!   separately, fused with RRF ([`crate::fusion`]), and de-duplicated on a
 //!   meeting-stable key so a meeting's two tracks collapse to one result.
@@ -48,29 +48,29 @@ struct CachedVector {
     id: String,
     /// The recording's `meeting_id`, if it is a meeting track — the dedupe key.
     meeting_id: Option<String>,
-    /// The deserialized, L2-normalized embedding. `None` marks a blob that
-    /// failed the 4-byte-alignment guard at load time, so the ranking paths can
-    /// skip it without re-reading SQLite (preserving the warn-and-skip behavior).
+    /// The deserialized, L2-normalized embedding. `None` marks a blob that failed
+    /// the 4-byte-alignment guard at load time, so the ranking paths skip it
+    /// without re-reading SQLite — the same warn-and-skip a direct decode does.
     vector: Option<Vec<f32>>,
 }
 
 /// The deserialized embedding corpus, cached in memory so a search doesn't
-/// re-read and re-decode every BLOB from SQLite on every query.
+/// re-read and re-decode every blob from SQLite on every query.
 ///
-/// Two flat lists mirror the two SQL queries the ranking paths used to run on
-/// each search: the per-chunk vectors (the primary, high-recall path) and the
-/// legacy whole-recording vectors (the backfill fallback). The ranking code
-/// keeps its own dimension/precedence logic; the corpus only removes the disk
-/// read + decode, never changes which vectors are considered.
+/// Two flat lists mirror the two SQL queries the ranking paths run on each
+/// search: the per-chunk vectors (the primary, high-recall path) and the legacy
+/// whole-recording vectors (the backfill fallback). The ranking code keeps its
+/// own dimension/precedence logic; the corpus only removes the disk read +
+/// decode, it never changes which vectors are considered.
 #[derive(Debug, Clone, Default)]
 struct EmbeddingCorpus {
-    /// Every row of `embedding_chunks`, decoded once. Each vector is held behind
-    /// an `Arc` so a single-recording update can copy-on-write a fresh corpus
-    /// that SHARES every other recording's vectors by pointer — no deep copy and
-    /// no SQLite re-decode (see `patch_recording_in_cache`).
+    /// Every row of `embedding_chunks`, decoded once. Each vector sits behind an
+    /// `Arc` so a single-recording update can copy-on-write a fresh corpus that
+    /// shares every other recording's vectors by pointer — no deep copy, no
+    /// SQLite re-decode (see `patch_recording_in_cache`).
     chunks: Vec<Arc<CachedVector>>,
-    /// Every row of `embeddings` (legacy whole-recording), decoded once. `Arc`-held
-    /// for the same cheap copy-on-write as `chunks`.
+    /// Every row of `embeddings` (legacy whole-recording), decoded once. Held
+    /// behind an `Arc` for the same cheap copy-on-write as `chunks`.
     legacy: Vec<Arc<CachedVector>>,
 }
 
@@ -83,9 +83,10 @@ struct EmbeddingCorpus {
 ///
 /// Semantic search (`hybrid_search` → `vector_ranking`, `semantic_search`,
 /// `more_like_this`) is a brute-force cosine scan over every stored vector. The
-/// vectors live as little-endian f32 BLOBs in `embedding_chunks` / `embeddings`,
-/// so each query used to `SELECT` and decode the *entire* corpus from disk — the
-/// hot cost grows with the library and dominates a typed query / RAG turn.
+/// vectors live as little-endian f32 blobs in `embedding_chunks` / `embeddings`.
+/// A naive implementation `SELECT`s and decodes the entire corpus from disk on
+/// every query, and that cost grows with the library and dominates a typed query
+/// or a RAG turn.
 ///
 /// `embedding_cache` holds the decoded corpus in memory so repeated queries
 /// reuse it. The design is deliberately simple and pessimistic about staleness:
@@ -96,17 +97,17 @@ struct EmbeddingCorpus {
 ///   single-recording change copy-on-write a fresh snapshot cheaply (below).
 /// - **Incremental single-recording updates.** A single embed (`upsert_embedding`,
 ///   `upsert_chunk_embeddings`) or a recording `delete` calls
-///   `patch_recording_in_cache`: it re-reads only THAT recording's rows and
-///   swaps them into a fresh snapshot that shares every other recording's vectors
-///   by `Arc` pointer — so recording one new memo no longer forces the next
-///   search to re-decode the entire library from SQLite. Bulk wipes
-///   (`clear_all_embeddings`, `clear_all_recordings`, the retention sweep) still
-///   drop the snapshot wholesale (the next query rebuilds), and any targeted
-///   reload that errors falls back to that same coarse drop — a stale vector that
-///   ranks wrongly is never an acceptable outcome.
-/// - **Bounded.** If the corpus exceeds a fixed vector-count cap it is *not*
-///   cached; those (rare, very large) libraries fall back to reading from SQLite
-///   each query, keeping memory bounded regardless of archive size.
+///   `patch_recording_in_cache`: it re-reads only that recording's rows and swaps
+///   them into a fresh snapshot that shares every other recording's vectors by
+///   `Arc` pointer. So recording one new memo doesn't force the next search to
+///   re-decode the entire library from SQLite. Bulk wipes (`clear_all_embeddings`,
+///   `clear_all_recordings`, the retention sweep) still drop the snapshot
+///   wholesale and let the next query rebuild, and any targeted reload that errors
+///   falls back to that same coarse drop — a stale vector that ranks wrongly is
+///   never an acceptable outcome.
+/// - **Bounded.** A corpus over a fixed vector-count cap is left uncached; those
+///   (rare, very large) libraries fall back to reading from SQLite each query, so
+///   memory stays bounded regardless of archive size.
 /// - **Shared across clones.** The cache sits behind `Arc<RwLock<…>>`, so the
 ///   derived `Clone` (the daemon hands clones to its workers) shares one cache
 ///   and one set of invalidations rather than diverging per clone.
@@ -124,7 +125,7 @@ pub struct Catalog {
     /// every vector. Shared across clones; see the type-level "Embedding cache"
     /// notes.
     embedding_cache: Arc<RwLock<Option<Arc<EmbeddingCorpus>>>>,
-    /// Monotonic generation bumped on every embedding-cache invalidation. A
+    /// Monotonic generation, bumped on every embedding-cache invalidation. A
     /// corpus rebuild snapshots this before its SQL reads and, under the cache
     /// write lock at store time, only caches the snapshot when the generation is
     /// unchanged — so an invalidation that races the rebuild can't be lost. See
@@ -266,29 +267,29 @@ fn words_table(variant: &str) -> &'static str {
 /// original casing is not preserved). `needle` is assumed non-empty (the caller
 /// guards the empty case as a no-op).
 ///
-/// Implementation note: matching walks the LOWERCASED haystack but copies from
-/// the ORIGINAL, advancing by the original byte length of each matched run.
-/// `char::to_lowercase` can change a string's length (e.g. some locale-specific
-/// folds), so we compare per-`char`-boundary on the original rather than slicing
-/// the lowercased copy back onto original byte offsets — keeping byte offsets
-/// valid and the un-matched text byte-for-byte intact.
+/// Matching is done by regex rather than by slicing a lowercased copy back onto
+/// the original. `char::to_lowercase` can change a string's length (some
+/// locale-specific folds), so lowercasing the haystack and reusing those byte
+/// offsets against the original would be unsound; the regex matches on the
+/// original directly, keeping every byte offset valid and the unmatched text
+/// byte-for-byte intact.
 fn replace_ignore_case(haystack: &str, needle: &str, replacement: &str) -> (usize, String) {
     // An empty needle would match at every position — nothing to replace.
     if needle.is_empty() {
         return (0, haystack.to_string());
     }
-    // Case-insensitive LITERAL search: escape the needle so its regex
-    // metacharacters are matched verbatim, and `(?i)` gives Unicode-aware case
-    // folding (so "café" matches "CAFÉ"). `regex::escape` can't produce an invalid
+    // Literal, case-insensitive search: escape the needle so its regex
+    // metacharacters match verbatim, and `(?i)` gives Unicode-aware case folding
+    // (so "café" matches "CAFÉ"). `regex::escape` can't produce an invalid
     // pattern, so the compile only fails on a pathological size limit — treat that
     // as "no match" rather than panicking on user input.
     let re = match regex::Regex::new(&format!("(?i){}", regex::escape(needle))) {
         Ok(re) => re,
         Err(_) => return (0, haystack.to_string()),
     };
-    // One pass: the closure counts matches and returns the literal replacement
-    // (a closure replacer does NOT expand `$1`/`$name`, so the replacement is
-    // inserted verbatim, and replace_all never re-scans inserted text).
+    // One pass: the closure counts matches and returns the literal replacement. A
+    // closure replacer doesn't expand `$1`/`$name`, so the replacement goes in
+    // verbatim, and replace_all never re-scans inserted text.
     let mut count = 0usize;
     let out = re
         .replace_all(haystack, |_: &regex::Captures<'_>| {
@@ -323,10 +324,10 @@ impl Catalog {
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
             .foreign_keys(true)
             // Without a busy timeout SQLite returns SQLITE_BUSY ("database is
-            // locked") the instant a connection can't take the lock. With a
-            // small pool (max_connections below) a reader and the daemon's
-            // writer can briefly contend, so wait up to 5s for the lock instead
-            // of failing the whole query immediately.
+            // locked") the instant a connection can't take the lock. With a small
+            // pool (max_connections below) a reader and the daemon's writer can
+            // briefly contend, so wait up to 5s for the lock rather than failing
+            // the whole query immediately.
             .busy_timeout(std::time::Duration::from_secs(5))
             .pragma("wal_autocheckpoint", "1000")
             .pragma("journal_size_limit", "67108864");
@@ -344,17 +345,17 @@ impl Catalog {
         })
     }
 
-    /// Drop the in-memory embedding snapshot. Called from every path that
-    /// mutates a stored vector so the next search rebuilds from SQLite. A
-    /// poisoned lock is recovered (cleared) rather than propagated: failing to
-    /// invalidate is the dangerous outcome (stale rankings), so we always clear.
+    /// Drop the in-memory embedding snapshot. Called from every path that mutates
+    /// a stored vector so the next search rebuilds from SQLite. A poisoned lock is
+    /// recovered (cleared) rather than propagated: the dangerous outcome is
+    /// failing to invalidate (stale rankings), so we clear either way.
     ///
-    /// The generation counter is bumped *while holding the cache write lock* so
-    /// it is ordered with respect to a racing `embedding_corpus` store: that
-    /// store snapshots the generation before its SQL reads and re-checks it under
-    /// this same lock before caching, so an invalidation that lands between the
-    /// snapshot's read and its store is observed (the bump) and the store backs
-    /// off — the writer's invalidation can't be silently clobbered.
+    /// The generation counter is bumped while holding the cache write lock, so it
+    /// is ordered against a racing `embedding_corpus` store. That store snapshots
+    /// the generation before its SQL reads and re-checks it under this same lock
+    /// before caching, so an invalidation landing between the snapshot's read and
+    /// its store is observed (via the bump) and the store backs off — the writer's
+    /// invalidation can't be silently clobbered.
     fn invalidate_embedding_cache(&self) {
         match self.embedding_cache.write() {
             Ok(mut guard) => {
@@ -374,12 +375,12 @@ impl Catalog {
     /// On a hit, returns the cached snapshot by cloning its `Arc` (O(1) — no deep
     /// copy of the vectors). The ranking loops consume the corpus by reference,
     /// so the shared `Arc<EmbeddingCorpus>` serves them all without copying. On a
-    /// miss, reads both embedding tables, decodes every BLOB once, and caches the
+    /// miss, reads both embedding tables, decodes every blob once, and caches the
     /// result unless it exceeds [`MAX_CACHED_VECTORS`] (in which case the corpus
-    /// is returned but not stored, bounding memory) — or unless an invalidation
-    /// raced the rebuild, in which case the freshly-read snapshot is returned but
-    /// the slot is left cold so the racing writer's view wins (see the generation
-    /// guard below).
+    /// is returned but not stored, keeping memory bounded) — or unless an
+    /// invalidation raced the rebuild, in which case the freshly-read snapshot is
+    /// returned but the slot is left cold so the racing writer's view wins (see
+    /// the generation guard below).
     async fn embedding_corpus(&self) -> Result<Arc<EmbeddingCorpus>> {
         // Fast path: a warm snapshot. Read lock only; clone the Arc (O(1)).
         if let Ok(guard) = self.embedding_cache.read() {
@@ -388,11 +389,11 @@ impl Catalog {
             }
         }
 
-        // Snapshot the generation BEFORE the SQL reads. If an invalidation runs
-        // while we read+decode below, it bumps this counter (under the cache
-        // write lock), and the store step sees the mismatch and declines to
-        // cache — so a vector changed mid-rebuild can't be masked by a snapshot
-        // taken before that change committed.
+        // Snapshot the generation before the SQL reads. An invalidation that runs
+        // while we read and decode below bumps this counter (under the cache write
+        // lock), so the store step sees the mismatch and declines to cache — a
+        // vector changed mid-rebuild can't be masked by a snapshot taken before
+        // that change committed.
         let gen_at_miss = self.embedding_cache_gen.load(Ordering::Acquire);
 
         // Miss: rebuild from SQLite. Decode happens outside any lock.
@@ -423,16 +424,16 @@ impl Catalog {
         Ok(corpus)
     }
 
-    /// Cache `corpus` under the write lock, but ONLY when the generation still
+    /// Cache `corpus` under the write lock, but only when the generation still
     /// matches `gen_at_miss` (the value snapshotted before the rebuild's SQL
     /// reads) and the corpus is under [`MAX_CACHED_VECTORS`].
     ///
-    /// This is the store half of the lost-invalidation guard: holding the write
+    /// This is the store half of the lost-invalidation guard. Holding the write
     /// lock here orders the generation re-read against `invalidate_embedding_cache`
     /// (which bumps the generation under the same lock), so an invalidation that
-    /// raced the rebuild is observed as a mismatch and the slot is left cold —
-    /// the racing writer's view wins instead of being clobbered by a snapshot
-    /// taken before its write committed.
+    /// raced the rebuild shows up as a mismatch and the slot is left cold — the
+    /// racing writer's view wins instead of being clobbered by a snapshot taken
+    /// before its write committed.
     fn store_corpus_if_current(&self, corpus: Arc<EmbeddingCorpus>, gen_at_miss: u64) {
         // Large libraries stay uncached so memory can't grow without bound.
         if !Self::cap_allows_caching(corpus.chunks.len() + corpus.legacy.len()) {
@@ -447,10 +448,10 @@ impl Catalog {
         }
     }
 
-    /// Decode just ONE recording's vectors (its chunks + legacy whole-recording
-    /// row) from SQLite — the targeted read behind `patch_recording_in_cache`, so
-    /// a single embed/delete touches only this recording's blobs instead of the
-    /// whole corpus.
+    /// Decode just one recording's vectors (its chunks plus its legacy
+    /// whole-recording row) from SQLite — the targeted read behind
+    /// `patch_recording_in_cache`, so a single embed or delete touches only this
+    /// recording's blobs instead of the whole corpus.
     async fn load_recording_vectors(
         &self,
         id: &RecordingId,
@@ -482,26 +483,26 @@ impl Catalog {
         Ok((chunks, legacy))
     }
 
-    /// Patch a SINGLE recording's vectors into the warm embedding cache instead of
-    /// dropping the whole snapshot (the old coarse invalidation re-decoded every
-    /// blob from SQLite on the next query). Reads only this recording's rows, then
-    /// copy-on-writes a fresh corpus that shares every OTHER recording's vectors by
-    /// `Arc` pointer. Used after a single embed / delete; bulk ops (clear-all,
+    /// Patch a single recording's vectors into the warm embedding cache instead of
+    /// dropping the whole snapshot. Reads only this recording's rows, then
+    /// copy-on-writes a fresh corpus that shares every other recording's vectors by
+    /// `Arc` pointer. Used after a single embed or delete; bulk ops (clear-all,
     /// retention sweep) still invalidate coarsely.
     ///
-    /// Cold cache → left cold (the next query rebuilds from SQLite, now including
-    /// this change). Over the cap after the patch → drops to uncached. On any read
-    /// error → falls back to a full invalidation so a stale vector can never be
-    /// served. The generation bump makes a full rebuild that snapshotted an older
-    /// generation back off, exactly as coarse invalidation did.
+    /// A cold cache is left cold (the next query rebuilds from SQLite, now
+    /// including this change). A patch that pushes past the cap drops to uncached.
+    /// Any read error falls back to a full invalidation, so a stale vector can
+    /// never be served. The generation bump makes a full rebuild that snapshotted
+    /// an older generation back off, just as a coarse invalidation does.
     ///
     /// Race guard (mirrors the rebuild path): the loaded vectors are a snapshot of
-    /// SQLite taken OUTSIDE the cache lock, so if any other write — another patch
+    /// SQLite taken outside the cache lock, so if any other write — another patch
     /// or an invalidation — lands between the load and the store, this corpus can't
     /// be trusted (a concurrent same-id patch could otherwise lose its update). We
     /// snapshot the generation before the load and, under the write lock, drop to a
-    /// coarse invalidation instead of writing a possibly-stale COW when it moved.
-    /// The common (uncontended) case still does the cheap incremental patch.
+    /// coarse invalidation instead of writing a possibly-stale copy-on-write when
+    /// it moved. The common, uncontended case still does the cheap incremental
+    /// patch.
     async fn patch_recording_in_cache(&self, id: &RecordingId) {
         let gen_at_load = self.embedding_cache_gen.load(Ordering::Acquire);
         let (new_chunks, new_legacy) = match self.load_recording_vectors(id).await {
@@ -517,10 +518,10 @@ impl Catalog {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
-        // A write raced our load (gen moved): our loaded vectors may be stale
-        // relative to the current cache, so don't COW from it. Bump + drop to cold;
-        // the next query rebuilds from SQLite (which holds the latest committed
-        // rows). Bumping still makes any in-flight rebuild back off.
+        // A write raced our load (the generation moved): our loaded vectors may be
+        // stale relative to the current cache, so don't copy-on-write from it. Bump
+        // and drop to cold; the next query rebuilds from SQLite, which holds the
+        // latest committed rows. The bump also makes any in-flight rebuild back off.
         let raced = self.embedding_cache_gen.load(Ordering::Acquire) != gen_at_load;
         // Bump under the lock so a rebuild that snapshotted an older generation
         // (it may have read SQLite before this change committed) declines to cache.
@@ -718,15 +719,15 @@ impl Catalog {
 
     /// Execute a stored saved search by id, server-side: look up its
     /// `filter_json`, parse it into a [`ListFilter`], and run the normal
-    /// [`Self::list`] query — so a saved search produces the *same* recordings
-    /// shape as a plain list without the frontend re-deriving the filter (S2).
+    /// [`Self::list`] query, so a saved search produces the same recordings shape
+    /// as a plain list without the frontend re-deriving the filter (S2).
     ///
     /// The persisted filter is the frontend's `UiFilter`
     /// ([`crate::SavedSearchFilter`]); the four-way `kind` and `tag_state` are
     /// mapped onto the daemon's `kind`/`favorite`/`in_place`/`tagged` exactly as
     /// the frontend's `toWireFilter` does, and UI-only display state (semantic /
-    /// like-mode) is ignored — executing a saved search runs the *list* query,
-    /// not a similarity/semantic search.
+    /// like-mode) is ignored — executing a saved search runs the list query, not a
+    /// similarity or semantic search.
     ///
     /// Errors: [`crate::Error::NotFound`] for an unknown id, and
     /// [`crate::Error::InvalidConfig`] when the stored `filter_json` won't parse
@@ -784,19 +785,20 @@ impl Catalog {
         Ok(())
     }
 
-    /// Insert a recording with EVERY persisted DTO column at once — the faithful
+    /// Insert a recording with every persisted DTO column at once — the faithful
     /// inverse of the library backup export ([`crate::backup`]).
     ///
     /// The pipeline's [`Catalog::insert`] writes only the columns a fresh
     /// recording starts with and fills the rest (title, summary, favorite, the
     /// per-step model names, …) later via dedicated setters as it advances. A
     /// backup restore has all of those values up front and must land them in one
-    /// row, so this writes the full column set. Fields the DTO does NOT carry —
+    /// row, so this writes the full column set. Fields the DTO doesn't carry —
     /// `original_transcript` / `clean_transcript`, segments, words, embeddings,
     /// voiceprints — are bounded by what the export captured and are simply not
-    /// restored. `INSERT` (not upsert): the restore caller skips ids that already
-    /// exist, so a re-import never overwrites a row (idempotent), and a genuine
-    /// id clash surfaces as an error rather than silently clobbering.
+    /// restored. This is a plain `INSERT`, not an upsert: the restore caller skips
+    /// ids that already exist, so a re-import never overwrites a row (idempotent),
+    /// and a genuine id clash surfaces as an error rather than silently
+    /// clobbering.
     pub async fn insert_restored(&self, r: &Recording) -> Result<()> {
         let tag_suggestions = if r.tag_suggestions.is_empty() {
             None
@@ -911,14 +913,13 @@ impl Catalog {
 
     /// Update the transcript after machine transcription.
     ///
-    /// `transcript` is the text to store as the live transcript — for
-    /// recordings with LLM post-processing enabled this will be the LLM-
-    /// cleaned text. `original_transcript` is **always** the raw Whisper
-    /// output, so the "View original" feature shows the pre-LLM version even
-    /// when post-processing is active. Re-transcription overwrites both
-    /// columns (fresh baseline) and clears any stored failure reason
-    /// (`error_kind`/`error_message`), so a successful retry of a previously
-    /// failed recording doesn't keep showing the old error.
+    /// `transcript` is the text to store as the live transcript; for recordings
+    /// with LLM post-processing enabled this is the LLM-cleaned text.
+    /// `original_transcript` is always the raw Whisper output, so "View original"
+    /// can show the pre-LLM version even when post-processing is active.
+    /// Re-transcription overwrites both columns (a fresh baseline) and clears any
+    /// stored failure reason (`error_kind`/`error_message`), so a successful retry
+    /// of a previously failed recording stops showing the old error.
     pub async fn update_transcript(
         &self,
         id: &RecordingId,
@@ -1013,9 +1014,9 @@ impl Catalog {
 
     /// Update the transcript from a manual user edit, preserving
     /// `original_transcript`/`clean_transcript` so the edit can be reverted.
-    /// Sets the `user_edited` flag and — crucially — leaves `model` untouched so
-    /// the "Transcript Model" column keeps showing the transcription model that
-    /// actually produced the text (the "Edited" column surfaces the hand edit).
+    /// Sets the `user_edited` flag and leaves `model` alone, so the "Transcript
+    /// Model" column keeps showing the transcription model that actually produced
+    /// the text (the hand edit shows up in the "Edited" column instead).
     pub async fn update_user_transcript(&self, id: &RecordingId, transcript: &str) -> Result<()> {
         sqlx::query(
             r#"UPDATE recordings
@@ -1029,32 +1030,32 @@ impl Catalog {
         Ok(())
     }
 
-    /// Find-and-replace across a recording's stored **live** transcript (S6).
+    /// Find-and-replace across a recording's stored live transcript (S6).
     ///
     /// ### Semantics
-    /// - **Literal** substring replacement, NOT regex — the safest default (no
-    ///   accidental metacharacter surprises on a transcript). `find` is matched
+    /// - Literal substring replacement, not regex — the safest default, with no
+    ///   accidental metacharacter surprises on a transcript. `find` is matched
     ///   verbatim; `replace` is inserted verbatim.
-    /// - **Case sensitivity** is opt-out via `case_sensitive`. A case-insensitive
-    ///   match still substitutes the user's `replace` text exactly (the original
-    ///   casing of each matched run is not preserved — documented).
-    /// - Returns the **count** of occurrences replaced.
+    /// - Case sensitivity is opt-out via `case_sensitive`. A case-insensitive match
+    ///   still substitutes the user's `replace` text exactly; the original casing
+    ///   of each matched run is not preserved (documented).
+    /// - Returns the count of occurrences replaced.
     ///
     /// ### Scope
     /// Only the live `transcript` is rewritten — the same column hand edits and
     /// `update_user_transcript` touch. The preserved `original_transcript`
-    /// (machine output) and `clean_transcript` (pipeline output) are deliberately
-    /// left intact so the edit stays revertible; per-segment / per-word layers are
-    /// re-flowed by the caller (the daemon) exactly as for a normal transcript
-    /// edit. The recording is marked `user_edited`.
+    /// (machine output) and `clean_transcript` (pipeline output) are left intact so
+    /// the edit stays revertible; the per-segment and per-word layers are re-flowed
+    /// by the caller (the daemon) exactly as for a normal transcript edit. The
+    /// recording is marked `user_edited`.
     ///
     /// ### No-op safety
-    /// An empty `find`, or zero matches, performs **no write** and returns 0 — a
-    /// no-match never rewrites (and so never corrupts) the transcript, and never
-    /// touches `updated_at`/`user_edited`.
+    /// An empty `find`, or zero matches, writes nothing and returns 0. A no-match
+    /// never rewrites (and so never corrupts) the transcript, and never touches
+    /// `updated_at`/`user_edited`.
     ///
-    /// Errors: [`crate::Error::NotFound`] when the id is unknown OR the recording
-    /// has no transcript yet (nothing to edit).
+    /// Errors: [`crate::Error::NotFound`] when the id is unknown, or when the
+    /// recording has no transcript yet (nothing to edit).
     pub async fn find_replace_transcript(
         &self,
         id: &RecordingId,
@@ -1089,7 +1090,7 @@ impl Catalog {
             replace_ignore_case(&current, find, replace)
         };
 
-        // No match → no write (no-op safety: never rewrite on zero matches).
+        // No match → no write: never rewrite on zero matches.
         if count == 0 {
             return Ok(FindReplaceOutcome {
                 replaced: 0,
@@ -1124,9 +1125,9 @@ impl Catalog {
         Ok(())
     }
 
-    /// Drop EVERY pending tag suggestion across the whole library (the
-    /// Auto-Tagging settings' "Clear all suggestions" action). Returns how
-    /// many recordings actually had suggestions to clear.
+    /// Drop every pending tag suggestion across the whole library (the
+    /// Auto-Tagging settings' "Clear all suggestions" action). Returns how many
+    /// recordings actually had suggestions to clear.
     pub async fn clear_all_tag_suggestions(&self) -> Result<u64> {
         let result = sqlx::query(
             r#"UPDATE recordings
@@ -1140,13 +1141,12 @@ impl Catalog {
 
     /// Set or clear a recording's display title.
     ///
-    /// Ownership rule: a user title (`title_is_auto = 0`) wins forever — an
-    /// auto write (`is_auto = true` with a title) only lands while the title
-    /// is still auto-owned, so the pipeline can refresh its own titles on
-    /// retranscribe but can never clobber one the user typed. Explicit user
-    /// writes always apply: `Some` + `is_auto = false` takes ownership;
-    /// `None` clears the title AND reverts ownership to auto, so the next
-    /// pipeline run generates a fresh one.
+    /// Ownership rule: a user title (`title_is_auto = 0`) wins for good. An auto
+    /// write (`is_auto = true` with a title) only lands while the title is still
+    /// auto-owned, so the pipeline can refresh its own titles on retranscribe but
+    /// can never clobber one the user typed. Explicit user writes always apply:
+    /// `Some` with `is_auto = false` takes ownership; `None` clears the title and
+    /// reverts ownership to auto, so the next pipeline run generates a fresh one.
     ///
     /// Returns whether a row was actually updated (`false` = unknown id, or
     /// an auto write skipped because the user owns the title).
@@ -1280,11 +1280,11 @@ impl Catalog {
     /// The recording's Meeting-Mode track and meeting link — `(track,
     /// meeting_id)` — without the speaker-name join [`get`](Self::get) does.
     ///
-    /// The pipeline needs only these two columns *before* transcribing to drive
+    /// The pipeline needs only these two columns before transcribing, to drive
     /// track-aware Meeting Mode (a meeting's mic track is labelled as one fixed
-    /// speaker instead of diarized), so this narrow read keeps that off the hot
-    /// path from paying for the full row + join. Both columns are `None` for a
-    /// normal single-track recording; `(None, None)` when the id is unknown.
+    /// speaker instead of diarized). This narrow read keeps that hot path from
+    /// paying for the full row and its join. Both columns are `None` for a normal
+    /// single-track recording; `(None, None)` when the id is unknown.
     pub async fn track_and_meeting(
         &self,
         id: &RecordingId,
@@ -1313,15 +1313,15 @@ impl Catalog {
         };
         // Populate the speaker-name map so a single-recording fetch (the daemon's
         // GetRecording, which backs the detail view) can render custom names.
-        // Tags are intentionally NOT loaded here — the detail view fetches those
-        // separately via `tags_for`, matching prior behavior.
+        // Tags are deliberately left out here — the detail view loads those
+        // separately via `tags_for`.
         rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
         Ok(Some(rec))
     }
 
     /// Upsert the semantic embedding vector for a recording.
     pub async fn upsert_embedding(&self, id: &RecordingId, vector: &[f32]) -> Result<()> {
-        // Pack f32 array into little-endian bytes.
+        // Pack the f32 array into little-endian bytes.
         let mut bytes = Vec::with_capacity(vector.len() * 4);
         for &v in vector {
             bytes.extend_from_slice(&v.to_le_bytes());
@@ -1336,8 +1336,8 @@ impl Catalog {
         .execute(&self.pool)
         .await?;
 
-        // A vector changed — patch just this recording into the warm cache
-        // (no whole-corpus re-decode; a stale cached vector would rank wrongly).
+        // A vector changed — patch just this recording into the warm cache, with
+        // no whole-corpus re-decode. A stale cached vector would rank wrongly.
         self.patch_recording_in_cache(id).await;
         Ok(())
     }
@@ -1393,11 +1393,11 @@ impl Catalog {
         Ok(())
     }
 
-    /// Delete ALL stored embeddings — per-chunk and legacy whole-recording — so
+    /// Delete all stored embeddings — per-chunk and legacy whole-recording — so
     /// the whole library can be re-embedded with a newly-configured model. After
-    /// this every recording counts as "without chunk embeddings", so the daemon's
-    /// backfill re-embeds them. Vectors from a different model/dimension would
-    /// otherwise be silently skipped (dimension guard) and the recording would be
+    /// this, every recording counts as "without chunk embeddings", so the daemon's
+    /// backfill re-embeds them. Vectors from a different model or dimension would
+    /// otherwise be silently skipped by the dimension guard, leaving the recording
     /// unsearchable until re-embedded.
     pub async fn clear_all_embeddings(&self) -> Result<()> {
         let mut tx = self.pool.begin().await?;
@@ -1464,10 +1464,10 @@ impl Catalog {
     /// `(id, cosine_score)` sorted high→low.
     ///
     /// - **Dimension safety:** an embedding whose length doesn't match the query
-    ///   vector is skipped (cosine over mismatched dimensions is meaningless and
-    ///   would otherwise score on a silently-truncated prefix).
+    ///   vector is skipped — cosine over mismatched dimensions is meaningless and
+    ///   would otherwise score on a silently-truncated prefix.
     /// - **Relevance floor:** results scoring below `min_score` are dropped, so a
-    ///   vague/garbage query returns *few or no* results instead of `limit`
+    ///   vague or garbage query returns few or no results rather than `limit`
     ///   arbitrary ones.
     /// - **Meeting dedupe:** a meeting's two tracks share a `meeting_id` and have
     ///   near-identical transcripts; they collapse to a single best-scoring entry
@@ -1479,8 +1479,8 @@ impl Catalog {
         limit: usize,
         min_score: f32,
     ) -> Result<Vec<(RecordingId, f32)>> {
-        // Reads the legacy whole-recording vectors from the shared decoded
-        // corpus, so a query doesn't re-read and re-decode the BLOBs each time.
+        // Read the legacy whole-recording vectors from the shared decoded corpus,
+        // so a query doesn't re-read and re-decode the blobs each time.
         let corpus = self.embedding_corpus().await?;
 
         let dim = query_vec.len();
@@ -1488,7 +1488,7 @@ impl Catalog {
 
         // The cosine scan over the legacy corpus is CPU-bound — up to
         // MAX_CACHED_VECTORS dot products — so run it on the blocking pool. On a
-        // large library / slow box, doing it inline would starve the async
+        // large library or a slow box, doing it inline would starve the async
         // executor (IPC named-pipe reads, audio streaming) between await points.
         let best = tokio::task::spawn_blocking(move || {
             // Best (id, score) per result key — meeting_id when present, else the
@@ -1531,21 +1531,21 @@ impl Catalog {
         Ok(scores)
     }
 
-    /// Compute the per-recording **best-chunk** (max-sim) cosine ranking for a
-    /// query vector, meeting-deduped.
+    /// Compute the per-recording best-chunk (max-sim) cosine ranking for a query
+    /// vector, meeting-deduped.
     ///
     /// Returns `(dedupe_key, RecordingId, raw_cosine)` sorted high→low. The raw
     /// cosine is of the single best-matching chunk, which is what makes a
-    /// paraphrase of one spoken idea rank on that idea instead of an averaged
-    /// whole-note vector. The `dedupe_key` is the recording's `meeting_id` when
-    /// it belongs to a meeting, else its own id — exposed so the fusion in
-    /// [`Self::hybrid_search`] can collapse a meeting on the SAME key the lexical
-    /// retriever uses, even if the two retrievers each pick a different track of
-    /// that meeting as its representative (otherwise the meeting would surface
-    /// twice). Recordings that only have a legacy whole-recording vector (no
-    /// chunks yet, pending backfill) are folded in from the `embeddings` table so
-    /// nothing becomes unsearchable during migration. Dimension-mismatched
-    /// vectors are skipped (same guard as [`Self::semantic_search`]).
+    /// paraphrase of one spoken idea rank on that idea instead of on an averaged
+    /// whole-note vector. The `dedupe_key` is the recording's `meeting_id` when it
+    /// belongs to a meeting, else its own id — exposed so the fusion in
+    /// [`Self::hybrid_search`] can collapse a meeting on the same key the lexical
+    /// retriever uses, even when the two retrievers each pick a different track of
+    /// that meeting as its representative (without it, the meeting would surface
+    /// twice). Recordings that only have a legacy whole-recording vector (no chunks
+    /// yet, pending backfill) are folded in from the `embeddings` table so nothing
+    /// becomes unsearchable during migration. Dimension-mismatched vectors are
+    /// skipped (the same guard as [`Self::semantic_search`]).
     async fn vector_ranking(&self, query_vec: &[f32]) -> Result<Vec<(String, RecordingId, f32)>> {
         let dim = query_vec.len();
         let query: Vec<f32> = query_vec.to_vec();
@@ -1562,8 +1562,8 @@ impl Catalog {
                 std::collections::HashMap::new();
 
             // Score one pre-decoded vector into `best`. A corrupt blob (vector
-            // None) or a dimension mismatch is skipped, exactly as the inline
-            // decode did.
+            // None) or a dimension mismatch is skipped, just as the inline decode
+            // did.
             let mut consider = |cv: &CachedVector| {
                 let Some(vec) = cv.vector.as_deref() else {
                     return; // corrupt blob, already warned at load
@@ -1655,11 +1655,11 @@ impl Catalog {
         Ok(out)
     }
 
-    /// Recordings whose TAG name matches `query` (case-insensitive substring),
+    /// Recordings whose tag name matches `query` (case-insensitive substring),
     /// meeting-deduped, in the same `(dedupe_key, RecordingId)` shape as
     /// [`Self::lexical_ranking`]. Feeds the hybrid search's lexical (exact-intent)
     /// side so a tag-name query surfaces its tagged recordings even in semantic
-    /// mode — mirroring the tag clause the plain [`Self::list`] already applies.
+    /// mode, mirroring the tag clause the plain [`Self::list`] already applies.
     async fn tag_ranking(&self, query: &str) -> Result<Vec<(String, RecordingId)>> {
         let q = query.trim();
         if q.is_empty() {
@@ -1694,54 +1694,49 @@ impl Catalog {
         Ok(out)
     }
 
-    /// Hybrid semantic + lexical search with Reciprocal Rank Fusion.
+    /// Hybrid semantic + lexical search with Reciprocal Rank Fusion (RRF).
     ///
-    /// This is the search the daemon now uses. It:
-    /// 1. Ranks recordings by best-matching chunk cosine (paraphrase recall).
-    /// 2. Ranks recordings by FTS5 BM25 (exact-term recall).
-    /// 3. Fuses the two rankings with RRF (no fragile cross-scale threshold).
-    /// 4. Returns `(RecordingId, relevance)` where `relevance` is the *calibrated*
-    ///    best-chunk cosine (0..1) for display — a meaningful percentage, not raw
-    ///    cosine. Lexical-only hits (no vector signal) get a small floor relevance
-    ///    so they still surface with an honest "weak semantic match" reading.
+    /// This is the search the daemon uses. It merges the ordered listings from two
+    /// retrievers:
+    /// 1. A vector retriever that ranks by best-matching chunk cosine — cosine
+    ///    similarity over ONNX embedding chunks (see [`crate::embed::Embedder`]),
+    ///    the paraphrase-recall side.
+    /// 2. A lexical retriever: an FTS5 BM25 prefix query over the full-text search
+    ///    virtual table, the exact-term-recall side.
     ///
-    /// Performs a hybrid search over the recording catalog, combining semantic
-    /// (vector) search and lexical (FTS5) search results.
+    /// RRF fuses the two without a fragile cross-scale threshold. The result is
+    /// `(RecordingId, relevance)`, where `relevance` is the calibrated best-chunk
+    /// cosine (0..1) for display — a meaningful percentage rather than a raw
+    /// cosine. Lexical-only hits (no vector signal) get a small relevance floor so
+    /// they still surface with an honest "weak semantic match" reading.
     ///
-    /// This function implements Reciprocal Rank Fusion (RRF) to merge the ordered
-    /// listings from two distinct retrievers:
-    /// 1. A vector-based semantic retriever that scores using cosine similarity
-    ///    over ONNX embedding chunks (see [`crate::embed::Embedder`]).
-    /// 2. A lexical prefix query over the FTS5 full-text search virtual table.
+    /// ### Meeting collapsing
+    /// In Meeting Mode a single meeting has two tracks (microphone and system
+    /// loopback). Returning both as separate results would clutter the UI, so
+    /// results are grouped by a stable dedupe key (the `meeting_id` for meetings,
+    /// the `id` for standalone voice notes). When the two retrievers match
+    /// different tracks of the same meeting the results collapse, and a single
+    /// representative `RecordingId` comes back, preferring the track with the
+    /// strongest semantic match.
     ///
-    /// ### Meeting Collapsing
-    /// In Meeting Mode, a single meeting has two separate tracks (microphone and
-    /// system loopback). Returning both tracks as separate search results would
-    /// clutter the UI. To prevent this, results are grouped by a stable deduplication
-    /// key (the `meeting_id` for meetings, or the `id` for standalone voice notes).
-    /// If both retrievers match different tracks of the same meeting, the results
-    /// collapse, and we return a single representative `RecordingId` (preferring
-    /// the track with the strongest semantic match).
+    /// ### Relevance calibration and flooring
+    /// `min_relevance` filters out weak semantic hits whose calibrated cosine falls
+    /// below the floor. Exact-term matches from the lexical retriever are exempt: a
+    /// query for an exact word present in the transcript is returned even when its
+    /// semantic similarity is low.
     ///
-    /// ### Relevance Calibration & Flooring
-    /// The `min_relevance` parameter filters out weak semantic hits (whose calibrated
-    /// cosine score falls below the floor). Crucially, exact term matches from the
-    /// lexical retriever are exempt from this threshold — if a user searches for an
-    /// exact word that is present in the transcript, it is returned even if the
-    /// semantic similarity score is low.
     /// ### Optional filter (S3)
     /// When `filter` is `Some`, the fused results are restricted to recordings
     /// matching the same constraints as the plain [`Self::list`] — tag, status,
-    /// date range, kind, favorite, in-place, tag-presence — so a meaning-search
-    /// can be scoped exactly like the Library. The restriction is applied
-    /// **after ranking, before the `limit` truncation**, so the top-`limit`
-    /// in-scope results come back (not the top-`limit` overall, then thinned).
-    /// A meeting passes when *either* track matches (the candidate set is keyed
-    /// by the same meeting-stable dedupe key). The filter's query/pagination
-    /// fields — `search` (the query is the separate `query`/`query_vec`),
-    /// `limit`, `offset`, `sort_desc` — are ignored for the restriction; only
-    /// its predicate fields scope the candidate set. `None` = today's behavior,
-    /// unchanged.
+    /// date range, kind, favorite, in-place, tag-presence — so a meaning-search can
+    /// be scoped exactly like the Library. The restriction runs after ranking but
+    /// before the `limit` truncation, so the top-`limit` in-scope results come back,
+    /// not the top-`limit` overall then thinned. A meeting passes when either track
+    /// matches (the candidate set is keyed by the same meeting-stable dedupe key).
+    /// The filter's query and pagination fields — `search` (the query is the
+    /// separate `query`/`query_vec`), `limit`, `offset`, `sort_desc` — are ignored
+    /// for the restriction; only its predicate fields scope the candidate set.
+    /// `None` leaves the unscoped behavior unchanged.
     pub async fn hybrid_search(
         &self,
         query: &str,
@@ -1751,15 +1746,15 @@ impl Catalog {
         filter: Option<&ListFilter>,
     ) -> Result<Vec<(RecordingId, f32)>> {
         // S3: when a filter is given, pre-compute the in-scope dedupe keys so the
-        // fused ranking can be restricted to them. Built from the SAME `list`
-        // query the Library uses (predicate fields only — query/pagination are
-        // dropped), then mapped to dedupe keys so a meeting passes if either of
-        // its tracks matches.
+        // fused ranking can be restricted to them. Built from the same `list` query
+        // the Library uses (predicate fields only — query and pagination dropped),
+        // then mapped to dedupe keys so a meeting passes if either of its tracks
+        // matches.
         let allowed_keys: Option<std::collections::HashSet<String>> = match filter {
             Some(f) => {
                 let scoped = ListFilter {
-                    // Drop query + pagination + sort: this list is only used to
-                    // derive the in-scope candidate set, not to order/page it.
+                    // Drop query, pagination, and sort: this list only derives the
+                    // in-scope candidate set, it doesn't order or page it.
                     search: None,
                     limit: None,
                     offset: None,
@@ -1792,8 +1787,8 @@ impl Catalog {
             }
         }
 
-        // Everything below is keyed by the meeting-stable DEDUPE KEY (meeting_id
-        // or recording id), not the raw recording id, so a meeting collapses to a
+        // Everything below is keyed by the meeting-stable dedupe key (meeting_id or
+        // recording id), not the raw recording id, so a meeting collapses to a
         // single result even when the vector and lexical retrievers each pick a
         // different track of it as their representative.
 
@@ -1873,21 +1868,20 @@ impl Catalog {
     /// it costs one corpus scan and works even when the embedding model isn't
     /// loaded.
     ///
-    /// The query vector is the **mean of the source's chunk vectors**,
-    /// L2-renormalized. The centroid captures what the whole note is about,
-    /// while candidates are still scored by their own best-matching chunk via
-    /// `vector_ranking` — the exact retrieval path a typed semantic
-    /// query takes — so a long candidate ranks on its closest idea instead of
-    /// an averaged blur. A source that only has a legacy whole-recording
-    /// vector uses that vector directly (it *is* that recording's mean).
+    /// The query vector is the mean of the source's chunk vectors, L2-renormalized.
+    /// The centroid captures what the whole note is about, while candidates are
+    /// still scored by their own best-matching chunk via `vector_ranking` — the
+    /// same retrieval path a typed semantic query takes — so a long candidate ranks
+    /// on its closest idea instead of an averaged blur. A source that only has a
+    /// legacy whole-recording vector uses that vector directly, since it already is
+    /// that recording's mean.
     ///
-    /// The source never appears in the results. Exclusion is by the
-    /// meeting-stable dedupe key, so for a meeting track the *other* track of
-    /// the same meeting — a near-identical transcript that would trivially
-    /// rank #1 — is excluded too. Scores are calibrated like a normal
-    /// semantic search ([`crate::fusion::calibrate_cosine`]); hits under
-    /// `min_relevance` are dropped, and at most `limit` results return,
-    /// best-first.
+    /// The source never appears in the results. Exclusion is by the meeting-stable
+    /// dedupe key, so for a meeting track the other track of the same meeting — a
+    /// near-identical transcript that would trivially rank #1 — is excluded too.
+    /// Scores are calibrated like a normal semantic search
+    /// ([`crate::fusion::calibrate_cosine`]); hits under `min_relevance` are
+    /// dropped, and at most `limit` results return, best-first.
     ///
     /// Errors: [`crate::error::Error::NotFound`] when `id` doesn't exist, and
     /// a "not indexed yet" [`crate::error::Error::Internal`] when the
@@ -1987,11 +1981,11 @@ impl Catalog {
     /// List recordings matching `filter`, newest-first by default, with tags and
     /// speaker names populated per row.
     ///
-    /// Every predicate — full-text search, tag, status, kind (single vs.
-    /// meeting), favorites, date range — is applied in SQL *before* `LIMIT`/
-    /// `OFFSET`, so pagination composes correctly (filtering after pagination
-    /// would return mostly-empty pages of the chosen kind). Backs the GUI
-    /// Library and the CLI `phoneme list`.
+    /// Every predicate — full-text search, tag, status, kind (single vs. meeting),
+    /// favorites, date range — is applied in SQL before `LIMIT`/`OFFSET`, so
+    /// pagination composes correctly. Filtering after pagination would return
+    /// mostly-empty pages of the chosen kind. Backs the GUI Library and the CLI
+    /// `phoneme list`.
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
         let mut sql = String::from("SELECT recordings.* FROM recordings");
 
@@ -2022,17 +2016,17 @@ impl Catalog {
             sql.push_str(" AND (recordings.rowid IN (SELECT rowid FROM recordings_fts WHERE transcript MATCH ?) OR recordings.id IN (SELECT recording_id FROM recording_tags rts JOIN tags ts ON ts.id = rts.tag_id WHERE ts.name LIKE ?) OR recordings.model LIKE ? OR recordings.cleanup_model LIKE ? OR recordings.summary_model LIKE ? OR recordings.title_model LIKE ? OR recordings.tag_model LIKE ? OR recordings.diarization_model LIKE ?)");
         }
         if let Some(tag_id) = filter.tag_id {
-            // `tag_id` is `i64`, so direct formatting is injection-safe (an
-            // integer can't carry SQL) — same rationale as the `u32` LIMIT/OFFSET
-            // below. String filters (FTS, status) use bound `?` parameters.
+            // `tag_id` is an `i64`, so formatting it directly is injection-safe —
+            // an integer can't carry SQL. Same rationale as the `u32` LIMIT/OFFSET
+            // below. String filters (FTS, status) go through bound `?` parameters.
             sql.push_str(&format!(" AND rt.tag_id = {tag_id}"));
         }
         if filter.status.is_some() {
             sql.push_str(" AND recordings.status = ?");
         }
-        // Kind + favorites are filtered HERE, not client-side: they must apply
-        // before LIMIT/OFFSET or pages of the chosen kind come back mostly
-        // empty (post-pagination filtering only ever thins the fetched page).
+        // Kind and favorites are filtered in SQL, not client-side: they must apply
+        // before LIMIT/OFFSET, or pages of the chosen kind come back mostly empty
+        // (post-pagination filtering only ever thins the fetched page).
         match filter.kind {
             Some(crate::types::ListKind::Single) => {
                 sql.push_str(" AND recordings.meeting_id IS NULL");
@@ -2053,8 +2047,8 @@ impl Catalog {
             None => {}
         }
         // Tag-presence filter (sidebar "All Tags" / "Untagged"). A static subquery
-        // over recording_tags — no bound params, injection-safe. Independent of
-        // the `tag_id` (single-tag) JOIN above, so the two compose.
+        // over recording_tags — no bound params, injection-safe. Independent of the
+        // single-tag `tag_id` JOIN above, so the two compose.
         match filter.tagged {
             Some(true) => {
                 sql.push_str(" AND recordings.id IN (SELECT recording_id FROM recording_tags)")
@@ -2078,9 +2072,9 @@ impl Catalog {
         sql.push_str(&format!(
             " ORDER BY recordings.started_at {dir}, recordings.id {dir}"
         ));
-        // LIMIT / OFFSET for pagination. SQLite requires a LIMIT before an
-        // OFFSET, so when only an offset is given we use `LIMIT -1` (= no row
-        // cap). `limit`/`offset` are `u32`, so direct formatting is injection-safe.
+        // LIMIT / OFFSET for pagination. SQLite requires a LIMIT before an OFFSET,
+        // so an offset given on its own uses `LIMIT -1` (no row cap). `limit` and
+        // `offset` are `u32`, so formatting them directly is injection-safe.
         match (filter.limit, filter.offset) {
             (Some(n), Some(m)) => sql.push_str(&format!(" LIMIT {n} OFFSET {m}")),
             (Some(n), None) => sql.push_str(&format!(" LIMIT {n}")),
@@ -2157,8 +2151,9 @@ impl Catalog {
     /// audio file from disk separately.
     pub async fn delete(&self, id: &RecordingId) -> Result<()> {
         // Named voices that will lose a sample when the cascade removes this
-        // recording's voiceprints — captured BEFORE the delete so we can recompute
-        // their cached centroids afterward (audit H1). NULL links are skipped.
+        // recording's voiceprints. Capture them before the delete so we can
+        // recompute their cached centroids afterward (audit H1). Null links are
+        // skipped.
         let affected: Vec<String> = sqlx::query_scalar(
             "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
              WHERE recording_id = ? AND named_voice_id IS NOT NULL",
@@ -2172,9 +2167,9 @@ impl Catalog {
             .execute(&self.pool)
             .await?;
         // The cascade took this recording's embeddings, voiceprints, and dismissed
-        // suggestions with it — patch its (now-empty) vectors out of the warm
-        // cache, then recompute any named voice that just lost a sample so its
-        // centroid + count stay accurate.
+        // suggestions with it — patch its now-empty vectors out of the warm cache,
+        // then recompute any named voice that just lost a sample so its centroid
+        // and count stay accurate.
         self.patch_recording_in_cache(id).await;
         for nid in affected {
             self.recompute_named_centroid(&nid).await?;
@@ -2182,16 +2177,16 @@ impl Catalog {
         Ok(())
     }
 
-    /// Delete EVERY recording row — and, via the same cascade as [`Self::delete`], all
-    /// their tags, segments, words, speaker names, and embeddings. Used by the
+    /// Delete every recording row — and, via the same cascade as [`Self::delete`],
+    /// all their tags, segments, words, speaker names, and embeddings. Used by the
     /// destructive catalog rebuild, which then re-imports the audio from disk.
-    /// Returns the number of rows removed. The caller leaves the WAV files on
-    /// disk (the rebuild re-links them).
+    /// Returns the number of rows removed. The caller leaves the WAV files on disk
+    /// (the rebuild re-links them).
     pub async fn clear_all_recordings(&self) -> Result<u64> {
         // Named voices that will lose samples when the cascade removes every
-        // recording's voiceprints — captured BEFORE the delete so their cached
-        // centroids + counts can be recomputed afterward, mirroring
-        // [`Self::delete`] (audit M1). NULL links are skipped.
+        // recording's voiceprints. Capture them before the delete so their cached
+        // centroids and counts can be recomputed afterward, mirroring
+        // [`Self::delete`] (audit M1). Null links are skipped.
         let affected: Vec<String> = sqlx::query_scalar(
             "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
              WHERE named_voice_id IS NOT NULL",
@@ -2225,9 +2220,8 @@ impl Catalog {
     /// dropdown and tag autocomplete — orphaned tags are excluded (see
     /// [`Catalog::list_all_tags`] for the unfiltered set).
     pub async fn list_tags(&self) -> Result<Vec<Tag>> {
-        // Only return tags that are attached to at least one recording.
-        // Orphaned tags (detached from all recordings) are excluded so they
-        // don't pollute the filter dropdown or tag autocomplete.
+        // Only tags attached to at least one recording; orphaned tags would
+        // otherwise clutter the filter dropdown and tag autocomplete.
         let rows = sqlx::query(
             "SELECT id, name, color FROM tags \
              WHERE id IN (SELECT tag_id FROM recording_tags) \
@@ -2250,13 +2244,12 @@ impl Catalog {
     /// case-insensitive, so adding "code" when "Code" exists reuses it, colour
     /// and links intact).
     pub async fn add_tag(&self, name: &str, color: Option<&str>) -> Result<Tag> {
-        // Tags are case-INSENSITIVELY unique at the application level: "Code"
-        // and "code" are the same tag, so adding either reuses the existing
-        // row (keeping its color and recording links — the first-created
-        // casing wins). The UNIQUE index on `name` is byte-wise, which is why
-        // this lookup guards the insert. COLLATE NOCASE is ASCII-only; that
-        // covers the realistic duplicate ("Test"/"test") without rewriting
-        // non-ASCII tag names.
+        // Tags are case-insensitively unique at the application level: "Code" and
+        // "code" are the same tag, so adding either reuses the existing row,
+        // keeping its color and recording links (the first-created casing wins).
+        // The UNIQUE index on `name` is byte-wise, so this lookup is what guards
+        // the insert. COLLATE NOCASE is ASCII-only, which covers the realistic
+        // duplicate ("Test"/"test") without rewriting non-ASCII tag names.
         let existing =
             sqlx::query("SELECT id, name, color FROM tags WHERE name = ? COLLATE NOCASE")
                 .bind(name)
@@ -2330,8 +2323,8 @@ impl Catalog {
             .collect())
     }
 
-    /// Returns ALL tags including ones not attached to any recording.
-    /// Used by the Tag Manager settings UI.
+    /// Every tag, including ones not attached to any recording. Used by the Tag
+    /// Manager settings UI.
     pub async fn list_all_tags(&self) -> Result<Vec<Tag>> {
         let rows = sqlx::query("SELECT id, name, color FROM tags ORDER BY name")
             .fetch_all(&self.pool)
@@ -2447,8 +2440,8 @@ impl Catalog {
     /// the catalog and returning their `audio_path` values so the caller can
     /// delete the files from disk.
     ///
-    /// Only terminal-state recordings (done / failed / cancelled) are eligible —
-    /// in-progress recordings are always preserved regardless of age or count.
+    /// Only terminal-state recordings (done / failed / cancelled) are eligible;
+    /// in-progress recordings are always kept, whatever their age or count.
     pub async fn apply_retention(
         &self,
         cfg: &crate::config::RetentionConfig,
@@ -2458,19 +2451,17 @@ impl Catalog {
         // delete cascade-drops that recording's embeddings, so the warm cache
         // must be dropped or deleted vectors keep surfacing in search.
         let mut hard_deleted = false;
-        // Named voices that lose a sample to a hard delete — collected as we go
-        // (BEFORE each delete cascades the voiceprint away) so their centroids +
+        // Named voices that lose a sample to a hard delete, collected as we go —
+        // before each delete cascades the voiceprint away — so their centroids and
         // counts can be recomputed once at the end, mirroring [`Self::delete`]
         // (audit M1). A `HashSet` dedupes voices touched by several recordings.
         let mut affected_voices: std::collections::HashSet<String> =
             std::collections::HashSet::new();
 
-        // `delete_audio = true` is the disk-saver mode: the catalog row stays
-        // (transcript searchable forever), only the WAV goes. The row's
-        // audio_path is blanked so the UI doesn't offer a dead player, and so
-        // the row never matches a later sweep again. `false` (default) deletes
-        // row + audio together. This flag was previously ignored — audio-only
-        // users were losing their rows.
+        // `delete_audio = true` is the disk-saver mode: the catalog row stays (the
+        // transcript stays searchable), only the WAV goes. The row's audio_path is
+        // blanked so the UI doesn't offer a dead player and so a later sweep won't
+        // re-process the row. `false` (the default) deletes row and audio together.
         let audio_only = cfg.delete_audio;
 
         // Age-based cleanup — everything older than max_age_days.
@@ -2500,7 +2491,7 @@ impl Catalog {
                     .execute(&self.pool)
                     .await?;
                 } else {
-                    // Capture the named voices losing a sample BEFORE the cascade
+                    // Capture the named voices losing a sample before the cascade
                     // removes this recording's voiceprints (audit M1).
                     let voices: Vec<String> = sqlx::query_scalar(
                         "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
@@ -2520,11 +2511,11 @@ impl Catalog {
             }
         }
 
-        // Count-based cleanup — all but the most recent max_count. In
-        // audio-only mode the ranking still counts EVERY terminal row (rows
-        // are kept, so "the most recent N" must mean recordings, not files) —
-        // the audio_path filter above/below only stops re-processing rows
-        // whose audio is already gone.
+        // Count-based cleanup — all but the most recent max_count. In audio-only
+        // mode the ranking still counts every terminal row: the rows are kept, so
+        // "the most recent N" has to mean recordings, not files. The audio_path
+        // filter above and below only stops re-processing rows whose audio is
+        // already gone.
         if let Some(max_count) = cfg.max_count {
             let rows = sqlx::query(&format!(
                 "SELECT id, audio_path FROM recordings \
@@ -2551,7 +2542,7 @@ impl Catalog {
                     .execute(&self.pool)
                     .await?;
                 } else {
-                    // Capture the named voices losing a sample BEFORE the cascade
+                    // Capture the named voices losing a sample before the cascade
                     // removes this recording's voiceprints (audit M1).
                     let voices: Vec<String> = sqlx::query_scalar(
                         "SELECT DISTINCT named_voice_id FROM speaker_voiceprints \
@@ -2573,12 +2564,12 @@ impl Catalog {
 
         // A hard delete cascade-drops the recordings' embeddings; drop the warm
         // snapshot so deleted vectors stop surfacing in semantic search. (The
-        // audio-only path keeps the rows + embeddings, so it needs no drop.)
+        // audio-only path keeps the rows and embeddings, so it needs no drop.)
         if hard_deleted {
             self.invalidate_embedding_cache();
         }
         // ...and recompute any named voice that just lost a sample so the Speaker
-        // Library's cached centroids + counts stay accurate (audit M1).
+        // Library's cached centroids and counts stay accurate (audit M1).
         for nid in affected_voices {
             self.recompute_named_centroid(&nid).await?;
         }
@@ -2598,10 +2589,10 @@ impl Catalog {
             None => return Ok(0),
         };
 
-        // cutoff_now is items older than this are ALREADY deleted or being deleted now.
+        // Items older than cutoff_now are already deleted, or being deleted now.
         let cutoff_now =
             chrono::Utc::now() - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
-        // cutoff_future is items older than this will be deleted in the next `hours_ahead` hours.
+        // Items older than cutoff_future fall due over the next `hours_ahead` hours.
         let cutoff_future =
             cutoff_now + chrono::Duration::try_hours(hours_ahead as i64).unwrap_or_default();
 
@@ -2683,11 +2674,11 @@ impl Catalog {
     ///
     /// This is the pipeline's "friendly default" path (the meeting mic track's
     /// label 1 → "You"). Unlike [`Self::set_speaker_name`] (the user/IPC rename
-    /// path, an upsert), this NEVER overwrites a name already on the row, so a
-    /// user rename of that speaker survives a retranscribe / re-run that
-    /// re-seeds the same default. The `name` is trimmed like `set_speaker_name`;
-    /// a blank/whitespace-only `name` is a no-op (we never seed an empty
-    /// default). The recording is expected to exist; a foreign-key violation
+    /// path, an upsert), this never overwrites a name already on the row, so a user
+    /// rename of that speaker survives a retranscribe or re-run that re-seeds the
+    /// same default. The `name` is trimmed like in `set_speaker_name`; a
+    /// blank/whitespace-only `name` is a no-op, since we never seed an empty
+    /// default. The recording is expected to exist; a foreign-key violation
     /// surfaces as an error.
     pub async fn set_speaker_name_if_absent(
         &self,
@@ -2835,8 +2826,9 @@ impl Catalog {
             return Ok(None);
         }
         // What this capture was enrolled under before (if anything), so a re-name
-        // (e.g. correcting a wrong suggestion) recomputes the OLD voice too — else
-        // it keeps the moved sample's stale centroid / inflated count (audit H2).
+        // — e.g. correcting a wrong suggestion — recomputes the old voice too.
+        // Otherwise that voice keeps the moved sample's stale centroid and inflated
+        // count (audit H2).
         let previous = self.named_voice_for(recording_id, speaker_label).await?;
         let id = self.find_or_create_named_voice(name).await?;
         sqlx::query(
@@ -2895,9 +2887,9 @@ impl Catalog {
         // racing under the same name can't create duplicate library entries
         // (audit M4). Then read back the existing-or-just-created id.
         let id = format!("nv_{}", RecordingId::new().as_str());
-        // A *forgotten* (soft-deleted) voice with this name does not count as a
-        // match — re-using a forgotten name creates a fresh live voice rather than
-        // silently reviving a tombstoned one (undo is the explicit revive path).
+        // A forgotten (soft-deleted) voice with this name doesn't count as a match:
+        // re-using a forgotten name creates a fresh live voice rather than silently
+        // reviving a tombstoned one (undo is the explicit revive path).
         sqlx::query(
             "INSERT INTO named_voiceprints (id, name, centroid, samples) \
              SELECT ?, ?, '[]', 0 \
@@ -2921,19 +2913,18 @@ impl Catalog {
 
     /// Drop clear outliers from a named voice's linked captures before averaging.
     ///
-    /// Each sample is `(centroid, duration_weight)`; outliers are judged purely on
-    /// centroid *geometry* (a long sample of the wrong speaker is still the wrong
-    /// speaker), and each survivor keeps its weight so the caller can take a
+    /// Each sample is `(centroid, duration_weight)`. Outliers are judged purely on
+    /// centroid geometry — a long sample of the wrong speaker is still the wrong
+    /// speaker — and each survivor keeps its weight so the caller can take a
     /// duration-weighted mean over what's left (roadmap V4).
     ///
-    /// With `< 4` samples there's too little signal to judge, so the input is
-    /// returned unchanged. At `>= 4`, a provisional (unweighted) mean is taken,
-    /// then any capture whose cosine to that mean is below either a hard floor
-    /// (`0.2` — almost certainly a different speaker) or `mean - 2*stddev` (a
-    /// statistical outlier) is removed. If pruning would drop *everything* (a
-    /// degenerate cutoff, or a provisional mean that can't be computed — e.g.
-    /// mixed dimensions), the originals are kept so the voice never silently
-    /// empties.
+    /// With fewer than 4 samples there's too little signal to judge, so the input
+    /// is returned unchanged. At 4 or more, a provisional (unweighted) mean is
+    /// taken, then any capture whose cosine to that mean is below either a hard
+    /// floor (`0.2`, almost certainly a different speaker) or `mean - 2*stddev` (a
+    /// statistical outlier) is removed. If pruning would drop everything — a
+    /// degenerate cutoff, or a provisional mean that can't be computed (e.g. mixed
+    /// dimensions) — the originals are kept so the voice never silently empties.
     fn drop_centroid_outliers(samples: Vec<(Vec<f32>, f64)>) -> Vec<(Vec<f32>, f64)> {
         const MIN_SAMPLES_TO_PRUNE: usize = 4;
         const HARD_FLOOR: f32 = 0.2;
@@ -2941,13 +2932,13 @@ impl Catalog {
         if samples.len() < MIN_SAMPLES_TO_PRUNE {
             return samples;
         }
-        // The provisional mean used for outlier detection is UNWEIGHTED — duration
-        // must not decide who counts as an outlier, only how much a survivor
+        // The provisional mean used for outlier detection is unweighted: duration
+        // doesn't decide who counts as an outlier, only how much a survivor
         // contributes to the final template.
         let centroids: Vec<Vec<f32>> = samples.iter().map(|(c, _)| c.clone()).collect();
         let provisional = match crate::voiceprint::mean_centroid(&centroids) {
             Some(m) => m,
-            None => return samples, // mixed dims etc. — can't judge, keep all
+            None => return samples, // mixed dims etc.: can't judge, keep all
         };
         let sims: Vec<f32> = samples
             .iter()
@@ -2964,26 +2955,25 @@ impl Catalog {
             .filter(|(_, &sim)| sim >= cutoff)
             .map(|((c, w), _)| (c.clone(), *w))
             .collect();
-        // A degenerate cutoff (every sample identical → var 0, and float jitter
-        // drops the whole set) must not empty the voice — fall back to the full
-        // sample set in that case.
+        // A degenerate cutoff — every sample identical, so var is 0 and float
+        // jitter drops the whole set — must not empty the voice; fall back to the
+        // full sample set in that case.
         if kept.is_empty() {
             return samples;
         }
         kept
     }
 
-    /// Recompute a named voice's cached centroid + sample count from its linked
-    /// captures: the **duration-weighted** L2-normalized mean (roadmap V4), taken
-    /// over the survivors of [`Self::drop_centroid_outliers`]. Weighting is
-    /// applied *after* outlier rejection, so a long sample only counts more once
-    /// it's already been judged a genuine member of the cluster — it can't drag in
-    /// a wrong-speaker capture just by being lengthy. Legacy captures with
-    /// `duration_ms = 0` fall back to equal weighting, so a library built before
-    /// this feature recomputes to the identical centroid until new, duration-
-    /// bearing captures arrive. A voice with no remaining captures gets an empty
-    /// centroid and zero samples (it never matches, but the entry stays until
-    /// explicitly forgotten).
+    /// Recompute a named voice's cached centroid and sample count from its linked
+    /// captures: the duration-weighted, L2-normalized mean (roadmap V4) over the
+    /// survivors of [`Self::drop_centroid_outliers`]. Weighting is applied after
+    /// outlier rejection, so a long sample only counts more once it's already been
+    /// judged a genuine member of the cluster — it can't drag in a wrong-speaker
+    /// capture just by being lengthy. Legacy captures with `duration_ms = 0` fall
+    /// back to equal weighting, so a library built before this feature recomputes
+    /// to the same centroid until new, duration-bearing captures arrive. A voice
+    /// with no remaining captures gets an empty centroid and zero samples — it
+    /// never matches, but the entry stays until explicitly forgotten.
     async fn recompute_named_centroid(&self, named_voice_id: &str) -> Result<()> {
         let rows = sqlx::query(
             "SELECT centroid, duration_ms FROM speaker_voiceprints WHERE named_voice_id = ?",
@@ -2998,9 +2988,9 @@ impl Catalog {
             samples.push((centroid, duration_ms as f64));
         }
         // With enough captures, prune clear outliers before the final mean so one
-        // mis-assigned sample (a wrong-speaker capture named into this voice)
-        // can't drag the template off the real speaker (audit M7). Below the
-        // threshold every sample counts — too few to tell signal from noise.
+        // mis-assigned sample (a wrong-speaker capture named into this voice) can't
+        // drag the template off the real speaker (audit M7). Below the threshold
+        // every sample counts — too few to tell signal from noise.
         let kept = Self::drop_centroid_outliers(samples);
         let mean = crate::voiceprint::weighted_mean_centroid(&kept).unwrap_or_default();
         let json = serde_json::to_string(&mean)?;
@@ -3061,9 +3051,9 @@ impl Catalog {
             let id: String = r.try_get("id")?;
             let centroid = serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
             // A centroid whose dimension differs from the probe came from a
-            // different embedding model — cosine would silently return 0.0, so
-            // such a library would go quietly unmatched. Skip it with a signal
-            // instead (audit L).
+            // different embedding model. Cosine would silently return 0.0, so such
+            // a library would go quietly unmatched; skip it with a warning instead
+            // (audit L).
             if centroid.len() != probe.len() {
                 tracing::warn!(
                     id = %id,
@@ -3121,9 +3111,9 @@ impl Catalog {
             .bind(from_id)
             .execute(&self.pool)
             .await?;
-        // Drop any undo-log rows keyed by the absorbed voice. The FK added in
-        // 20260620000004 now also cascades these on the hard delete below; the
-        // explicit DELETE stays as belt-and-suspenders (and documents the intent).
+        // Drop any undo-log rows keyed by the absorbed voice. The FK on
+        // forgotten_voiceprint_links already cascades these on the hard delete
+        // below; the explicit DELETE is redundant but makes the intent obvious.
         sqlx::query("DELETE FROM forgotten_voiceprint_links WHERE named_voice_id = ?")
             .bind(from_id)
             .execute(&self.pool)
@@ -3146,8 +3136,8 @@ impl Catalog {
     /// second forget of the same id is a no-op.
     pub async fn forget_named_voice(&self, id: &str) -> Result<bool> {
         let mut tx = self.pool.begin().await?;
-        // Only a LIVE voice can be forgotten; this both guards idempotency and
-        // gives us the rows_affected to report.
+        // Only a live voice can be forgotten; this guards idempotency and gives us
+        // the rows_affected to report.
         let stamped = sqlx::query(
             "UPDATE named_voiceprints SET deleted_at = datetime('now') \
              WHERE id = ? AND deleted_at IS NULL",
@@ -3226,19 +3216,19 @@ impl Catalog {
 
     // ---- Name propagation — back-fill a name onto past recordings (V5) ----
 
-    /// Find the *unnamed* speakers in OTHER recordings whose voiceprint matches a
+    /// Find the unnamed speakers in other recordings whose voiceprint matches a
     /// named voice — the back-fill candidates for naming propagation (V5).
     ///
     /// Scans every `speaker_voiceprints` row with `named_voice_id IS NULL` (a
     /// captured-but-never-named speaker), in any recording other than ones already
     /// linked to this voice, and scores its centroid against the named voice's
-    /// cached centroid with the *same scorer the recognizer uses* — raw cosine
-    /// under [`ScoreNorm::Off`](crate::voiceprint::ScoreNorm::Off), or the z-score
-    /// under `s_norm`/`as_norm`, cohort = the live named-voice library. A row is a
-    /// candidate iff it clears `threshold` (interpret `threshold` on the same scale
-    /// the chosen `mode` does, exactly as `recognize_speakers_for`). Already-named
-    /// speakers are never candidates (only `named_voice_id IS NULL` rows are
-    /// scanned), so propagation can only ADD a name, never overwrite one. Results
+    /// cached centroid with the same scorer the recognizer uses: raw cosine under
+    /// [`ScoreNorm::Off`](crate::voiceprint::ScoreNorm::Off), or the z-score under
+    /// `s_norm`/`as_norm` with the live named-voice library as the cohort. A row is
+    /// a candidate when it clears `threshold`, interpreted on the same scale the
+    /// chosen `mode` uses (exactly as `recognize_speakers_for`). Already-named
+    /// speakers are never candidates — only `named_voice_id IS NULL` rows are
+    /// scanned — so propagation can only add a name, never overwrite one. Results
     /// are ordered by score, highest first.
     ///
     /// Returns empty when the voice is unknown, forgotten, or has no centroid yet.
@@ -3248,9 +3238,9 @@ impl Catalog {
         threshold: f32,
         mode: crate::voiceprint::ScoreNorm,
     ) -> Result<Vec<PropagationCandidate>> {
-        // The live library: the cohort for normalization AND the source of the
-        // target centroid. A forgotten / sample-less voice isn't here, so it yields
-        // no candidates.
+        // The live library is both the cohort for normalization and the source of
+        // the target centroid. A forgotten or sample-less voice isn't here, so it
+        // yields no candidates.
         let library = self.named_voice_centroids().await?;
         let target_idx = match library.iter().position(|(v, _)| v.id == named_voice_id) {
             Some(i) => i,
@@ -3258,18 +3248,18 @@ impl Catalog {
         };
         let cohort: Vec<Vec<f32>> = library.iter().map(|(_, c)| c.clone()).collect();
 
-        // Every UNNAMED capture: not enrolled (`named_voice_id IS NULL`) AND with
-        // no display name (`speaker_names`) — a speaker can carry a display name
-        // without being enrolled (e.g. the pipeline's "You" default, or a name set
-        // on a cloud-diarized recording with no voiceprint), and propagation must
-        // never overwrite such a name. The `IS NULL` filter is PER-SPEAKER (the PK
+        // Every unnamed capture: not enrolled (`named_voice_id IS NULL`) and with
+        // no display name (`speaker_names`). A speaker can carry a display name
+        // without being enrolled — e.g. the pipeline's "You" default, or a name set
+        // on a cloud-diarized recording with no voiceprint — and propagation must
+        // never overwrite such a name. The `IS NULL` filter is per-speaker (the PK
         // is `(recording_id, speaker_label)`), so a speaker already enrolled under
-        // this — or any — voice is excluded by it directly, while a *second*,
-        // still-unnamed speaker of the same voice in the same recording is still
-        // admitted. We use NO recording-wide exclusion (that was the over-exclude
-        // bug — it dropped that second speaker) and NO per-speaker enrolled-guard
-        // (it would self-join the PK against an `IS NULL` row, always vacuously
-        // true — a no-op that only misleads).
+        // this — or any — voice is excluded directly, while a second, still-unnamed
+        // speaker of the same voice in the same recording is still admitted. There
+        // is deliberately no recording-wide exclusion: that would drop that second
+        // speaker. And there's no per-speaker enrolled-guard: it would self-join the
+        // PK against an `IS NULL` row, which is always vacuously true — a no-op that
+        // only misleads.
         let rows = sqlx::query(
             "SELECT sv.recording_id AS recording_id, sv.speaker_label AS speaker_label, \
                     sv.centroid AS centroid \
@@ -3286,7 +3276,7 @@ impl Catalog {
         for r in rows {
             let centroid = serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
             // A dimension mismatch (cross-model capture) scores cosine 0.0 and
-            // won't clear any sane threshold — same skip the recognizer makes.
+            // won't clear any sane threshold — the same skip the recognizer makes.
             let score = crate::voiceprint::normalized_score(&centroid, &cohort, target_idx, mode);
             if score >= threshold {
                 let recording_id: String = r.try_get("recording_id")?;
@@ -3320,11 +3310,11 @@ impl Catalog {
     /// enroll the capture into the library so the voice gets stronger. The voice's
     /// own name is read from the library by id.
     ///
-    /// Safety + idempotency: a target whose speaker is ALREADY named is skipped (we
-    /// never overwrite a name), as is a target with no captured voiceprint or one
-    /// already enrolled under this voice. Re-running with the same targets does no
-    /// duplicate work. Returns the targets actually back-filled (so callers can
-    /// refresh exactly those recordings, not every candidate).
+    /// Safety and idempotency: a target whose speaker is already named is skipped
+    /// (we never overwrite a name), as is a target with no captured voiceprint or
+    /// one already enrolled under this voice. Re-running with the same targets does
+    /// no duplicate work. Returns the targets actually back-filled, so callers can
+    /// refresh exactly those recordings rather than every candidate.
     ///
     /// Best-effort per target: the voice must exist and be live (a forgotten voice
     /// back-fills nothing).
@@ -3333,8 +3323,8 @@ impl Catalog {
         named_voice_id: &str,
         targets: &[(RecordingId, i64)],
     ) -> Result<Vec<(RecordingId, i64)>> {
-        // Resolve the name from the LIVE library; a forgotten/unknown voice can't
-        // be propagated.
+        // Resolve the name from the live library; a forgotten or unknown voice
+        // can't be propagated.
         let name: Option<String> = sqlx::query_scalar(
             "SELECT name FROM named_voiceprints WHERE id = ? AND deleted_at IS NULL",
         )
@@ -3359,7 +3349,7 @@ impl Catalog {
             if already_named.is_some() {
                 continue;
             }
-            // Skip a capture already enrolled under THIS voice (idempotent re-run).
+            // Skip a capture already enrolled under this voice (idempotent re-run).
             if self
                 .named_voice_for(recording_id.as_str(), *speaker_label)
                 .await?
@@ -3372,8 +3362,9 @@ impl Catalog {
             // capture. enroll_speaker is a no-op when no voiceprint was captured.
             self.set_speaker_name(recording_id, *speaker_label, &name)
                 .await?;
-            // Don't `?` the enroll: a failure AFTER the name was written would leave a
-            // display name with no enrollment. Match so we can roll the name back.
+            // Don't `?` the enroll: a failure after the name was written would
+            // leave a display name with no enrollment. Match on it so we can roll
+            // the name back.
             match self
                 .enroll_speaker(recording_id.as_str(), *speaker_label, &name)
                 .await
@@ -3483,19 +3474,19 @@ impl Catalog {
     }
 
     /// On-demand named-speaker recognition for a recording (#9): each captured
-    /// speaker that has NO name yet and hasn't been dismissed is matched against
-    /// the named-voice library, and the surviving suggestions are returned.
-    /// Reflects the live library, so a voice named *after* this recording was
+    /// speaker that has no name yet and hasn't been dismissed is matched against
+    /// the named-voice library, and the surviving suggestions are returned. This
+    /// reads the live library, so a voice named after this recording was
     /// transcribed is still suggested here.
     ///
-    /// Assignment is **one-to-one**: the full captured-speaker × named-voice
-    /// cosine matrix is scored once, then the best pairs are taken in descending
-    /// score so no two speakers in the same recording can be handed the same
-    /// name (audit H2). A pair is only emitted when it clears `threshold` AND
-    /// beats that speaker's own second-best candidate by `MARGIN` — an
-    /// ambiguous speaker (two library voices nearly tied) is left unknown rather
-    /// than guessed. The result holds at most one suggestion per captured speaker
-    /// and per name, ordered by `speaker_label`.
+    /// Assignment is one-to-one: the full captured-speaker × named-voice cosine
+    /// matrix is scored once, then the best pairs are taken in descending score so
+    /// no two speakers in the same recording can be handed the same name (audit
+    /// H2). A pair is only emitted when it clears `threshold` and beats that
+    /// speaker's own second-best candidate by `MARGIN` — an ambiguous speaker (two
+    /// library voices nearly tied) is left unknown rather than guessed. The result
+    /// holds at most one suggestion per captured speaker and per name, ordered by
+    /// `speaker_label`.
     pub async fn recognize_speakers_for(
         &self,
         recording_id: &str,
@@ -3537,17 +3528,17 @@ impl Catalog {
     /// One-to-one greedy assignment of captured speakers to named voices.
     ///
     /// Builds the score matrix, then repeatedly takes the highest remaining
-    /// `(speaker, voice)` cell whose speaker and voice are both still free, the
-    /// score clears `threshold`, and the score beats that speaker's *second-best
-    /// over the whole library* by `MARGIN`. Each speaker and each named
-    /// voice is used at most once. Output is sorted by `speaker_label` for a
-    /// stable suggestion order.
+    /// `(speaker, voice)` cell whose speaker and voice are both still free, whose
+    /// score clears `threshold`, and whose score beats that speaker's second-best
+    /// over the whole library by `MARGIN`. Each speaker and each named voice is
+    /// used at most once. Output is sorted by `speaker_label` for a stable
+    /// suggestion order.
     ///
     /// `mode` selects the scorer (V2): [`ScoreNorm::Off`](crate::voiceprint::ScoreNorm::Off)
-    /// uses raw cosine and `threshold` is the cosine bar (unchanged behavior);
-    /// `s_norm`/`as_norm` z-score each probe against the rest of the *library*
-    /// (the cohort) and `threshold` is then a z-score bar. The library is the
-    /// cohort for both probe-side and (AS-norm) target-side normalization.
+    /// uses raw cosine, and `threshold` is the cosine bar; `s_norm`/`as_norm`
+    /// z-score each probe against the rest of the library (the cohort), and
+    /// `threshold` is then a z-score bar. The library serves as the cohort for both
+    /// probe-side and (AS-norm) target-side normalization.
     fn assign_speakers(
         probes: &[(i64, Vec<f32>)],
         library: &[(NamedVoice, Vec<f32>)],
@@ -3557,9 +3548,9 @@ impl Catalog {
         if library.is_empty() {
             return Vec::new();
         }
-        // Cohort = the library centroids; normalize each probe against the *other*
-        // library voices. With ScoreNorm::Off this is exactly the raw cosine, so
-        // the default path is unchanged. A dimension mismatch yields cosine 0.0
+        // Cohort = the library centroids; normalize each probe against the other
+        // library voices. With ScoreNorm::Off this reduces to raw cosine, so the
+        // default path is unchanged. A dimension mismatch yields cosine 0.0
         // (treated as no signal), matching `recognize_voice`'s skip; the margin
         // test below keeps such a row from ever winning.
         let cohort: Vec<Vec<f32>> = library.iter().map(|(_, c)| c.clone()).collect();
@@ -3609,8 +3600,8 @@ impl Catalog {
                     if voice_taken[vi] || score < threshold {
                         continue;
                     }
-                    // Clear the speaker's own runner-up by a margin, else it's
-                    // ambiguous — leave this speaker unknown.
+                    // Must clear the speaker's own runner-up by a margin; if not,
+                    // it's ambiguous, so leave this speaker unknown.
                     let runner_up = second_best[si];
                     if runner_up.is_finite() && score < runner_up + Self::MARGIN {
                         continue;
@@ -3640,11 +3631,10 @@ impl Catalog {
 
     /// Replace a recording's machine transcript segments with a fresh set.
     ///
-    /// Called by the pipeline after every transcribe/retranscribe — segments
-    /// always describe the *current* machine output, so the old rows are
-    /// dropped first (in the same transaction, so a crash can't leave a
-    /// half-replaced timeline). An empty slice simply clears them (e.g. a
-    /// provider that returns no timing data).
+    /// Called by the pipeline after every transcribe/retranscribe. Segments always
+    /// describe the current machine output, so the old rows are dropped first, in
+    /// the same transaction, so a crash can't leave a half-replaced timeline. An
+    /// empty slice just clears them (e.g. a provider that returns no timing data).
     pub async fn replace_segments(
         &self,
         recording_id: &RecordingId,
@@ -3660,11 +3650,11 @@ impl Catalog {
     /// timeline re-aligned to the post-cleanup transcript. Same
     /// replace-on-(re)transcribe semantics, scoped to `variant`.
     ///
-    /// NOTE: the U1 speaker-correction ops (`reassign_segment`/merge/split) edit
-    /// `transcript_segments` by `(recording_id, idx)` without a variant filter;
-    /// before `"cleaned"` rows exist that is harmless (only `"raw"` rows are
-    /// present), but those ops must be scoped to `"raw"` once the cleaned re-flow
-    /// is wired.
+    /// Caveat: the U1 speaker-correction ops (`reassign_segment`/merge/split) edit
+    /// `transcript_segments` by `(recording_id, idx)` without a variant filter.
+    /// That's harmless before any `"cleaned"` rows exist (only `"raw"` rows are
+    /// present), but those ops need to be scoped to `"raw"` once the cleaned
+    /// re-flow is wired.
     pub async fn replace_segments_variant(
         &self,
         recording_id: &RecordingId,
@@ -3826,15 +3816,15 @@ impl Catalog {
     // Let the user fix the diarizer's per-segment speaker assignments after the
     // fact: reassign one segment, merge two speakers into one, or split some
     // segments off into a fresh speaker. `transcript_segments.speaker` is the
-    // authoritative store (the timeline / Synced views re-derive from it). The
-    // prose `transcript` text's `[Speaker N]:` markers are a SEPARATE display
-    // source (the detail prose view and the rename modal read them), so every
-    // op that changes which segment belongs to which speaker also rebuilds those
-    // markers from the updated segments in the SAME transaction — otherwise the
-    // prose view would disagree with the timeline. Labels are the 1-based
-    // integer `[Speaker N]` index that also keys `speaker_names` /
-    // `speaker_voiceprints`; in `transcript_segments`/`transcript_words` they are
-    // stored as that integer's text form ("1", "2", …).
+    // authoritative store — the timeline and Synced views re-derive from it. The
+    // prose `transcript` text's `[Speaker N]:` markers are a separate display
+    // source (the detail prose view and the rename modal read them), so every op
+    // that changes which segment belongs to which speaker also rebuilds those
+    // markers from the updated segments in the same transaction; otherwise the
+    // prose view would disagree with the timeline. Labels are the 1-based integer
+    // `[Speaker N]` index that also keys `speaker_names` / `speaker_voiceprints`;
+    // in `transcript_segments`/`transcript_words` they're stored as that integer's
+    // text form ("1", "2", …).
 
     /// Reassign one segment to a different speaker label.
     ///
@@ -3880,10 +3870,10 @@ impl Catalog {
         .bind(idx)
         .execute(&mut *tx)
         .await?;
-        // Keep the per-word layer in step: words inside the segment's span get
-        // the same new label. Words carry no idx tie to a segment, so the span
-        // is the join (the diarizer builds both from one attribution, so a
-        // word's span lies within its segment's).
+        // Keep the per-word layer in step: words inside the segment's span get the
+        // same new label. Words carry no idx tie to a segment, so the time span is
+        // the join — the diarizer builds both from one attribution, so a word's
+        // span lies within its segment's.
         sqlx::query(
             "UPDATE transcript_words SET speaker = ? \
              WHERE recording_id = ? AND start_ms >= ? AND start_ms < ?",
@@ -3903,21 +3893,20 @@ impl Catalog {
     /// becomes `into`, the `from` label ceases to exist.
     ///
     /// Consistency, all in one transaction:
-    /// - **Segments / words**: repoint `speaker = from` → `into`.
-    /// - **Names**: keep `into`'s name; if `into` has none, adopt `from`'s. The
-    ///   now-defunct `from` name row is deleted either way.
-    /// - **Voiceprints**: the captured centroid is *per recording-label*, so a
-    ///   merged speaker's two captures can't be averaged into one meaningful
-    ///   centroid here (we'd need the raw frames). The simplest correct choice is
-    ///   to **drop `from`'s capture row** (and recompute its formerly-linked named
-    ///   voice so the library no longer counts it); `into` keeps its own capture.
-    ///   A re-transcribe re-captures a fresh, correct centroid for the merged
-    ///   label. This favours a clean library over a blended centroid built from
-    ///   the wrong inputs.
+    /// - Segments and words: repoint `speaker = from` → `into`.
+    /// - Names: keep `into`'s name; if `into` has none, adopt `from`'s. Either way
+    ///   the now-defunct `from` name row is deleted.
+    /// - Voiceprints: the captured centroid is per recording-label, so a merged
+    ///   speaker's two captures can't be averaged into one meaningful centroid here
+    ///   (that would need the raw frames). The simplest correct choice is to drop
+    ///   `from`'s capture row — and recompute its formerly-linked named voice so the
+    ///   library no longer counts it — while `into` keeps its own capture. A
+    ///   re-transcribe re-captures a fresh, correct centroid for the merged label.
+    ///   This favours a clean library over a centroid blended from the wrong inputs.
     ///
-    /// Errors with [`Error::NotFound`](crate::error::Error) when no segment
-    /// carries `from_label` (nothing to merge → no write). `from`/`into` must be
-    /// ≥ 1 and differ.
+    /// Errors with [`Error::NotFound`](crate::error::Error) when no segment carries
+    /// `from_label` (nothing to merge, so no write). `from`/`into` must be ≥ 1 and
+    /// differ.
     pub async fn merge_speakers(
         &self,
         recording_id: &RecordingId,
@@ -3938,8 +3927,8 @@ impl Catalog {
         let from_text = from_label.to_string();
         let into_text = into_label.to_string();
 
-        // The named voice `from`'s capture was enrolled under (if any) must be
-        // recomputed AFTER its row is gone, so it stops counting the dropped
+        // The named voice that `from`'s capture was enrolled under (if any) needs
+        // recomputing once its row is gone, so it stops counting the dropped
         // sample. Read it before the transaction's writes.
         let from_named_voice = self.named_voice_for(rid, from_label).await?;
 
@@ -4043,11 +4032,11 @@ impl Catalog {
     ///
     /// The listed segments (and their words) become `new_label`; every other
     /// segment of `label` stays put. The new label has no name and no voiceprint
-    /// until the user names / re-enrolls it. The prose markers are rebuilt from
+    /// until the user names or re-enrolls it. The prose markers are rebuilt from
     /// the updated segments. Errors with [`Error::NotFound`](crate::error::Error)
-    /// if any listed idx is missing or doesn't currently carry `label` (no
-    /// partial write). `label`/`new_label` must be ≥ 1 and differ, and the idx
-    /// list must be non-empty.
+    /// if any listed idx is missing or doesn't currently carry `label` (no partial
+    /// write). `label`/`new_label` must be ≥ 1 and differ, and the idx list must be
+    /// non-empty.
     pub async fn split_speaker(
         &self,
         recording_id: &RecordingId,
@@ -4075,9 +4064,10 @@ impl Catalog {
         let new_text = new_label.to_string();
 
         let mut tx = self.pool.begin().await?;
-        // Validate every idx first (must exist AND currently belong to `label`),
-        // collecting spans so the word layer can be repointed. A single bad idx
-        // aborts the whole op with no write (the transaction is rolled back).
+        // Validate every idx first — each must exist and currently belong to
+        // `label` — collecting spans so the word layer can be repointed. A single
+        // bad idx aborts the whole op with no write (the transaction is rolled
+        // back).
         let mut spans: Vec<(i64, i64)> = Vec::with_capacity(segment_idxs.len());
         for &idx in segment_idxs {
             let row = sqlx::query(
@@ -4131,21 +4121,20 @@ impl Catalog {
     /// current `transcript_segments`, inside an open transaction.
     ///
     /// The prose view and the rename modal read speaker structure from the stored
-    /// `transcript` text, while the timeline / Synced views re-derive from
-    /// segments — so after a label edit the text must be re-rendered to agree.
-    /// Only diarized transcripts (those that already carry `[Speaker N]:`
-    /// markers) are rebuilt; a plain (un-diarized) transcript has no markers to
-    /// keep consistent and is left untouched. Consecutive same-label segments are
-    /// coalesced into one `[Speaker N]: <text>` turn, turns joined by `\n\n` —
-    /// the same shape the diarizer emits. Segments with no speaker are skipped
-    /// from marker emission (they can't appear in a diarized turn anyway).
+    /// `transcript` text, while the timeline and Synced views re-derive from
+    /// segments, so after a label edit the text has to be re-rendered to agree.
+    /// Only diarized transcripts (those that already carry `[Speaker N]:` markers)
+    /// are rebuilt; a plain, un-diarized transcript has no markers to keep
+    /// consistent and is left alone. Consecutive same-label segments are coalesced
+    /// into one `[Speaker N]: <text>` turn, turns joined by `\n\n` — the same shape
+    /// the diarizer emits. Segments with no speaker are skipped from marker
+    /// emission (they can't appear in a diarized turn anyway).
     ///
     /// The rebuild uses each segment's stored `text` joined with a space, which
-    /// reproduces the diarized turn text for the local/cloud paths that build
-    /// both from one attribution. It deliberately does NOT touch
-    /// `original_transcript`/`clean_transcript` (machine truth is preserved) and
-    /// does NOT set `user_edited` (a label correction is not a transcript hand
-    /// edit).
+    /// reproduces the diarized turn text for the local and cloud paths that build
+    /// both from one attribution. It deliberately leaves `original_transcript` and
+    /// `clean_transcript` alone (machine truth is preserved) and doesn't set
+    /// `user_edited` — a label correction isn't a transcript hand edit.
     async fn rebuild_transcript_markers_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         recording_id: &RecordingId,
@@ -4288,9 +4277,9 @@ impl Catalog {
 /// Decode one `(id, vector, meeting_id)` embedding row into a [`CachedVector`].
 ///
 /// The vector is stored as little-endian f32 bytes; a blob whose length isn't a
-/// multiple of 4 is kept as `vector: None` (and warned) so the ranking paths
-/// skip it exactly as they did when decoding inline — the cache must not silently
-/// resurrect a corrupt blob as a zero-length vector.
+/// multiple of 4 is kept as `vector: None` (and warned) so the ranking paths skip
+/// it. The cache must not silently resurrect a corrupt blob as a zero-length
+/// vector.
 fn row_to_cached_vector(row: &sqlx::sqlite::SqliteRow) -> Result<CachedVector> {
     let id: String = row.try_get("id")?;
     let meeting_id: Option<String> = row.try_get("meeting_id")?;
@@ -4419,7 +4408,7 @@ mod tests {
         assert_eq!(n, 0);
         assert_eq!(s, "hello");
 
-        // Replacement containing the needle does NOT recurse (we advance past the
+        // A replacement containing the needle doesn't recurse (we advance past the
         // inserted text), so "a" → "aa" over "aaa" yields exactly 3 replacements.
         let (n, s) = replace_ignore_case("aaa", "a", "aa");
         assert_eq!(n, 3);
@@ -4430,7 +4419,7 @@ mod tests {
         assert_eq!(n, 2);
         assert_eq!(s, "tea tea déjà");
 
-        // Regex metacharacters in the needle are matched LITERALLY (escaped):
+        // Regex metacharacters in the needle are matched literally (escaped):
         // "a.b" matches "a.b"/"A.B" but not "axb".
         let (n, s) = replace_ignore_case("a.b axb A.B", "a.b", "Z");
         assert_eq!(n, 2);
@@ -4449,10 +4438,10 @@ mod tests {
 
     #[test]
     fn parse_status_round_trips_all_variants_incl_paused() {
-        // Regression: `parse_status` lacked a "paused" arm, so the moment a
-        // recording was paused, `catalog.list()`/`get()` failed for the ENTIRE
-        // result set (one bad row errored the whole query). Every status the DB
-        // can hold must round-trip.
+        // Every status the DB can hold must round-trip through
+        // `parse_status`/`as_str`. A missing arm (it once lacked "paused") makes
+        // one unparseable row error the whole `list()`/`get()` query, not just that
+        // row — so any new status needs an arm here and a case in this list.
         for s in [
             "recording",
             "paused",
@@ -4577,10 +4566,9 @@ mod tests {
 
     #[tokio::test]
     async fn list_filters_kind_and_favorites_in_sql_before_pagination() {
-        // Regression for the client-side Library type-filter: filtering kind /
-        // favorites AFTER pagination meant a page could contain almost none of
-        // the chosen kind, and favorites past the first page were unreachable.
-        // Both predicates must be applied in the SQL, before LIMIT/OFFSET.
+        // Kind and favorites must be filtered in SQL, before LIMIT/OFFSET. Doing it
+        // client-side after pagination lets a page contain almost none of the
+        // chosen kind, and leaves favorites past the first page unreachable.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         // 30 single voice notes, the first 25 of them starred…
         let mut singles = Vec::new();
@@ -4620,9 +4608,9 @@ mod tests {
         assert_eq!(meeting_only.len(), 5);
         assert!(meeting_only.iter().all(|r| r.meeting_id.is_some()));
 
-        // THE crux: page 3 of the favorites view (limit 10, offset 20) must
-        // hold the remaining 5 starred recordings — with post-pagination
-        // filtering this page was empty or full of unstarred rows.
+        // The crux: page 3 of the favorites view (limit 10, offset 20) must hold
+        // the remaining 5 starred recordings. With post-pagination filtering this
+        // page would be empty or full of unstarred rows.
         let fav_page3 = db
             .list(&ListFilter {
                 favorite: Some(true),
@@ -4677,8 +4665,8 @@ mod tests {
         assert_eq!(sanitize_fts5_query("   spaces   "), "\"spaces\"*");
         assert_eq!(sanitize_fts5_query(""), "");
 
-        // Punctuation inside a term is KEPT (quoted, for FTS5 to tokenize) rather
-        // than stripped — the old sanitizer split these into prefix-AND soup.
+        // Punctuation inside a term is kept (quoted, for FTS5 to tokenize) rather
+        // than stripped, so these stay single terms instead of prefix-AND soup.
         assert_eq!(sanitize_fts5_query("O'Connor"), "\"O'Connor\"*");
         assert_eq!(sanitize_fts5_query("react-router"), "\"react-router\"*");
         assert_eq!(
@@ -4686,7 +4674,7 @@ mod tests {
             "\"std::collections::HashMap\"*"
         );
 
-        // An explicitly quoted span is an EXACT phrase (no trailing prefix star).
+        // An explicitly quoted span is an exact phrase (no trailing prefix star).
         assert_eq!(sanitize_fts5_query("\"fix the bug\""), "\"fix the bug\"");
         // A quoted phrase plus a trailing bare word: phrase exact + word prefix.
         assert_eq!(
@@ -4803,8 +4791,8 @@ mod tests {
         db.upsert_embedding(&good.id, &[1.0, 0.0, 0.0])
             .await
             .unwrap();
-        // Wrong dimension (2 vs the query's 3) — must be skipped, not scored on a
-        // truncated prefix and not panic.
+        // Wrong dimension (2 vs the query's 3): must be skipped, not scored on a
+        // truncated prefix, and not panic.
         db.upsert_embedding(&bad.id, &[1.0, 0.0]).await.unwrap();
 
         let results = db
@@ -4854,11 +4842,11 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_chunk_embeddings_replaces_prior_chunks() {
-        // Re-embedding (a re-transcription or a manual edit) must REPLACE a
+        // Re-embedding (a re-transcription or a manual edit) must replace a
         // recording's chunk vectors, never leave stale ones from the old text
-        // behind — otherwise an edited note keeps matching phrases it no longer
-        // contains. We store three chunks, then re-embed with two and assert the
-        // third is gone.
+        // behind. Otherwise an edited note keeps matching phrases it no longer
+        // contains. Store three chunks, then re-embed with two and assert the third
+        // is gone.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let a = embedded_recording(None);
         db.insert(&a).await.unwrap();
@@ -4903,11 +4891,11 @@ mod tests {
 
     #[tokio::test]
     async fn vector_ranking_scores_by_best_chunk_not_average() {
-        // The core paraphrase fix: a recording is ranked by its BEST-matching
-        // chunk (max-sim), not by an averaged whole-note vector. Recording `a`
-        // has many unrelated chunks plus ONE chunk that nails the query; it must
-        // still rank top, because that one chunk competes on its own tight vector
-        // instead of being diluted by the rest of the note.
+        // The core of paraphrase recall: a recording is ranked by its best-matching
+        // chunk (max-sim), not by an averaged whole-note vector. Recording `a` has
+        // many unrelated chunks plus one chunk that nails the query; it must still
+        // rank top, because that one chunk competes on its own tight vector instead
+        // of being diluted by the rest of the note.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let a = embedded_recording(None);
         let b = embedded_recording(None);
@@ -4948,8 +4936,8 @@ mod tests {
     async fn vector_ranking_falls_back_to_legacy_whole_recording_vector() {
         // During the backfill window a recording may still have only a legacy
         // whole-recording vector and no chunks. It must remain searchable via the
-        // `embeddings` table fallback, and once chunks exist they SUPERSEDE the
-        // legacy vector (no double-counting / no stale legacy score winning).
+        // `embeddings` table fallback, and once chunks exist they supersede the
+        // legacy vector (no double-counting, no stale legacy score winning).
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let legacy_only = embedded_recording(None);
         let chunked = embedded_recording(None);
@@ -4960,7 +4948,7 @@ mod tests {
         db.upsert_embedding(&legacy_only.id, &[0.8, 0.6, 0.0])
             .await
             .unwrap();
-        // chunked: a stale legacy vector AND a fresh, better chunk vector. The
+        // chunked: a stale legacy vector plus a fresh, better chunk vector. The
         // chunk must win; the legacy row must be ignored for this recording.
         db.upsert_embedding(&chunked.id, &[0.0, 0.0, 1.0])
             .await
@@ -5018,9 +5006,9 @@ mod tests {
         );
 
         // A second query reads from the warm cache and must produce the same
-        // per-recording cosine scores. (The order *between equal scores* is not
-        // a guarantee of either path — both build from a HashMap and sort
-        // unstably — so compare on id→score, the contract that actually matters.)
+        // per-recording cosine scores. The order between equal scores isn't
+        // guaranteed by either path — both build from a HashMap and sort unstably —
+        // so compare on id→score, the contract that actually matters.
         let second = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
         let as_scores = |r: &[(String, RecordingId, f32)]| {
             r.iter()
@@ -5064,7 +5052,7 @@ mod tests {
     #[tokio::test]
     async fn retention_hard_delete_invalidates_the_embedding_cache() {
         // A retention sweep that hard-deletes recordings cascade-drops their
-        // embeddings; the warm cache MUST be invalidated or the deleted vectors
+        // embeddings; the warm cache has to be invalidated, or the deleted vectors
         // keep surfacing as ghost hits in search.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let a = embedded_recording(None);
@@ -5090,8 +5078,8 @@ mod tests {
 
     #[tokio::test]
     async fn audio_only_retention_does_not_drop_the_cache() {
-        // delete_audio mode only blanks audio_path (keeps row + embeddings), so
-        // it must NOT needlessly drop a warm cache.
+        // delete_audio mode only blanks audio_path (it keeps the row and
+        // embeddings), so it must not needlessly drop a warm cache.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let a = embedded_recording(None);
         db.insert(&a).await.unwrap();
@@ -5115,8 +5103,8 @@ mod tests {
     #[tokio::test]
     async fn reembed_invalidates_cache_and_changes_ranking() {
         // (b) The correctness invariant: a re-embed must invalidate the cache so
-        // the changed vector takes effect. A stale cached vector returning the
-        // old ranking would be the worst possible bug.
+        // the changed vector takes effect. A stale cached vector returning the old
+        // ranking would be the worst possible bug.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let a = embedded_recording(None);
         let b = embedded_recording(None);
@@ -5147,9 +5135,9 @@ mod tests {
         db.upsert_chunk_embeddings(&a.id, &[vec![0.0, 1.0, 0.0]])
             .await
             .unwrap();
-        // Incremental patching keeps the cache WARM but updates the two changed
-        // recordings in place (the old behavior dropped the whole snapshot). Still
-        // two vectors cached; the point is they're the NEW ones, proven next.
+        // Incremental patching keeps the cache warm but updates the two changed
+        // recordings in place, rather than dropping the whole snapshot. Still two
+        // vectors cached; the point is they're the new ones, proven next.
         assert_eq!(
             db.cached_vector_count(),
             Some(2),
@@ -5204,10 +5192,10 @@ mod tests {
     #[tokio::test]
     async fn rebuild_does_not_clobber_an_invalidation_that_raced_it() {
         // The lost-invalidation TOCTOU: `embedding_corpus` snapshots the
-        // generation BEFORE its SQL reads and only caches when the generation is
+        // generation before its SQL reads and only caches when the generation is
         // unchanged at store time. If `invalidate_embedding_cache` (a racing
-        // embedding write) lands between the snapshot and the store, the store
-        // MUST leave the slot cold so the writer's fresh data wins — otherwise a
+        // embedding write) lands between the snapshot and the store, the store has
+        // to leave the slot cold so the writer's fresh data wins — otherwise a
         // pre-write snapshot would be cached and search would go stale.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let a = embedded_recording(None);
@@ -5256,9 +5244,9 @@ mod tests {
 
     #[tokio::test]
     async fn warm_cache_hit_shares_the_same_corpus_arc() {
-        // Fix 2: a warm hit returns the SAME Arc (O(1) clone), not a deep copy of
-        // every vector. Two reads with no intervening write must hand back Arcs
-        // that point at one allocation.
+        // A warm hit returns the same Arc (O(1) clone), not a deep copy of every
+        // vector. Two reads with no intervening write must hand back Arcs that point
+        // at one allocation.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let a = embedded_recording(None);
         db.insert(&a).await.unwrap();
@@ -5442,20 +5430,20 @@ mod tests {
 
     #[tokio::test]
     async fn hybrid_search_recalls_a_paraphrase_where_keyword_match_misses() {
-        // THE headline requirement: "utter the likeness of something I spoke
-        // about and get the proper search results."
+        // The headline requirement: "utter the likeness of something I spoke about
+        // and get the proper search results."
         //
-        // We simulate the embedding space directly (the ONNX model isn't bundled
-        // in tests). The query and the target recording's transcript share NO
-        // word, so FTS5 (lexical) returns nothing for them — a naive keyword
-        // search misses entirely. But their *vectors* are nearly identical
-        // (high cosine), modelling a paraphrase. Hybrid search must still surface
-        // the right recording, ranked first, with an honest relevance score.
+        // We simulate the embedding space directly (the ONNX model isn't bundled in
+        // tests). The query and the target recording's transcript share no word, so
+        // FTS5 (lexical) returns nothing for them — a naive keyword search misses
+        // entirely. But their vectors are nearly identical (high cosine), modelling
+        // a paraphrase. Hybrid search must still surface the right recording, ranked
+        // first, with an honest relevance score.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
 
         // The recording the user is trying to recall. Its transcript talks about
-        // moving the schema over — the QUERY below ("database migration") shares
-        // none of these words, so lexical search cannot find it.
+        // moving the schema over; the query below ("database migration") shares none
+        // of these words, so lexical search can't find it.
         let mut target = embedded_recording(None);
         target.transcript = Some("we should shift the records across to the new store".into());
         // A distractor whose words overlap the query's domain words a bit but
@@ -5476,8 +5464,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Sanity: a pure keyword search for the query terms finds NOTHING — the
-        // words don't appear in either transcript. This is the gap vectors close.
+        // Sanity check: a pure keyword search for the query terms finds nothing —
+        // the words appear in neither transcript. This is the gap vectors close.
         let lexical = db.lexical_ranking("database migration").await.unwrap();
         assert!(
             lexical.is_empty(),
@@ -5513,8 +5501,8 @@ mod tests {
     async fn hybrid_search_keeps_exact_term_hit_despite_weak_cosine() {
         // The complement to paraphrase recall: when the user remembers one
         // distinctive word, an exact lexical hit must surface even if its vector
-        // barely aligns with the query — never filtered out by the relevance
-        // floor. This is the "union of strengths" guarantee.
+        // barely aligns with the query — never filtered out by the relevance floor.
+        // This is the "union of strengths" guarantee.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let mut named = embedded_recording(None);
         named.transcript = Some("the Kubernetes rollout notes are attached".into());
@@ -5541,17 +5529,16 @@ mod tests {
 
     #[tokio::test]
     async fn hybrid_search_collapses_a_meeting_across_both_retrievers() {
-        // Regression for the cross-retriever dedupe: a meeting's two tracks share
-        // a meeting_id. If the vector retriever's best track differs from the
-        // lexical retriever's best track, fusing on raw recording id would surface
-        // the SAME meeting twice. Fusing on the meeting-stable dedupe key must
-        // collapse it to one row.
+        // Cross-retriever dedupe: a meeting's two tracks share a meeting_id. If the
+        // vector retriever's best track differs from the lexical retriever's best
+        // track, fusing on raw recording id would surface the same meeting twice.
+        // Fusing on the meeting-stable dedupe key must collapse it to one row.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let mic = embedded_recording(Some("meeting-x"));
         let mut sys = embedded_recording(Some("meeting-x"));
-        // Put the distinctive lexical term on the SYSTEM track only, and the
-        // strong semantic vector on the MIC track only — so each retriever prefers
-        // a different track of the same meeting.
+        // Put the distinctive lexical term on the system track only, and the strong
+        // semantic vector on the mic track only, so each retriever prefers a
+        // different track of the same meeting.
         sys.transcript = Some("the quarterly Kubernetes review".into());
         db.insert(&mic).await.unwrap();
         db.insert(&sys).await.unwrap();
@@ -5699,7 +5686,7 @@ mod tests {
             .expect("user edit");
         let got = db.get(&r.id).await.unwrap().unwrap();
         assert_eq!(got.transcript.as_deref(), Some("edited by the user"));
-        // The transcription model is preserved — a hand edit is surfaced by the
+        // The transcription model is preserved — a hand edit shows up via the
         // user_edited flag / "Edited" column, not by overwriting the model field.
         assert_eq!(got.model.as_deref(), Some("ggml-base"));
         assert!(
@@ -5766,7 +5753,7 @@ mod tests {
             Some("remember to follow up")
         );
 
-        // (Re-)transcription writes the transcript columns but must NOT touch notes.
+        // (Re-)transcription writes the transcript columns but must not touch notes.
         db.update_transcript(&r.id, "machine output", "machine output", "ggml-base")
             .await
             .expect("machine transcript");
@@ -5803,8 +5790,8 @@ mod tests {
         assert_eq!(got.title, None);
         assert!(got.title_is_auto, "fresh rows must be auto-owned");
 
-        // An auto write lands while the title is auto-owned (and a later auto
-        // write — e.g. a retranscribe — refreshes it AND its recorded model).
+        // An auto write lands while the title is auto-owned, and a later auto write
+        // (e.g. a retranscribe) refreshes both the title and its recorded model.
         assert!(db
             .set_title(&r.id, Some("first pass"), true, Some("gemma3"))
             .await
@@ -5863,10 +5850,10 @@ mod tests {
 
     #[tokio::test]
     async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
-        // Meeting Mode (v1.6): a meeting produces TWO recordings that share a
-        // freshly-minted meeting_id and differ only by `track`. Both must
-        // round-trip through insert/get/list, and a fresh single-track
-        // recording must leave both columns NULL.
+        // Meeting Mode (v1.6): a meeting produces two recordings that share a
+        // freshly-minted meeting_id and differ only by `track`. Both must round-trip
+        // through insert/get/list, and a fresh single-track recording leaves both
+        // columns NULL.
         let db = Catalog::open(Path::new("sqlite::memory:"))
             .await
             .expect("open db");
@@ -6137,9 +6124,9 @@ mod tests {
 
     #[tokio::test]
     async fn retention_audio_only_keeps_rows_and_is_idempotent() {
-        // delete_audio = true: the WAV path is returned for deletion and
-        // blanked on the row, but the row itself (transcript, metadata)
-        // SURVIVES — and a second sweep finds nothing left to reclaim.
+        // delete_audio = true: the WAV path is returned for deletion and blanked on
+        // the row, but the row itself (transcript, metadata) survives, and a second
+        // sweep finds nothing left to reclaim.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let mut r = embedded_recording(None);
         r.started_at = Local::now() - chrono::Duration::days(90);
@@ -6206,9 +6193,9 @@ mod tests {
 
     #[tokio::test]
     async fn add_tag_is_case_insensitive() {
-        // "Code" and "code" are the same tag: the second add must reuse the
-        // first row (same id, its casing, its color) instead of minting a
-        // byte-wise-unique duplicate.
+        // "Code" and "code" are the same tag: the second add must reuse the first
+        // row (same id, casing, and color) instead of minting a byte-wise-unique
+        // duplicate.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let first = db.add_tag("Code", Some("#f00")).await.unwrap();
         let second = db.add_tag("code", None).await.unwrap();
@@ -6243,8 +6230,8 @@ mod tests {
         db.replace_segments(&r.id, &first).await.unwrap();
         assert_eq!(db.segments_for(&r.id).await.unwrap(), first);
 
-        // A retranscribe REPLACES the timeline — fewer rows must not leave
-        // stale tail segments behind.
+        // A retranscribe replaces the timeline — fewer rows must not leave stale
+        // tail segments behind.
         let second = vec![TranscriptSegment {
             start_ms: 0,
             end_ms: 900,
@@ -6297,7 +6284,7 @@ mod tests {
         assert_eq!(got[0].confidence, Some(0.97));
         assert_eq!(got[1].confidence, None, "a NULL confidence stays None");
 
-        // A retranscribe REPLACES the word timeline — fewer rows must not leave
+        // A retranscribe replaces the word timeline — fewer rows must not leave
         // stale tail words behind.
         let second = vec![TranscriptWord {
             start_ms: 0,
@@ -6495,7 +6482,7 @@ mod tests {
     async fn merge_speakers_drops_froms_voiceprint_and_recomputes_library() {
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let r = seed_diarized(&db).await;
-        // Both labels captured and enrolled under DIFFERENT named voices.
+        // Both labels captured and enrolled under different named voices.
         db.save_speaker_voiceprint(r.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
             .unwrap();
@@ -6652,9 +6639,9 @@ mod tests {
 
     #[tokio::test]
     async fn recognize_speakers_one_to_one_never_doubles_a_name() {
-        // Audit H2: two captured speakers in ONE recording both nearest the same
-        // library voice must NOT both be suggested that name — at most one gets
-        // it, the other is left unknown.
+        // Audit H2: two captured speakers in one recording, both nearest the same
+        // library voice, must not both be suggested that name — at most one gets it,
+        // the other is left unknown.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
 
         // Enroll one library voice "Ada" from a source recording.
@@ -6984,8 +6971,8 @@ mod tests {
     #[tokio::test]
     async fn recompute_named_centroid_legacy_zero_durations_match_plain_mean() {
         // Backward-compat contract: a library whose captures all have
-        // duration_ms=0 (built before V4) must recompute to the SAME centroid the
-        // old unweighted mean produced — i.e. mean_centroid of those vectors.
+        // duration_ms=0 (built before V4) must recompute to the same centroid the
+        // unweighted mean produces — that is, mean_centroid of those vectors.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
@@ -7171,15 +7158,15 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        // rec_match: one UNNAMED speaker that matches Ada.
+        // rec_match: one unnamed speaker that matches Ada.
         let rec_match = embedded_recording(None);
         db.insert(&rec_match).await.unwrap();
         db.save_speaker_voiceprint(rec_match.id.as_str(), 1, &[0.99, 0.01, 0.0], 0)
             .await
             .unwrap();
 
-        // rec_named: an unnamed Ada-match at label 1 AND an already-named "Bob"
-        // (also near Ada geometrically — its name must NOT be overwritten).
+        // rec_named: an unnamed Ada-match at label 1 plus an already-named "Bob"
+        // (also near Ada geometrically — its name must not be overwritten).
         let rec_named = embedded_recording(None);
         db.insert(&rec_named).await.unwrap();
         db.save_speaker_voiceprint(rec_named.id.as_str(), 1, &[0.98, 0.0, 0.0], 0)
@@ -7233,17 +7220,16 @@ mod tests {
 
     #[tokio::test]
     async fn propagation_admits_a_second_unnamed_speaker_in_an_enrolled_recording() {
-        // Regression guard for the over-exclude fix: a single recording can hold
-        // speaker 1 ENROLLED as Ada AND a second, still-unnamed speaker of the
-        // same voice. The old recording-wide exclusion dropped the whole recording
-        // (so speaker 2 was never offered); per-speaker `IS NULL` scoping must
-        // still surface speaker 2. This test FAILS under the old SQL and passes
-        // under the new.
+        // The over-exclude guard: a single recording can hold speaker 1 enrolled as
+        // Ada plus a second, still-unnamed speaker of the same voice. A
+        // recording-wide exclusion would drop the whole recording (so speaker 2 is
+        // never offered); per-speaker `IS NULL` scoping must still surface speaker
+        // 2.
         let (db, ada, _rec_match, _rec_named, _far) = propagation_fixture().await;
 
         let rec = embedded_recording(None);
         db.insert(&rec).await.unwrap();
-        // Speaker 1: enrolled into the SAME Ada voice (find_or_create dedups by
+        // Speaker 1: enrolled into the same Ada voice (find_or_create dedups by
         // name), so this recording has a speaker already under `ada`.
         db.save_speaker_voiceprint(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
             .await
@@ -7297,7 +7283,7 @@ mod tests {
 
     #[tokio::test]
     async fn propagation_ask_returns_candidates_but_applies_nothing() {
-        // The default-policy guarantee: under Ask, gathering candidates must NOT
+        // The default-policy guarantee: under Ask, gathering candidates must not
         // modify any other recording.
         let (db, ada, rec_match, rec_named, _far) = propagation_fixture().await;
 
@@ -7530,7 +7516,7 @@ mod tests {
 
     #[tokio::test]
     async fn undo_forget_does_not_clobber_a_later_reenrollment() {
-        // A capture re-named onto a DIFFERENT voice after the forget keeps its
+        // A capture re-named onto a different voice after the forget keeps its
         // newer assignment when the original is undone.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let src = embedded_recording(None);
@@ -7554,7 +7540,7 @@ mod tests {
             .unwrap();
         assert_ne!(bob, ada);
 
-        // Undo Ada — must NOT steal the capture back from Bob.
+        // Undo Ada — must not steal the capture back from Bob.
         assert!(db.undo_forget(&ada).await.unwrap());
         assert_eq!(
             db.named_voice_for(src.id.as_str(), 1)
@@ -7606,7 +7592,7 @@ mod tests {
 
     #[tokio::test]
     async fn name_propagation_config_defaults_to_ask() {
-        // The DEFAULT-Ask contract at the config layer.
+        // The default-Ask contract at the config layer.
         let diar = crate::config::DiarizationConfig::default();
         assert_eq!(diar.name_propagation, crate::config::NamePropagation::Ask);
         // Round-trips through serde as snake_case.
@@ -7622,8 +7608,8 @@ mod tests {
     #[tokio::test]
     async fn soft_delete_migration_applies_and_deleted_at_filters() {
         // The migration chain applies cleanly on a fresh DB (Catalog::open runs
-        // it) and the new column exists + filters listing. A direct UPDATE proves
-        // the column is queryable and the read path honors it.
+        // it), the new column exists, and it filters listing. A direct UPDATE
+        // proves the column is queryable and the read path honors it.
         let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
         let src = embedded_recording(None);
         db.insert(&src).await.unwrap();

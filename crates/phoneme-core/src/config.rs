@@ -9,8 +9,8 @@
 //!
 //! - **Secrets are encrypted at rest.** API-key fields are [`SecretString`]s
 //!   with custom serde that runs them through the crate's `secret_crypto`
-//!   module (DPAPI on Windows) on the way to disk and back — a key is never written to
-//!   `config.toml` in plaintext, and the manual `Debug` impls redact them so a
+//!   module (DPAPI on Windows) on the way to disk and back, so a key never lands
+//!   in `config.toml` as plaintext, and the manual `Debug` impls redact them so a
 //!   stray `debug!(?cfg)` can't leak one either.
 //! - **Blank fields inherit.** The summary, auto-tag, and title sections each
 //!   model their own LLM connection, but a left-blank provider/key/URL/model
@@ -134,10 +134,10 @@ pub struct Config {
     /// `None` (default) → the live preview reuses the main [`whisper`](Self::whisper)
     /// provider and shares its server. `Some` → the preview runs through this
     /// separate provider so it never contends with the final transcription:
-    /// typically a small/fast local model on its OWN bundled server (give it a
-    /// distinct `bundled_server_port`), the same model as the final on a second
-    /// server, or a fast cloud API (e.g. Groq). The final transcript always uses
-    /// [`whisper`](Self::whisper).
+    /// typically a small/fast local model on its own bundled server (give it a
+    /// distinct `bundled_server_port`), the same model as the final one on a
+    /// second server, or a fast cloud API (e.g. Groq). The final transcript
+    /// always uses [`whisper`](Self::whisper).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_whisper: Option<WhisperConfig>,
     /// Dictation (transcription-in-place) behavior — the fast lane. See
@@ -182,7 +182,7 @@ pub struct Config {
     pub recipes: Vec<PlaybookRecipe>,
     /// Whether the one-time Playbook migration has run for this config. Defaults
     /// to `false` so every pre-Playbook config.toml is reconciled exactly once:
-    /// [`Config::migrate_playbook`] copies the user's LIVE resolved cleanup /
+    /// [`Config::migrate_playbook`] copies the user's live resolved cleanup /
     /// title / summary / auto-tag values into the built-in entries and rebuilds
     /// the `default` recipe from the legacy enable flags, then sets this `true`
     /// so it never re-runs (and never clobbers later Playbook edits).
@@ -248,10 +248,10 @@ pub enum DiarizationBackend {
 
 /// Settings for speaker diarization.
 ///
-/// NOTE: a manual `Default` (not `#[derive(Default)]`) so the speakrs tuning
-/// knobs default to the values the local pipeline already used implicitly —
-/// changing them via Settings actually shifts behavior, while a config that
-/// omits them (every existing config.toml) keeps today's exact output.
+/// The `Default` impl is hand-written (not derived) so the speakrs tuning knobs
+/// default to the values the local pipeline already used implicitly. Changing
+/// them via Settings actually shifts behavior, while a config that omits them
+/// (every existing config.toml) keeps today's exact output.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiarizationConfig {
     /// Which backend handles speaker diarization.
@@ -266,7 +266,7 @@ pub struct DiarizationConfig {
     /// the default Hugging Face cache (`%USERPROFILE%/.cache/huggingface/hub`).
     #[serde(default)]
     pub models_dir: String,
-    /// Treat a single (non-meeting) recording as ONE speaker — skip diarization
+    /// Treat a single (non-meeting) recording as one speaker: skip diarization
     /// for it entirely so it reads as plain prose, never split into `[Speaker N]`
     /// turns. Off by default. Solo dictation is almost always one voice, but the
     /// model can still hear two "speakers" when you change your voice (quoting)
@@ -278,7 +278,7 @@ pub struct DiarizationConfig {
     pub solo_one_speaker: bool,
     /// Expected speaker count, as a prior on the diarizer's auto-detected count.
     /// `None` (default, and any `0`) = today's behavior: trust whatever speakrs
-    /// clusters. `Some(n)` = if the local pipeline detects MORE than `n`
+    /// clusters. `Some(n)` = if the local pipeline detects more than `n`
     /// speakers, greedily merge the closest speaker clusters (by centroid cosine)
     /// until exactly `n` remain. It never *splits* — detecting `<= n` speakers is
     /// left untouched, since the prior is "no more than this many voices", not "at
@@ -334,8 +334,8 @@ pub struct DiarizationConfig {
     #[serde(default = "default_voiceprint_threshold")]
     pub voiceprint_match_threshold: f64,
     /// Score normalization for speaker matching (V2). `off` (default) compares the
-    /// raw cosine against [`voiceprint_match_threshold`](Self::voiceprint_match_threshold)
-    /// — byte-for-byte the previous behavior. `s_norm`/`as_norm` z-score each
+    /// raw cosine against [`voiceprint_match_threshold`](Self::voiceprint_match_threshold),
+    /// byte-for-byte the unnormalized behavior. `s_norm`/`as_norm` z-score each
     /// comparison against the other enrolled voices (the cohort), so one threshold
     /// holds across speakers/sessions instead of drifting with how "central" a
     /// voice is. When on, the threshold used is
@@ -351,7 +351,7 @@ pub struct DiarizationConfig {
     /// Default 2.0. Tune with the EER harness on your own enrolled voices.
     #[serde(default = "default_voiceprint_score_norm_threshold")]
     pub voiceprint_score_norm_threshold: f64,
-    /// What to do with PAST recordings when you name a speaker (V5 back-fill
+    /// What to do with past recordings when you name a speaker (V5 back-fill
     /// policy). Naming a speaker enrolls their voiceprint; this controls whether
     /// that name is also applied to the *same* voice where it appears unnamed in
     /// other recordings. `ask` (default) gathers the matching unnamed speakers and
@@ -514,11 +514,11 @@ pub struct SemanticSearchConfig {
     /// error if fed one. Leave on for the bundled model.
     #[serde(default = "default_true")]
     pub token_type_ids: bool,
-    /// Prefix prepended to a SEARCH QUERY before embedding (e.g. `"query: "` for
+    /// Prefix prepended to a search query before embedding (e.g. `"query: "` for
     /// E5). Empty for symmetric models like all-MiniLM.
     #[serde(default)]
     pub query_prefix: String,
-    /// Prefix prepended to a STORED PASSAGE/transcript before embedding (e.g.
+    /// Prefix prepended to a stored passage/transcript before embedding (e.g.
     /// `"passage: "` for E5). Empty for all-MiniLM.
     #[serde(default)]
     pub passage_prefix: String,
@@ -621,16 +621,17 @@ impl LlmPostProcessConfig {
         self.api_key.expose_secret()
     }
 
-    /// The EFFECTIVE LLM connection for a pipeline step that inherits the base
+    /// The effective LLM connection for a pipeline step that inherits the base
     /// `[llm_post_process]` connection but may override any field: a non-blank
     /// `provider` / `api_url` / `api_key` / `model` wins, a blank one inherits
     /// from `self`. `enabled` is forced on (a step runs under its own gate, not
     /// the post-processor's switch).
     ///
-    /// THE single source of truth for per-step LLM inheritance — the daemon
-    /// pipeline (`summary_llm_config` / `auto_tag_llm_config` / title / Playbook
-    /// `entry_llm_config`) and the Doctor's connection probes both call this, so
-    /// "what connection will this step use" is computed identically everywhere.
+    /// This is the single source of truth for per-step LLM inheritance. The
+    /// daemon pipeline (`summary_llm_config` / `auto_tag_llm_config` / title /
+    /// Playbook `entry_llm_config`) and the Doctor's connection probes both call
+    /// it, so "what connection will this step use" is computed identically
+    /// everywhere.
     pub fn resolve_step(
         &self,
         provider: &str,
@@ -858,10 +859,11 @@ impl Default for AutoTagConfig {
 }
 
 fn default_auto_tag_prompt() -> String {
-    // Balance matters here: the original "only invent a new tag when nothing
-    // existing applies" wording made models fill every slot with existing tags
-    // and never propose anything new — useless once auto-accept attaches the
-    // existing matches silently and there's nothing left to show.
+    // Balance matters here. A "only invent a new tag when nothing existing
+    // applies" wording makes models fill every slot with existing tags and
+    // propose nothing new — useless once auto-accept attaches the existing
+    // matches silently and there's nothing left to show. So this prompt
+    // deliberately asks for a mix of reused and freshly-coined tags.
     "You tag voice-note transcripts. Suggest concise topical tags (1-3 words each). Reuse tags from the EXISTING TAGS list when they genuinely fit, AND coin new tags for topics no existing tag covers — a good answer usually mixes both. Reply with ONLY a JSON array of tag-name strings — no preamble, no explanations.".into()
 }
 
@@ -987,15 +989,15 @@ fn default_initial_prompt() -> String {
 }
 
 /// Relative "cost" of a whisper model, parsed from its file name — smaller is
-/// faster/lighter. Used to auto-pick the smallest LOCAL model for the live
+/// faster/lighter. Used to auto-pick the smallest local model for the live
 /// preview when `[preview_whisper]` is unset (see
-/// [`Config::materialize_auto_preview`]). NOT a real byte size: it is a
-/// filename-derived rank, deliberately the same family of tiers
+/// [`Config::materialize_auto_preview`]). This is not a real byte size; it's a
+/// filename-derived rank, deliberately using the same tier family
 /// (`tiny < base < small < medium < large`) the Doctor's heavy-model warning
 /// keys off. A higher number is heavier.
 ///
 /// Tier first (the dominant cost), then a small penalty for non-quantized vs
-/// quantized of the SAME tier (`ggml-base-q5_0` < `ggml-base`), then `turbo`
+/// quantized of the same tier (`ggml-base-q5_0` < `ggml-base`), then `turbo`
 /// and `v2/v3` as tie-break bumps. Unknown names get a middling tier so a
 /// custom file never silently outranks a real `tiny`/`base` for the preview.
 fn whisper_model_cost(file_name: &str) -> u32 {
@@ -1026,7 +1028,7 @@ fn whisper_model_cost(file_name: &str) -> u32 {
 
     // Quantized variants of a tier are lighter than the full-precision one of
     // the same tier (q5/q8/etc.). A tiny per-step bump keeps them strictly
-    // ordered within the tier without ever reaching the next tier.
+    // ordered within the tier without ever reaching the next tier up.
     let quantized = stem.contains("-q") || stem.contains("_q") || stem.contains("quant");
     let quant_bump = if quantized { 0 } else { 5 };
 
@@ -1044,7 +1046,7 @@ fn is_whisper_model_file(file_name: &str) -> bool {
     lower.ends_with(".bin") || lower.ends_with(".gguf")
 }
 
-/// Pure ranking: given a list of file names, return the index of the SMALLEST
+/// Pure ranking: given a list of file names, return the index of the smallest
 /// (cheapest) whisper model, ignoring non-model files. `None` when the list has
 /// no recognizable model file. On a tie the earlier name wins (stable), so the
 /// result is deterministic. Separated from the directory scan so the ranking is
@@ -1058,10 +1060,10 @@ pub fn smallest_whisper_model_index(file_names: &[&str]) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-/// Scan `dir` for whisper model files and return the path to the SMALLEST one,
+/// Scan `dir` for whisper model files and return the path to the smallest one,
 /// or `None` when the directory is unreadable or holds no model file. Thin
 /// filesystem wrapper over [`smallest_whisper_model_index`] — the ranking logic
-/// lives there and is tested without real files. Does NOT recurse; whisper
+/// lives there and is tested without real files. Does not recurse; whisper
 /// models live flat in their models dir.
 pub fn smallest_whisper_model_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let entries = std::fs::read_dir(dir).ok()?;
@@ -1162,7 +1164,7 @@ pub struct WhisperConfig {
     #[serde(default)]
     pub api_url: String,
     /// Opt-in (default false): when set on an `[in_place].stt` block that is a
-    /// LOCAL bundled model, the daemon supervises a dedicated third
+    /// local bundled model, the daemon supervises a dedicated third
     /// whisper-server just for dictation, on this block's own port. When false
     /// (the default, and the only sensible value on `[whisper]` /
     /// `[preview_whisper]`), dictation reuses a server that is already running —
@@ -1324,7 +1326,7 @@ pub struct RecordingConfig {
     /// the CLI still honors whatever record mode it is given.
     #[serde(default)]
     pub auto_stop_on_silence: bool,
-    /// How the live preview handles a MEETING's two tracks (requires
+    /// How the live preview handles a meeting's two tracks (requires
     /// `streaming_preview`):
     ///
     /// * `"toggle"` (default) — one preview loop follows a single track (the
@@ -1332,23 +1334,23 @@ pub struct RecordingConfig {
     ///   Same cost as a single-recording preview.
     /// * `"both"` — one preview loop per track, captions shown stacked. By
     ///   default both loops share the single transcription permit, so they
-    ///   ALTERNATE (each track updates at ~half rate) and never run two whisper
+    ///   alternate (each track updates at ~half rate) and never run two whisper
     ///   requests at once — light, but the two captions visibly lag. Enable
     ///   [`Self::meeting_preview_own_server`] to give the second track its own
     ///   preview server so the two stream truly concurrently (heavier).
     #[serde(default = "default_meeting_preview")]
     pub meeting_preview: String,
-    /// Meeting **"both"** mode only: spawn a SECOND live-preview whisper-server
-    /// so the two meeting tracks transcribe their captions CONCURRENTLY instead
+    /// Meeting **"both"** mode only: spawn a second live-preview whisper-server
+    /// so the two meeting tracks transcribe their captions concurrently instead
     /// of alternating on one shared server. Off by default. Only takes effect
-    /// when ALL of: streaming preview is on, `meeting_preview = "both"`, and the
+    /// when all of: streaming preview is on, `meeting_preview = "both"`, and the
     /// preview source is a **local bundled model** (the dedicated preview server)
     /// — see [`Config::second_preview_needs_own_server`]. It reuses the existing
     /// `[preview_whisper]` model (no second model to pick), just on a distinct
     /// port ([`Config::preview2_port`]).
     ///
-    /// **Costs an extra resident model + a concurrent whisper inference**, so
-    /// it's strictly opt-in for users with the RAM/CPU headroom; the weak-box
+    /// This costs an extra resident model plus a concurrent whisper inference,
+    /// so it's strictly opt-in for users with the RAM/CPU headroom; the weak-box
     /// default (off) is byte-for-byte unchanged.
     #[serde(default)]
     pub meeting_preview_own_server: bool,
@@ -1429,9 +1431,9 @@ pub struct InPlaceConfig {
     /// [`preview_whisper`](Config::preview_whisper). `None` (default) falls
     /// back to the live preview's provider when the preview is enabled (it
     /// already runs a fast model), else the main `[whisper]` provider. For a
-    /// local model this should point at an ALREADY-RUNNING server (the main
-    /// or preview one, or an external URL) — the daemon does not supervise a
-    /// third server for dictation.
+    /// local model this should point at a server that is already running (the
+    /// main or preview one, or an external URL) — the daemon does not supervise
+    /// a third server for dictation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stt: Option<WhisperConfig>,
     /// Text polish applied before typing:
@@ -1443,18 +1445,17 @@ pub struct InPlaceConfig {
     ///   (the same cleanup the main pipeline runs). Slowest; only choose this
     ///   when polish matters more than latency.
     pub cleanup: String,
-    /// Route in-place recordings through the FULL normal pipeline instead of
-    /// the fast lane (the pre-overhaul behavior): inbox queue, configured
-    /// cleanup, summary, auto-tags, and hooks all run. `type_first` below
-    /// picks whether the text is typed before or after those steps. Default
-    /// false.
+    /// Route in-place recordings through the full normal pipeline instead of
+    /// the fast lane: inbox queue, configured cleanup, summary, auto-tags, and
+    /// hooks all run. `type_first` below picks whether the text is typed before
+    /// or after those steps. Default false.
     pub full_pipeline: bool,
-    /// Only meaningful when `full_pipeline` is true — WHEN the typed text
-    /// lands relative to the pipeline:
+    /// Only meaningful when `full_pipeline` is true — when the typed text lands
+    /// relative to the pipeline:
     /// * `true` — the text lands immediately: a type-only fast pass
     ///   transcribes and types the moment the recording stops, while cleanup,
     ///   summary, auto-tags, and hooks continue in the background for the
-    ///   library copy. The typed text is the fast pass's polish, NOT the
+    ///   library copy. The typed text is the fast pass's polish, not the
     ///   pipeline's LLM cleanup.
     /// * `false` (default) — the typed text waits for, and includes, every
     ///   configured step: nothing lands at the cursor until the pipeline
@@ -1486,12 +1487,12 @@ pub struct InPlaceConfig {
     /// Opt-in (**default false**): include the focused window's title in the
     /// LLM cleanup prompt so dictation can adapt to what you're working in
     /// (code-ish in an editor, prose in a doc). Only consulted when
-    /// `cleanup = "llm"`. The title is potentially sensitive — when this is on,
-    /// it is sent to your configured cleanup LLM (use a local one if that
-    /// matters). When off, the title is never read, never sent, never logged.
+    /// `cleanup = "llm"`. The title is potentially sensitive; when this is on,
+    /// it goes to your configured cleanup LLM (use a local one if that matters).
+    /// When off, the title is never read, never sent, never logged.
     #[serde(default)]
     pub app_context: bool,
-    /// Apps (lowercased executable stems) whose window titles are NEVER read for
+    /// Apps (lowercased executable stems) whose window titles are never read for
     /// app-aware context, even when `app_context` is on — e.g. a password
     /// manager or a banking app. **Default empty.**
     #[serde(default)]
@@ -1499,7 +1500,7 @@ pub struct InPlaceConfig {
     /// Streaming-type (**default false**, off): type words live as you speak —
     /// each word lands at the cursor as the live preview finalizes it, instead
     /// of the whole transcript arriving at once when you stop. On stop the typed
-    /// run is reconciled to the authoritative final transcript (the accurate
+    /// run is reconciled against the authoritative final transcript (the accurate
     /// post-stop pass), correcting any words the live stream got wrong. Requires
     /// the live streaming preview to be on, since that is what produces the
     /// committed-word stream this types from.
@@ -1538,7 +1539,7 @@ impl InPlaceConfig {
     /// With the default (empty) `app_overrides`, this always returns
     /// `type_mode` — byte-for-byte today's behavior.
     ///
-    /// Matching is case-insensitive on BOTH sides: keys loaded from disk are
+    /// Matching is case-insensitive on both sides: keys loaded from disk are
     /// already lowercased (see `deserialize_lowercase_keys`) and the foreground
     /// stem is lowercased, but a key added in memory (the Settings form, a test)
     /// may carry mixed case — so an override matches regardless of either side's
@@ -1555,7 +1556,7 @@ impl InPlaceConfig {
     }
 
     /// Whether the focused window's title may be read for app-aware cleanup
-    /// context. True only when `app_context` is on AND the foreground app isn't
+    /// context. True only when `app_context` is on and the foreground app isn't
     /// on `app_context_denylist`. With `app_context` off (the default) this is
     /// always false — the title is never even read.
     pub fn may_read_window_title(&self, app: Option<&str>) -> bool {
@@ -1641,21 +1642,21 @@ fn default_webhook_max_retries() -> u32 {
 
 /// Network policy for the outbound webhook POST (`[webhook]` in config.toml).
 ///
-/// Phoneme is local-first: a webhook into THIS machine (n8n, Home Assistant, a
-/// local script server on loopback) is the primary use case and is always
-/// allowed, any scheme, regardless of these knobs. They govern everything
+/// Phoneme is local-first: a webhook into this same machine (n8n, Home
+/// Assistant, a local script server on loopback) is the primary use case and is
+/// always allowed, any scheme, regardless of these knobs. They govern everything
 /// beyond loopback, so a mistyped or hostile `hook.webhook_url` can't quietly
 /// point transcripts at an internal service or send them over the internet in
-/// the clear (S-H1). Both default to off — the safe posture.
+/// the clear. Both default to off — the safe posture.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct WebhookConfig {
-    /// Allow webhook targets on non-loopback PRIVATE ranges — RFC1918 (10/8,
+    /// Allow webhook targets on non-loopback private ranges — RFC1918 (10/8,
     /// 172.16/12, 192.168/16), link-local 169.254/16, IPv6 ULA fc00::/7 and
     /// link-local fe80::/10. Off by default: such targets fail with an error
     /// naming this knob. Turn on to webhook into a LAN box (e.g. n8n on a NAS).
     #[serde(default)]
     pub allow_private_network: bool,
-    /// Allow plain `http://` for PUBLIC webhook targets. Off by default —
+    /// Allow plain `http://` for public webhook targets. Off by default —
     /// public targets must be `https://`. Loopback is exempt, and private
     /// targets are governed by
     /// [`allow_private_network`](Self::allow_private_network) instead.
@@ -1684,7 +1685,7 @@ pub struct WebhookConfig {
     /// own value wins — so a custom header can't break the JSON content type or
     /// forge the signature.
     ///
-    /// Like [`hmac_secret`](Self::hmac_secret), header VALUES are encrypted at
+    /// Like [`hmac_secret`](Self::hmac_secret), header values are encrypted at
     /// rest (DPAPI on Windows) — they routinely carry secrets such as an
     /// `Authorization: Bearer …` token — and never written to `config.toml` in
     /// plaintext. Keys stay plaintext. A legacy config with plaintext values
@@ -1695,12 +1696,12 @@ pub struct WebhookConfig {
         deserialize_with = "deserialize_protected_headers"
     )]
     pub custom_headers: std::collections::BTreeMap<String, String>,
-    /// How many times to RETRY a failed webhook POST (after the first attempt),
-    /// with exponential backoff (~250 ms, 500 ms, 1 s, capped at 2 s). Retries
-    /// only a TRANSIENT failure — a timeout, a connection error, an HTTP 429, or
-    /// a 5xx; a 4xx (the receiver rejecting the request) and an SSRF-policy block
-    /// fail immediately, since retrying can't help. Default 2 (up to 3 attempts);
-    /// 0 disables retries.
+    /// How many times to retry a failed webhook POST (after the first attempt),
+    /// with exponential backoff (~250 ms, 500 ms, 1 s, capped at 2 s). Only a
+    /// transient failure is retried — a timeout, a connection error, an HTTP 429,
+    /// or a 5xx; a 4xx (the receiver rejecting the request) and an SSRF-policy
+    /// block fail immediately, since retrying can't help. Default 2 (up to 3
+    /// attempts); 0 disables retries.
     #[serde(default = "default_webhook_max_retries")]
     pub max_retries: u32,
 }
@@ -1712,7 +1713,7 @@ impl std::fmt::Debug for WebhookConfig {
             .field("allow_http", &self.allow_http)
             .field("hmac_secret", &redact_key(self.hmac_secret.expose_secret()))
             // Header *values* can be secrets (e.g. an `Authorization` token), so
-            // Debug shows only the header NAMES — never the values.
+            // Debug shows only the header names, never the values.
             .field(
                 "custom_headers",
                 &self.custom_headers.keys().collect::<Vec<_>>(),
@@ -1878,7 +1879,7 @@ pub struct FillerConfig {
     /// customize. An empty list removes no single words.
     #[serde(default = "default_filler_words")]
     pub words: Vec<String>,
-    /// Multi-word filler phrases, removed as whole-word units — but ONLY when
+    /// Multi-word filler phrases, removed as whole-word units — but only when
     /// [`aggressive`](Self::aggressive) is on, because the built-ins ("kind of",
     /// "like", …) are real words elsewhere. Defaults to `default_filler_phrases`.
     #[serde(default = "default_filler_phrases")]
@@ -1902,7 +1903,7 @@ impl Default for FillerConfig {
 
 // ── Playbook ────────────────────────────────────────────────────────────────
 // The Playbook is the unified, reusable library of LLM/hook "moves" (entries)
-// and ordered chains of them (recipes) that power BOTH the default recording
+// and ordered chains of them (recipes) that power both the default recording
 // pipeline and Custom Hotkey chains. Phase 1 lands the schema + curated seeds
 // only — additive (`#[serde(default)]`), so existing configs load unchanged and
 // nothing reads these yet; the pipeline still runs off the legacy
@@ -1914,7 +1915,7 @@ impl Default for FillerConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaybookKind {
-    /// LLM step that REWRITES the running transcript text and feeds the next step
+    /// LLM step that rewrites the running transcript text and feeds the next step
     /// (e.g. cleanup, "reshape into a prompt").
     #[default]
     Transform,
@@ -1923,7 +1924,7 @@ pub enum PlaybookKind {
     Enrichment,
     /// A shell command or webhook fired with the recording JSON (like an Integration).
     Hook,
-    /// A DETERMINISTIC (non-LLM) text transform that rewrites the running
+    /// A deterministic (non-LLM) text transform that rewrites the running
     /// transcript like a `Transform`, but in pure Rust — no provider, no network,
     /// no prompt. Today the only one is filler-word removal
     /// ([`crate::filler::strip_fillers`]), driven by the `[filler]` config; the
@@ -2035,7 +2036,7 @@ fn default_playbook_hook_timeout() -> u64 {
 }
 
 /// The hook half of a Playbook entry (used when `kind` is `Hook`). One command/
-/// script OR a webhook URL — mirrors a single Integration.
+/// script or a webhook URL — mirrors a single Integration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlaybookHook {
     /// Shell command or script path to run (receives the recording JSON on stdin).
@@ -2158,11 +2159,11 @@ pub struct PlaybookRecipe {
 /// default cleanup / title / summary / auto-tag prompts so the migrated default
 /// recipe behaves exactly like today's pipeline. (A runtime migration reconciles
 /// an EXISTING user's customized prompts onto these in a later Phase-1 step.)
-/// Example keyword-triggered hooks for a fresh install. Each fires ONLY when the
+/// Example keyword-triggered hooks for a fresh install. Each fires only when the
 /// post-processed transcript contains the exact marker (so ordinary speech never
 /// triggers them), appending the note to a Markdown file under the user's
-/// Documents. Self-contained PowerShell — needs no bundled script. Showcase the
-/// power of keyword hooks; users edit or delete them in Settings → Integrations.
+/// Documents. Self-contained PowerShell — needs no bundled script. They showcase
+/// keyword hooks; users edit or delete them in Settings → Integrations.
 fn default_keyword_rules() -> Vec<KeywordRule> {
     let append = |file: &str| -> String {
         format!(
@@ -2237,7 +2238,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             target: "tags".into(),
             hook: PlaybookHook::default(),
         },
-        // Example entries (NOT in the `default` recipe, so they don't auto-run) —
+        // Example entries (not in the `default` recipe, so they don't auto-run) —
         // they show off what the Playbook can do. Edit them, add them to a recipe
         // or a custom hotkey, or delete them.
         PlaybookEntry {
@@ -2407,7 +2408,7 @@ pub fn default_recipes() -> Vec<PlaybookRecipe> {
 
 /// A user-defined custom keybind, beyond the three built-ins (record / in-place /
 /// meeting). Configured in Settings → Keybinds and stored in [`Config::hotkeys`];
-/// each binds a key combo to an action + mode, and carries its OWN pipeline and
+/// each binds a key combo to an action + mode, and carries its own pipeline and
 /// hooks so different keybinds can do different things (e.g. one cleans up +
 /// titles and posts to a journal; another runs the full pipeline + a webhook).
 /// Persisted so the manager round-trips — daemon registration of these bindings
@@ -2437,8 +2438,8 @@ pub struct HotkeyBinding {
     /// that recipe instead (e.g. a "dictate → prompt" chain). When the named recipe
     /// has been deleted the daemon falls back to the `default` recipe (never a
     /// panic, never the wrong chain). This is the sole driver of a keybind's
-    /// chain — the legacy per-step `pipeline` flags were removed.
-    /// IGNORED when [`action`](Self::action) is [`HotkeyAction::Meeting`]: a
+    /// chain — the legacy per-step `pipeline` flags are gone.
+    /// Ignored when [`action`](Self::action) is [`HotkeyAction::Meeting`]: a
     /// meeting resolves its recipe per-track via the daemon's multi-track path,
     /// not the single-recording ledger.
     #[serde(default)]
@@ -2448,7 +2449,7 @@ pub struct HotkeyBinding {
     /// this keybind's recordings with that model instead (e.g. a bigger model for
     /// an important dictation, or a tiny one for a quick note). For the local
     /// bundled backend this is a model-file path; for cloud backends a model id —
-    /// the same shape the per-job retranscribe override carries. IGNORED when
+    /// the same shape the per-job retranscribe override carries. Ignored when
     /// [`action`](Self::action) is [`HotkeyAction::Meeting`]: a meeting resolves
     /// its transcription model per-track via the daemon's multi-track path, not
     /// the single-recording ledger.
@@ -2456,7 +2457,7 @@ pub struct HotkeyBinding {
     pub whisper_model: String,
     /// Capture-source override for a Record / in-place keybind — `microphone` or
     /// `system_audio`. `None` (the default) uses the global `[recording].source`,
-    /// so existing bindings are unchanged. IGNORED when [`action`](Self::action)
+    /// so existing bindings are unchanged. Ignored when [`action`](Self::action)
     /// is [`HotkeyAction::Meeting`] (a meeting always records both tracks).
     /// Carried on `RecordStart` and applied at recorder start, like the
     /// recipe / model overrides.
@@ -2707,7 +2708,7 @@ impl Default for RestApiConfig {
 pub struct DaemonConfig {
     /// The verbosity of the daemon's internal log (e.g., `info`, `debug`, `trace`).
     pub log_level: String,
-    /// CURRENTLY UNUSED — rotation is daily, not size-based (the tracing
+    /// Currently unused — rotation is daily, not size-based (the tracing
     /// appender has no size rotation). Kept for config compatibility; a future
     /// size-based rotator would honor it.
     pub log_max_size_mb: u32,
@@ -2741,10 +2742,10 @@ pub enum WhisperServerRole {
     /// The dedicated live-preview server (`[preview_whisper]`), only when
     /// [`Config::preview_needs_own_server`] is true.
     Preview,
-    /// An optional SECOND live-preview server, only for meeting **"both"** mode
+    /// An optional second live-preview server, only for meeting **"both"** mode
     /// when the user opts in (`recording.meeting_preview_own_server`), so the two
-    /// meeting tracks can stream their captions CONCURRENTLY instead of
-    /// alternating on one server. Runs the SAME `[preview_whisper]` model as
+    /// meeting tracks can stream their captions concurrently instead of
+    /// alternating on one server. Runs the same `[preview_whisper]` model as
     /// [`Self::Preview`] but on a distinct port (see [`Config::preview2_port`]).
     /// Gated by [`Config::second_preview_needs_own_server`]; default off.
     Preview2,
@@ -2769,7 +2770,7 @@ impl WhisperServerRole {
 /// One whisper-server the live config requires: its role plus a clone of the
 /// `[whisper]`-shaped provider that drives it (model, port, args). Returned by
 /// [`Config::needed_whisper_servers`], the canonical *declaration* of which local
-/// servers a config needs. NOTE: the daemon supervisor currently hand-rolls the
+/// servers a config needs. Note that the daemon supervisor hand-rolls the
 /// equivalent per-loop gates (`run`/`run_preview`/`run_preview2`/`run_dictation`)
 /// rather than consuming this list directly, so the two must be kept in sync;
 /// this declaration is exercised by the config unit tests.
@@ -2839,9 +2840,9 @@ impl Config {
     }
 
     /// One-time reconcile that makes the Playbook the source of truth (Strategy
-    /// B). Copies the user's LIVE, inheritance-resolved cleanup / title /
+    /// B). Copies the user's live, inheritance-resolved cleanup / title /
     /// summary / auto-tag values into the four built-in `[[playbook]]` entries
-    /// and rebuilds the `default` recipe's step list from the legacy ENABLE
+    /// and rebuilds the `default` recipe's step list from the legacy enable
     /// flags — so an existing user sees byte-for-byte the same pipeline, but
     /// from then on the Playbook entries (not the legacy `[llm_post_process]` /
     /// `[summary]` / `[title]` / `[auto_tag]` sections) drive each built-in step.
@@ -2849,16 +2850,16 @@ impl Config {
     /// Idempotent: a no-op (returns `false`) once [`Self::playbook_migrated`] is
     /// set. On the first run it returns `true`, and the caller must persist the
     /// config exactly once so the reconciled entries (and the flag) are frozen
-    /// BEFORE any unrelated `write_config` could overwrite the seeds.
+    /// before any unrelated `write_config` could overwrite the seeds.
     ///
     /// Inheritance mirrors the daemon's per-step `*_llm_config` builders exactly:
     /// each step's provider / model / api_url / timeout falls back to the
     /// `[llm_post_process]` (cleanup) value when its own field is blank, so the
-    /// entry stores the SAME effective connection the step would have resolved at
-    /// run time. The API key is NEVER copied into an entry — keys stay in their
+    /// entry stores the same effective connection the step would have resolved at
+    /// run time. The API key is never copied into an entry — keys stay in their
     /// existing sections and are inherited at run time (`PlaybookLlm` carries an
     /// `api_key` only for genuinely user-authored entries). The auto-tag prompt
-    /// is copied from the LIVE `auto_tag.prompt` (the JSON-array runtime default,
+    /// is copied from the live `auto_tag.prompt` (the JSON-array runtime default,
     /// not the comma-separated seed in `default_playbook`).
     ///
     /// Returns whether a migration actually happened.
@@ -2872,7 +2873,7 @@ impl Config {
         let base = &self.llm_post_process;
 
         // Resolve one step's effective (provider, model, api_url, timeout_secs),
-        // inheriting the cleanup value on a blank field — the exact rule the
+        // inheriting the cleanup value on a blank field — the same rule the
         // daemon's `*_llm_config` overlays apply. The api_key is intentionally
         // never returned: it is inherited at run time and never stored per entry.
         let resolve = |provider: &str, model: &str, api_url: &str, timeout: u64| -> PlaybookLlm {
@@ -2910,7 +2911,7 @@ impl Config {
         };
 
         // Build each built-in entry's resolved LLM half. Prompts come from the
-        // matching LIVE section (the auto-tag prompt from `auto_tag.prompt`, NOT
+        // matching live section (the auto-tag prompt from `auto_tag.prompt`, not
         // the seed) so a user's customised prompt carries over verbatim.
         let cleanup_llm = {
             let mut l = resolve(
@@ -2943,8 +2944,8 @@ impl Config {
 
         // Overwrite the LLM half of each built-in entry in place, leaving any
         // user-added entries and the entries' id/name/description/kind/target
-        // untouched. A missing built-in entry (a user deleted it) is simply not
-        // reconciled — the recipe step would dangle and the executor skips it.
+        // untouched. A built-in entry the user deleted is simply not reconciled —
+        // the recipe step would dangle and the executor skips it.
         for entry in &mut self.playbook {
             let resolved = match entry.id.as_str() {
                 "cleanup" => &cleanup_llm,
@@ -2962,14 +2963,14 @@ impl Config {
             entry.llm.timeout_secs = resolved.timeout_secs;
         }
 
-        // Rebuild the `default` recipe's step list from the legacy ENABLE flags
-        // so a step that was OFF doesn't silently start running: cleanup iff
-        // post-processing is enabled AND a provider is set (provider !=
+        // Rebuild the `default` recipe's step list from the legacy enable flags
+        // so a step that was off doesn't silently start running: cleanup iff
+        // post-processing is enabled and a provider is set (provider !=
         // none/blank), title iff `title.enabled`, summary iff `summary.auto`,
         // tags iff `auto_tag.auto`. The runtime gate is `llm_provider_for_run`
         // → `LlmPostProcessor::provider`, which returns `None` the moment
-        // `!enabled` (llm.rs) — so a user who turned post-processing OFF but
-        // left a provider id behind must NOT get cleanup in the default recipe.
+        // `!enabled` (llm.rs) — so a user who turned post-processing off but
+        // left a provider id behind must not get cleanup in the default recipe.
         let cleanup_on = {
             let p = self.llm_post_process.provider.trim();
             self.llm_post_process.enabled && !p.is_empty() && p != "none"
@@ -3010,8 +3011,8 @@ impl Config {
     /// cutover): every `hook.commands` entry, every `keyword_rules` rule (its
     /// pattern becomes the entry's `keyword` trigger), and a non-blank
     /// `hook.webhook_url` becomes a built-in Hook [`PlaybookEntry`] appended to
-    /// the `default` recipe AFTER its LLM steps — so an existing user's hooks keep
-    /// firing, now as recipe steps. The legacy fields are then CLEARED so nothing
+    /// the `default` recipe after its LLM steps — so an existing user's hooks keep
+    /// firing, now as recipe steps. The legacy fields are then cleared so nothing
     /// fires twice (the old in-pipeline loops iterate an empty list). `run_on_transcribe`
     /// and the `[webhook]` SSRF/HMAC policy are deliberately left intact: the
     /// former still gates whether the migrated hooks run on a given pass, the
@@ -3137,18 +3138,18 @@ impl Config {
         self.preview_whisper.as_ref().unwrap_or(&self.whisper)
     }
 
-    /// The transcription provider config the live preview should use, **owned**,
+    /// The transcription provider config the live preview should use, owned,
     /// including the auto-default: a borrow of [`preview_whisper`](Self::preview_whisper)
     /// when the user set one, a borrow of [`whisper`](Self::whisper) for the
-    /// historical fallback, or an OWNED derived config when the auto-default
-    /// applies (see [`Self::derived_auto_preview`]). The final transcript always
-    /// uses `whisper`.
+    /// plain fallback, or an owned derived config when the auto-default applies
+    /// (see [`Self::derived_auto_preview`]). The final transcript always uses
+    /// `whisper`.
     ///
     /// Callers that have already had [`Self::materialize_auto_preview`] folded
     /// into the config (the daemon, after `load_config`) can keep using
     /// [`Self::preview_provider_config`] — once materialized, the derived config
     /// is just a `Some(preview_whisper)` and both methods agree. This `Cow`
-    /// variant is for call sites holding a config that has NOT been materialized
+    /// variant is for call sites holding a config that has not been materialized
     /// and want the effective answer without mutating it.
     pub fn effective_preview_provider_config(&self) -> std::borrow::Cow<'_, WhisperConfig> {
         if let Some(pv) = &self.preview_whisper {
@@ -3161,25 +3162,25 @@ impl Config {
     }
 
     /// The synthesized `[preview_whisper]` for the auto-default, or `None` when
-    /// it does not apply. Applies ONLY when ALL of:
+    /// it does not apply. Applies only when all of:
     /// - `preview_whisper` is unset (a user-set preview is honored verbatim);
-    /// - the main `[whisper]` is a LOCAL bundled model (cloud/external mains are
+    /// - the main `[whisper]` is a local bundled model (cloud/external mains are
     ///   left alone — the preview keeps reusing the main provider);
     /// - the main `model_path` is absolute/expanded and points at a real file
     ///   (so we can find its models dir and compare against it);
-    /// - that models dir holds a local model STRICTLY smaller than the main one.
+    /// - that models dir holds a local model strictly smaller than the main one.
     ///
     /// The result is a clone of the main `WhisperConfig` (same mode/provider/args
     /// /timeout) with `model_path` swapped to the smaller model and
     /// `bundled_server_port` bumped to the conventional preview port
     /// (`whisper.bundled_server_port + 1`, default 5810) so the supervisor runs
-    /// it as a dedicated second server — a whisper.cpp server loads one model, so
+    /// it as a dedicated second server. A whisper.cpp server loads one model, so
     /// the preview only actually runs lighter if it talks to a server that loaded
     /// the lighter model.
     ///
-    /// This does filesystem I/O (a single non-recursive directory scan). It is
-    /// meant to be called ONCE per config (re)load via
-    /// [`Self::materialize_auto_preview`], NOT from a hot path.
+    /// This does filesystem I/O (a single non-recursive directory scan), so it is
+    /// meant to be called once per config (re)load via
+    /// [`Self::materialize_auto_preview`], not from a hot path.
     pub fn derived_auto_preview(&self) -> Option<WhisperConfig> {
         if self.preview_whisper.is_some() {
             return None;
@@ -3198,8 +3199,8 @@ impl Config {
         let dir = main_path.parent()?;
         let smallest = smallest_whisper_model_in_dir(dir)?;
 
-        // Only override when the chosen model is STRICTLY smaller than the main
-        // one. If the smallest local model IS the main model (or no lighter
+        // Only override when the chosen model is strictly smaller than the main
+        // one. If the smallest local model is the main model (or no lighter
         // tier exists), fall back to reusing the main provider unchanged.
         let main_name = main_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let pick_name = smallest.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -3213,22 +3214,22 @@ impl Config {
         // supervisor's pre-flight probe routes around a squatter, so this is a
         // preference, not a hard bind.
         derived.bundled_server_port = self.whisper.bundled_server_port.saturating_add(1);
-        // The preview never spawns its OWN dictation server off this synthesized
+        // The preview never spawns its own dictation server off this synthesized
         // block — that opt-in only makes sense on a user-authored block.
         derived.use_own_bundled_server = false;
         Some(derived)
     }
 
-    /// Fold the auto-default preview model into this config IN PLACE when it
+    /// Fold the auto-default preview model into this config in place when it
     /// applies (see [`Self::derived_auto_preview`]): sets `preview_whisper` to
     /// the synthesized smaller-model block so every existing
     /// `preview_whisper`-keyed consumer — the preview loop, the supervisor's
     /// `preview_needs_own_server` gate, port resolution, the spec-change watch —
-    /// sees ONE materialized config and stays in agreement. Returns `true` if it
+    /// sees one materialized config and stays in agreement. Returns `true` if it
     /// changed the config.
     ///
-    /// The daemon calls this once per config (re)load, AFTER path expansion and
-    /// AFTER the on-disk persist, so the synthesized block is in-memory only and
+    /// The daemon calls this once per config (re)load, after path expansion and
+    /// after the on-disk persist, so the synthesized block is in-memory only and
     /// is never written back to `config.toml`. A no-op when `preview_whisper` is
     /// already set or the auto-default does not apply.
     pub fn materialize_auto_preview(&mut self) -> bool {
@@ -3258,8 +3259,8 @@ impl Config {
         &self.whisper
     }
 
-    /// True when the daemon must supervise a SECOND whisper-server for the live
-    /// preview: live preview is enabled AND `preview_whisper` is a local bundled
+    /// True when the daemon must supervise a second whisper-server for the live
+    /// preview: live preview is enabled and `preview_whisper` is a local bundled
     /// model on its own port. False when preview is off, reuses the main
     /// provider, or uses a cloud API (no extra server needed) — so the second
     /// server never spawns unless the live preview is actually turned on.
@@ -3279,9 +3280,9 @@ impl Config {
         }
     }
 
-    /// True when the daemon must supervise a THIRD whisper-server dedicated to
+    /// True when the daemon must supervise a third whisper-server dedicated to
     /// in-place dictation: `[in_place].stt` is set, is a local bundled model,
-    /// AND the user opted in with `use_own_bundled_server`. Default off — the
+    /// and the user opted in with `use_own_bundled_server`. Default off — the
     /// weak-box default leaves `in_place.stt = None`, and even a custom local
     /// dictation provider reuses the main/preview server unless the opt-in flag
     /// is set. Mirrors [`Self::preview_needs_own_server`] so the gate is consistent.
@@ -3299,9 +3300,9 @@ impl Config {
         }
     }
 
-    /// True when the daemon must supervise a SECOND live-preview server for
+    /// True when the daemon must supervise a second live-preview server for
     /// meeting **"both"** mode: streaming preview is on, `meeting_preview` is
-    /// `"both"`, the user opted in with `meeting_preview_own_server`, AND the
+    /// `"both"`, the user opted in with `meeting_preview_own_server`, and the
     /// preview already runs on its own local bundled server
     /// ([`Self::preview_needs_own_server`] — the model this 2nd server reuses). Default
     /// off; mirrors [`Self::preview_needs_own_server`]/[`Self::in_place_needs_own_server`] so
@@ -3312,7 +3313,7 @@ impl Config {
             && self.preview_needs_own_server()
     }
 
-    /// The conventional port for the SECOND live-preview server: the preview
+    /// The conventional port for the second live-preview server: the preview
     /// server's configured port + 2, so it never collides with main (preview
     /// port − 1 / the default 5809), the preview server itself (5810), or the
     /// dedicated dictation server (preview port + 1 / the default 5811). With the
@@ -3324,15 +3325,15 @@ impl Config {
             .saturating_add(2)
     }
 
-    /// The EXACT set of whisper-servers the live config requires — the canonical
-    /// declaration of what should run (the supervisor currently hand-rolls the
-    /// matching gates rather than consuming this; keep them in sync). "Never more
-    /// servers than needed": each entry is gated independently and only local
-    /// bundled providers (the only kind the daemon supervises) ever appear.
+    /// The exact set of whisper-servers the live config requires — the canonical
+    /// declaration of what should run (the supervisor hand-rolls the matching
+    /// gates rather than consuming this; keep them in sync). Never more servers
+    /// than needed: each entry is gated independently and only local bundled
+    /// providers (the only kind the daemon supervises) ever appear.
     ///
     /// - **Main** — always, whenever `[whisper].mode != External` (matching the
     ///   supervisor's own gate). A cloud-provider bundled-mode config still
-    ///   needs the local server, so this gates on MODE, not provider.
+    ///   needs the local server, so this gates on the mode, not the provider.
     /// - **Preview** — only when [`Self::preview_needs_own_server`] is true.
     /// - **Preview2** — only when [`Self::second_preview_needs_own_server`] is true
     ///   (meeting "both" mode opt-in; reuses the preview model on
@@ -3392,7 +3393,7 @@ impl Default for Config {
                 bundled_server_port: 5809,
                 bundled_server_args: vec![],
                 // Generous flat cap: long recordings (and slow local models)
-                // can take many minutes; 60s timed out real 10-minute notes.
+                // can legitimately take many minutes to transcribe.
                 timeout_secs: 3600,
                 language: None,
                 // A light Whisper context hint that nudges it to render the
@@ -3456,14 +3457,12 @@ impl Default for Config {
             in_place: InPlaceConfig::default(),
             filler: FillerConfig::default(),
             meeting_hotkey: default_meeting_hotkey(),
-            // One disabled example so a fresh install shows what a custom hotkey
-            // looks like (its own combo + recipe + per-binding hook). Off by
-            // default — the user enables/edits/deletes it in Settings → Hotkeys.
             hotkeys: vec![
-                // Disabled-by-default examples that showcase recipe-bearing custom
-                // keybinds — the user enables / edits / deletes them in Settings →
-                // Hotkeys. Each points at a seeded recipe (no dead per-binding
-                // `hooks`; the journal/webhook side-effects live in the recipe now).
+                // Disabled-by-default examples so a fresh install shows what a
+                // custom keybind looks like (its own combo + recipe). The user
+                // enables / edits / deletes them in Settings → Hotkeys. Each
+                // points at a seeded recipe — there's no per-binding `hooks`
+                // field; the journal/webhook side-effects live in the recipe.
                 HotkeyBinding {
                     id: "example-journal".into(),
                     label: "Example: journal note".into(),
@@ -3586,10 +3585,10 @@ impl Config {
 
     /// Validate constraints not enforced by the type system.
     pub fn validate(&self) -> Result<()> {
-        // A cloud LLM step that is ON with no key anywhere (own field empty
-        // AND nothing to inherit from cleanup) can only fail at runtime —
-        // catch it at save/load instead. Local providers (ollama, lmstudio,
-        // …) need no key, and a blank provider inherits cleanup wholesale.
+        // A cloud LLM step that is on with no key anywhere (own field empty and
+        // nothing to inherit from cleanup) can only fail at runtime, so catch it
+        // at save/load instead. Local providers (ollama, lmstudio, …) need no
+        // key, and a blank provider inherits cleanup wholesale.
         if self.auto_tag.auto {
             let p = self.auto_tag.provider.trim();
             let cloud =
@@ -3674,7 +3673,7 @@ impl Config {
                 self.recording.meeting_preview
             )));
         }
-        // No two ACTIVE bundled whisper-servers may share a port. Otherwise the
+        // No two active bundled whisper-servers may share a port. Otherwise the
         // supervisor probes one off its configured port at runtime and the
         // port-keyed `WhisperEffectivePorts::resolve` can route a consumer to the
         // wrong server — e.g. a dictation server deliberately set to the derived
@@ -3771,9 +3770,9 @@ impl Config {
             expand_path(&out.semantic_search.model_dir.to_string_lossy())?.into();
         // Hook commands are arbitrary shell strings that may contain $variables
         // used at runtime by the shell (e.g. `$payload`, `$input` in PowerShell).
-        // Only expand the known Phoneme path tokens (%APPDATA%, ~/) — do NOT
-        // run them through shellexpand::env, which would misinterpret those
-        // shell variables as OS environment variable references and error.
+        // Only expand the known Phoneme path tokens (%APPDATA%, ~/) — don't run
+        // them through shellexpand::env, which would misinterpret those shell
+        // variables as OS environment variable references and error.
         out.hook.commands = out.hook.commands.iter().map(|c| expand_cmd(c)).collect();
         out.hook.keyword_rules = out
             .hook
@@ -3848,9 +3847,9 @@ pub fn default_config_path() -> Option<PathBuf> {
 
 /// Resolve the *active* config path: the `PHONEME_CONFIG` env override if set
 /// (and non-empty), otherwise the per-user default. This is the single source of
-/// truth so the daemon, the CLI, and the tray all agree on which file is live —
-/// previously only the daemon honored `PHONEME_CONFIG`, so a `phoneme` CLI
-/// invocation could read a different config than the daemon it talks to.
+/// truth so the daemon, the CLI, and the tray all agree on which file is live. If
+/// only some of them honored `PHONEME_CONFIG`, a `phoneme` CLI invocation could
+/// read a different config than the daemon it talks to.
 pub fn resolved_config_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("PHONEME_CONFIG") {
         if !p.is_empty() {
@@ -3894,7 +3893,7 @@ mod tests {
         // A customized legacy config: a cloud cleanup connection with a key, a
         // summary that overrides only the model (inherits the rest), an LLM
         // title with its own provider, an auto-tag with a customized prompt, and
-        // every step turned ON.
+        // every step turned on.
         cfg.llm_post_process.enabled = true;
         cfg.llm_post_process.provider = "openai".into();
         cfg.llm_post_process.model = "gpt-4o-mini".into();
@@ -3944,7 +3943,7 @@ mod tests {
         assert_eq!(title.llm.model, "gpt-4o-mini", "inherits cleanup model");
         assert_eq!(title.llm.prompt, "Custom title prompt.");
 
-        // Auto-tag copies the LIVE prompt, NOT the seed.
+        // Auto-tag copies the live prompt, not the seed.
         let auto_tag = entry("auto_tag");
         assert_eq!(
             auto_tag.llm.prompt,
@@ -3961,7 +3960,7 @@ mod tests {
             "must copy the live prompt, not the comma-separated seed"
         );
 
-        // The api_key is NEVER copied into any entry.
+        // The api_key is never copied into any entry.
         for e in &cfg.playbook {
             assert!(
                 e.llm.api_key_str().is_empty(),
@@ -4064,10 +4063,10 @@ mod tests {
 
     #[test]
     fn migrate_playbook_recipe_omits_cleanup_when_post_processing_disabled() {
-        // A user who turned post-processing OFF but left a provider id behind:
+        // A user who turned post-processing off but left a provider id behind:
         // the legacy gate is `LlmPostProcessor::provider`, which returns `None`
         // the moment `!enabled` (regardless of the provider). So cleanup must
-        // NOT be a member of the migrated default recipe — otherwise a disabled
+        // not be a member of the migrated default recipe — otherwise a disabled
         // step would silently start running.
         let mut cfg = Config::default();
         cfg.llm_post_process.enabled = false;
@@ -4123,7 +4122,7 @@ mod tests {
         assert!(local.preview_needs_own_server());
         assert_eq!(local.preview_provider_config().bundled_server_port, 5810);
 
-        // Same local config but preview OFF → no second server spawns.
+        // Same local config but preview off → no second server spawns.
         let mut off = local.clone();
         off.recording.streaming_preview = false;
         assert!(!off.preview_needs_own_server());
@@ -4154,7 +4153,7 @@ mod tests {
         // `.en` variants rank with their base tier (tiny.en is still a tiny).
         assert!(whisper_model_cost("ggml-tiny.en.bin") < whisper_model_cost("ggml-base.en.bin"));
         assert!(whisper_model_cost("ggml-base.en.bin") < whisper_model_cost("ggml-small.bin"));
-        // A quantized variant of a tier is lighter than the full one of the SAME
+        // A quantized variant of a tier is lighter than the full one of the same
         // tier, but never crosses into a lower tier.
         assert!(whisper_model_cost("ggml-base-q5_0.bin") < whisper_model_cost("ggml-base.bin"));
         assert!(whisper_model_cost("ggml-tiny.bin") < whisper_model_cost("ggml-base-q5_0.bin"));
@@ -4303,13 +4302,13 @@ mod tests {
     fn materialize_auto_preview_keeps_loop_and_supervisor_in_agreement() {
         let dir = TempDir::new().unwrap();
         let mut cfg = local_main_cfg(dir.path(), "ggml-large-v3.bin", &["ggml-tiny.bin"]);
-        // Preview must be ON for the supervisor gate to fire.
+        // Preview must be on for the supervisor gate to fire.
         cfg.recording.streaming_preview = true;
         assert!(cfg.materialize_auto_preview());
         // Now the supervisor gate sees a local bundled preview → owns a server.
         assert!(cfg.preview_needs_own_server());
-        // And the loop's provider config is the SAME derived block (same model
-        // + same port) the supervisor will spawn — they agree.
+        // And the loop's provider config is the same derived block (same model,
+        // same port) the supervisor will spawn — they agree.
         let loop_cfg = cfg.preview_provider_config();
         assert!(loop_cfg.model_path.ends_with("ggml-tiny.bin"));
         assert_eq!(loop_cfg.bundled_server_port, 5810);
@@ -4639,7 +4638,7 @@ mod tests {
 
     #[test]
     fn webhook_custom_headers_round_trip_through_toml() {
-        // Header VALUES are encrypted at rest like hmac_secret; a full
+        // Header values are encrypted at rest like hmac_secret; a full
         // serialize → deserialize cycle must return the original map (DPAPI
         // round-trips on Windows, passthrough off it). Keys stay verbatim.
         let mut cfg = Config::default();
@@ -4652,7 +4651,7 @@ mod tests {
         let serialized = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(parsed.webhook.custom_headers, cfg.webhook.custom_headers);
-        // On Windows the token must NOT appear in plaintext on disk; off Windows
+        // On Windows the token must not appear in plaintext on disk; off Windows
         // protect() is a passthrough, so only assert the encrypted property there.
         #[cfg(windows)]
         assert!(
@@ -4718,7 +4717,7 @@ mod tests {
         Config::default().validate().expect("defaults are valid");
     }
 
-    /// The NON-NEGOTIABLE invariant: a default config needs exactly the main
+    /// The non-negotiable invariant: a default config needs exactly the main
     /// server on its configured port — no preview, no dictation server.
     #[test]
     fn default_config_needs_only_the_main_server() {
@@ -4770,7 +4769,7 @@ mod tests {
         assert_eq!(needed[1].config.bundled_server_port, 5810);
     }
 
-    /// The dedicated dictation server is OFF by default even when a custom
+    /// The dedicated dictation server is off by default even when a custom
     /// local `[in_place].stt` is set: it only runs with the explicit opt-in.
     #[test]
     fn in_place_local_without_optin_does_not_add_a_server() {
@@ -4810,7 +4809,7 @@ mod tests {
         assert_eq!(needed[2].config.bundled_server_port, 5811);
     }
 
-    /// Meeting "both" mode with the 2nd-preview opt-in adds a FOURTH server
+    /// Meeting "both" mode with the 2nd-preview opt-in adds a fourth server
     /// (Preview2) on the derived port — but only with all preconditions met.
     #[test]
     fn meeting_both_optin_adds_the_second_preview_server() {
@@ -4838,8 +4837,8 @@ mod tests {
         assert_eq!(needed[2].config.bundled_server_port, 5812);
     }
 
-    /// The 2nd preview server stays OFF unless ALL preconditions hold: opt-in
-    /// flag, "both" mode, AND a dedicated local preview server.
+    /// The 2nd preview server stays off unless all preconditions hold: opt-in
+    /// flag, "both" mode, and a dedicated local preview server.
     #[test]
     fn second_preview_server_gated_on_all_preconditions() {
         // Opt-in + both, but preview reuses the main provider (no own server).
@@ -5067,7 +5066,7 @@ mod tests {
         assert_eq!(parsed.interface.column_widths.first().unwrap(), "150px");
     }
 
-    /// The lifecycle knobs default ON, and a config written before they
+    /// The lifecycle knobs default on, and a config written before they
     /// existed parses with both on — existing users get the full shutdown
     /// chain and Ollama auto-launch without touching their config.
     #[test]
@@ -5113,7 +5112,7 @@ mod tests {
     fn expanded_does_not_shellexpand_hook_commands() {
         let mut cfg = Config::default();
         // Simulate the clipboard preset: contains $d and $input which are
-        // PowerShell variables, NOT environment variables.
+        // PowerShell variables, not environment variables.
         cfg.hook.commands = vec![
             r#"powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript""#.into(),
         ];
@@ -5148,7 +5147,7 @@ mod tests {
 
     #[test]
     fn title_defaults_to_heuristic_only() {
-        // The heuristic title is free and local, so it ships ON; the LLM pass
+        // The heuristic title is free and local, so it ships on; the LLM pass
         // is an opt-in enhancement.
         let cfg = Config::default();
         assert!(cfg.title.enabled);
@@ -5315,7 +5314,7 @@ mod tests {
 
     #[test]
     fn playbook_hook_should_run_trigger() {
-        // Empty keyword ⇒ ALWAYS run (unlike KeywordRule, where empty = never).
+        // Empty keyword ⇒ always run (unlike KeywordRule, where empty = never).
         let always = PlaybookHook::default();
         assert!(always.should_run("anything"));
         assert!(always.should_run(""));

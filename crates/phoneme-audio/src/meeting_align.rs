@@ -349,8 +349,8 @@ mod tests {
         assert_eq!(loud_before, 0, "no audio before video start");
     }
 
-    /// A loopback track that *did* deliver continuous frames (only a small
-    /// deficit) with internal leading silence must NOT be treated as sparse —
+    /// A loopback track that did deliver continuous frames (only a small
+    /// deficit) with internal leading silence must not be treated as sparse —
     /// the in-buffer silence already aligns it, so it stays at `track_late`.
     #[test]
     fn dense_loopback_with_internal_leading_silence_not_sparse() {

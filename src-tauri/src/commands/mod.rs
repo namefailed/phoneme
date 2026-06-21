@@ -21,15 +21,14 @@
 //! API keys never enter the WebView. `read_config` serializes the config
 //! and replaces every non-empty `api_key` (whisper, llm_post_process,
 //! summary, auto_tag, title, preview_whisper, and the nested
-//! `in_place.stt`) — plus the `webhook.hmac_secret` signing key — with the
-//! `__phoneme_secret_kept__` sentinel;
-//! `write_config` restores any field still holding the sentinel from the
-//! on-disk config before validating and saving, so an unchanged key
-//! round-trips without ever leaving the Rust side — and saving can never
-//! clobber a real key with the mask. The frontend mirrors the sentinel
-//! constant. Commands that accept per-run key overrides resolve the
-//! sentinel the same way (e.g. the cleanup re-run maps a masked key back
-//! to the configured one).
+//! `in_place.stt`), plus the `webhook.hmac_secret` signing key, with the
+//! `__phoneme_secret_kept__` sentinel. `write_config` restores any field
+//! still holding the sentinel from the on-disk config before validating and
+//! saving, so an unchanged key round-trips without ever leaving the Rust
+//! side, and saving can never clobber a real key with the mask. The frontend
+//! mirrors the sentinel constant. Commands that accept per-run key overrides
+//! resolve the sentinel the same way (e.g. the cleanup re-run maps a masked
+//! key back to the configured one).
 //!
 //! `write_config` also applies side effects after saving: registry Run-key
 //! for start-at-login, `ReloadConfig` to the daemon, hotkey
@@ -120,8 +119,8 @@ async fn forward(slot: &BridgeSlot, req: Request) -> Result<Value, CommandError>
 }
 
 /// Validate a frontend-supplied recording id. A malformed id reaching the
-/// daemon would risk a panic in `RecordingId`'s fixed-offset slicing
-/// accessors; reject it here with a clean error instead.
+/// daemon could panic in `RecordingId`'s fixed-offset slicing accessors, so
+/// reject it here with a clean error instead.
 fn parse_id(id: &str) -> Result<RecordingId, CommandError> {
     RecordingId::parse(id)
         .ok_or_else(|| CommandError::new("invalid_config", format!("invalid recording id: {id:?}")))
@@ -167,7 +166,7 @@ fn mask_config_secrets(v: &mut Value) {
             }
         }
     }
-    // The dictation STT lives one level deeper (`in_place.stt.api_key`).
+    // The dictation STT key lives one level deeper, at `in_place.stt.api_key`.
     if let Some(key) = v
         .get_mut("in_place")
         .and_then(|s| s.get_mut("stt"))
@@ -267,10 +266,10 @@ fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
     }
 }
 
-/// True iff `child`, once canonicalized, is `root` itself or lives under it.
+/// True when `child`, once canonicalized, is `root` itself or lives under it.
 /// Both paths are canonicalized so `..` traversal and symlinks can't escape the
-/// allowed root. Returns `false` if either path can't be canonicalized (e.g.
-/// doesn't exist) — fail closed.
+/// allowed root. Returns `false` (fails closed) if either path can't be
+/// canonicalized, e.g. it doesn't exist.
 fn path_within(child: &std::path::Path, root: &std::path::Path) -> bool {
     match (std::fs::canonicalize(child), std::fs::canonicalize(root)) {
         (Ok(c), Ok(r)) => c.starts_with(&r),
@@ -327,9 +326,9 @@ mod tests {
 
     /// Completeness guard: mask and unmask are hand-enumerated, so a new
     /// secret-bearing field could be added to one but not the other (leaking a
-    /// key to the WebView, or losing it on save). Set EVERY secret to a unique
+    /// key to the WebView, or losing it on save). Set every secret to a unique
     /// sentinel, then assert (a) each is masked, (b) no plaintext sentinel
-    /// survives anywhere in the JSON, and (c) unmask restores each — so the two
+    /// survives anywhere in the JSON, and (c) unmask restores each, so the two
     /// functions can't silently drift out of sync.
     #[test]
     fn mask_unmask_cover_every_secret_field() {
@@ -466,8 +465,8 @@ mod tests {
     // ── path_within ───────────────────────────────────────
     // The reveal/open/run commands hand a renderer-supplied path to the OS, so
     // `path_within` is the gate that keeps those to an allowed root. It
-    // canonicalizes BOTH sides (so `..` and 8.3/junction tricks can't escape a
-    // lexical prefix) and fails CLOSED when either path can't be canonicalized.
+    // canonicalizes both sides (so `..` and 8.3/junction tricks can't escape a
+    // lexical prefix) and fails closed when either path can't be canonicalized.
     // These need real on-disk dirs because canonicalize touches the filesystem.
 
     #[test]
@@ -488,8 +487,8 @@ mod tests {
 
     #[test]
     fn path_within_rejects_traversal_escape() {
-        // `<root>/sub/../../outside` canonicalizes ABOVE root → denied, even
-        // though the lexical string starts under it.
+        // `<root>/sub/../../outside` canonicalizes above the root, so it's
+        // denied even though the lexical string starts under it.
         let base = tempfile::tempdir().unwrap();
         let root = base.path().join("root");
         let outside = base.path().join("outside");
@@ -507,7 +506,7 @@ mod tests {
 
     #[test]
     fn path_within_rejects_prefix_sibling() {
-        // `C:\data2` must NOT count as inside `C:\data` — the canonical
+        // `C:\data2` must not count as inside `C:\data`: the canonical
         // starts_with compares whole path components, not raw string prefixes.
         let base = tempfile::tempdir().unwrap();
         let data = base.path().join("data");

@@ -47,20 +47,20 @@ pub fn l2_normalize(v: &mut [f32]) {
 
 /// Component-wise mean of several centroids, L2-normalized.
 ///
-/// Returns `None` when `centroids` is empty or the vectors disagree on length
-/// (a dimension mismatch means they came from different embedding models and
-/// must not be averaged). Non-finite components are skipped per cell so one bad
-/// sample can't poison the mean.
+/// Returns `None` when `centroids` is empty or the vectors disagree on length.
+/// A dimension mismatch means they came from different embedding models, and
+/// averaging those would be meaningless. Non-finite components are skipped per
+/// cell so one bad sample can't poison the mean.
 pub fn mean_centroid(centroids: &[Vec<f32>]) -> Option<Vec<f32>> {
     let first = centroids.first()?;
     let dim = first.len();
     if dim == 0 || centroids.iter().any(|c| c.len() != dim) {
         return None;
     }
-    // Accumulate the per-component sum in f64 (then cast to f32 at the end) to
-    // match `diarization::cluster_centroids`, which aggregates the identical mean
-    // in f64 — keeping the two paths bit-for-bit consistent and avoiding f32
-    // rounding drift over many samples.
+    // Accumulate the per-component sum in f64 and cast to f32 only at the end.
+    // `diarization::cluster_centroids` aggregates the same mean in f64, so doing
+    // it the same way here keeps the two paths bit-for-bit consistent and avoids
+    // f32 rounding drift over many samples.
     let mut sum = vec![0.0f64; dim];
     let mut counts = vec![0u32; dim];
     for c in centroids {
@@ -87,18 +87,17 @@ pub fn mean_centroid(centroids: &[Vec<f32>]) -> Option<Vec<f32>> {
 /// Each sample is `(centroid, weight)`; a longer speech sample carries a heavier
 /// weight, so a clean multi-minute capture outvotes a one-word blip instead of
 /// counting the same. Weights are the speaker's total speaking duration (any
-/// positive unit — ms in practice); only ratios matter, never the absolute
-/// scale.
+/// positive unit, ms in practice); only ratios matter, never the absolute scale.
 ///
-/// Fallback rule (this is the backward-compatibility contract): a sample whose
-/// weight is non-positive or non-finite is treated as weight `1` — so legacy
-/// captures stored before durations existed (`duration_ms = 0`) count equally.
-/// When *every* weight is non-positive (or the total collapses to zero), this is
-/// exactly equal weighting, i.e. byte-for-byte [`mean_centroid`] of the same
-/// vectors. With all-equal positive weights it also equals [`mean_centroid`].
+/// The fallback rule is the backward-compatibility contract: a sample whose
+/// weight is non-positive or non-finite is treated as weight `1`, so captures
+/// stored before durations existed (`duration_ms = 0`) count equally. When every
+/// weight is non-positive (or the total collapses to zero), the result is exactly
+/// equal weighting, i.e. byte-for-byte [`mean_centroid`] of the same vectors.
+/// With all-equal positive weights it also equals [`mean_centroid`].
 ///
 /// Returns `None` under the same conditions as [`mean_centroid`]: empty input or
-/// a dimension mismatch (vectors from different embedding models must not be
+/// a dimension mismatch (vectors from different embedding models can't be
 /// averaged). Non-finite components are skipped per cell so one bad sample can't
 /// poison the mean.
 pub fn weighted_mean_centroid(samples: &[(Vec<f32>, f64)]) -> Option<Vec<f32>> {
@@ -106,13 +105,13 @@ pub fn weighted_mean_centroid(samples: &[(Vec<f32>, f64)]) -> Option<Vec<f32>> {
     if dim == 0 || samples.iter().any(|(c, _)| c.len() != dim) {
         return None;
     }
-    // Normalize each weight to a usable positive number: a non-positive or
-    // non-finite weight falls back to 1.0 (equal weighting), which makes legacy
+    // Pin each weight to a usable positive number: a non-positive or non-finite
+    // weight falls back to 1.0 (equal weighting), which makes legacy
     // duration_ms=0 rows behave exactly like the unweighted mean.
     let norm_weight = |w: f64| if w.is_finite() && w > 0.0 { w } else { 1.0 };
 
-    // Weighted per-component sum in f64 (cast to f32 at the end), matching
-    // `mean_centroid` / `diarization::cluster_centroids` for path consistency.
+    // Weighted per-component sum in f64, cast to f32 at the end, matching
+    // `mean_centroid` and `diarization::cluster_centroids` for path consistency.
     let mut sum = vec![0.0f64; dim];
     let mut weight = vec![0.0f64; dim];
     for (c, w) in samples {
@@ -154,12 +153,12 @@ pub fn best_match(probe: &[f32], candidates: &[Vec<f32>], threshold: f32) -> Opt
 /// Score-normalization mode for [`best_match_normalized`] (roadmap V2).
 ///
 /// Raw cosine has a different scale per speaker (some voices sit closer to the
-/// whole cohort than others), so one global `threshold` over-accepts for "central"
-/// speakers and over-rejects for "outlier" ones. Cohort normalization re-centers
+/// whole cohort than others), so one global `threshold` over-accepts for central
+/// speakers and over-rejects for outlier ones. Cohort normalization re-centers
 /// every comparison onto a common z-scale so a single threshold means the same
 /// thing for everyone.
 ///
-/// The cohort is the candidate set itself — the *other* enrolled speakers'
+/// The cohort is the candidate set itself: the other enrolled speakers'
 /// centroids. No external impostor set is needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScoreNorm {
@@ -168,13 +167,13 @@ pub enum ScoreNorm {
     #[default]
     Off,
     /// S-norm: z-score the raw cosine `probe·target` against the distribution of
-    /// the probe's cosines to the rest of the cohort (mean/std of *probe vs the
-    /// other candidates*). Normalizes away how "central" the probe voice is.
+    /// the probe's cosines to the rest of the cohort (mean/std of probe against
+    /// the other candidates). Normalizes away how central the probe voice is.
     SNorm,
     /// AS-norm (symmetric): average the probe-side z-score (as [`ScoreNorm::SNorm`])
     /// with the target-side z-score (the same cosine re-centered against the
-    /// *target's* cosines to the rest of the cohort). Cancels per-speaker scale on
-    /// both ends, so it does not matter which voice is the probe.
+    /// target's cosines to the rest of the cohort). Cancels per-speaker scale on
+    /// both ends, so it doesn't matter which voice is the probe.
     ASNorm,
 }
 
@@ -209,9 +208,9 @@ fn mean_std(xs: &[f32]) -> Option<(f64, f64)> {
 ///   (the same raw cosine re-centered against the target's cosines to the other
 ///   candidates).
 ///
-/// When a side's cohort is degenerate (fewer than two members, or zero spread —
-/// see `mean_std`) that side falls back to the raw cosine, so a cohort of size
-/// 1 gracefully degrades to raw with no `NaN`/divide-by-zero. AS-norm with one
+/// When a side's cohort is degenerate (fewer than two members, or zero spread;
+/// see `mean_std`) that side falls back to the raw cosine, so a cohort of size 1
+/// degrades gracefully to raw with no `NaN` or divide-by-zero. AS-norm with one
 /// degenerate side uses the well-defined side alone.
 pub fn normalized_score(
     probe: &[f32],
@@ -263,11 +262,11 @@ pub fn normalized_score(
 /// Like [`best_match`], but scores under a [`ScoreNorm`] mode and compares the
 /// *normalized* score against `threshold` (roadmap V2).
 ///
-/// With [`ScoreNorm::Off`] this is byte-for-byte [`best_match`] — same scores,
-/// same threshold, same tie-breaking — so the default path is unchanged. With a
+/// With [`ScoreNorm::Off`] this is byte-for-byte [`best_match`]: same scores,
+/// same threshold, same tie-breaking, so the default path is unchanged. With a
 /// normalization mode the returned `score` is the normalized z-score (no longer a
 /// cosine in `[-1, 1]`), so `threshold` must be a z-threshold (~1.5–3), not the
-/// cosine `voiceprint_match_threshold`. Ties keep the lowest index, as `best_match`.
+/// cosine `voiceprint_match_threshold`. Ties keep the lowest index, like `best_match`.
 pub fn best_match_normalized(
     probe: &[f32],
     candidates: &[Vec<f32>],
@@ -275,7 +274,7 @@ pub fn best_match_normalized(
     mode: ScoreNorm,
 ) -> Option<(usize, f32)> {
     if mode == ScoreNorm::Off {
-        // Exact delegation — provably identical behavior to the raw path.
+        // Delegate directly so the Off path is provably identical to the raw one.
         return best_match(probe, candidates, threshold);
     }
     let mut best: Option<(usize, f32)> = None;
@@ -359,7 +358,7 @@ mod tests {
     #[test]
     fn weighted_mean_zero_weights_fall_back_to_equal() {
         // The legacy contract: duration_ms=0 everywhere → equal weighting → the
-        // SAME centroid as mean_centroid of those vectors.
+        // same centroid as mean_centroid of those vectors.
         let vecs = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![0.7, 0.7]];
         let plain = mean_centroid(&vecs).unwrap();
         let w_zero: Vec<_> = vecs.iter().map(|v| (v.clone(), 0.0)).collect();
@@ -433,7 +432,7 @@ mod tests {
     #[test]
     fn off_mode_reproduces_raw_best_match_exactly() {
         // The whole opt-in contract: ScoreNorm::Off must equal best_match for any
-        // input, including ties, sub-threshold cases, and empties.
+        // input, including ties, sub-threshold cases, and empty lists.
         let check = |probe: &[f32], cands: &[Vec<f32>], thr: f32| {
             assert_eq!(
                 best_match_normalized(probe, cands, thr, ScoreNorm::Off),
@@ -451,8 +450,8 @@ mod tests {
 
     #[test]
     fn cohort_of_one_falls_back_to_raw_no_nan() {
-        // One candidate → no "others" to normalize against → both S-norm and
-        // AS-norm must return the raw cosine, finite, never NaN/inf.
+        // One candidate means no "others" to normalize against, so both S-norm
+        // and AS-norm must return the raw cosine: finite, never NaN or inf.
         let probe = vec![0.8, 0.6];
         let cands = vec![vec![0.6, 0.8]];
         let raw = cosine_similarity(&probe, &cands[0]);
@@ -468,8 +467,8 @@ mod tests {
 
     #[test]
     fn degenerate_zero_spread_cohort_falls_back_to_raw() {
-        // All other candidates score the probe identically → cohort std 0 → no
-        // valid z-score → fall back to raw, no divide-by-zero.
+        // All other candidates score the probe identically, so the cohort std is
+        // 0 and there's no valid z-score; fall back to raw, no divide-by-zero.
         let probe = vec![1.0, 0.0, 0.0];
         // Two cohort members equidistant from the probe (same cosine), plus the
         // target. Probe-vs-cohort scores are equal → std 0.
@@ -498,14 +497,14 @@ mod tests {
 
     #[test]
     fn as_norm_is_symmetric() {
-        // AS-norm averages a probe-side z-score and a target-side z-score over the
-        // SAME cohort, so scoring A against B must equal scoring B against A when
-        // both share one fixed cohort. Build it explicitly from the two-sided
+        // AS-norm averages a probe-side z-score and a target-side z-score over one
+        // shared cohort, so scoring A against B must equal scoring B against A when
+        // both share that fixed cohort. Build it explicitly from the two-sided
         // formula so the property is tested without the leave-one-out plumbing
         // confusing which voice is excluded:
         //   AS(A,B) = 0.5 * [ (cos(A,B) - μ_A)/σ_A  +  (cos(A,B) - μ_B)/σ_B ]
         // where μ_X/σ_X are X's cosines to a shared cohort. Swapping A and B keeps
-        // cos(A,B) and merely reorders the two averaged terms → identical.
+        // cos(A,B) and merely reorders the two averaged terms, so the result is identical.
         let a = vec![1.0, 0.2, 0.0];
         let b = vec![0.3, 1.0, 0.1];
         let cohort = [
@@ -515,8 +514,8 @@ mod tests {
         ];
 
         // Candidate list for direction A→B: [B, cohort...]; probe = A, target = B
-        // at index 0. Cohort (leave-one-out on target B) = the shared cohort, and
-        // A is NOT in the list, so the probe never self-matches.
+        // at index 0. Cohort (leave-one-out on target B) is the shared cohort, and
+        // A is not in the list, so the probe never self-matches.
         let mut cands_ab = vec![b.clone()];
         cands_ab.extend(cohort.iter().cloned());
         let s_ab = normalized_score(&a, &cands_ab, 0, ScoreNorm::ASNorm);
@@ -572,11 +571,11 @@ mod tests {
         use crate::voiceprint_eval::compute_eer;
 
         // Three speakers placed on the unit circle. The trick that makes raw
-        // cosine struggle: speaker C sits *between* A and B, so C's genuine
-        // samples have a smaller cosine to C's own centroid than A's genuine
-        // samples have to A's — a single global cosine bar can't fit all three.
-        // S-norm re-centers each probe against its cohort, flattening that
-        // per-speaker scale difference so genuine/impostor separate cleaner.
+        // cosine struggle: speaker C sits between A and B, so C's genuine samples
+        // have a smaller cosine to C's own centroid than A's genuine samples have
+        // to A's, and a single global cosine bar can't fit all three. S-norm
+        // re-centers each probe against its cohort, flattening that per-speaker
+        // scale difference so genuine and impostor scores separate more cleanly.
         let at = |deg: f32, jitter: f32| {
             let t = deg.to_radians() + jitter;
             vec![t.cos(), t.sin()]
@@ -597,8 +596,8 @@ mod tests {
                     at(70.0, 0.05),
                 ],
             ),
-            // C: WIDE cluster near 35° (between A and B) — large intra-speaker
-            // spread, so its raw genuine scores run lower than A's/B's.
+            // C: wide cluster near 35° (between A and B), with large intra-speaker
+            // spread, so its raw genuine scores run lower than A's and B's.
             (
                 "c",
                 vec![
@@ -614,7 +613,8 @@ mod tests {
 
         let eer_raw = compute_eer(&g_raw, &i_raw).eer.expect("raw EER defined");
         let eer_norm = compute_eer(&g_norm, &i_norm).eer.expect("norm EER defined");
-        // On this constructed set: raw EER ≈ 0.083, S-norm EER ≈ 0.042 (halved).
+        // On this constructed set, raw EER lands around 0.083 and S-norm around
+        // 0.042 — roughly halved.
 
         assert!(
             eer_norm <= eer_raw + 1e-6,

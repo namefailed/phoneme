@@ -1,33 +1,34 @@
 //! Pinned SHA-256 checksums for every artifact the first-run wizard downloads
 //! (S-H7).
 //!
-//! The download allow-list (`is_allowed_download_url`) already restricts *where*
-//! bytes may come from, but an allowed host can still be compromised, MITM'd
-//! behind a corporate proxy, or simply serve a corrupted file. So every artifact
-//! Phoneme itself loads or extracts — the whisper GGML weights, the semantic
-//! ONNX model + tokenizer, and the whisper-server release zip — is pinned to an
-//! exact SHA-256 here. A download that doesn't match its pin is deleted and
-//! rejected before the file is ever loaded, extracted, or marked complete.
+//! The download allow-list (`is_allowed_download_url`) already restricts which
+//! hosts bytes may come from, but an allowed host can still be compromised,
+//! MITM'd behind a corporate proxy, or simply serve a corrupted file. So every
+//! artifact Phoneme itself loads or extracts — the whisper GGML weights, the
+//! semantic ONNX model and tokenizer, and the whisper-server release zip — is
+//! pinned to an exact SHA-256 here. A download that doesn't match its pin is
+//! deleted and rejected before the file is ever loaded, extracted, or marked
+//! complete.
 //!
 //! Adding a new download URL without adding its pin is a hard error at runtime
-//! (`expected_sha256` returns `None`) and a compile-noticed gap in the tests
+//! (`expected_sha256` returns `None`) and a test failure
 //! (`pinned_table_covers_every_wizard_url`): fail closed rather than run
 //! un-verified bytes.
 //!
 //! ## Provenance of each hash (recorded 2026-06-12)
 //! - whisper GGML `.bin` weights — the `lfs.oid` published by the Hugging Face
 //!   API for `ggerganov/whisper.cpp` (`/api/models/ggerganov/whisper.cpp/tree/main`).
-//!   For a Git-LFS file the `oid` *is* the SHA-256 of the file contents.
+//!   For a Git-LFS file the `oid` is the SHA-256 of the file contents.
 //! - semantic `model.onnx` — the `lfs.oid` from the Hugging Face API for
 //!   `Xenova/all-MiniLM-L6-v2` (`/tree/main/onnx`).
-//! - semantic `tokenizer.json` — NOT an LFS file, so HF publishes no content
+//! - semantic `tokenizer.json` — not an LFS file, so HF publishes no content
 //!   hash; self-computed from the file served at the pinned URL on 2026-06-12.
 //! - `whisper-bin-x64.zip` — the `digest` field GitHub's release API reports for
 //!   the asset on the version-locked `v1.8.4` tag, cross-checked against a
 //!   self-computed SHA-256 of the downloaded artifact on 2026-06-12 (the two
 //!   agree). The URL is version-locked, so the pin stays valid for that release.
 //!
-//! NOT pinned here, by design: the Ollama installer (`wizard_download_file` →
+//! Not pinned here, by design: the Ollama installer (`wizard_download_file` →
 //! `https://ollama.com/download/OllamaSetup.exe`). It is an auto-updating,
 //! third-party installer served from a floating "latest" URL with no published
 //! per-version digest, and the user launches it themselves through the official
@@ -96,7 +97,7 @@ const PINNED: &[Pinned] = &[
         url: "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/tokenizer.json",
         sha256: "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0",
     },
-    // ── whisper-server release zip (verified BEFORE extraction) ───────────────
+    // ── whisper-server release zip (verified before extraction) ───────────────
     Pinned {
         // GitHub release `digest` for the v1.8.4 asset, cross-checked self-computed.
         url: "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip",
@@ -106,7 +107,7 @@ const PINNED: &[Pinned] = &[
 
 /// The pinned SHA-256 for `url`, if it is a known wizard artifact.
 ///
-/// `None` means the URL is not in the pin table. Callers MUST treat that as a
+/// `None` means the URL is not in the pin table. Callers have to treat that as a
 /// hard failure (fail closed): the host allow-list lets a whole domain through,
 /// so an un-pinned URL on an allowed host is exactly the case we don't want to
 /// run un-verified.
@@ -147,7 +148,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 /// Verify a freshly-downloaded file at `path` against the pin for `url`, then
 /// delete it and return an error if it doesn't match (or if `url` has no pin).
 ///
-/// On success the file is left in place. On ANY failure — un-pinned URL, hash
+/// On success the file is left in place. On any failure — un-pinned URL, hash
 /// mismatch, or an IO error while hashing — the file is removed so a corrupt or
 /// tampered artifact is never loaded, extracted, or treated as a finished
 /// download on the next run. The returned message is user-facing (the wizard

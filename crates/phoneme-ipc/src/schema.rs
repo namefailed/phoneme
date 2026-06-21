@@ -18,10 +18,10 @@ use serde::{Deserialize, Serialize};
 
 /// One-time overrides for a Re-run → "All" (whole-pipeline) run, carried on
 /// [`Request::RetranscribeRecording`]. When present, the daemon forces the
-/// cleanup and auto-summary steps ON for this run and layers these values into
+/// cleanup and auto-summary steps on for this run and layers these values into
 /// the temporary in-memory config (never persisted). `None` fields fall back to
 /// the configured `[llm_post_process]` / `[summary]` values. The API key is
-/// intentionally NOT included — cleanup/summary reuse the configured key.
+/// deliberately left out — cleanup/summary reuse the configured key.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct RerunAllOverrides {
     /// Cleanup provider for this run only (`"ollama"`, `"openai"`, …).
@@ -65,7 +65,7 @@ pub struct RerunAllOverrides {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
     // ── Recording control ───────────────────────────────────────────────
-    // Drives the daemon recorder: at most one active single recording OR one
+    // Drives the daemon recorder: at most one active single recording, or one
     // active two-track meeting. Sent by the GUI record/meeting buttons, the
     // tray global hotkeys, and `phoneme record` / `phoneme meeting`.
     /// Start a recording. Ok `{"id":"<recording id>"}`; emits
@@ -117,16 +117,16 @@ pub enum Request {
         /// Forwarded to [`Request::RecordStart`] when the toggle starts.
         #[serde(default)]
         in_place: bool,
-        /// Custom-hotkey recipe override, applied ONLY when this toggle STARTS a
-        /// recording (a toggle that stops the active one has no new recording to
-        /// attach it to). See [`Request::RecordStart::recipe_id`].
+        /// Custom-hotkey recipe override, applied only on the start half of a
+        /// toggle (a toggle that stops the active recording has no new recording
+        /// to attach it to). See [`Request::RecordStart::recipe_id`].
         #[serde(default)]
         recipe_id: Option<String>,
-        /// Custom-hotkey transcription-model override, applied ONLY on the start
+        /// Custom-hotkey transcription-model override, applied only on the start
         /// half of the toggle. See [`Request::RecordStart::whisper_model`].
         #[serde(default)]
         whisper_model: Option<String>,
-        /// Custom-hotkey capture-source override, applied ONLY on the start half of
+        /// Custom-hotkey capture-source override, applied only on the start half of
         /// the toggle. See [`Request::RecordStart::source`].
         #[serde(default)]
         source: Option<phoneme_core::config::CaptureSource>,
@@ -223,7 +223,7 @@ pub enum Request {
     /// Execute a stored saved search by id, server-side (S2): the daemon parses
     /// the saved search's `filter_json` into a `ListFilter` and runs the same
     /// list query as [`Request::ListRecordings`], so a saved search can be run
-    /// by id without the client re-deriving the filter. Ok = the SAME JSON array
+    /// by id without the client re-deriving the filter. Ok = the same JSON array
     /// of recording DTOs `ListRecordings` returns. The stored filter is the
     /// frontend's `UiFilter` (`phoneme_core::SavedSearchFilter`); its four-way
     /// `kind` and `tag_state` map onto the daemon's `kind`/`favorite`/`in_place`/
@@ -374,7 +374,7 @@ pub enum Request {
 
     /// Scan the audio directory for `.wav` files whose RecordingId has no
     /// catalog row and re-link each: insert a `queued` row pointing at the
-    /// EXISTING file and enqueue it for the normal pipeline — recovering
+    /// existing file and enqueue it for the normal pipeline — recovering
     /// recordings after a lost/rebuilt catalog. Strictly **non-destructive**:
     /// never deletes or copies audio, never touches existing rows; files whose
     /// names aren't valid RecordingIds are skipped. The safe counterpart to the
@@ -391,8 +391,8 @@ pub enum Request {
     /// --rebuild-catalog`): clear every recording row — losing transcripts,
     /// edits, tags, summaries — then re-import every WAV under the audio dir as
     /// a fresh `Queued` recording (re-transcribed by the pipeline). Refused
-    /// while a recording/meeting is in flight. For a CORRUPT catalog.db (the
-    /// daemon can't open it) use the CLI instead. Ok `{"count":N}` (rows
+    /// while a recording/meeting is in flight. A catalog.db too corrupt for the
+    /// daemon to open needs the CLI instead. Ok `{"count":N}` (rows
     /// re-imported). Settings → Doctor, behind a type-to-confirm.
     RebuildCatalog,
 
@@ -460,7 +460,7 @@ pub enum Request {
         #[serde(default)]
         command: Option<String>,
     },
-    /// Re-run ONLY the LLM post-processing ("cleanup") step on a recording's
+    /// Re-run just the LLM post-processing ("cleanup") step on a recording's
     /// already-stored transcript — without re-transcribing the audio. The
     /// preserved original (machine) transcript is the input, so cleanup is
     /// always idempotent and can be re-run against the same baseline; the
@@ -532,7 +532,7 @@ pub enum Request {
         text: String,
     },
     /// Find-and-replace across a recording's stored live transcript (S6):
-    /// **literal** (not regex) substring replacement, case-sensitive by default.
+    /// literal (not regex) substring replacement, case-sensitive by default.
     /// The same preserve-and-re-flow path as [`Request::UpdateTranscript`] —
     /// only the live `transcript` is rewritten (the preserved original/clean
     /// copies stay, so the edit is revertible), the word/segment timing layers
@@ -597,7 +597,7 @@ pub enum Request {
         favorite: bool,
     },
     /// Set or clear a recording's display title. `Some` marks the title
-    /// user-owned — auto generation never overwrites it again. `None` (or a
+    /// user-owned, so auto-generation leaves it alone from then on. `None` (or a
     /// blank string) clears it back to auto: the title empties now and is
     /// regenerated on the next pipeline run (e.g. a retranscribe). Ok
     /// `null`; emits [`DaemonEvent::TranscriptUpdated`] (the same refresh
@@ -686,9 +686,9 @@ pub enum Request {
     /// Ok = `{"propagation": {"policy": "ask"|"auto"|"off", "applied": N,
     /// "candidates": [PropagationCandidate]}}` (V5 name back-fill). When naming
     /// enrolls a voice and `[diarization].name_propagation` is `auto`, the name is
-    /// back-filled onto matching UNNAMED speakers in other recordings and
+    /// back-filled onto matching unnamed speakers in other recordings and
     /// `applied` is the count; under `ask` (default) the matches are returned in
-    /// `candidates` and **nothing past is changed** (the UI confirms, then applies
+    /// `candidates` and nothing past is touched (the UI confirms, then applies
     /// each via `SetSpeakerName` on that recording); under `off`, or when nothing
     /// enrolled (cleared name / cloud-diarized / recognition off), it's an empty
     /// `off` block.
@@ -783,12 +783,12 @@ pub enum Request {
     /// the target and deletes the source. Ok = `{"merged":bool}`. GUI Speaker
     /// Library manager.
     MergeNamedVoices {
-        /// The voice to merge FROM (removed on success).
+        /// The voice to merge from (removed on success).
         from_id: String,
-        /// The voice to merge INTO (kept).
+        /// The voice to merge into (kept).
         into_id: String,
     },
-    /// Forget a named voice — REVERSIBLY (V5). Soft-deletes the library entry
+    /// Forget a named voice — reversibly (V5). Soft-deletes the library entry
     /// (it vanishes from `ListNamedVoices` and recognition) and unlinks its
     /// captures, recording which it unlinked so the forget can be undone. The raw
     /// per-recording voiceprints stay. Ok = `{"removed":bool}` (false for an
@@ -860,8 +860,8 @@ pub enum Request {
     /// so the failed badge clears. GUI failure panel, `phoneme queue
     /// clear-failed`.
     ClearFailed,
-    /// Remove ONE quarantined payload from the inbox `failed/` folder by id — the
-    /// per-item counterpart to [`Self::ClearFailed`], so a single acknowledged failure
+    /// Remove a single quarantined payload from the inbox `failed/` folder by id —
+    /// the per-item counterpart to [`Self::ClearFailed`], so one acknowledged failure
     /// can be dismissed without wiping the whole quarantine. The catalog row is
     /// untouched. Ok `{"removed":bool}`; emits `QueueDepthChanged` when something
     /// was removed. GUI per-item dismiss, `phoneme queue dismiss-failed <id>`.
@@ -869,7 +869,7 @@ pub enum Request {
         /// The recording id whose `failed/<id>.json` quarantine file to remove.
         id: RecordingId,
     },
-    /// Remove ALL still-pending items from the queue at once ("clear queue").
+    /// Remove every still-pending item from the queue at once ("clear queue").
     /// The currently-processing item is left untouched. Each removed
     /// recording is marked `cancelled`. Ok `{"removed":n}`; emits
     /// [`DaemonEvent::RecordingCancelled`] per item + `QueueDepthChanged`.
@@ -919,7 +919,7 @@ pub enum Request {
     /// the daemon replies Ok
     /// `{"protocol_version":n,"app_version":"x.y.z","compatible":bool}` where
     /// `compatible` is `protocol_version == <client's>`. Lets a client built
-    /// against a BREAKING wire revision detect an incompatible daemon at connect
+    /// against a breaking wire revision detect an incompatible daemon at connect
     /// time and refuse cleanly. Optional + best-effort: an old daemon predating
     /// this answers it as an unknown request, which the client reads as
     /// "unversioned — proceed". `protocol_version` defaults to 0 so a peer that
@@ -929,9 +929,9 @@ pub enum Request {
         #[serde(default)]
         protocol_version: u32,
     },
-    /// Ask the daemon to exit. Replies Ok `null` FIRST — the actual trigger
-    /// is delayed a fraction of a second so the acknowledgement always
-    /// reaches the pipe before teardown. The daemon then finalizes any
+    /// Ask the daemon to exit. The Ok `null` reply goes out first, and the
+    /// actual trigger is delayed a fraction of a second so the acknowledgement
+    /// always reaches the pipe before teardown. The daemon then finalizes any
     /// in-flight recording (closed + enqueued, never corrupted), stops its
     /// workers, kills its whisper-server children, and stops a
     /// Phoneme-launched Ollama. `phoneme daemon stop`, the tray Quit chain,
@@ -946,9 +946,9 @@ pub enum Request {
     ReloadConfig,
     /// Run one hook command with a representative sample payload — the Hook
     /// Manager's "test this command" affordance for hooks the user is still
-    /// editing. `custom_command` runs as supplied (deliberately NOT subject
-    /// to the RefireHook allowlist — it is a user-initiated test, gated by
-    /// the owner-only pipe); `None` tests the first configured hook. Ok
+    /// editing. `custom_command` runs as supplied — deliberately exempt from
+    /// the RefireHook allowlist, since it's a user-initiated test gated by the
+    /// owner-only pipe; `None` tests the first configured hook. Ok
     /// `{"exit_code":n,"duration_ms":n,"stderr_tail":"…"}` —
     /// credential-shaped values are redacted on both the Ok and the error
     /// path before crossing the pipe. GUI Hook Manager, `phoneme hook test`.
@@ -962,8 +962,8 @@ pub enum Request {
     /// `Response` is ever sent — from this line on the connection carries
     /// one [`DaemonEvent`] JSON object per line until either side closes.
     /// A subscriber that lags the broadcast buffer is disconnected and must
-    /// reconnect + re-fetch state. Clients needing events AND commands open
-    /// two connections. The tray event bridge, `phoneme watch`, blocking
+    /// reconnect + re-fetch state. A client needing both events and commands
+    /// opens two connections. The tray event bridge, `phoneme watch`, blocking
     /// `phoneme record`.
     SubscribeEvents,
 
@@ -974,7 +974,7 @@ pub enum Request {
     /// List tags currently attached to at least one recording. Ok = JSON
     /// array of tag objects. GUI filter dropdowns, `phoneme tag list`.
     ListTags,
-    /// List EVERY tag, including orphans with no recordings attached
+    /// List every tag, including orphans with no recordings attached
     /// (mirrors the GUI Tag Manager's full list). Ok = JSON array of tag
     /// objects. `phoneme tag list --all`.
     ListAllTags,
@@ -1064,8 +1064,8 @@ pub enum Request {
         /// status, date range, kind, favorite, in-place, tag-presence — applied
         /// after ranking, before the limit. The filter's `search` (the query is
         /// the field above), `limit`/`offset`, and `sort_desc` are ignored for
-        /// the restriction. `None` = unscoped (today's behavior). Serde-defaulted
-        /// so older clients omitting it still decode.
+        /// the restriction. `None` = unscoped. Serde-defaulted so older clients
+        /// omitting it still decode.
         #[serde(default)]
         filter: Option<ListFilter>,
     },
@@ -1117,11 +1117,10 @@ pub enum Response {
 /// Decoding a bare [`Request`] fails the whole codec stream when a line is valid
 /// JSON but not a recognized variant — e.g. a newer client (the tray) sends a
 /// request this daemon predates during a rolling rebuild. That codec error tears
-/// down the entire pipe connection, collaterally killing every other in-flight
-/// and subsequent command on it (this is what made an unrelated `run_doctor`
-/// "stop working" the moment the tray got ahead of the daemon). `ServerRequest`
-/// instead decodes such a line to [`ServerRequest::Unknown`] so the daemon can
-/// answer with an error `Response` and keep serving the connection.
+/// down the entire pipe connection, taking every other in-flight and subsequent
+/// command on it down with it. `ServerRequest` instead decodes such a line to
+/// [`ServerRequest::Unknown`] so the daemon can answer with an error `Response`
+/// and keep serving the connection.
 #[derive(Debug, Clone)]
 pub enum ServerRequest {
     /// A recognized request.
@@ -1294,12 +1293,12 @@ pub enum DaemonEvent {
     },
     /// The input device failed mid-recording (e.g. the microphone was
     /// unplugged or its driver dropped) and capture ended early. The audio
-    /// captured before the drop WAS saved and is finalizing/transcribing
-    /// exactly like a normal recording — this event only surfaces WHY capture
-    /// stopped, so the UI can warn the user instead of failing silently (A1).
-    /// Emitted in addition to the recording's normal `RecordingStopped`. The GUI
-    /// raises a warning toast linking to the saved partial via `id`. Never
-    /// emitted for a normal user stop, an auto-stop, or a clean end-of-stream.
+    /// captured before the drop is saved and finalizes/transcribes exactly like
+    /// a normal recording — this event only surfaces why capture stopped, so the
+    /// UI can warn the user instead of failing silently (A1). Emitted in addition
+    /// to the recording's normal `RecordingStopped`. The GUI raises a warning
+    /// toast linking to the saved partial via `id`. Never emitted for a normal
+    /// user stop, an auto-stop, or a clean end-of-stream.
     DeviceLost {
         /// The recording whose capture ended on the device failure — the saved
         /// partial take the user can still open.
@@ -1335,7 +1334,7 @@ pub enum DaemonEvent {
     /// A live, partial transcript of an in-progress recording, emitted
     /// periodically while `recording.streaming_preview` is enabled. Each event
     /// carries the latest best-effort transcript of the audio captured so far;
-    /// the UI replaces the displayed preview each time. This is NOT the
+    /// the UI replaces the displayed preview each time. It's not the
     /// authoritative result — the final transcript still arrives via
     /// `TranscriptionDone` after the recording stops.
     TranscriptionPartial {
@@ -1351,8 +1350,7 @@ pub enum DaemonEvent {
         /// `text.len()` when nothing new was appended this tick (dim nothing) and
         /// `0` on the very first emit (all fresh). Optional for backward
         /// compatibility: a partial without this field (older daemon) deserializes
-        /// to `None` and the overlay renders the whole caption solid, exactly as
-        /// before this field existed.
+        /// to `None`, and the overlay then renders the whole caption solid.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         committed_len: Option<usize>,
     },

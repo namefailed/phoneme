@@ -1,6 +1,6 @@
 //! Meeting Mode (v1.6) machinery for the daemon recorder.
 //!
-//! A meeting records the microphone AND the system audio (WASAPI loopback)
+//! A meeting records the microphone and the system audio (WASAPI loopback)
 //! concurrently as two separate, linked recordings that share a `meeting_id`.
 //! Both tracks are wall-clock aligned on stop; a partial start failure aborts
 //! cleanly, and a partial stop failure still finalizes the healthy track.
@@ -41,7 +41,7 @@ pub(crate) struct ActiveMeeting {
     /// on resume.
     pub(super) paused_at_ms: Option<i64>,
     /// Completed pause spans as `[start_ms, end_ms]` wall-offsets. Every track
-    /// discards audio while paused, so its captured timeline is COMPRESSED by
+    /// discards audio while paused, so its captured timeline is compressed by
     /// these spans; `stop_meeting` folds them out of the wall clock (duration and
     /// each track's first-content offset) so both tracks align on the same
     /// active-only clock instead of desyncing by the pause length.
@@ -54,7 +54,7 @@ fn total_paused_ms(spans: &[(i64, i64)]) -> i64 {
     spans.iter().map(|(s, e)| (e - s).max(0)).sum()
 }
 
-/// Paused time (ms) that elapsed strictly BEFORE wall-offset `t_ms` — the spans
+/// Paused time (ms) that elapsed strictly before wall-offset `t_ms` — the spans
 /// fully before it. First content is only ever stamped while running, so a span
 /// never straddles `t_ms`; this is what shifts a track's first-content anchor
 /// onto the active clock. Pure helper.
@@ -105,7 +105,7 @@ impl DaemonRecorder {
         }
     }
 
-    /// Start Meeting Mode (v1.6): record the microphone AND the system audio
+    /// Start Meeting Mode (v1.6): record the microphone and the system audio
     /// (WASAPI loopback) concurrently as two separate, linked recordings.
     ///
     /// Opens a mic `CpalSource` and a system-audio (loopback) `CpalSource`,
@@ -308,8 +308,8 @@ impl DaemonRecorder {
         // `ActiveMeeting`. These power both meeting-preview modes
         // (`recording.meeting_preview`):
         //  * "toggle" (default) — one loop follows a single track; the overlay's
-        //    🎤/🔊 button switches it via SetPreviewSource (which is why every
-        //    track's snapshot handle is kept, not just the starting one).
+        //    🎤/🔊 button switches it via SetPreviewSource. That's why we keep
+        //    every track's snapshot handle, not just the one we start on.
         //  * "both" — one loop per track, captions shown stacked.
         let sources: Vec<(RecordingId, String, phoneme_audio::recorder::SnapshotHandle)> = tracks
             .iter()
@@ -339,8 +339,8 @@ impl DaemonRecorder {
         // get the same opt-in live caption single recordings do.
         let mode = state.config.load().recording.meeting_preview.clone();
         *self.meeting_preview_sources.lock().await = sources.clone();
-        // The cheap audio-level waveform ("it hears me") follows ONE track for the
-        // whole meeting — the mic (the voice the user watches), else the first
+        // The cheap audio-level waveform ("it hears me") follows one track for the
+        // whole meeting: the mic (the voice the user watches), else the first
         // track. It's independent of which caption track is shown and never
         // touches whisper, so a single loop is enough. Gated on `preview_waveform`
         // inside start_level_loop; pushed into `self.preview` so stop_meeting's
@@ -355,16 +355,16 @@ impl DaemonRecorder {
         }
         if mode == "both" {
             // One caption loop per track. When the user opted into the second
-            // preview server (`second_preview_needs_own_server`), the FIRST track
+            // preview server (`second_preview_needs_own_server`), the first track
             // runs on the primary preview server (yielding to final on
-            // `whisper_sem`) and the SECOND on the dedicated 2nd server (its own
-            // `preview2_sem`) — so the two stream CONCURRENTLY. Without the opt-in
+            // `whisper_sem`) and the second on the dedicated 2nd server (its own
+            // `preview2_sem`), so the two stream concurrently. Without the opt-in
             // (or its preconditions), every loop stays on the primary server and
-            // they alternate on the shared permit, exactly as before.
+            // they alternate on the shared permit.
             let dual = state.config.load().second_preview_needs_own_server();
-            // The dedicated 2nd preview server only parallelizes TWO tracks: track 0
+            // The dedicated 2nd preview server only parallelizes two tracks: track 0
             // (primary, on `whisper_sem`) vs the rest (the single 2nd server + its
-            // one `preview2_sem`). With 3+ tracks every track >0 shares that one
+            // one `preview2_sem`). With 3+ tracks every track past 0 shares that one
             // permit/server and alternates among themselves — fine for the only
             // production layout (2-track mic + system), but an N-track meeting would
             // need a pool of preview-N servers keyed by index. Assert the invariant
@@ -423,10 +423,10 @@ impl DaemonRecorder {
         let sample_rate = phoneme_audio::format::SampleRate::HZ_16K.as_u32();
 
         // Fold paused spans out of the wall clock. While paused, every track
-        // discards audio, so the captured buffers are COMPRESSED by the paused
-        // total — align and store against this active-only duration (and shift
+        // discards audio, so the captured buffers are compressed by the paused
+        // total. Align and store against this active-only duration (and shift
         // each track's first-content anchor below by the pause time before it),
-        // or the loopback track lands a full pause-length late vs the mic.
+        // otherwise the loopback track lands a full pause-length late vs the mic.
         let mut pause_spans_ms = meeting.pause_spans_ms.clone();
         if let Some(start_ms) = meeting.paused_at_ms {
             // Stopped while still paused — close the open span at stop time.
@@ -480,8 +480,8 @@ impl DaemonRecorder {
 
         let mut stopped: Vec<StoppedTrack> = Vec::new();
 
-        // Every track the meeting had — including ones that fail below. Only
-        // when NONE of them reaches the pipeline does stop_meeting error.
+        // Every track the meeting had, including ones that fail below. Only
+        // when none of them reaches the pipeline does stop_meeting error.
         let track_total = stop_results.len();
         for (id, audio_path, started_at, track, track_late_by_ms, stop_result) in stop_results {
             match stop_result {
@@ -563,7 +563,7 @@ impl DaemonRecorder {
         // abandon its siblings mid-loop — the other track is a complete,
         // healthy recording that deserves to reach the pipeline. A failed
         // track takes the normal failure path (TranscribeFailed, visible in
-        // the library) and the rest proceed; only when EVERY track of the
+        // the library) and the rest proceed; only when every track of the
         // meeting failed does stop_meeting itself report an error.
         let mut finalized = 0usize;
         for track in track_data {
@@ -606,7 +606,7 @@ impl DaemonRecorder {
     /// Finalize one cleanly-stopped meeting track: write its aligned samples
     /// to WAV, flip the catalog row to `Transcribing` with the shared
     /// wall-clock duration, enqueue it for the normal pipeline, and emit
-    /// `RecordingStopped`. Any step failing aborts THIS track only — the
+    /// `RecordingStopped`. Any step failing aborts this track alone — the
     /// caller (`stop_meeting`) isolates tracks from each other and routes a
     /// failure to the normal TranscribeFailed path.
     async fn finalize_meeting_track(
@@ -1150,10 +1150,10 @@ mod tests {
 
     #[tokio::test]
     async fn stop_meeting_errors_only_when_every_track_fails() {
-        // The flip side: when NO track reaches the pipeline the stop
-        // must surface an error (the caller would otherwise report a clean
-        // stop for a meeting that produced nothing) — and the meeting state
-        // must still be fully cleared.
+        // The flip side: when no track reaches the pipeline the stop must
+        // surface an error (the caller would otherwise report a clean stop for
+        // a meeting that produced nothing), and the meeting state must still be
+        // fully cleared.
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(tmp.path()).await;
         let (meeting_id, (mic_sink, sys_sink)) = start_two_track_meeting(&state).await;

@@ -4,9 +4,9 @@
 //! Imported files can be anything — stereo MP3 at 44.1 kHz, AAC/ALAC in an
 //! `.m4a` container, 24-bit FLAC, etc. This module uses the pure-Rust
 //! [`symphonia`] demuxer/decoder to turn any supported file into interleaved
-//! f32 samples, then funnels them through the SAME downmix → resample → i16
-//! conversion the recorder uses, so an imported recording is byte-for-byte the
-//! kind of WAV the transcription pipeline already knows how to handle.
+//! f32 samples, then funnels them through the same downmix → resample → i16
+//! conversion the recorder uses, so an imported recording comes out byte-for-byte
+//! the kind of WAV the transcription pipeline already knows how to handle.
 
 use crate::convert::{downmix_to_mono_f32, f32_to_i16, resample_mono};
 use crate::format::AudioConfig;
@@ -27,12 +27,12 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "flac"];
 /// Maximum decoded audio duration accepted for import, in seconds (6 hours).
 ///
 /// `decode_to_f32` buffers the entire decoded stream into one `Vec<f32>` and
-/// `convert::resample_mono` builds a `SincFixedIn` sized to the *whole* input,
-/// so a long or maliciously-crafted file could exhaust memory. We enforce this
-/// cap with a running per-channel sample counter as packets are decoded and
-/// bail out BEFORE allocating the full-size resampler. 6 hours is far beyond
-/// any realistic voice note (~6.6 GiB of f32 at 48 kHz stereo) while still
-/// being a hard upper bound.
+/// `convert::resample_mono` builds a `SincFixedIn` sized to the whole input, so
+/// a long or maliciously crafted file could exhaust memory. The cap is enforced
+/// with a running per-channel sample counter as packets are decoded, bailing out
+/// before the full-size resampler is ever allocated. 6 hours is far beyond any
+/// realistic voice note (~6.6 GiB of f32 at 48 kHz stereo) while still being a
+/// firm upper bound.
 pub const MAX_IMPORT_DURATION_SECS: u64 = 6 * 60 * 60;
 
 /// Returns `true` if `path`'s extension is one Phoneme can import.
@@ -160,9 +160,9 @@ fn decode_to_f32(input: &Path) -> Result<(Vec<f32>, u32, usize)> {
                     channels = decoded.spec().channels.count();
                 }
                 append_samples(&decoded, &mut out);
-                // Enforce the duration cap with a running counter so we bail out
-                // mid-decode (before the full-size resampler is ever built) on a
-                // long or crafted file, rather than after buffering everything.
+                // Enforce the duration cap with a running counter so a long or
+                // crafted file bails out mid-decode, before the full-size
+                // resampler is ever built, rather than after buffering everything.
                 if sample_rate > 0 && channels > 0 {
                     let frames = (out.len() / channels) as u64;
                     if exceeds_duration_cap(frames, sample_rate) {
@@ -332,12 +332,11 @@ mod tests {
     }
 
     /// Verify that `.flac` passes the extension gate and reaches symphonia's
-    /// FLAC decoder. A fully-decoded round-trip test would require a FLAC
-    /// encoder in the test suite (symphonia is decoder-only and we don't want
-    /// to pull in an extra encoder dep). Instead we confirm the critical
-    /// invariant: a `.flac` path is NOT rejected with "unsupported audio
-    /// format" — any subsequent parse error is expected for a zero-byte
-    /// fixture and is fine.
+    /// FLAC decoder. A fully-decoded round-trip test would need a FLAC encoder in
+    /// the test suite (symphonia is decoder-only, and pulling in an extra encoder
+    /// dependency isn't worth it). Instead, confirm the one invariant that
+    /// matters: a `.flac` path isn't rejected with "unsupported audio format".
+    /// Any later parse error is expected for a zero-byte fixture and is fine.
     #[test]
     fn flac_extension_reaches_decoder() {
         let dir = tempfile::tempdir().unwrap();

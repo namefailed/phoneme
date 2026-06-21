@@ -13,8 +13,7 @@
 //! finish-then-crash window). Two dot-files control ordering and pausing without
 //! showing up as payloads: `pending/.queue-order` (the user's custom claim order)
 //! and `.queue-paused` in the inbox root (a sentinel the worker checks before each
-//! claim). The badge
-//! counts in the GUI come from [`InboxQueue::counts`].
+//! claim). The badge counts in the GUI come from [`InboxQueue::counts`].
 //!
 //! [`recover_orphans`]: InboxQueue::recover_orphans
 
@@ -86,19 +85,21 @@ pub struct FailedPayload {
 
 /// Filesystem-backed work queue for transcribing and processing recordings.
 ///
-/// State transitions are implemented as atomic file renames across the following
-/// subdirectories (created automatically under the `root` path):
-/// - `pending/`: Payload JSON files awaiting processing. Ordered chronologically
-///   by filename unless overridden by the user-defined order manifest.
-/// - `processing/`: The single payload currently undergoing transcription or post-processing.
-/// - `done/`: Completed payloads, retained temporarily before deletion or archival.
-/// - `failed/`: Payloads that failed due to an error, accompanied by error logs.
+/// State transitions are atomic file renames across these subdirectories
+/// (created under `root` if missing):
+/// - `pending/`: payload JSON files awaiting processing, ordered by filename
+///   (chronological) unless the order manifest overrides it.
+/// - `processing/`: the single payload currently being transcribed or
+///   post-processed.
+/// - `done/`: completed payloads, kept a while before deletion or archival.
+/// - `failed/`: payloads that hit an error, alongside their error record.
 ///
-/// ### Metadata & Control Files:
-/// - `pending/.queue-order`: A JSON array of recording IDs representing the user's
-///   custom drag-and-drop sequencing. Any ID not listed here falls back to chronological.
-/// - `.queue-paused`: A zero-byte sentinel file. When present, the daemon's queue worker
-///   is blocked from claiming new pending tasks (the active processing task is unaffected).
+/// Two control files live among the payloads but never count as one:
+/// - `pending/.queue-order`: a JSON array of recording ids in the user's
+///   drag-and-drop claim order. An id not listed here falls back to
+///   chronological.
+/// - `.queue-paused`: a zero-byte sentinel. While it exists the daemon's queue
+///   worker won't claim new pending items (the in-flight one keeps going).
 #[derive(Debug, Clone)]
 pub struct InboxQueue {
     root: PathBuf,
@@ -220,13 +221,13 @@ impl InboxQueue {
         // Honor the user-defined order (manifest) first, then chronological.
         let entries = self.ordered_pending().await?;
         // Walk the queue oldest-first and return the first file we can actually
-        // claim. Crucially, a file we *can't* claim (malformed name, OS-level
-        // rename failure from an AV/dangling-handle lock, or a corrupt payload)
-        // must NOT block the rest of the queue: we skip it and try the next one.
-        // A locked file is left in pending/ and retried on the next poll; a
-        // structurally-bad file is quarantined to failed/. The old code always
-        // took entries.first() and propagated a rename error, so one stuck file
-        // would starve the entire queue forever.
+        // claim. The crucial part: a file we can't claim (malformed name, an
+        // OS-level rename failure from an AV or dangling-handle lock, or a
+        // corrupt payload) must not block the rest of the queue. We skip it and
+        // try the next one — a locked file is left in pending/ and retried on the
+        // next poll, a structurally bad file is quarantined to failed/. Taking
+        // entries.first() and propagating its rename error instead would let one
+        // stuck file starve the whole queue.
         for file in &entries {
             let Some(id_str) = file.file_stem().and_then(|s| s.to_str()) else {
                 tracing::warn!(file = %file.display(), "skipping inbox file with non-utf8 name");
@@ -449,7 +450,7 @@ impl InboxQueue {
             .unwrap_or(false)
     }
 
-    /// Remove ALL still-pending payloads from the queue (user-initiated
+    /// Remove every still-pending payload from the queue (user-initiated
     /// "clear queue"). The in-flight `processing/` item is left untouched. Also
     /// clears the order manifest. Returns the ids of the removed items so the
     /// caller can mark them terminal in the catalog.
@@ -478,10 +479,10 @@ impl InboxQueue {
     /// Remove every payload quarantined in `failed/` (user-initiated "dismiss
     /// failed"). The `failed/` folder only ever grows — permanent transcription
     /// errors, hook failures, corrupt payloads, and user cancellations all land
-    /// here and nothing else empties it — so this is the way to acknowledge and
-    /// clear them. The catalog rows (with their `transcribe_failed`/`hook_failed`
-    /// status) are untouched; only the inbox quarantine is cleared. Returns how
-    /// many files were removed.
+    /// here, and nothing else empties it — so this is how a user acknowledges
+    /// and clears them. The catalog rows (with their
+    /// `transcribe_failed`/`hook_failed` status) are untouched; only the inbox
+    /// quarantine is cleared. Returns how many files were removed.
     pub async fn clear_failed(&self) -> Result<usize> {
         let mut removed = 0;
         for path in read_json_entries_sorted(&self.root.join("failed")).await? {
@@ -492,11 +493,11 @@ impl InboxQueue {
         Ok(removed)
     }
 
-    /// Remove ONE quarantined payload from `failed/` by id — the per-item
+    /// Remove a single quarantined payload from `failed/` by id — the per-item
     /// counterpart to [`clear_failed`](Self::clear_failed), so a user can dismiss
-    /// a single acknowledged failure without wiping the whole quarantine. The
-    /// catalog row (with its failed status) is untouched; only the inbox file is
-    /// removed. Returns whether a file was actually removed.
+    /// one acknowledged failure without wiping the whole quarantine. The catalog
+    /// row (with its failed status) is untouched; only the inbox file is removed.
+    /// Returns whether a file was actually removed.
     pub async fn dismiss_failed(&self, id: &RecordingId) -> Result<bool> {
         let path = self.root.join("failed").join(format!("{id}.json"));
         if fs::try_exists(&path).await.unwrap_or(false) {
@@ -679,10 +680,10 @@ mod tests {
 
     #[tokio::test]
     async fn re_enqueue_clears_a_stale_done_marker_so_recovery_keeps_the_retranscribe() {
-        // Regression: a recording that finished (or was cancelled) leaves a
-        // done/ marker. Retranscribing it must clear that marker, or a crash
-        // mid-retranscribe makes recover_orphans drop the live processing file
-        // as "already done" — silently losing the retranscribe.
+        // A recording that finished (or was cancelled) leaves a done/ marker.
+        // Retranscribing it must clear that marker, or a crash mid-retranscribe
+        // makes recover_orphans drop the live processing file as "already done"
+        // and silently loses the retranscribe.
         let tmp = tempfile::tempdir().unwrap();
         let inbox = open_inbox(tmp.path()).await;
         let p = make_payload();

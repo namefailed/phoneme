@@ -11,11 +11,10 @@
 //! `set <key> <value>` edits the file directly — no daemon involved (run
 //! `config reload` after, or let the queue worker's mtime check pick it
 //! up). Dotted keys navigate tables (`whisper.mode`), values are
-//! type-sniffed (bool → int → float → string), and the FULL updated config
-//! is parsed and validated BEFORE anything touches disk — a bad value must
-//! never brick the config file. Writes go atomically (tmp + rename) to the
-//! SAME file the daemon reads (`PHONEME_CONFIG`-aware). Exits 6 on any
-//! rejected value.
+//! type-sniffed (bool → int → float → string), and the whole updated config
+//! is parsed and validated before anything touches disk, so a bad value can't
+//! brick the config file. Writes go atomically (tmp + rename) to the same file
+//! the daemon reads (`PHONEME_CONFIG`-aware). Exits 6 on any rejected value.
 
 use crate::args::{ConfigAction, ConfigArgs};
 use crate::exit;
@@ -75,14 +74,14 @@ const REDACTED_SECRET: &str = "<redacted>";
 /// Serialize `cfg` to TOML for display, masking every secret value unless
 /// `show_secrets` is set.
 ///
-/// `Config` serializes secrets through the DPAPI protector — on Windows they
+/// `Config` serializes secrets through the DPAPI protector. On Windows they
 /// already land as opaque `dpapi:v1:…` ciphertext, but off Windows `protect()`
 /// is a passthrough, so a plain `phoneme config` would print API keys and the
 /// webhook HMAC secret in cleartext to the terminal (and into any shell history
-/// or piped log). Mask them in the rendered TOML regardless of platform so the
+/// or piped log). We mask them in the rendered TOML on every platform so the
 /// dump is safe to share by default; `--show-secrets` opts back into the real
 /// values for the rare case the user deliberately needs them. The on-disk file
-/// is untouched; `config set` still writes real values. The same field set as
+/// is untouched, and `config set` still writes real values. Same field set as
 /// the GUI's `mask_config_secrets`.
 fn render_config(cfg: &Config, show_secrets: bool) -> Result<String, String> {
     let serialized =
@@ -192,21 +191,21 @@ fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
         }
     }
 
-    // Validate the FULL updated config before anything touches the disk: a
-    // value that doesn't parse back (wrong type for the field) or that fails
-    // `Config::validate()` would otherwise be written out and then rejected by
-    // the daemon on its next load — bricking every later `phoneme` invocation
-    // until the file is hand-repaired.
+    // Validate the whole updated config before anything touches disk. A value
+    // that doesn't parse back (wrong type for the field) or that fails
+    // `Config::validate()` would otherwise get written out and then rejected by
+    // the daemon on its next load, bricking every later `phoneme` invocation
+    // until someone hand-repairs the file.
     let updated: Config = toml::from_str(&doc.to_string())
         .map_err(|e| format!("'{value}' is not valid for {key}: {e}"))?;
     updated
         .validate()
         .map_err(|e| format!("rejected: the change makes the config invalid: {e}"))?;
 
-    // Write to the SAME file the daemon reads: the PHONEME_CONFIG override
-    // when set, else the per-user default. Writing default_config_path
-    // unconditionally (the old behavior) silently edited a file the daemon
-    // never looks at whenever the override was active.
+    // Write to the same file the daemon reads: the PHONEME_CONFIG override when
+    // set, else the per-user default. Resolving the path here (rather than
+    // always using default_config_path) matters when the override is active —
+    // otherwise we'd edit a file the daemon never looks at.
     let config_path = phoneme_core::config::resolved_config_path()
         .ok_or_else(|| "could not resolve config path".to_string())?;
     if let Some(parent) = config_path.parent() {
@@ -214,13 +213,13 @@ fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
             .map_err(|e| format!("failed to create config directory: {e}"))?;
     }
 
-    // Persist the SERIALIZED validated Config, not the hand-edited toml_edit
-    // doc: re-serializing runs the secret serializer (serialize_secret_string →
+    // Persist the serialized validated Config, not the hand-edited toml_edit
+    // doc. Re-serializing runs the secret serializer (serialize_secret_string →
     // DPAPI protect), so a freshly-set `whisper.api_key sk-live-…` lands as
     // `dpapi:v1:…` instead of cleartext, and pre-existing encrypted keys stay
-    // encrypted. Writing `doc.to_string()` here (the old behavior) bypassed
-    // that and wrote secrets in plaintext. Cost: toml_edit's comment/format
-    // preservation is dropped — fine for this generated file.
+    // encrypted. Writing `doc.to_string()` instead would bypass the serializer
+    // and store secrets in plaintext. The trade-off is that toml_edit's
+    // comment/format preservation is lost, which is fine for this generated file.
     let body = toml::to_string_pretty(&updated)
         .map_err(|e| format!("failed to serialize updated config: {e}"))?;
 
@@ -280,8 +279,8 @@ mod tests {
 
     #[test]
     fn set_value_writes_to_the_phoneme_config_override_path() {
-        // Regression: `config set` wrote default_config_path unconditionally,
-        // so with PHONEME_CONFIG active it edited a file the daemon never reads.
+        // With PHONEME_CONFIG active, `config set` must write the override file,
+        // not default_config_path — otherwise it edits a file the daemon never reads.
         let tmp = tempfile::tempdir().unwrap();
         let override_path = tmp.path().join("override.toml");
         let _env = ConfigEnvOverride::set(&override_path);
@@ -336,12 +335,11 @@ mod tests {
 
     #[test]
     fn set_value_does_not_write_secrets_in_plaintext() {
-        // Regression for the trust-boundary BLOCKER: `config set` used to write
-        // the raw toml_edit doc verbatim, so a freshly-set API key landed
-        // cleartext, bypassing the DPAPI secret serializer. The fix persists the
-        // serialized validated Config instead (→ serialize_secret_string →
-        // protect), so on Windows the key is stored as `dpapi:v1:…` and never
-        // raw.
+        // Trust boundary: a freshly-set API key must not land cleartext on disk.
+        // Writing the raw toml_edit doc would bypass the DPAPI secret serializer,
+        // so `set_value` persists the serialized validated Config instead
+        // (→ serialize_secret_string → protect). On Windows the key is then stored
+        // as `dpapi:v1:…`, never raw.
         let tmp = tempfile::tempdir().unwrap();
         let override_path = tmp.path().join("override.toml");
         let _env = ConfigEnvOverride::set(&override_path);
@@ -354,8 +352,8 @@ mod tests {
 
         // On Windows DPAPI encrypts the key, so the raw value must never appear.
         // Off Windows `protect` is a no-op (it can't lose a key on a platform
-        // without DPAPI), so only assert the secret round-trips through the
-        // serializer — the path that was being bypassed.
+        // without DPAPI), so we only assert the secret round-trips through the
+        // serializer — the path the cleartext bug bypassed.
         #[cfg(windows)]
         {
             assert!(
@@ -369,8 +367,8 @@ mod tests {
         }
 
         // Either way, the file round-trips back to the original secret (DPAPI
-        // unprotect on Windows; verbatim off Windows) — the fix didn't break
-        // read-back.
+        // unprotect on Windows; verbatim off Windows) — encrypting on write
+        // mustn't break read-back.
         let reloaded: Config = toml::from_str(&written).unwrap();
         #[cfg(windows)]
         assert_eq!(reloaded.whisper.api_key_str(), secret);
@@ -398,9 +396,9 @@ mod tests {
 
     #[test]
     fn render_config_redacts_secret_values() {
-        // The cross-platform fix: `phoneme config` must not print API keys in
-        // cleartext. Off Windows `protect()` is a passthrough, so without this the
-        // raw key would land in the terminal/scrollback. A masked dump is safe.
+        // `phoneme config` must not print API keys in cleartext on any platform.
+        // Off Windows `protect()` is a passthrough, so without masking the raw key
+        // would land in the terminal/scrollback. A masked dump is safe to share.
         let mut cfg = Config::default();
         let secret = "sk-live-super-secret-123";
         cfg.whisper.set_api_key(secret.to_owned());
@@ -436,9 +434,9 @@ mod tests {
 
     #[test]
     fn render_config_show_secrets_does_not_redact() {
-        // The `--show-secrets` opt-out: the dump must NOT carry the redaction
+        // The `--show-secrets` opt-out: the dump must not carry the redaction
         // marker, so the real value (cleartext off Windows, DPAPI ciphertext on
-        // it) is shown verbatim. Asserting the absence of the marker keeps this
+        // it) shows verbatim. Asserting the marker's absence keeps this check
         // platform-independent.
         let mut cfg = Config::default();
         cfg.whisper

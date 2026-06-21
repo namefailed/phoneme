@@ -1,27 +1,26 @@
 //! Doctor checks — local filesystem checks + optional backend probes.
 //!
 //! Shared by the GUI (`phoneme-tray`) and the CLI (`phoneme doctor`) so both
-//! report the same checks with the same probe semantics. Previously
-//! each had its own copy of the whisper/ollama probe logic and its own
-//! check-result type. The GUI reads `fix_action` to render a one-click
-//! remediation; the CLI ignores it.
+//! report the same checks with the same probe semantics, off one copy of the
+//! whisper/ollama probe logic and one check-result type. The GUI reads
+//! `fix_action` to render a one-click remediation; the CLI ignores it.
 //!
 //! `run_local_checks` is synchronous (config presence, audio-dir writability,
 //! disk space, hook resolvability, model integrity). `run_backend_checks` is
 //! async and probes remote HTTP endpoints with short timeouts so callers don't
 //! hang on an unreachable service.
 //!
-//! Both are **provider-aware**: every check follows the EFFECTIVE connection a
-//! feature will actually use (main STT, live preview, dictation override, each
-//! enabled LLM step). Local providers keep the model-file and supervised-server
-//! checks; cloud providers swap them for what can still be verified — the API
-//! key is set and the endpoint answers — without ever sending a billable
-//! request. A check that doesn't apply is simply absent.
+//! Both are provider-aware: every check follows the connection a feature will
+//! actually use (main STT, live preview, dictation override, each enabled LLM
+//! step). Local providers keep the model-file and supervised-server checks;
+//! cloud providers swap them for what can still be verified — the API key is
+//! set and the endpoint answers — without ever sending a billable request. A
+//! check that doesn't apply is simply absent.
 //!
-//! Every result carries a [`CheckCategory`] (how severe the *current* state
-//! is), a one-sentence `explanation` of what the check verifies, and — when
-//! failing — an actionable `fix_hint`. All three are additive serde fields, so
-//! readers built before categories existed keep deserializing fine.
+//! Every result carries a [`CheckCategory`] (how severe the current state is),
+//! a one-sentence `explanation` of what the check verifies, and, when failing,
+//! an actionable `fix_hint`. All three are additive serde fields, so readers
+//! built before categories existed keep deserializing fine.
 
 use crate::config::{
     DiarizationBackend, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
@@ -30,7 +29,7 @@ use crate::Config;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// How severe a check result is *right now*. Passing checks report `Info`
+/// How severe a check result is right now. Passing checks report `Info`
 /// (nothing to act on); failing checks report `Warning` or `Critical`
 /// depending on what breaks while they stay broken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -75,7 +74,8 @@ fn category_for(ok: bool, severity_if_failed: CheckCategory) -> CheckCategory {
 /// Whether yt-dlp can be invoked — a binary on PATH, or the pip-installed module
 /// via `python -m yt_dlp` (mirroring the CLI's `yt_dlp_command` resolution, so a
 /// module install whose Scripts dir isn't on PATH isn't a false "not installed").
-/// The `python -m yt_dlp --version` probe runs ONLY when no binary is on PATH.
+/// The `python -m yt_dlp --version` probe runs only as a fallback, when no
+/// binary is on PATH.
 fn ytdlp_available() -> bool {
     if which::which("yt-dlp").is_ok() {
         return true;
@@ -127,17 +127,17 @@ pub struct CheckResult {
     pub fix_hint: Option<String>,
 }
 
-/// The ports the bundled whisper-servers are ACTUALLY listening on after any
+/// The ports the bundled whisper-servers are really listening on after any
 /// startup port fallback, threaded into [`run_backend_checks`] so the Doctor
-/// probes where the server really landed instead of the configured (possibly
+/// probes where the server actually landed instead of the configured (possibly
 /// dead) port.
 ///
 /// Core can't see the daemon's live port atomics, so the caller fills this in:
 /// the daemon from its `WhisperEffectivePorts`, the tray from the published
 /// `daemon_status` fields. `None` (the default) means nothing is published —
-/// the server isn't running, or the reader is older than the port-fallback
-/// work — in which case every probe falls back to the configured port,
-/// exactly the pre-fallback behavior.
+/// the server isn't running, or the reader predates the port-fallback work —
+/// in which case every probe falls back to the configured port, which is the
+/// behavior callers that don't know about fallback always got.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EffectiveWhisperPorts {
     /// The main (final-transcription) server's live port, when it is running.
@@ -156,13 +156,13 @@ impl EffectiveWhisperPorts {
     /// Matching is by preferred port, mirroring the daemon's
     /// `WhisperEffectivePorts::resolve`: `provider` may be `[whisper]` itself,
     /// `[preview_whisper]`, or an `[in_place].stt` block the Settings UI
-    /// pointed at either server's configured port — all three must follow the
-    /// same server wherever it actually bound.
+    /// pointed at either server's configured port — all three follow the same
+    /// server wherever it actually bound.
     fn live_port_for(&self, cfg: &Config, provider: &WhisperConfig) -> Option<u16> {
         // Only a local bundled server runs on a supervised port that can fall
         // back; external endpoints are user-managed and cloud backends never
-        // use the port — mirror the daemon's `WhisperEffectivePorts::apply`
-        // guard so neither is ever rewritten.
+        // touch the port. Mirror the daemon's `WhisperEffectivePorts::apply`
+        // guard so neither gets rewritten.
         if provider.provider != TranscriptionBackend::Local
             || !matches!(
                 provider.mode,
@@ -172,9 +172,9 @@ impl EffectiveWhisperPorts {
             return None;
         }
         let preferred = provider.bundled_server_port;
-        // The dedicated dictation server is checked FIRST (only when it's
-        // actually running and on a distinct port), mirroring the daemon's
-        // `WhisperEffectivePorts::resolve` so neither shadows the main/preview
+        // Check the dedicated dictation server first, but only when it's
+        // actually running and on a distinct port. This mirrors the daemon's
+        // `WhisperEffectivePorts::resolve` so it doesn't shadow the main/preview
         // reuse case.
         let live = if cfg.in_place_needs_own_server()
             && preferred != cfg.whisper.bundled_server_port
@@ -525,7 +525,7 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
     // yt-dlp for URL imports (`phoneme import <url>`). Purely optional — local
     // file imports never touch it — so it's Info either way and never dings the
     // health summary; it just tells you whether URL import is available.
-    // Mirror the CLI's resolution (`yt_dlp_command`): a binary on PATH OR a
+    // Mirror the CLI's resolution (`yt_dlp_command`): a binary on PATH, or a
     // pip-installed module reachable via `python -m yt_dlp`, so a working module
     // install whose Scripts dir isn't on PATH isn't reported as missing.
     let ytdlp_found = ytdlp_available();
@@ -545,7 +545,7 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
         }),
     });
 
-    // Main transcription model (only relevant when the LOCAL provider runs a
+    // Main transcription model (only relevant when the local provider runs a
     // bundled server — the supervisor spawns one whenever the mode isn't
     // External). Cloud and custom-endpoint providers never read a local model
     // file, so for them the check is absent rather than failing noise; their
@@ -615,8 +615,8 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
     // plausible model; tokenizer.json only needs to exist and be non-empty
     // (it is legitimately well under 1 MiB).
     if xcfg.semantic_search.enabled {
-        // Read the EXPANDED model_dir so a `~/` / `%APPDATA%` embedding path is
-        // probed at its real location — matching what the embedder loads at
+        // Read the expanded model_dir so a `~/` / `%APPDATA%` embedding path is
+        // probed at its real location, matching what the embedder loads at
         // runtime (see `Config::expanded`).
         let dir = &xcfg.semantic_search.model_dir;
         let model = dir.join("model.onnx");
@@ -660,8 +660,8 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
 
 /// The two ONNX files speakrs' local pipeline needs. Resolution mirrors the
 /// loader exactly: `from_pretrained` pulls `avencera/speakrs-models` through
-/// the Hugging Face hub cache (`HF_HOME`, else `~/.cache/huggingface`) — the
-/// `diarization.local_model_path` config key is NOT part of the load path,
+/// the Hugging Face hub cache (`HF_HOME`, else `~/.cache/huggingface`). The
+/// `diarization.local_model_path` config key isn't part of the load path,
 /// which is why this check doesn't read it.
 const SPEAKRS_MODEL_FILES: [&str; 2] =
     ["segmentation-3.0.onnx", "wespeaker-voxceleb-resnet34.onnx"];
@@ -687,9 +687,9 @@ fn speakrs_snapshots_dir() -> Option<std::path::PathBuf> {
     )
 }
 
-/// Pass when ANY cached snapshot holds both model files non-empty; the models
+/// Pass when any cached snapshot holds both model files non-empty. The models
 /// download automatically on the first diarized recording, so "not downloaded
-/// yet" is a Warning with that exact explanation, never a config hint.
+/// yet" is a Warning that says exactly that, never a config hint.
 fn diarization_cache_check() -> CheckResult {
     let explanation = "Verifies the speaker-diarization models are in the Hugging Face cache — recordings transcribe without speaker labels while they're missing.";
     let snapshots = speakrs_snapshots_dir();
@@ -790,12 +790,12 @@ fn classify_stt(w: &WhisperConfig) -> SttConnection {
     }
 }
 
-/// Heuristic for "this is a heavy/slow whisper model" — used only to WARN that
+/// Heuristic for "this is a heavy/slow whisper model" — used only to warn that
 /// dictation will be sluggish, never to block. `WhisperConfig` has no size
 /// field, so we read the model file name: `large` / `medium` / `turbo` are the
 /// big ones; `tiny` / `base` / `small` are the fast ones. Case-insensitive,
 /// matched on the file stem so a parent dir named "medium-models" doesn't trip
-/// it. Unknown names are treated as not-heavy (no false alarm).
+/// it. Unknown names are treated as not-heavy, to avoid a false alarm.
 fn model_path_looks_heavy(model_path: &str) -> bool {
     let stem = Path::new(model_path)
         .file_stem()
@@ -852,7 +852,7 @@ pub fn orphan_audio_check_result(count: usize) -> CheckResult {
 struct LlmStep {
     /// Short step label for check names ("cleanup", "summary", "tags", "titles").
     label: &'static str,
-    /// The step's EFFECTIVE connection after own-or-inherit resolution.
+    /// The connection the step ends up on after own-or-inherit resolution.
     conn: LlmPostProcessConfig,
 }
 
@@ -977,10 +977,10 @@ fn llm_probe_url(kind: LlmKind, url: &str) -> String {
 
 // ── Probe + check builders ───────────────────────────────────────────────────
 
-/// Send a prepared GET and report `(reachable, detail)`. ANY HTTP response —
-/// including 401/403 — counts as reachable: it proves DNS, TCP, TLS and
-/// routing all work and the service answered; only what a real (billable)
-/// request would prove is left unverified.
+/// Send a prepared GET and report `(reachable, detail)`. Any HTTP response,
+/// 401/403 included, counts as reachable: it proves DNS, TCP, TLS and routing
+/// all work and the service answered. Only what a real (billable) request would
+/// prove is left unverified.
 async fn probe_any_response(req: reqwest::RequestBuilder, url: &str) -> (bool, String) {
     match req.send().await {
         Ok(resp) => (
@@ -1019,8 +1019,8 @@ async fn endpoint_check(
     }
 }
 
-/// Build a key-presence check. Presence only, verified AFTER own-or-inherit
-/// resolution — the key value itself must never appear in any detail, log, or
+/// Build a key-presence check. Presence only, verified after own-or-inherit
+/// resolution, and the key value itself never appears in any detail, log, or
 /// explanation.
 fn api_key_check(
     name: &str,
@@ -1109,8 +1109,8 @@ pub async fn run_backend_checks_with_ports(
                 ok: whisper_ok,
                 detail: whisper_detail,
                 // Bundled modes: the daemon supervises the server, so "Fix" can sweep
-                // hung/orphaned processes and respawn it. External servers are the
-                // user's own — nothing for us to restart.
+                // hung/orphaned processes and respawn it. An external server is the
+                // user's own, with nothing for us to restart.
                 fix_action: if external {
                     None
                 } else {
@@ -1172,10 +1172,10 @@ pub async fn run_backend_checks_with_ports(
     }
 
     // ── Live-preview connection ─────────────────────────────────────────────
-    // Only when the preview is enabled AND has its own provider; a preview
-    // that inherits the main connection is already covered by the checks
-    // above. Everything here is a Warning — the final transcript still runs
-    // through the main provider.
+    // Only when the preview is both enabled and on its own provider; a preview
+    // that inherits the main connection is already covered by the checks above.
+    // Everything here is a Warning — the final transcript still runs through the
+    // main provider.
     if cfg.recording.streaming_preview {
         if let Some(pv) = cfg.preview_whisper.as_ref() {
             match classify_stt(pv) {
@@ -1275,12 +1275,12 @@ pub async fn run_backend_checks_with_ports(
         let dedicated = cfg.in_place_needs_own_server();
         match classify_stt(stt) {
             // Two local shapes:
-            //  - DEDICATED (opt-in on): the daemon supervises a third server on
-            //    this block's own port, so a "Fix" can sweep + respawn it, and
+            //  - Dedicated (opt-in on): the daemon supervises a third server on
+            //    this block's own port, so a "Fix" can sweep and respawn it, and
             //    a model-file check (above) covers the model. The probe follows
             //    its live port after any startup fallback.
-            //  - REUSE (default): dictation must point at an ALREADY-RUNNING
-            //    server (the main or preview one), so it's a pure reachability
+            //  - Reuse (default): dictation points at a server that's already
+            //    running (the main or preview one), so it's a pure reachability
             //    check with no Fix — there's nothing daemon-owned to restart.
             SttConnection::LocalBundled | SttConnection::LocalExternal => {
                 let (url, fallback_note) = bundled_probe_url(ports, cfg, stt);
@@ -1353,16 +1353,16 @@ pub async fn run_backend_checks_with_ports(
     }
 
     // ── Dictation on the slow model ─────────────────────────────────────────
-    // When in-place dictation resolves to a HEAVY local model (the main
+    // When in-place dictation resolves to a heavy local model (the main
     // transcription one is typically large-v3-turbo), every dictation pays the
     // big model's latency. A Warning — it still works, just slowly. Reuses
     // `in_place_provider_config()` so this stays in lockstep with what the
     // dictation fast lane actually dials.
     {
-        // Only meaningful when dictation can actually run — its own STT provider
-        // is configured, OR the in-place hotkey is enabled (which also stands in
+        // Only meaningful when dictation can actually run: its own STT provider
+        // is configured, or the in-place hotkey is enabled (which also stands in
         // for the CLI `record --in-place` path). Without this gate the check
-        // false-fires for anyone who merely picked a heavy MAIN transcription
+        // false-fires for anyone who merely picked a heavy main transcription
         // model (large/turbo) but never turned dictation on — `in_place_provider_config`
         // falls through to `[whisper]` in that case. Mirrors the in-use gate the
         // sibling dictation checks (endpoint, model file) already apply.
@@ -1394,7 +1394,7 @@ pub async fn run_backend_checks_with_ports(
     }
 
     // ── LLM steps (cleanup / summary / tags / titles) ───────────────────────
-    // Each enabled step resolves its EFFECTIVE connection (own fields, or
+    // Each enabled step resolves the connection it'll run on (own fields, or
     // inherited from the cleanup connection), then identical endpoints are
     // deduped so one shared connection yields one check naming every step on
     // it. All Warnings — these steps degrade to the raw transcript; capture
@@ -1423,8 +1423,8 @@ pub async fn run_backend_checks_with_ports(
         let url = resolved_llm_url(conn);
         let kind = llm_kind(&conn.provider);
         match kind {
-            // Local Ollama: the same /api/tags probe the standalone check has
-            // always used — but REQUIRED here, because enabled steps run on it.
+            // Local Ollama: the same /api/tags probe the standalone check uses,
+            // but required here, because enabled steps run on it.
             LlmKind::Ollama => {
                 any_step_on_ollama = true;
                 let base = url
@@ -1540,8 +1540,8 @@ pub async fn run_backend_checks_with_ports(
     }
 
     // ── Ollama availability (informational) ─────────────────────────────────
-    // No enabled AI step runs on Ollama right now — a step that does gets a
-    // required per-connection check above instead — but knowing whether the
+    // No enabled AI step runs on Ollama right now (a step that does gets a
+    // required per-connection check above instead), but knowing whether the
     // local service is up helps users about to turn a step on.
     if !any_step_on_ollama {
         let ollama_url = if cfg.llm_post_process.provider == "ollama"
@@ -2017,9 +2017,9 @@ mod tests {
 
     #[tokio::test]
     async fn slow_dictation_warning_is_gated_on_dictation_being_in_use() {
-        // A heavy MAIN transcription model (large/turbo) must NOT trigger the
+        // A heavy main transcription model (large/turbo) must not trigger the
         // "Dictation speed" warning on its own — only once dictation is actually
-        // reachable. Regression for the false-fire the integration review caught.
+        // reachable. Guards against the false-fire when dictation is off.
         let mut cfg = Config::default();
         cfg.whisper.provider = TranscriptionBackend::Local;
         cfg.whisper.mode = WhisperMode::BundledModel;
@@ -2073,7 +2073,7 @@ mod tests {
     // ── Provider-aware checks ──────────────────────────────────────────────
 
     /// A wiremock server answering every request with the given status —
-    /// 401/403 from a cloud API still PROVES the endpoint is reachable.
+    /// 401/403 from a cloud API still proves the endpoint is reachable.
     async fn any_request_server(status: u16) -> wiremock::MockServer {
         use wiremock::matchers::method;
         use wiremock::{Mock, MockServer, ResponseTemplate};

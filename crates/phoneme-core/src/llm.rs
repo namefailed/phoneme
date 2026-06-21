@@ -125,8 +125,9 @@ fn combine(prompt: &str, text: &str) -> String {
     format!("{prompt}:\n{text}")
 }
 
-/// Normalize LLM response by collapsing multiple consecutive newlines into single newlines
-/// and removing single newlines that break sentences (unless followed by sentence-ending punctuation).
+/// Tidy an LLM response: collapse runs of blank lines down to a single blank
+/// line, and join a single newline that only wraps a sentence (unless it follows
+/// sentence-ending punctuation or precedes a capitalized word).
 fn normalize_response(text: &str) -> String {
     // Compiled once: matching every response is hot, and `Regex::new` is costly.
     static EXCESS_NEWLINES: LazyLock<regex::Regex> =
@@ -134,19 +135,17 @@ fn normalize_response(text: &str) -> String {
     static WRAPPED_SENTENCE: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r"([^\n.!?])\n([a-z])").unwrap());
 
-    // First, collapse 3+ consecutive newlines into 2 newlines (preserve paragraph breaks)
+    // Collapse 3+ consecutive newlines down to 2, keeping paragraph breaks.
     let collapsed = EXCESS_NEWLINES.replace_all(text, "\n\n");
 
-    // Then, collapse a *single* newline that merely wraps a sentence. The
-    // newline must be preceded by a non-newline, non-sentence-ending character
-    // and followed by a lowercase letter. Requiring a non-newline char before
-    // the newline leaves paragraph breaks (`\n\n`) intact (the previous
-    // `\n([a-z])` ate the second newline of a pair); excluding `.?!` preserves a
-    // newline that follows sentence-ending punctuation; the lowercase look-ahead
-    // preserves a newline before a capitalized word.
+    // Now join a lone newline that just wraps a sentence. It has to be preceded
+    // by a non-newline, non-sentence-ending character and followed by a lowercase
+    // letter. The leading non-newline requirement keeps paragraph breaks (`\n\n`)
+    // intact — a plain `\n([a-z])` would eat the second newline of a pair.
+    // Excluding `.?!` keeps a newline that follows a sentence end, and the
+    // lowercase look-ahead keeps a newline before a capitalized word.
     let sentence_normalized = WRAPPED_SENTENCE.replace_all(&collapsed, "${1} ${2}");
 
-    // Trim leading/trailing whitespace
     sentence_normalized.trim().to_string()
 }
 
@@ -196,12 +195,12 @@ struct OllamaStreamChunk {
 impl LlmProvider for OllamaProvider {
     async fn process(&self, prompt: &str, text: &str) -> Result<String> {
         // Drive the streaming path with a no-op sink rather than a `stream:false`
-        // request. `RequestBuilder::timeout` is a TOTAL cap on the whole response
-        // body, so a `stream:false` call buffers the entire generation server-side
-        // before the first byte and a cold model on a slow box blows the cap mid-
-        // generation, surfacing a misleading timeout. The streaming path instead
-        // bounds only the *idle* gap between chunks (see `process_streaming`), so a
-        // healthy long generation never trips it. We discard the per-token deltas.
+        // request. `RequestBuilder::timeout` caps the whole response body, so a
+        // `stream:false` call buffers the entire generation server-side before the
+        // first byte, and a cold model on a slow box blows that cap mid-generation
+        // and surfaces a misleading timeout. The streaming path instead bounds
+        // only the idle gap between chunks (see `process_streaming`), so a healthy
+        // long generation never trips it. The per-token deltas are discarded.
         self.process_streaming(prompt, text, &mut |_| {}).await
     }
 
@@ -220,14 +219,14 @@ impl LlmProvider for OllamaProvider {
             "stream": true,
         });
         // A streaming generation legitimately runs far longer than a single
-        // request deadline. `RequestBuilder::timeout` is a TOTAL cap on the whole
-        // response body, so on a slow/CPU box it aborts a *healthy* long
-        // generation mid-stream — reqwest then surfaces it as the opaque "error
-        // decoding response body". Instead bound the *idle* time: how long we wait
-        // for the next chunk (and for the first one, which also covers a cold
-        // model load), letting total generation take as long as it needs while
-        // tokens keep arriving. Floor it well above the 30 s default, which is
-        // meant for a whole non-streaming response, not a per-token gap.
+        // request deadline. `RequestBuilder::timeout` caps the whole response
+        // body, so on a slow or CPU-bound box it aborts a healthy long generation
+        // mid-stream, which reqwest then surfaces as the opaque "error decoding
+        // response body". So bound the idle time instead: how long we wait for the
+        // next chunk (and for the first one, which also covers a cold model load),
+        // letting total generation take as long as it needs while tokens keep
+        // arriving. Floor it well above the 30 s default, which is meant for a
+        // whole non-streaming response, not a per-token gap.
         let idle = self.timeout.max(Duration::from_secs(120));
         let resp =
             match tokio::time::timeout(idle, self.http.post(&self.url).json(&body).send()).await {
@@ -249,13 +248,13 @@ impl LlmProvider for OllamaProvider {
         }
 
         // NDJSON: one JSON object per line. reqwest hands us arbitrary byte
-        // chunks, so buffer the RAW bytes and split on '\n' rather than assuming a
+        // chunks, so buffer the raw bytes and split on '\n' rather than assuming a
         // chunk is a whole line. Decoding each network chunk to UTF-8 on its own
-        // would corrupt any multi-byte character straddling a chunk boundary
-        // (each half lossily becomes U+FFFD); decoding only once a full line is
-        // assembled keeps multi-byte text intact. Each chunk read is bounded by
-        // `idle` so a genuinely stalled stream fails fast while a slow-but-
-        // progressing one keeps going.
+        // would corrupt any multi-byte character straddling a chunk boundary —
+        // each half lossily becomes U+FFFD — whereas decoding only once a full
+        // line is assembled keeps multi-byte text intact. Each chunk read is
+        // bounded by `idle`, so a genuinely stalled stream fails fast while a slow
+        // but progressing one keeps going.
         let mut acc = String::new();
         let mut buf: Vec<u8> = Vec::new();
         let mut resp = resp;
@@ -458,8 +457,8 @@ impl LlmProvider for AnthropicProvider {
 mod tests {
     use super::*;
 
-    // The provider structs hold a plaintext API key but must never render it in
-    // `Debug` output (which can reach logs / panic backtraces).
+    // The provider structs hold a plaintext API key, which must never reach
+    // `Debug` output — that can land in logs or panic backtraces.
     #[test]
     fn openai_chat_provider_debug_redacts_api_key() {
         let p = OpenAiChatProvider {
@@ -535,7 +534,7 @@ mod tests {
 
     #[test]
     fn normalize_response_preserves_single_newlines() {
-        assert_eq!(normalize_response("hello\nworld"), "hello world"); // Changed: single newlines now collapse
+        assert_eq!(normalize_response("hello\nworld"), "hello world"); // single newlines collapse despite the test name
     }
 
     #[test]

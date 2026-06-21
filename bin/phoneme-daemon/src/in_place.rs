@@ -2,8 +2,8 @@
 //! full pipeline entirely (unless `[in_place].full_pipeline` opts back in).
 //!
 //! Flow: transcribe with the dictation provider → polish (rule-based by
-//! default, zero latency) → type/paste at the cursor → only THEN persist to
-//! the library in the background. A dictation never waits behind a meeting
+//! default, zero latency) → type/paste at the cursor → and only then persist
+//! to the library in the background. A dictation never waits behind a meeting
 //! that's mid-transcription, never runs diarization, and never pays an LLM
 //! round-trip unless `cleanup = "llm"`.
 //!
@@ -28,9 +28,10 @@ use phoneme_ipc::schema::{DaemonEvent, PipelineStage};
 use std::path::{Path, PathBuf};
 
 /// Prepended to the in-place LLM cleanup prompt so spoken editing commands are
-/// interpreted, not echoed. Kept local to dictation (not baked into the global
-/// post-processing prompt). The rule-based `fast_polish` fallback applies the
-/// same three commands, so behavior is consistent whether the LLM runs or not.
+/// interpreted, not echoed. Kept local to dictation rather than baked into the
+/// global post-processing prompt. The rule-based `fast_polish` fallback applies
+/// the same three commands, so behavior is consistent whether the LLM runs or
+/// not.
 const VOICE_COMMAND_DIRECTIVES: &str = "The text is dictation that may contain spoken editing commands. \
 Treat \"new line\" as a line break, \"new paragraph\" as a blank line, and \"scratch that\" (or \"delete that\") \
 as an instruction to remove the immediately preceding phrase. Apply these edits and do not include the command words in the output.";
@@ -41,10 +42,10 @@ as an instruction to remove the immediately preceding phrase. Apply these edits 
 ///
 /// `model_override` is the custom-hotkey binding's per-recording Whisper model
 /// (claimed from `pending_overrides` by the recorder, since the fast lane never
-/// reaches `pipeline::run`). `None`/blank = the configured dictation model — the
-/// steady-state path, unchanged. When set it is applied for THIS transcription
-/// only via the same `apply_model_override` the queued pipeline uses (#49-safe:
-/// the override never touches the process-global config).
+/// reaches `pipeline::run`). `None`/blank means the configured dictation model,
+/// the steady-state path. When set it is applied for this transcription only,
+/// via the same `apply_model_override` the queued pipeline uses, so the override
+/// never touches the process-global config.
 pub fn spawn_fast_lane(
     state: AppState,
     id: RecordingId,
@@ -81,17 +82,17 @@ pub fn spawn_fast_lane(
     });
 }
 
-/// Run the type-only pass for a just-stopped in-place recording when
-/// `[in_place].full_pipeline` AND `[in_place].type_first` are on: type the
-/// quick transcription at the cursor now, while the queued pipeline — the
-/// recorder enqueued the recording alongside spawning this — does everything
-/// else in the background. The pipeline owns ALL of the recording's state:
+/// Run the type-only pass for a just-stopped in-place recording when both
+/// `[in_place].full_pipeline` and `[in_place].type_first` are on: type the
+/// quick transcription at the cursor now, while the queued pipeline (the
+/// recorder enqueued the recording alongside spawning this) does everything
+/// else in the background. The pipeline owns all of the recording's state:
 /// catalog writes, segments, statuses, stage events, the inbox item, and the
 /// library copy. This task touches none of it, and the pipeline skips its own
 /// end-of-run typing (see `pipeline_should_type`) so the text lands exactly
 /// once.
 ///
-/// Detached. A failure here costs only the instant typing — and since the
+/// Detached. A failure here costs only the instant typing, and since the
 /// pipeline won't type either in this mode, the toast tells the user their
 /// words are still coming to the library, just not to the cursor.
 pub fn spawn_type_first(
@@ -104,7 +105,7 @@ pub fn spawn_type_first(
     tokio::spawn(async move {
         // The quick instant-typing pass uses the configured dictation model
         // (`None`): the queued pipeline owns the authoritative transcription and
-        // claims any per-binding model override from `pending_overrides` — this
+        // claims any per-binding model override from `pending_overrides`. This
         // pass must not claim it out from under the pipeline, and a recipe-bearing
         // in-place takes the full pipeline rather than this type-first variant.
         if let Err(e) = transcribe_polish_type(
@@ -119,7 +120,7 @@ pub fn spawn_type_first(
         {
             tracing::error!(id = %id.as_str(), error = %e, "in-place type-first pass failed");
             // No status flip, no Failed stage: the recording is fine — it's
-            // still queued and the pipeline retries transcription itself.
+            // still queued and the pipeline retries transcription on its own.
             state.events.emit(DaemonEvent::TranscriptionFailed {
                 id,
                 error: format!(
@@ -195,12 +196,12 @@ async fn run(
     let raw = transcription.text.clone();
 
     if cfg.in_place.save_to_library {
-        // Persist AFTER the text has landed — the user already has their
-        // words; none of this is on the latency path. Store the REAL model that
+        // Persist after the text has landed — the user already has their words,
+        // so none of this is on the latency path. Store the model that actually
         // produced the text (the per-job override when a custom hotkey carried
         // one, else the configured dictation model — same derivation as the
         // pipeline) so the Transcript model column reads like every other
-        // recording; the dictation marker is the persisted `in_place` flag
+        // recording. The dictation marker is the persisted `in_place` flag
         // (shown as a badge in the detail pane), not a fake model name.
         state
             .catalog
@@ -214,12 +215,12 @@ async fn run(
             tracing::warn!(id = %id.as_str(), "failed to persist dictation segments: {e}");
         }
         // The fast lane skips the pipeline (and its LLM auto-title), so without a
-        // title a dictation would fall back to showing the bare date as its title
-        // — which hides the date from the detail meta line. Give it a cheap
-        // content snippet as the title (no LLM, so it's reliable even when the
-        // box can't run one); it reads like every other recording (title + date +
-        // duration), and `is_auto = true` lets a later auto-title or the user
-        // override it.
+        // title a dictation would fall back to showing the bare date as its
+        // title, which then hides the date from the detail meta line. Give it a
+        // cheap content snippet as the title (no LLM, so it's reliable even when
+        // the box can't run one); it reads like every other recording (title +
+        // date + duration), and `is_auto = true` lets a later auto-title or the
+        // user override it.
         let snippet = dictation_title_snippet(&polished);
         if !snippet.is_empty() {
             if let Err(e) = state
@@ -266,16 +267,16 @@ async fn run(
 /// lane can store it — it reflects a per-binding override when one applied).
 ///
 /// `model_override` is the custom-hotkey binding's per-recording Whisper model.
-/// `None`/blank = the configured dictation model. When set it is applied for
-/// this transcription ONLY, via the same `apply_model_override` the queued
+/// `None`/blank means the configured dictation model. When set it is applied for
+/// this transcription alone, via the same `apply_model_override` the queued
 /// pipeline uses (a server restart for the local backend, a request param for a
-/// cloud one), and the returned guard restores the configured model on drop —
+/// cloud one), and the returned guard restores the configured model on drop, so
 /// the override never touches the process-global config.
 ///
-/// A typing failure is deliberately NOT an `Err`: the words exist, so it is
-/// logged and toasted (`TranscriptionFailed`) while the caller proceeds — the
-/// fast lane still persists the transcript, and the type-first pass leaves
-/// the queued pipeline to deliver it to the library.
+/// A typing failure is deliberately not an `Err`: the words exist, so it is
+/// logged and toasted (`TranscriptionFailed`) while the caller proceeds. The
+/// fast lane still persists the transcript, and the type-first pass leaves the
+/// queued pipeline to deliver it to the library.
 async fn transcribe_polish_type(
     state: &AppState,
     id: &RecordingId,
@@ -296,11 +297,12 @@ async fn transcribe_polish_type(
     // server; `apply` follows either to the port it actually listens on.
     //
     // A custom-hotkey binding's per-recording model override (if any) is applied
-    // to the dictation STT config BEFORE the port resolution, exactly like the
-    // queued pipeline: for a local server it triggers one supervised restart +
-    // readiness wait (serialized under the permit we just took), for a cloud
-    // backend it swaps the request model id. The guard restores the configured
-    // model when this function returns — so it is held across the transcription.
+    // to the dictation STT config before the port resolution, exactly like the
+    // queued pipeline: for a local server it triggers one supervised restart
+    // plus readiness wait (serialized under the permit we just took), for a
+    // cloud backend it swaps the request model id. The guard restores the
+    // configured model when this function returns, so it is held across the
+    // transcription.
     let (overridden_stt, _model_guard) = crate::pipeline::apply_model_override(
         state,
         cfg.in_place_provider_config(),
@@ -342,9 +344,9 @@ async fn transcribe_polish_type(
                 // (6c) Opt-in app-aware context: when enabled (and the app was
                 // not denylisted at capture time), prepend the focused window's
                 // title so the LLM can adapt its polish to what you're working
-                // in (code-ish in an editor, prose in a doc). The title is only
-                // ever present here when `app_context` is on — it is never logged
-                // and never goes anywhere but this cleanup prompt.
+                // in (code-ish in an editor, prose in a doc). The title only ever
+                // reaches here when `app_context` is on; it is never logged and
+                // never goes anywhere but this cleanup prompt.
                 if cfg.in_place.app_context {
                     if let Some(title) = focused_window_title.as_deref().filter(|t| !t.is_empty()) {
                         prompt =
@@ -372,20 +374,21 @@ async fn transcribe_polish_type(
     // map this is always the global mode — today's behavior unchanged.
     let type_mode = cfg.in_place.resolve_type_mode(focused_app.as_deref());
 
-    // Did streaming-type type live this dictation? The rolling state is reset at
-    // every record start, so a non-empty value means THIS recording streamed —
-    // a signal independent of the current config, robust even if stream_type was
-    // toggled mid-recording (audit M3). Taken (cleared) here regardless.
+    // Did streaming-type type live during this dictation? The rolling state is
+    // reset at every record start, so a non-empty value means this recording
+    // streamed — a signal independent of the current config, robust even if
+    // stream_type was toggled mid-recording (audit M3). Taken (cleared) here
+    // regardless.
     let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
 
     if !streamed.is_empty() {
-        // This recording streamed text live, so there is ALREADY live-typed text
-        // at the cursor — branch on that FIRST, before the resolved `type_mode`
-        // (audit LOW / mode-flip). If a mid-recording config change flipped the
-        // app to paste/off, the old code fell through and pasted `polished` ON
-        // TOP of the orphaned live text. Instead, always reconcile the streamed
-        // text: type-mode patches it to the final, paste/off first backspaces it
-        // away (then paste re-delivers `polished` via the clipboard).
+        // This recording streamed text live, so there is already live-typed text
+        // at the cursor — branch on that before the resolved `type_mode` (audit
+        // LOW / mode-flip). A mid-recording config change can flip the app to
+        // paste/off; if it does, pasting `polished` would land it on top of the
+        // orphaned live text. So always reconcile the streamed text first:
+        // type-mode patches it to the final, paste/off backspaces it away (and
+        // paste then re-delivers `polished` via the clipboard).
         //
         // For "type" we patch streamed → polished; for paste/off the streamed
         // live text must be removed (target = ""), since the live typing should
@@ -396,8 +399,8 @@ async fn transcribe_polish_type(
             ""
         };
         let (backspaces, insert) = phoneme_core::dictation::reconcile_edit(&streamed, target);
-        // SAFETY GUARD (audit H1/M14): those backspaces only land safely while
-        // the SAME window the text streamed into still owns the caret. If the
+        // Safety guard (audit H1/M14): those backspaces only land safely while
+        // the same window the text streamed into still owns the caret. If the
         // user alt-tabbed (or moved the caret) between live streaming and stop,
         // backspacing here would destroy unrelated content in the wrong window.
         // Re-check the foreground against the capture-time app before deleting
@@ -443,7 +446,7 @@ async fn transcribe_polish_type(
     } else if polished.trim().is_empty() {
         tracing::info!(id = %id.as_str(), "in-place dictation: nothing to type (empty transcript)");
     } else if type_mode == "off" {
-        // The user asked dictation NOT to auto-deliver for this app — the
+        // The user asked dictation not to auto-deliver for this app — the
         // transcript still persists (fast lane) or rides the pipeline into the
         // library, it just doesn't land at the cursor.
         tracing::info!(
@@ -451,7 +454,7 @@ async fn transcribe_polish_type(
             "in-place dictation: per-app override is \"off\" for the focused app; not typing"
         );
     } else if let Err(e) = type_at_cursor(&polished, type_mode).await {
-        // Typing failing must not lose the words — the transcript still
+        // A typing failure must not lose the words — the transcript still
         // persists (fast lane) or rides the queued pipeline into the library
         // (type-first), and the error reaches the UI.
         tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to insert text");
@@ -464,10 +467,10 @@ async fn transcribe_polish_type(
     Ok((transcription, polished, model_label))
 }
 
-/// Insert `text` at the system cursor. `mode` `"paste"` goes via the
-/// clipboard (set → Ctrl+V → restore the previous clipboard) — near-instant
-/// for long text; anything else types simulated keystrokes (works in apps
-/// that block paste). Blocking input APIs run on a blocking thread.
+/// Insert `text` at the system cursor. `mode` `"paste"` goes via the clipboard
+/// (set → Ctrl+V → restore the previous clipboard), which is near-instant for
+/// long text; anything else types simulated keystrokes, which works in apps that
+/// block paste. The blocking input APIs run on a blocking thread.
 pub(crate) async fn type_at_cursor(text: &str, mode: &str) -> Result<(), String> {
     let text = text.to_string();
     let paste = mode == "paste";
@@ -487,7 +490,7 @@ pub(crate) async fn type_at_cursor(text: &str, mode: &str) -> Result<(), String>
 /// own pipeline/in-place tests exercise the typing path), or when
 /// `PHONEME_DISABLE_INPUT_INJECTION` is set (CI and integration tests that spawn
 /// a real daemon subprocess, which inherits the env var). The typing path then
-/// no-ops successfully — callers see `Ok(())` and proceed as if it typed.
+/// no-ops successfully, so callers see `Ok(())` and proceed as if it typed.
 fn input_injection_disabled() -> bool {
     cfg!(test) || std::env::var_os("PHONEME_DISABLE_INPUT_INJECTION").is_some()
 }
@@ -502,10 +505,10 @@ fn type_blocking(text: &str) -> Result<(), String> {
     enigo.text(text).map_err(|e| format!("typing failed: {e}"))
 }
 
-/// Is it still SAFE to backspace away the live-streamed tail at the cursor?
+/// Is it still safe to backspace away the live-streamed tail at the cursor?
 ///
 /// The stop reconcile presses raw Backspaces assuming the caret sits right after
-/// the text streaming-type typed live. That holds only while the SAME window the
+/// the text streaming-type typed live. That holds only while the same window the
 /// dictation streamed into still owns the foreground — if the user alt-tabbed or
 /// the caret moved, those backspaces would chew through unrelated content in the
 /// wrong window (audit H1 / M14). So before any destructive reconcile we
@@ -514,11 +517,11 @@ fn type_blocking(text: &str) -> Result<(), String> {
 ///
 /// Returns `true` only when the current foreground app matches the capture-time
 /// one. A `None` capture (foreground undetectable at start) or a `None` current
-/// snapshot is treated as "can't confirm the same window" → `false`, so we never
-/// backspace on an unverifiable match. The comparison is read-only (it calls the
-/// foreground accessor and reads nothing else); on non-Windows the accessor
-/// always yields `None`, so streamed dictation there falls back to appending
-/// rather than backspacing — the conservative, non-destructive choice.
+/// snapshot counts as "can't confirm the same window", so we return `false` and
+/// never backspace on an unverifiable match. The comparison is read-only (it
+/// calls the foreground accessor and reads nothing else); on non-Windows the
+/// accessor always yields `None`, so streamed dictation there falls back to
+/// appending rather than backspacing — the conservative, non-destructive choice.
 pub(crate) fn foreground_still_matches(captured_app: Option<&str>) -> bool {
     let Some(captured) = captured_app else {
         return false;
@@ -530,10 +533,11 @@ pub(crate) fn foreground_still_matches(captured_app: Option<&str>) -> bool {
 }
 
 /// Patch already-typed text toward a target: press Backspace `backspaces` times,
-/// then type `insert`. Streaming-type's reconciliation (`stream_type`) — applied
-/// once at stop to fix the live-typed rolling-preview text up to the accurate
-/// final transcript (see [`phoneme_core::dictation::reconcile_edit`]). Always
-/// simulated keystrokes (never the clipboard), since it edits at the live cursor.
+/// then type `insert`. This is streaming-type's reconciliation (`stream_type`),
+/// applied once at stop to bring the live-typed rolling-preview text up to the
+/// accurate final transcript (see [`phoneme_core::dictation::reconcile_edit`]).
+/// Always simulated keystrokes, never the clipboard, since it edits at the live
+/// cursor.
 pub(crate) async fn reconcile_at_cursor(backspaces: usize, insert: &str) -> Result<(), String> {
     if backspaces == 0 && insert.is_empty() {
         return Ok(());
@@ -611,12 +615,12 @@ mod tests {
     use super::{input_injection_disabled, paste_blocking, reconcile_blocking, type_blocking};
     use phoneme_core::config::InPlaceConfig;
 
-    /// Tests must NEVER inject real keystrokes/clipboard into the developer's
+    /// Tests must never inject real keystrokes/clipboard into the developer's
     /// focused window. Under `cfg!(test)` the guard suppresses all three input
-    /// paths — they no-op to `Ok(())` instead of driving enigo. Regression: the
-    /// daemon pipeline tests reached this path and typed their fixtures
-    /// ("CLEANED", "raw words from whisper") into whatever window had focus
-    /// every time `cargo test` ran.
+    /// paths — they no-op to `Ok(())` instead of driving enigo. Without the
+    /// guard, the daemon pipeline tests reach this path and type their fixtures
+    /// ("CLEANED", "raw words from whisper") into whatever window has focus every
+    /// time `cargo test` runs.
     #[test]
     fn input_injection_is_suppressed_under_test() {
         assert!(input_injection_disabled());

@@ -2,46 +2,45 @@
 //! pipeline and the live preview always have something local to dial.
 //!
 //! Three independent loops, one per supervised role — exactly the set
-//! `Config::needed_whisper_servers()` declares, never more: [`run`] supervises
+//! `Config::needed_whisper_servers()` declares and no more. [`run`] supervises
 //! the main (final-transcription) server from `[whisper]` (always, unless that
 //! is External); [`run_preview`] a second, thread-capped server from
 //! `[preview_whisper]` when the preview needs its own; and [`run_dictation`] an
-//! optional third server from `[in_place].stt` ONLY when the user opts into a
+//! optional third server from `[in_place].stt`, only when the user opts into a
 //! dedicated dictation server (`use_own_bundled_server`, default off). A loop
 //! whose role isn't needed idles on a 5 s poll and clears its port, so a config
-//! toggle adds or removes its server through the proven poll — no reconciler.
-//! Each loop spawns the binary, then watches four wake sources at
-//! once: child exit (respawn with 2 s → 60 s backoff, reset after a healthy
-//! minute), a spec change poll (model/port/mode differs from what the child
-//! was spawned with), an explicit `whisper_restart` notify (the Doctor's
-//! "Fix" — the only path that heals a HUNG server), and shutdown. Even the
-//! crash backoff itself is cancellable by restart/shutdown so a Doctor fix
-//! is never lost to a sleeping supervisor.
+//! toggle adds or removes its server through that same poll — there's no
+//! separate reconciler. Each loop spawns the binary, then watches four wake
+//! sources at once: child exit (respawn with 2 s → 60 s backoff, reset after a
+//! healthy minute), a spec-change poll (model/port/mode differs from what the
+//! child was spawned with), an explicit `whisper_restart` notify (the Doctor's
+//! "Fix", the only path that heals a hung server), and shutdown. The crash
+//! backoff itself is cancellable by restart/shutdown, so a Doctor fix is never
+//! lost to a sleeping supervisor.
 //!
 //! Invariants owned here:
 //! - **Effective ports** — the configured port is a preference. A pre-flight
 //!   probe routes around a foreign squatter to a free OS-assigned port,
-//!   excluding the sibling server's published + configured ports so the two
-//!   can never collide; the choice is published to
-//!   `AppState::whisper_ports` BEFORE the spawn (so the sibling's probe sees
-//!   it mid-restart) and cleared whenever the server is down. Consumers
-//!   resolve effective-or-configured right where they build providers.
+//!   excluding the sibling server's published and configured ports so the two
+//!   can never collide. The choice is published to `AppState::whisper_ports`
+//!   before the spawn (so the sibling's probe sees it mid-restart) and cleared
+//!   whenever the server is down. Consumers resolve effective-or-configured
+//!   right where they build providers.
 //! - **One-job model overrides** — the spawn uses `effective_model_path`
 //!   (override-if-set, else config), and the spec-change check compares the
-//!   same effective value, which is what makes a model-override
-//!   re-transcription exactly one restart-to-override plus one restore (#49)
-//!   instead of a config-mutation thrash.
+//!   same effective value. That's what keeps a model-override re-transcription
+//!   to exactly one restart-to-override plus one restore (#49) rather than a
+//!   config-mutation thrash.
 //! - **Job membership** — every spawned child is assigned to the daemon's
 //!   kill-on-close job object, so the kernel reaps it even when the daemon
-//!   dies uncleanly. That job is the ONLY automatic orphan-cleanup at startup;
-//!   there is no startup sweep. [`sweep_stray_servers`] is a heavier, manual
-//!   net that kills the whisper-servers Phoneme launched (matched by command
-//!   line, not image name) — but it runs ONLY from the Doctor's "Fix" (the
-//!   `RestartWhisper` IPC), never at startup. So on a normal
-//!   boot the supervisors do not assume the port is clear: a still-running
-//!   orphan (e.g. one a job didn't reap because the daemon was force-killed
-//!   before assigning it) is routed around by the effective-port fallback
-//!   below, not killed.
+//!   dies uncleanly. That job is the only automatic orphan cleanup; there is
+//!   no startup sweep. [`sweep_stray_servers`] is a heavier, manual net that
+//!   kills the whisper-servers Phoneme launched (matched by command line, not
+//!   image name), but it runs only from the Doctor's "Fix" (the
+//!   `RestartWhisper` IPC), never at startup. So on a normal boot the
+//!   supervisors do not assume the port is clear: a still-running orphan (say,
+//!   one a job didn't reap because the daemon was force-killed before assigning
+//!   it) is routed around by the effective-port fallback below, not killed.
 //! - **No pipe wedging** — the child's stdout/stderr are discarded; a
 //!   piped-but-undrained child blocks once the OS buffer fills and silently
 //!   hangs transcription.
@@ -72,10 +71,10 @@ enum BackoffWake {
 
 /// Wait out a restart backoff without going deaf. `tokio::sync::Notify` stores
 /// no permit for `notify_waiters`, so a Doctor restart fired while the
-/// supervisor slept in a plain `tokio::time::sleep` was simply LOST — the user
-/// pressed "Fix", nothing happened, and the respawn still waited out the full
-/// (up to 60 s) backoff. Selecting over the sleep, the restart notify, and
-/// shutdown makes the pause cancellable by both signals.
+/// supervisor sat in a plain `tokio::time::sleep` would be dropped on the
+/// floor: pressing "Fix" would do nothing and the respawn would still wait out
+/// the full (up to 60 s) backoff. Selecting over the sleep, the restart notify,
+/// and shutdown makes the pause cancellable by both signals.
 async fn backoff_pause(
     backoff: Duration,
     restart: &tokio::sync::Notify,
@@ -111,10 +110,10 @@ fn assign_to_daemon_job(_state: &AppState, _child: &Child) {}
 /// The model file the bundled whisper-server should be running right now: a
 /// one-job-scoped override (from a model-override re-transcription) when present,
 /// otherwise the configured `whisper.model_path`. Centralizing this is what lets
-/// an override drive exactly one restart-to-override / restore cycle WITHOUT the
-/// override ever entering the process-global config — the global-mutation
-/// approach is what made the server thrash and mass-fail other jobs (#49). Pure
-/// so it can be unit-tested without spawning a server.
+/// an override drive exactly one restart-to-override / restore cycle without the
+/// override ever entering the process-global config. Mutating the global config
+/// instead would thrash the server and mass-fail other jobs (#49). Pure, so it
+/// can be unit-tested without spawning a server.
 fn effective_model_path(configured_model_path: &str, override_model: Option<&str>) -> String {
     match override_model {
         Some(m) if !m.trim().is_empty() => m.to_string(),
@@ -137,27 +136,27 @@ fn port_is_free(port: u16) -> bool {
 
 /// Pre-flight port choice for a bundled whisper-server: the preferred
 /// (configured) port when it is free, otherwise a free OS-assigned fallback.
-/// We do NOT assume the box was swept first (there is no startup sweep — the
+/// We can't assume the box was swept first — there is no startup sweep (the
 /// kill-on-close job is the only automatic orphan cleanup, and the manual
 /// `sweep_stray_servers` only runs on the Doctor's "Fix"). So a process holding
-/// the preferred port could be a foreign app OR a whisper-server orphan a job
-/// failed to reap; either way the safe move is identical — route around it onto
-/// a free OS-assigned port rather than fight for the preferred one.
+/// the preferred port could be a foreign app or a whisper-server orphan a job
+/// failed to reap; either way the safe move is the same: route around it onto a
+/// free OS-assigned port rather than fight for the preferred one.
 ///
 /// `exclude` lists ports the caller must never pick even when they probe free:
 /// the sibling server's published/configured port, which can be momentarily
-/// unbound while that server restarts. This is what keeps the preview's
+/// unbound while that server restarts. That's what keeps the preview's
 /// fallback from colliding with the main server's choice.
 ///
 /// If every fallback attempt fails, the preferred port is returned anyway —
 /// the spawn then fails (or the server exits at bind) and the supervisor
 /// retries on its normal backoff, which matches the pre-probe behavior.
 /// Ports a freshly-(re)spawning whisper-server of role `me` must steer away
-/// from: every OTHER managed server's published (live) port AND its
+/// from: every other managed server's published (live) port and its
 /// configured/derived port. Keeps the N servers from racing onto the same port
-/// on a simultaneous restart. One source of truth for all four loops so adding a
-/// server can never desync the exclusion lists (the old per-loop hand-wiring was
-/// O(N²) and easy to forget — exactly what made a 4th server risky).
+/// on a simultaneous restart. One source of truth for all four loops, so adding
+/// a server can't desync the exclusion lists — per-loop hand-wiring would be
+/// O(N²) and easy to get wrong as the server count grows.
 fn exclude_other_server_ports(me: WhisperServerRole, state: &AppState, cfg: &Config) -> Vec<u16> {
     let mut out = Vec::new();
     if me != WhisperServerRole::Main {
@@ -348,13 +347,13 @@ pub async fn run_with(
         let mut check_interval = tokio::time::interval(Duration::from_secs(1));
         check_interval.tick().await; // consume first tick
 
-        // Restart iff the EFFECTIVE spec (configured model + one-job override),
-        // the port, or the mode differs from what this child was spawned with.
-        // Comparing the effective model — not the raw config — is what makes a
-        // model-override re-transcription produce exactly ONE restart-to-override
-        // and ONE restore (when the pipeline clears the override), instead of the
-        // old config-mutation + blanket-reload double restart that thrashed the
-        // server (#49).
+        // Restart iff the effective spec (configured model plus one-job
+        // override), the port, or the mode differs from what this child was
+        // spawned with. Comparing the effective model rather than the raw config
+        // is what makes a model-override re-transcription produce exactly one
+        // restart-to-override and one restore (when the pipeline clears the
+        // override). Mutating the config and reloading instead would double
+        // restart and thrash the server (#49).
         let spec_changed = |child_model: &str| -> bool {
             let current_cfg = state.config.load();
             let current_override = state.whisper_model_override.get();
@@ -385,8 +384,9 @@ pub async fn run_with(
                     break;
                 }
                 // Explicit restart (the Doctor's "Fix"): bounce the child with
-                // the backoff reset. This heals a HUNG server — the exit-based
-                // auto-restart only sees processes that die on their own.
+                // the backoff reset. This is how a hung server gets healed; the
+                // exit-based auto-restart only sees processes that die on their
+                // own.
                 _ = state.whisper_restart.notified() => {
                     tracing::info!("whisper-server restart requested; bouncing");
                     let _ = kill_gracefully(&mut child).await;
@@ -420,7 +420,7 @@ pub async fn run_with(
             }
         }
         if exited {
-            // The crash backoff, taken OUTSIDE the select so an explicit
+            // The crash backoff, taken outside the select so an explicit
             // restart request (or shutdown) cancels it instead of being lost.
             match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
                 BackoffWake::Shutdown => return Ok(()),
@@ -441,7 +441,7 @@ fn preview_thread_cap() -> usize {
         .unwrap_or(2)
 }
 
-/// Supervises a SECOND whisper-server dedicated to the live preview — used only
+/// Supervises a second whisper-server dedicated to the live preview — used only
 /// when the user configures `preview_whisper` as a local bundled model on its
 /// own port (see [`phoneme_core::Config::preview_needs_own_server`]). Otherwise
 /// (preview reuses the main provider, uses a cloud API, or is off) this idles.
@@ -631,20 +631,20 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
     }
 }
 
-/// Supervises an OPTIONAL SECOND live-preview server — used only for meeting
+/// Supervises an optional second live-preview server — used only for meeting
 /// **"both"** mode when the user opts in
 /// (`recording.meeting_preview_own_server`, see
-/// [`phoneme_core::Config::second_preview_needs_own_server`]). It runs the SAME
+/// [`phoneme_core::Config::second_preview_needs_own_server`]). It runs the same
 /// `[preview_whisper]` model as [`run_preview`] but on [`Config::preview2_port`],
 /// so the two meeting tracks can stream their captions concurrently instead of
 /// alternating on one server. Otherwise (single recordings, "toggle" mode, the
 /// opt-in off, or no dedicated preview server) this idles.
 ///
 /// A faithful sibling of [`run_preview`]/[`run_dictation`]: the same self-polling
-/// idle gate, spec poll, crash backoff, and Doctor-restart handling — so add/
-/// remove on a config toggle works through the proven 5 s poll with no new
-/// wiring. Kept separate so neither the final server, the preview, nor dictation
-/// is ever bounced by a "both"-mode change.
+/// idle gate, spec poll, crash backoff, and Doctor-restart handling, so add/
+/// remove on a config toggle works through the same 5 s poll with no new wiring.
+/// Kept separate so neither the final server, the preview, nor dictation is ever
+/// bounced by a "both"-mode change.
 pub async fn run_preview2(state: AppState, mut shutdown: ShutdownSignal) -> anyhow::Result<()> {
     let mut backoff = RESTART_BACKOFF_INITIAL;
 
@@ -656,9 +656,10 @@ pub async fn run_preview2(state: AppState, mut shutdown: ShutdownSignal) -> anyh
         let raw = state.config.load();
         let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
 
-        // Idle gate: the 2nd preview server runs ONLY for opted-in meeting "both"
-        // mode with a dedicated local preview model. When the flag flips off (or
-        // the mode/source changes), the next poll clears the port and idles.
+        // Idle gate: the 2nd preview server runs only for opted-in meeting
+        // "both" mode with a dedicated local preview model. When the flag flips
+        // off (or the mode/source changes), the next poll clears the port and
+        // idles.
         if !cfg.second_preview_needs_own_server() {
             state.whisper_ports.set_preview2(None);
             tokio::select! {
@@ -820,18 +821,18 @@ pub async fn run_preview2(state: AppState, mut shutdown: ShutdownSignal) -> anyh
     }
 }
 
-/// Supervises an OPTIONAL THIRD whisper-server dedicated to in-place dictation
-/// — used only when the user opts in (`[in_place].stt` is a local bundled model
+/// Supervises an optional third whisper-server dedicated to in-place dictation,
+/// used only when the user opts in (`[in_place].stt` is a local bundled model
 /// with `use_own_bundled_server = true`, see
 /// [`phoneme_core::Config::in_place_needs_own_server`]). Otherwise (the default,
 /// and every weak-box config) this idles and dictation reuses the main or
 /// preview server.
 ///
 /// A faithful sibling of [`run_preview`]: the same self-polling idle gate, spec
-/// poll, crash backoff, and Doctor-restart handling — so add/remove on a config
-/// toggle works through the proven 1 s poll, with NO new ReloadConfig wiring.
-/// Kept separate from [`run`]/[`run_preview`] so neither the critical final
-/// server nor the preview is ever bounced by a dictation change.
+/// poll, crash backoff, and Doctor-restart handling, so add/remove on a config
+/// toggle works through the same 1 s poll, with no new ReloadConfig wiring. Kept
+/// separate from [`run`]/[`run_preview`] so neither the critical final server
+/// nor the preview is ever bounced by a dictation change.
 pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> anyhow::Result<()> {
     let mut backoff = RESTART_BACKOFF_INITIAL;
 
@@ -845,7 +846,7 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
         let raw = state.config.load();
         let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
 
-        // Idle gate: the dedicated dictation server runs ONLY when the user has
+        // Idle gate: the dedicated dictation server runs only when the user has
         // opted in. When the flag flips off (or the stt block clears), the next
         // poll clears the port and idles — the same add/remove-on-poll the
         // preview supervisor uses.
@@ -1017,7 +1018,7 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
     }
 }
 
-/// The command-line marker every whisper-server WE spawn carries (see the
+/// The command-line marker every whisper-server we spawn carries (see the
 /// `--inference-path` arg every supervisor passes). The sweep matches on this so
 /// it kills Phoneme's servers and orphans from a previous Phoneme daemon, but
 /// leaves an unrelated whisper.cpp instance a user launched by hand — which a
@@ -1028,17 +1029,17 @@ const SWEEP_CMDLINE_MARKER: &str = "/v1/audio/transcriptions";
 /// from a previous daemon still holding our port (the classic "Whisper
 /// unreachable after an unclean shutdown") and hung children — so the
 /// supervisors can respawn the main/preview servers cleanly from the current
-/// config within seconds. Invoked ONLY from the Doctor's "Fix" (`RestartWhisper`
+/// config within seconds. Invoked only from the Doctor's "Fix" (`RestartWhisper`
 /// IPC), never at startup.
 ///
 /// Narrowed by command line ([`SWEEP_CMDLINE_MARKER`]) rather than image name so
 /// it doesn't reap a bystander whisper.cpp the user started with a different
-/// inference path. Residual: a hand-launched whisper.cpp that happens to serve
-/// the SAME `/v1/audio/transcriptions` path is indistinguishable from ours and
-/// would still be killed — acceptable for an explicit, user-pressed "Fix", and
-/// far narrower than the previous kill-every-`whisper-server.exe` behavior. If
+/// inference path. One residual case: a hand-launched whisper.cpp that happens
+/// to serve the same `/v1/audio/transcriptions` path is indistinguishable from
+/// ours and would still be killed — acceptable for an explicit, user-pressed
+/// "Fix", and far narrower than killing every `whisper-server.exe` by name. If
 /// the filtered query fails to run at all (PowerShell/pgrep missing), nothing is
-/// killed and the user can retry — we deliberately do NOT fall back to the broad
+/// killed and the user can retry; there is deliberately no fallback to the broad
 /// image-name kill.
 pub fn sweep_stray_servers() {
     #[cfg(windows)]
@@ -1210,9 +1211,9 @@ mod tests {
     async fn backoff_cancelled_immediately_by_restart_request() {
         // A Doctor "Fix" fired mid-backoff must cancel the wait. `Notify`
         // stores no permit for `notify_waiters`, so anything not already
-        // selecting on it when the notify fires loses the request outright —
-        // the old plain-sleep backoff did exactly that and the user's restart
-        // silently did nothing for up to 60 s.
+        // selecting on it when the notify fires loses the request outright — a
+        // plain-sleep backoff would do exactly that, leaving the user's restart
+        // to silently do nothing for up to 60 s.
         let restart = Arc::new(tokio::sync::Notify::new());
         let coordinator = ShutdownCoordinator::new();
         let mut shutdown = coordinator.signal.clone();

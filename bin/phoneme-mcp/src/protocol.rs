@@ -1,24 +1,24 @@
 //! JSON-RPC 2.0 wire types and stdio framing for the MCP bridge.
 //!
-//! MCP rides JSON-RPC 2.0; this module owns the *transport* half of that — the
+//! MCP rides on JSON-RPC 2.0; this module owns the transport half of that: the
 //! request/response/error envelopes and the two framings an MCP client may use
-//! over stdio:
+//! over stdio.
 //!
-//! - **newline-delimited** — one JSON object per line (`\n`), the simplest
-//!   framing and what most MCP launchers (and our smoke test) speak;
-//! - **`Content-Length`** — an LSP-style header block
+//! - Newline-delimited: one JSON object per line (`\n`). This is the simplest
+//!   framing and what most MCP launchers (and our smoke test) speak.
+//! - `Content-Length`: an LSP-style header block
 //!   (`Content-Length: <n>\r\n\r\n<n bytes of JSON>`), which some clients use so
-//!   a JSON object may contain raw newlines.
+//!   a JSON object can contain raw newlines.
 //!
-//! [`FramedReader`] accepts either on the same stream by peeking the first
-//! non-blank bytes: a `Content-Length:` header switches it into header mode for
-//! that one message, otherwise the line is treated as a whole JSON value. All
-//! framing helpers are deliberately free functions / small types with no daemon
-//! dependency so they round-trip in unit tests without any I/O.
+//! [`FramedReader`] accepts either framing on the same stream by peeking at the
+//! first non-blank bytes: a `Content-Length:` header switches it into header
+//! mode for that one message, otherwise the line is treated as a whole JSON
+//! value. The framing helpers are deliberately free functions and small types
+//! with no daemon dependency, so they round-trip in unit tests without any I/O.
 //!
-//! Everything here writes to the caller's chosen sink; the binary points the
-//! responses at **stdout** and all logging at **stderr** — stdout is the
-//! protocol channel and must never carry anything but framed JSON-RPC.
+//! Everything here writes to the caller's chosen sink. The binary points the
+//! responses at stdout and all logging at stderr, since stdout is the protocol
+//! channel and must carry nothing but framed JSON-RPC.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -100,11 +100,11 @@ pub fn to_line(value: &impl Serialize) -> serde_json::Result<String> {
     serde_json::to_string(value)
 }
 
-/// Upper bound on a single framed message body / line, mirroring the daemon's
-/// IPC frame cap (`phoneme_ipc`'s `MAX_FRAME_BYTES`, 8 MiB). A malicious or
-/// buggy MCP client must never be able to make the bridge allocate without
-/// limit: an oversize `Content-Length`, or a line/header stream that never
-/// sends a newline, would otherwise grow memory until the process aborts or is
+/// Upper bound on a single framed message body or line, mirroring the daemon's
+/// IPC frame cap (`phoneme_ipc`'s `MAX_FRAME_BYTES`, 8 MiB). This keeps a
+/// malicious or buggy MCP client from making the bridge allocate without limit:
+/// an oversize `Content-Length`, or a line/header stream that never sends a
+/// newline, would otherwise grow memory until the process aborts or gets
 /// OOM-killed.
 const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
@@ -124,15 +124,14 @@ async fn read_capped_line<R: AsyncBufRead + Unpin>(
 ) -> std::io::Result<usize> {
     let n = inner.take(MAX_FRAME_BYTES as u64).read_line(line).await?;
     if n == MAX_FRAME_BYTES && !line.ends_with('\n') {
-        // The cap was hit before a newline arrived. Drain the remainder of this
+        // We hit the cap before a newline arrived. Drain the rest of this
         // oversized line so the next read_line starts on a clean message
-        // boundary, then surface the problem as a parse error rather than an
-        // io::Error (which would kill the session).
+        // boundary.
         drain_to_newline(inner).await?;
-        // Signal the oversize-line case as an InvalidData error; `next_message`
-        // surfaces it as a JSON-RPC parse error (`Ok(Some(Err(..)))`) without
-        // tearing down the session. The stream is already drained past the bad
-        // line, so the next read starts on a clean boundary.
+        // Report it as an InvalidData error. The stream is already drained past
+        // the bad line, so the next read starts cleanly, and `next_message`
+        // turns this into a JSON-RPC parse error rather than letting it end the
+        // session.
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("MCP line exceeds {MAX_FRAME_BYTES} bytes; line drained for realignment"),
@@ -185,9 +184,9 @@ impl<R: AsyncBufRead + Unpin> FramedReader<R> {
             let n = match read_capped_line(&mut self.inner, &mut line).await {
                 Ok(n) => n,
                 Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                    // Oversize line: the stream has been drained to the next
-                    // newline boundary; surface this as a parse error so the
-                    // loop keeps serving rather than killing the session.
+                    // Oversize line. The stream is already drained to the next
+                    // newline boundary, so report it as a parse error and let
+                    // the loop keep serving instead of ending the session.
                     return Ok(Some(Err(e.to_string())));
                 }
                 Err(e) => return Err(e),
@@ -204,13 +203,13 @@ impl<R: AsyncBufRead + Unpin> FramedReader<R> {
                 // LSP-style header block: consume any further headers up to the
                 // blank line, then read exactly `len` bytes of JSON body.
                 self.consume_headers().await?;
-                // Cap the body to the IPC frame limit: an oversize Content-Length
-                // must not trigger an unbounded eager allocation. Unlike the
-                // newline-framed oversize case (where we can drain to the next
-                // `\n`), a Content-Length body could be arbitrarily large and
-                // draining it is unbounded — so we close the stream here. This
-                // is a hard protocol violation from the client; the session is
-                // not recoverable.
+                // Cap the body at the IPC frame limit so an oversize
+                // Content-Length can't trigger an unbounded eager allocation.
+                // The newline-framed oversize case drains to the next `\n` and
+                // recovers, but a Content-Length body can be arbitrarily large
+                // and draining it is unbounded, so close the stream instead.
+                // This is a hard protocol violation from the client and the
+                // session can't recover.
                 if len > MAX_FRAME_BYTES {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -235,10 +234,10 @@ impl<R: AsyncBufRead + Unpin> FramedReader<R> {
     /// After a `Content-Length` header, consume remaining header lines through
     /// the terminating blank line.
     async fn consume_headers(&mut self) -> std::io::Result<()> {
-        // Bound the header block: a peer that streams header lines without a
-        // terminating blank line must not loop forever. Each line is itself
-        // capped by `read_capped_line`, so neither the count nor any single
-        // line can grow memory without limit.
+        // Bound the header block so a peer that streams header lines without a
+        // terminating blank line can't loop forever. Each line is itself capped
+        // by `read_capped_line`, so neither the count nor any single line can
+        // grow memory without limit.
         for _ in 0..MAX_HEADER_LINES {
             let mut line = String::new();
             let n = read_capped_line(&mut self.inner, &mut line).await?;
@@ -345,9 +344,9 @@ mod tests {
 
     #[tokio::test]
     async fn oversize_content_length_closes_stream_not_allocation() {
-        // A wildly oversize Content-Length must NOT trigger a multi-terabyte
+        // A wildly oversize Content-Length must not trigger a multi-terabyte
         // eager allocation. Because draining the body is unbounded, the stream
-        // is closed (Err returned) rather than attempting to drain and continue.
+        // is closed (Err returned) rather than drained-and-continued.
         let framed = "Content-Length: 4000000000000\r\n\r\n";
         let mut reader = FramedReader::new(BufReader::new(Cursor::new(framed.as_bytes().to_vec())));
         let result = reader.next_message().await;
@@ -360,11 +359,11 @@ mod tests {
 
     #[tokio::test]
     async fn oversize_line_surfaces_as_parse_error_and_session_continues() {
-        // An oversize newline-framed line must NOT kill the session. The reader
+        // An oversize newline-framed line must not end the session. The reader
         // drains to the newline boundary and returns Ok(Some(Err)) so the loop
         // can send a JSON-RPC parse error and keep serving.
         //
-        // Build: MAX_FRAME_BYTES of 'x', NO newline (triggers the cap),
+        // Build: MAX_FRAME_BYTES of 'x' with no newline (which trips the cap),
         // then a valid second message on its own line.
         let mut input: Vec<u8> = vec![b'x'; MAX_FRAME_BYTES];
         // Add a newline to terminate the oversize "line".

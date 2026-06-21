@@ -2,14 +2,14 @@
 
 use super::*;
 
-/// Rewrite a local bundled-whisper probe URL to the port the daemon reports
-/// the server is ACTUALLY listening on. The daemon treats the configured
+/// Rewrite a local bundled-whisper probe URL to the port the daemon reports the
+/// server is actually listening on. The daemon treats the configured
 /// `bundled_server_port` as a preference and falls back to a free port when
 /// another app holds it; `daemon_status` publishes the live ports as
-/// `whisper_preferred_port`/`whisper_effective_port` (and the
-/// `preview_whisper_*` pair). `None` = leave the URL alone: it isn't the
-/// shape the frontend builds for a local server (`http://127.0.0.1:<port>`),
-/// it doesn't name a preferred port, or no differing effective port is live.
+/// `whisper_preferred_port`/`whisper_effective_port` (and the `preview_whisper_*`
+/// pair). `None` means leave the URL alone: it isn't the shape the frontend
+/// builds for a local server (`http://127.0.0.1:<port>`), it doesn't name a
+/// preferred port, or no differing effective port is live.
 fn effective_local_whisper_url(url: &str, status: &Value) -> Option<String> {
     let rest = url.trim().strip_prefix("http://127.0.0.1:")?;
     let port: u16 = rest.strip_suffix('/').unwrap_or(rest).parse().ok()?;
@@ -37,10 +37,10 @@ pub async fn wizard_test_whisper(
     bridge: Br<'_>,
     url: String,
 ) -> Result<TestConnectResult, CommandError> {
-    // For the local bundled server, probe the port it is ACTUALLY on — the
+    // For the local bundled server, probe the port it actually landed on: the
     // daemon falls back from the configured port when another app holds it.
-    // `current()` only peeks at an existing connection (never spawns a
-    // daemon), so a wizard run without one probes `url` exactly as before.
+    // `current()` only peeks at an existing connection (it never spawns a daemon),
+    // so a wizard run without one probes `url` as given.
     let mut target = url;
     if target.starts_with("http://127.0.0.1:") {
         if let Some(b) = bridge.current() {
@@ -85,11 +85,11 @@ pub async fn wizard_download_model(
         .map_err(|e| format!("failed to create models dir: {}", e))?;
 
     let dest_path = models_dir.join(&filename);
-    // A 0-byte file is a husk from a previously failed download, not a model —
-    // fall through and re-download over it. A non-empty file only counts as
-    // "already downloaded" once it passes its pinned checksum: an interrupted
-    // run (or a tampered cache) can leave a non-zero but wrong file behind, and
-    // it must not skip hashing. A failed check deletes the file (inside
+    // A 0-byte file is a husk from a failed download, not a model, so fall
+    // through and re-download over it. A non-empty file only counts as "already
+    // downloaded" once it passes its pinned checksum: an interrupted run or a
+    // tampered cache can leave a non-zero but wrong file behind, and that can't be
+    // allowed to skip hashing. A failed check deletes the file (inside
     // verify_file_or_delete) and falls through to a clean re-download.
     if tokio::fs::metadata(&dest_path)
         .await
@@ -124,9 +124,9 @@ pub async fn wizard_download_model(
         return Err(format!("download failed with status: {}", response.status()).into());
     }
 
-    // Create the destination only once the server said yes — creating it
-    // first left a 0-byte file behind on request failure, and the
-    // already-downloaded check then treated that husk as a finished
+    // Create the destination only once the server has said yes. Creating it up
+    // front would leave a 0-byte file behind on request failure, and the
+    // already-downloaded check above would then treat that husk as a finished
     // download forever.
     let mut file = tokio::fs::File::create(&dest_path)
         .await
@@ -195,7 +195,7 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
     for (filename, url) in files {
         let dest_path = semantic_dir.join(filename);
         // Treat a pre-existing file as done only if it passes its pin; a partial
-        // or tampered cache otherwise re-downloads (verify deletes it first).
+        // or tampered cache re-downloads (verify deletes it first).
         if tokio::fs::metadata(&dest_path).await.is_ok() {
             let verify_path = dest_path.clone();
             let verify_url = url.to_string();
@@ -440,9 +440,9 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Com
     }
     drop(file);
 
-    // Verify the zip against its pin BEFORE extracting (S-H7): we are about to
-    // write executables out of this archive, so a mismatched or unpinned zip is
-    // deleted and rejected here rather than unpacked. The pin is keyed on the
+    // Verify the zip against its pin before extracting: we're about to write
+    // executables out of this archive, so a mismatched or unpinned zip is deleted
+    // and rejected here rather than unpacked. The pin is keyed on the
     // version-locked release URL above.
     let verify_zip = temp_zip.clone();
     let verify_url = url.to_string();
@@ -477,8 +477,8 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Com
                 if let Some(file_name) = outpath.file_name().and_then(|n| n.to_str()) {
                     if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
                         // Extract to a sibling temp path first, then rename into
-                        // place atomically — a crash or write error mid-copy
-                        // leaves only the .tmp, so the final target is never a
+                        // place atomically: a crash or write error mid-copy leaves
+                        // only the .tmp, so the final target is never a
                         // trusted-but-truncated binary on the next launch.
                         let extract_to = bin_path.join(file_name);
                         let tmp_path = bin_path.join(format!("{}.tmp", file_name));
@@ -633,9 +633,9 @@ pub async fn wizard_pull_ollama_model(
     Ok(())
 }
 
-/// Hosts Phoneme may download from. Anything else is rejected so a compromised
-/// renderer cannot fetch an arbitrary (e.g. malicious .exe) URL that could then
-/// be run via wizard_run_installer.
+/// Whether `url` points at a host Phoneme is allowed to download from. Anything
+/// else is rejected so a compromised renderer can't fetch an arbitrary URL (say,
+/// a malicious .exe) that could then be run via wizard_run_installer.
 fn is_allowed_download_url(url: &str) -> bool {
     if !url.starts_with("https://") {
         return false;
@@ -723,10 +723,10 @@ pub fn wizard_run_installer(path: String) -> Result<(), CommandError> {
     if !p.exists() {
         return Err(CommandError::from("Installer file does not exist"));
     }
-    // Canonicalize BOTH sides before comparing: the old lexical
-    // starts_with let "…\Temp\..\evil.exe" through (".." survives
-    // Path::starts_with), and 8.3 short names / junctions could dodge a
-    // prefix check entirely. path_within canonicalizes child and root.
+    // Canonicalize both sides before comparing. A plain lexical starts_with would
+    // let "…\Temp\..\evil.exe" through (".." survives Path::starts_with), and 8.3
+    // short names or junctions could dodge a prefix check entirely. path_within
+    // canonicalizes both the child and the root first.
     if !path_within(p, &std::env::temp_dir()) {
         return Err(CommandError::from(
             "Execution is restricted to the temporary directory",
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn local_probe_url_follows_the_effective_port() {
-        // The bundled server fell back from 5809 — the wizard's "Test" must
+        // The bundled server fell back from 5809, so the wizard's "Test" must
         // probe where it actually listens, with or without a trailing slash.
         let s = status(Some(5809), Some(51234), None, None);
         assert_eq!(
@@ -801,7 +801,7 @@ mod tests {
     fn non_matching_urls_are_left_alone() {
         let s = status(Some(5809), Some(51234), None, None);
         // External hosts, non-preferred local ports, and unparsable URLs are
-        // never rewritten — only the configured bundled endpoint is ours.
+        // never rewritten; only the configured bundled endpoint is ours.
         assert_eq!(
             effective_local_whisper_url("http://10.0.0.7:5809", &s),
             None
@@ -837,12 +837,12 @@ mod tests {
     }
 
     // ── is_allowed_download_url ────────────────────────────────────
-    // The download allow-list is a security boundary: a compromised renderer
-    // must not be able to point a download (whose bytes can later be run via
+    // The download allow-list is a security boundary: a compromised renderer can't
+    // be allowed to point a download (whose bytes can later be run via
     // wizard_run_installer) at an arbitrary host. These pin the real contract:
     // https-only, host on the allow-list (exact or a true sub-domain), and the
-    // classic spoofs (downgrade, look-alike, userinfo@, sub-domain suffix
-    // confusion) all denied.
+    // classic spoofs all denied (downgrade, look-alike, userinfo@, sub-domain
+    // suffix confusion).
 
     #[test]
     fn allowed_urls_cover_the_real_wizard_hosts() {
@@ -864,7 +864,7 @@ mod tests {
     #[test]
     fn http_downgrade_is_denied() {
         // Plain http (or anything not https) is rejected outright, even for an
-        // otherwise-allowed host — no MITM-able transport for runnable bytes.
+        // otherwise-allowed host: no MITM-able transport for runnable bytes.
         assert!(!is_allowed_download_url("http://huggingface.co/model.bin"));
         assert!(!is_allowed_download_url("ftp://github.com/x"));
         assert!(!is_allowed_download_url("HTTPS://github.com/x")); // scheme match is case-sensitive by design (starts_with "https://")
@@ -897,7 +897,7 @@ mod tests {
         assert!(!is_allowed_download_url(
             "https://huggingface.co:pass@evil.com/model.bin"
         ));
-        // And the inverse must STILL pass: userinfo in front of a truly-allowed
+        // And the inverse must still pass: userinfo in front of a truly-allowed
         // host is fine (the host is the allowed one).
         assert!(is_allowed_download_url(
             "https://user@github.com/ggml-org/whisper.cpp/releases/x.zip"
@@ -907,7 +907,7 @@ mod tests {
     #[test]
     fn suffix_confusion_is_denied() {
         // `ends_with(".github.com")` must not be satisfied by a host that merely
-        // ENDS with the bare name without the dot boundary.
+        // ends with the bare name without the dot boundary.
         assert!(!is_allowed_download_url("https://fakegithub.com/x"));
         assert!(!is_allowed_download_url("https://myhuggingface.co/x"));
         // Garbage / unparseable.

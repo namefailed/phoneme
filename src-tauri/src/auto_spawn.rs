@@ -12,19 +12,19 @@
 //!
 //! - **Version handshake**: a reachable daemon is only reused when its
 //!   `DaemonStatus.version` matches this build — a stale daemon drops the
-//!   pipe on requests it can't decode. A mismatched daemon is restarted,
-//!   EXCEPT when it positively reports being mid-recording or
-//!   mid-transcription (`daemon_is_busy`): bouncing it then would kill the
+//!   pipe on requests it can't decode. A mismatched daemon is restarted, with
+//!   one exception: a daemon that positively reports being mid-recording or
+//!   mid-transcription (`daemon_is_busy`). Bouncing it then would kill the
 //!   capture stream, so the old daemon is left to finish and upgrades on
 //!   the next idle start.
 //! - **Job membership** (the `quit_stops_daemon` contract): when the knob is
 //!   on (default), the freshly-spawned daemon is assigned to the tray's
 //!   kill-on-close job object, so even an "End task" on the tray takes the
 //!   daemon (and, transitively, its whisper/Ollama children) down. Windows
-//!   can't remove a process from a kill-on-close job, so membership is
-//!   decided AT SPAWN TIME — flipping the setting applies to the NEXT
-//!   daemon spawn. With the knob off the daemon is spawned outside any
-//!   tray-held job and survives the tray byte-for-byte (headless setups).
+//!   can't remove a process from a kill-on-close job, so membership is fixed
+//!   at spawn time — flipping the setting only affects the next daemon spawn.
+//!   With the knob off the daemon is spawned outside any tray-held job and
+//!   survives the tray exactly (headless setups).
 
 use phoneme_core::Config;
 use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport};
@@ -47,9 +47,9 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 /// — even on Task Manager's End task — and the daemon's own children follow
 /// (they inherit job membership, plus the daemon holds its own job).
 ///
-/// Membership is decided AT SPAWN TIME because Windows cannot remove a
-/// process from a kill-on-close job afterwards: when the user flips
-/// `interface.quit_stops_daemon`, the new value applies to the NEXT daemon
+/// Membership is fixed at spawn time because Windows can't remove a process
+/// from a kill-on-close job afterwards: when the user flips
+/// `interface.quit_stops_daemon`, the new value applies to the next daemon
 /// spawn, not the one already running. `None` when job creation failed — the
 /// graceful Quit chain still works, only the end-process safety net is lost.
 #[cfg(windows)]
@@ -84,10 +84,10 @@ async fn daemon_version_matches(t: &mut NamedPipeTransport) -> bool {
 /// aborted and has to re-run).
 ///
 /// Conservative on purpose, in the direction that protects user audio: only a
-/// daemon that POSITIVELY reports being busy is spared. A probe that errors,
+/// daemon that actually reports being busy is spared. A probe that errors,
 /// times out, or is too old to know the request counts as idle — for a wedged
-/// or ancient daemon, restarting IS the recovery path, exactly as the version
-/// probe above already concluded.
+/// or ancient daemon, restarting is itself the recovery path, exactly as the
+/// version probe above already concluded.
 async fn daemon_is_busy(t: &mut NamedPipeTransport) -> bool {
     // Capture in flight? `RecordStatus` predates the version handshake, so any
     // daemon old enough to mismatch still answers it.
@@ -121,11 +121,11 @@ async fn daemon_is_busy(t: &mut NamedPipeTransport) -> bool {
 async fn wait_for_pipe_gone(pipe_name: &str) {
     // A daemon asked to shut down has to finish its in-flight request handling
     // and release the pipe before a fresh daemon can bind it (first-pipe-instance
-    // wins). 5s was occasionally too tight for a daemon mid-cleanup, leaving the
-    // new daemon to lose the bind race and exit; the old one then keeps serving
-    // and the upgrade silently slips to the next idle start. A longer window
-    // closes that race. Still bounded so a daemon that refuses to die never hangs
-    // startup — the loop returns the instant the pipe goes away.
+    // wins). A daemon mid-cleanup can take several seconds; if we give up too
+    // early the new daemon loses the bind race and exits, the old one keeps
+    // serving, and the version upgrade silently slips to the next idle start.
+    // 12s comfortably covers cleanup. Still bounded so a daemon that refuses to
+    // die never hangs startup — the loop returns the instant the pipe goes away.
     let deadline = std::time::Instant::now() + Duration::from_secs(12);
     while std::time::Instant::now() < deadline {
         if NamedPipeTransport::connect(pipe_name).await.is_err() {
@@ -142,24 +142,23 @@ async fn wait_for_pipe_gone(pipe_name: &str) {
 /// diagnostic message if the daemon could not be found or did not start
 /// within the timeout.
 pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
-    // Fast path — a daemon is already up *and* matches our version. A stale
-    // daemon left running from an older install would fail to deserialize newer
-    // request variants and drop the pipe ("connection closed by peer"), so if
-    // the running one doesn't match we ask it to shut down and respawn the
-    // current binary below.
+    // Fast path — a daemon is already up *and* matches our version. A daemon
+    // from an older install can't deserialize newer request variants and drops
+    // the pipe ("connection closed by peer"), so if the running one doesn't
+    // match we ask it to shut down and respawn the current binary below.
     if let Ok(mut t) = NamedPipeTransport::connect(&cfg.daemon.pipe_name).await {
         if daemon_version_matches(&mut t).await {
             tracing::debug!("matching daemon already reachable on startup");
             return Ok(());
         }
-        // Version mismatch — but NEVER bounce a daemon that is mid-recording
+        // Version mismatch — but don't bounce a daemon that is mid-recording
         // or mid-transcription: the restart would kill the capture stream and
-        // lose the user's audio. Conservative behavior: leave the old daemon
-        // running and proceed against it (its protocol is close enough for
-        // the tray's day-to-day requests; anything it can't decode answers
-        // with an error rather than dropping the pipe). The version upgrade
-        // happens on the next idle startup, or when the user restarts the
-        // daemon manually (tray Quit→reopen, or `phoneme daemon restart`).
+        // lose the user's audio. So leave the old daemon running and proceed
+        // against it. Its protocol is close enough for the tray's day-to-day
+        // requests; anything it can't decode answers with an error rather than
+        // dropping the pipe. The version upgrade happens on the next idle
+        // startup, or when the user restarts the daemon manually (tray
+        // Quit→reopen, or `phoneme daemon restart`).
         if daemon_is_busy(&mut t).await {
             tracing::warn!(
                 "running daemon is a different version but is mid-recording or mid-transcription; \
@@ -204,10 +203,10 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
                 anyhow::anyhow!("failed to spawn phoneme-daemon at {}: {e}", exe.display())
             })?;
         // Tie the daemon's lifetime to the tray's when the user wants Quit /
-        // end-process to take everything down (the default). Decided here, at
-        // spawn time — see `tray_daemon_job`. With the knob off the daemon is
-        // spawned outside any tray-held job, preserving the headless contract
-        // where it survives the tray byte-for-byte.
+        // end-process to take everything down (the default). This is the spawn
+        // point where membership is fixed — see `tray_daemon_job`. With the
+        // knob off the daemon is spawned outside any tray-held job, preserving
+        // the headless contract where it survives the tray.
         if cfg.interface.quit_stops_daemon {
             if let Some(job) = tray_daemon_job() {
                 use std::os::windows::io::AsRawHandle;
@@ -277,7 +276,7 @@ mod tests {
         format!("phoneme-autospawn-test-{label}-{pid}-{ns}")
     }
 
-    /// Reuse path: a reachable daemon that reports a MATCHING version is reused —
+    /// Reuse path: a reachable daemon that reports a matching version is reused —
     /// ensure_running returns Ok without trying to spawn anything. The mock
     /// daemon answers `DaemonStatus` with this build's version.
     #[tokio::test]
@@ -320,7 +319,7 @@ mod tests {
         );
     }
 
-    /// Busy-skip path: a reachable daemon with a MISMATCHED version that is
+    /// Busy-skip path: a reachable daemon with a mismatched version that is
     /// mid-recording must be left running — ensure_running returns Ok against
     /// the old daemon and never sends it `Shutdown`. (A restart would kill the
     /// capture stream and lose the recording.)
@@ -390,13 +389,12 @@ mod tests {
     }
 
     /// Timeout path: if the pipe never becomes reachable and the daemon binary
-    /// doesn't exist, ensure_running should return an error (not hang forever).
-    /// We use a short custom timeout by directly testing the poll logic via a
-    /// pipe name that will never be served.
+    /// doesn't exist, ensure_running should return an error rather than hang
+    /// forever. Drives the poll logic through a pipe name that will never be
+    /// served.
     ///
-    /// NOTE: This test intentionally waits for POLL_TOTAL (8s). It is marked
-    /// `#[ignore]` so it doesn't slow down `cargo test` by default.
-    /// Run with: `cargo test auto_spawn -- --ignored`
+    /// This test intentionally waits out POLL_TOTAL (8s), so it's `#[ignore]`d
+    /// to keep `cargo test` fast. Run with: `cargo test auto_spawn -- --ignored`
     #[tokio::test]
     #[ignore]
     async fn timeout_path_returns_error_when_daemon_missing() {

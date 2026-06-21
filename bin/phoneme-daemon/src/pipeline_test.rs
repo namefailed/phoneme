@@ -1,7 +1,7 @@
 //! Integration test for the core pipeline orchestration: transcribe → cleanup
 //! → auto-summary → catalog. Transcription and the LLM are mocked with wiremock,
 //! so this exercises `pipeline::run` end-to-end against a real `AppState`
-//! (catalog, inbox, events) without any network or model downloads.
+//! (catalog, inbox, events) with no network or model downloads.
 
 #![cfg(test)]
 
@@ -62,8 +62,8 @@ async fn seed_recording(
 }
 
 /// Like [`seed_recording`], but the row is flagged `in_place` — the shape the
-/// recorder hands a custom-hotkey dictation that FIX 1 routes down the full
-/// pipeline (so its recipe runs and the result is typed in place).
+/// recorder hands a custom-hotkey dictation, which gets routed down the full
+/// pipeline so its recipe runs and the result is typed in place.
 async fn seed_in_place_recording(
     state: &AppState,
     tmp: &std::path::Path,
@@ -112,13 +112,13 @@ async fn seed_in_place_recording(
 
 async fn test_state(tmp: &std::path::Path, mut cfg: Config) -> AppState {
     // Mirror the daemon's startup: reconcile the Playbook entries from the
-    // config's LIVE cleanup/title/summary/auto_tag values BEFORE the recipe
+    // config's live cleanup/title/summary/auto_tag values before the recipe
     // executor runs, so each built-in step's prompt/model/provider in the
     // entries matches what the test configured. In production `main` does this
     // once and persists it; here we do it in-memory per test.
     cfg.migrate_playbook();
-    // Explicit data-local (no global `set_var`) so parallel tests don't race on
-    // the shared `PHONEME_DATA_LOCAL` env var — see `AppState::new_in`.
+    // Pass the data-local dir explicitly (no global `set_var`) so parallel tests
+    // don't race on the shared `PHONEME_DATA_LOCAL` env var — see `AppState::new_in`.
     AppState::new_in(cfg, Some(tmp.join("data")))
         .await
         .expect("build test AppState")
@@ -292,7 +292,7 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         "the cleanup model should be recorded"
     );
     // [title] defaults: enabled, heuristic-only — the title is the first
-    // clause of the CLEANED transcript (the text the user sees).
+    // clause of the cleaned transcript (the text the user sees).
     assert_eq!(
         rec.title.as_deref(),
         Some("PROCESSED OUTPUT"),
@@ -374,7 +374,7 @@ async fn seed_meeting_track(
     (id, audio_path)
 }
 
-/// A meeting MIC track is labelled as one fixed speaker "You" WITHOUT running
+/// A meeting mic track is labelled as one fixed speaker "You" without running
 /// the diarizer: the raw transcript carries the canonical `[Speaker 1]` marker,
 /// the recording is flagged diarized, every persisted segment carries speaker
 /// "1", and a `speaker_names` row maps label 1 → "You" (so the UI renders "You"
@@ -401,7 +401,7 @@ async fn meeting_mic_track_is_labelled_you_without_diarizing() {
     cfg.whisper.provider = TranscriptionBackend::Custom;
     cfg.whisper.api_url = server.uri();
     cfg.whisper.model = "test-stt".into();
-    // Local diarization configured — the mic track must STILL skip it.
+    // Local diarization configured — the mic track must still skip it.
     cfg.diarization.provider = DiarizationBackend::Local;
     cfg.llm_post_process.enabled = false;
     cfg.hook.run_on_transcribe = false;
@@ -448,7 +448,7 @@ async fn meeting_mic_track_is_labelled_you_without_diarizing() {
     );
 }
 
-/// A meeting SYSTEM track is NOT short-circuited: it takes the normal
+/// A meeting system track is not short-circuited: it takes the normal
 /// diarization path (here with no models present, so it lands as plain
 /// unlabelled text), and crucially it gets no auto "You" speaker name. This is
 /// the negative case proving the fixed-speaker label is mic-track only.
@@ -472,8 +472,8 @@ async fn meeting_system_track_takes_the_normal_path_and_is_not_named_you() {
     cfg.whisper.provider = TranscriptionBackend::Custom;
     cfg.whisper.api_url = server.uri();
     cfg.whisper.model = "test-stt".into();
-    // Diarization OFF keeps the system track on the normal path WITHOUT needing
-    // speakrs models — the point here is only that it is NOT force-labelled
+    // Diarization off keeps the system track on the normal path without needing
+    // speakrs models — the point here is only that it isn't force-labelled
     // "You" the way the mic track is.
     cfg.diarization.provider = DiarizationBackend::None;
     cfg.llm_post_process.enabled = false;
@@ -503,18 +503,19 @@ async fn meeting_system_track_takes_the_normal_path_and_is_not_named_you() {
     assert!(!rec.diarized, "diarization was off → not diarized");
     let segments = state.catalog.segments_for(&id).await.unwrap();
     assert!(segments.iter().all(|s| s.speaker.is_none()));
-    // The crux: no auto "You" name on a system track.
+    // The crux of this case: no auto "You" name on a system track.
     assert!(
         rec.speaker_names.is_empty(),
         "system track must NOT be auto-named 'You'"
     );
 }
 
-/// BUG 1 (silent data loss): a user rename of the meeting mic speaker must
-/// survive a retranscribe / re-run. The first run seeds label 1 → "You"; the
-/// user renames it to "Alice"; a SECOND `pipeline::run` on the same id (which
-/// re-enters the `is_meeting_mic` branch with the same fixed-speaker labelling)
-/// must NOT clobber the rename back to "You". This pins the if-absent seed.
+/// A user rename of the meeting mic speaker survives a retranscribe / re-run,
+/// rather than being silently lost. The first run seeds label 1 → "You"; the
+/// user renames it to "Alice"; a second `pipeline::run` on the same id re-enters
+/// the `is_meeting_mic` branch with the same fixed-speaker labelling and must
+/// leave the rename alone instead of stamping "You" back over it. This pins the
+/// if-absent seed.
 #[tokio::test]
 async fn meeting_mic_rename_survives_retranscribe() {
     let server = MockServer::start().await;
@@ -571,8 +572,8 @@ async fn meeting_mic_rename_survives_retranscribe() {
         .await
         .unwrap();
 
-    // Re-run the pipeline on the SAME id (Retranscribe / Re-run / requeue). The
-    // mic-track branch fires again, but the if-absent seed must NOT revert the
+    // Re-run the pipeline on the same id (Retranscribe / Re-run / requeue). The
+    // mic-track branch fires again, but the if-absent seed must not revert the
     // rename to "You".
     crate::pipeline::run(&state, payload, CancellationToken::new())
         .await
@@ -587,13 +588,13 @@ async fn meeting_mic_rename_survives_retranscribe() {
     );
 }
 
-/// BUG 2 (orphan/mislabel), local case: a meeting mic track whose provider
-/// returns text but NO segments produces no `[Speaker 1]` (the fixed-speaker
+/// Orphan/mislabel guard, local case: a meeting mic track whose provider
+/// returns text but no segments produces no `[Speaker 1]` (the fixed-speaker
 /// short-circuit is guarded by `!segs.is_empty()`), so `fixed_speaker_applied`
-/// stays false and NO `speaker_names` row is written — the gate is the result
-/// flag, not just `is_meeting_mic`. (This same false-flag path is what a cloud
-/// STT backend — which ignores the hint entirely — also takes, so it stands in
-/// for the cloud-provider case too.)
+/// stays false and no `speaker_names` row is written. The gate is the result
+/// flag, not just `is_meeting_mic`. A cloud STT backend — which ignores the hint
+/// entirely — takes this same false-flag path, so this also stands in for the
+/// cloud-provider case.
 #[tokio::test]
 async fn meeting_mic_track_without_segments_writes_no_speaker_name() {
     let server = MockServer::start().await;
@@ -642,25 +643,25 @@ async fn meeting_mic_track_without_segments_writes_no_speaker_name() {
         !rec.diarized,
         "no segments → no fixed-speaker label → not diarized"
     );
-    // …and NO orphan "You" speaker-name row was written.
+    // …and no orphan "You" speaker-name row was written.
     assert!(
         rec.speaker_names.is_empty(),
         "a segment-less mic track must NOT get an orphan 'You' speaker name"
     );
 }
 
-/// A queued per-recording model override is applied to JUST that job: the
+/// A queued per-recording model override is applied to just that job: the
 /// transcription provider uses the override model, the override is consumed
 /// (removed from the pending map), and the process-global config is left
-/// untouched (#49 — the override never leaks into the shared config the
-/// supervisor/preview/other jobs read).
+/// untouched — the override never leaks into the shared config the
+/// supervisor/preview/other jobs read.
 #[tokio::test]
 async fn pipeline_applies_pending_model_override_without_touching_global_config() {
     let server = MockServer::start().await;
-    // This mock ONLY matches a transcription request whose multipart body carries
-    // the override model — so the assertion that the pipeline succeeds is itself
-    // proof the per-job override reached the provider. A request with the
-    // configured model (or none) would 404 and fail the run.
+    // This mock only matches a transcription request whose multipart body carries
+    // the override model, so the pipeline succeeding is itself proof the per-job
+    // override reached the provider. A request with the configured model (or none)
+    // would 404 and fail the run.
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))
         .and(body_string_contains("override-model-xyz"))
@@ -727,7 +728,7 @@ async fn pipeline_applies_pending_model_override_without_touching_global_config(
     assert_eq!(rec.status, RecordingStatus::Done);
     assert_eq!(rec.transcript.as_deref(), Some("overridden transcript"));
     // The recorded model is the one that actually ran: for a cloud/custom
-    // backend that's the request model id, here the one-job override.
+    // backend that's the request model id, which here is the one-job override.
     assert_eq!(
         rec.model.as_deref(),
         Some("override-model-xyz"),
@@ -736,7 +737,7 @@ async fn pipeline_applies_pending_model_override_without_touching_global_config(
 }
 
 /// Re-run overrides (hooks toggle / post-process opt-out / Re-run "All") apply
-/// onto a config CLONE only — never the process-global config — so a concurrent
+/// onto a config clone only, never the process-global config, so a concurrent
 /// `ReloadConfig` can't clobber them and they can't leak onto another queued job.
 /// A forced "All" run enables cleanup + summary and layers the per-step models;
 /// the post-process opt-out disables cleanup; an empty override is a no-op.
@@ -752,10 +753,10 @@ fn rerun_overrides_apply_to_a_clone_only() {
     assert_eq!(same.llm_post_process.enabled, base.llm_post_process.enabled);
     assert_eq!(same.summary.auto, base.summary.auto);
 
-    // Post-process opt-out disables cleanup for this run only — AND, under the
-    // recipe executor, drops the `cleanup` Transform step from the per-job
-    // clone's `default` recipe so no Transform runs (#38: "skip post-processing"
-    // must yield the raw transcript). The base recipe still has cleanup.
+    // Post-process opt-out disables cleanup for this run only, and under the
+    // recipe executor it also drops the `cleanup` Transform step from the per-job
+    // clone's `default` recipe so no Transform runs — "skip post-processing" has
+    // to yield the raw transcript. The base recipe still has cleanup.
     assert!(
         base.recipes
             .iter()
@@ -816,9 +817,9 @@ fn rerun_overrides_apply_to_a_clone_only() {
     assert!(all.title.enabled && all.title.use_llm);
     assert_eq!(all.title.model, "qwen2.5:0.5b");
 
-    // The recipe executor reads each step from its Playbook ENTRY, so the
-    // one-shot overrides must be mirrored onto the matching entries of the clone
-    // — otherwise a Re-run → "All" custom model would be ignored.
+    // The recipe executor reads each step from its Playbook entry, so the
+    // one-shot overrides have to be mirrored onto the matching entries of the
+    // clone, or else a Re-run → "All" custom model would be ignored.
     let cleanup_entry = all.playbook.iter().find(|e| e.id == "cleanup").unwrap();
     assert_eq!(cleanup_entry.llm.model, "llama3.2:3b");
     let summary_entry = all.playbook.iter().find(|e| e.id == "summary").unwrap();
@@ -851,10 +852,10 @@ fn rerun_overrides_apply_to_a_clone_only() {
     );
 }
 
-/// Re-run "All" must re-fire the whole pipeline even for a (migrated) user who
-/// had summary/title OFF — so those steps are ABSENT from the persisted recipe.
-/// Under the membership-gated executor, forcing the legacy flags on is not
-/// enough; "All" must also slot cleanup/title/summary back into the per-job
+/// Re-run "All" re-fires the whole pipeline even for a (migrated) user who had
+/// summary/title off, where those steps are absent from the persisted recipe.
+/// Under the membership-gated executor, forcing the legacy flags on isn't
+/// enough; "All" also has to slot cleanup/title/summary back into the per-job
 /// clone's recipe (canonical order), while leaving auto-tag membership alone
 /// (legacy "All" never force-enabled auto-tagging). Confined to the clone.
 #[test]
@@ -862,7 +863,7 @@ fn rerun_all_restores_missing_steps_into_the_recipe_clone() {
     use crate::app_state::PendingRerun;
     use phoneme_ipc::RerunAllOverrides;
 
-    // A user who only kept cleanup on: summary/title/tags were migrated OFF, so
+    // A user who only kept cleanup on: summary/title/tags were migrated off, so
     // the persisted default recipe is just `["cleanup"]`.
     let mut base = Config::default();
     if let Some(recipe) = base.recipes.iter_mut().find(|r| r.id == "default") {
@@ -887,7 +888,7 @@ fn rerun_all_restores_missing_steps_into_the_recipe_clone() {
         .find(|r| r.id == "default")
         .unwrap()
         .steps;
-    // cleanup → title → summary, in canonical order; auto-tag is NOT forced on.
+    // cleanup → title → summary, in canonical order; auto-tag is not forced on.
     assert_eq!(
         steps,
         &[
@@ -909,17 +910,18 @@ fn rerun_all_restores_missing_steps_into_the_recipe_clone() {
     );
 }
 
-/// A TRANSIENT transcribe failure (server unreachable) must leave the
-/// recording retryable: status stays Transcribing and nothing lands in
-/// failed/ — the queue worker requeues it and tries again with backoff.
-/// (Regression: this used to mark TranscribeFailed + move to failed/ on the
-/// first blip, permanently losing the recording to a server restart.)
+/// A transient transcribe failure (server unreachable) leaves the recording
+/// retryable: status stays Transcribing and nothing lands in failed/, so the
+/// queue worker can requeue it and try again with backoff. The distinction
+/// matters because the failed path is permanent — treating a momentary blip as
+/// a failure would lose the recording to something as routine as a server
+/// restart.
 #[tokio::test]
 async fn transient_whisper_failure_keeps_the_recording_retryable() {
     let tmp = tempfile::tempdir().unwrap();
     let mut cfg = Config::default();
     cfg.whisper.provider = TranscriptionBackend::Custom;
-    // Nothing listens here — the provider fails with WhisperUnreachable.
+    // Nothing listens here, so the provider fails with WhisperUnreachable.
     cfg.whisper.api_url = "http://127.0.0.1:9".into();
     cfg.whisper.model = "test-stt".into();
     cfg.diarization.provider = DiarizationBackend::None;
@@ -954,8 +956,8 @@ async fn transient_whisper_failure_keeps_the_recording_retryable() {
     );
 }
 
-/// A PERMANENT transcribe failure (the server answered with an error) takes
-/// the failed path exactly as before: TranscribeFailed + a failed/ entry.
+/// A permanent transcribe failure (the server answered with an error) takes the
+/// failed path: TranscribeFailed plus a failed/ entry.
 #[tokio::test]
 async fn permanent_whisper_failure_still_fails_the_recording() {
     let server = MockServer::start().await;
@@ -993,11 +995,10 @@ async fn permanent_whisper_failure_still_fails_the_recording() {
     assert_eq!(rec.status, RecordingStatus::TranscribeFailed);
 }
 
-/// A user cancel mid-pipeline settles the recording as `Cancelled` — never
-/// `TranscribeFailed`. (Regression: the cancel path borrowed the failed status
-/// "until a dedicated status lands", so every cancel looked like a failure in
-/// the list and the failed panel.) The inbox item must still leave
-/// `processing/` so the queue can't wedge on it.
+/// A user cancel mid-pipeline settles the recording as `Cancelled`, never
+/// `TranscribeFailed` — otherwise a cancel reads as a failure in the list and
+/// the failed panel. The inbox item still has to leave `processing/` so the
+/// queue can't wedge on it.
 #[tokio::test]
 async fn user_cancel_marks_recording_cancelled_not_failed() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1044,7 +1045,7 @@ async fn user_cancel_marks_recording_cancelled_not_failed() {
 
 /// The auto-title step end to end: a fresh run sets a heuristic title from
 /// the transcript (no LLM configured); a re-run refreshes that auto title;
-/// and once the user has set their own title, re-runs leave it alone forever.
+/// and once the user has set their own title, re-runs leave it alone for good.
 #[tokio::test]
 async fn pipeline_sets_heuristic_title_and_never_clobbers_a_user_title() {
     let server = MockServer::start().await;
@@ -1096,7 +1097,7 @@ async fn pipeline_sets_heuristic_title_and_never_clobbers_a_user_title() {
         .await
         .unwrap();
 
-    // …so a retranscribe must NOT touch it (the run itself still succeeds and
+    // …so a retranscribe must leave it alone (the run itself still succeeds and
     // rewrites the transcript).
     crate::pipeline::run(&state, payload(), CancellationToken::new())
         .await
@@ -1124,7 +1125,7 @@ async fn llm_title_applies_and_falls_back_to_heuristic_on_error() {
         })))
         .mount(&server)
         .await;
-    // The title LLM replies with the quotes-and-prefix mess models love.
+    // The title LLM replies with the usual quotes-and-prefix mess.
     Mock::given(method("POST"))
         .and(path("/title-llm"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1194,20 +1195,20 @@ async fn llm_title_applies_and_falls_back_to_heuristic_on_error() {
     );
 }
 
-/// THE FULL-PATH test: the single critical path no other test covers end to
+/// The full-path test: the single critical path no other test covers end to
 /// end — transcribe → LLM cleanup → summary → auto-tag → auto-title → hook →
 /// catalog/inbox → webhook, all legs live at once against a real `AppState`.
 ///
 /// Everything external is faked but exercised for real:
-///   * a whisper endpoint returning `verbose_json` WITH segments,
-///   * one OpenAI-compatible `/v1/chat/completions` serving FOUR distinct
+///   - a whisper endpoint returning `verbose_json` with segments,
+///   - one OpenAI-compatible `/v1/chat/completions` serving four distinct
 ///     canned replies, routed by a sentinel word planted in each stage's
-///     prompt (cleanup / summary / tags / title) — so the test proves each
+///     prompt (cleanup / summary / tags / title), so the test proves each
 ///     stage actually called the LLM with its own prompt,
-///   * a real hook subprocess (`cmd /c echo … > marker`) that drops a file on
+///   - a real hook subprocess (`cmd /c echo … > marker`) that drops a file on
 ///     disk, proving the hook ran with the recording's data,
-///   * a real webhook listener (a second mock server) whose received POST body
-///     is read back and asserted field-by-field.
+///   - a real webhook listener (a second mock server) whose received POST body
+///     is read back and asserted field by field.
 ///
 /// Assertions walk the whole promised surface: final status, every persisted
 /// transcript variant, segments, canonicalized tag suggestions, the recorded
@@ -1241,10 +1242,10 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         .mount(&server)
         .await;
 
-    // Four LLM stages share ONE endpoint; each canned reply is gated on a
+    // Four LLM stages share one endpoint; each canned reply is gated on a
     // sentinel only that stage's prompt carries. A request whose body lacks the
-    // sentinel won't match that mock — so a stage calling the LLM with the
-    // wrong prompt would simply 404 and surface in the assertions.
+    // sentinel won't match that mock, so a stage calling the LLM with the wrong
+    // prompt simply 404s and surfaces in the assertions.
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .and(body_string_contains("STAGE_CLEANUP"))
@@ -1325,7 +1326,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
     cfg.auto_tag.api_url = format!("{}/v1/chat/completions", server.uri());
     cfg.auto_tag.model = "tag-llm".into();
     cfg.auto_tag.prompt = "STAGE_TAGS suggest tags".into();
-    // Keep auto-accept OFF so the canonicalized suggestion stays a chip we can
+    // Keep auto-accept off so the canonicalized suggestion stays a chip we can
     // assert on (auto-accept would silently attach the existing-tag match).
     cfg.auto_tag.auto_accept_existing = false;
 
@@ -1348,7 +1349,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
 
     let state = test_state(tmp.path(), cfg).await;
 
-    // Seed an EXISTING "onboarding" tag so the tagger's "Onboarding" suggestion
+    // Seed an existing "onboarding" tag so the tagger's "Onboarding" suggestion
     // is canonicalized to the lower-case existing spelling.
     state.catalog.add_tag("onboarding", None).await.unwrap();
 
@@ -1470,7 +1471,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
     assert_eq!(segments[1].text, "the new onboarding flow today");
 
     // ── Words: the finer per-word timeline persists alongside the segments,
-    //    ms-converted, in idx order, with null confidence (whisper gives none) ─
+    //    ms-converted, in idx order, with null confidence (whisper supplies none) ─
     let words = state.catalog.words_for(&id).await.unwrap();
     assert_eq!(words.len(), 4, "all whisper words persist");
     assert_eq!(words[0].text, "um");
@@ -1528,10 +1529,10 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
     );
     assert_eq!(body["duration_ms"], 4200, "payload carries the duration");
     // A Custom/cloud backend sends its model id in the request and leaves
-    // `model_path` empty, so the recorded model is the REQUESTED `whisper.model`
-    // ("test-stt" here), not the path stem. (The local bundled backend, which
-    // only knows its model as a file on disk, still records the `model_path`
-    // stem.) The catalog row and the webhook payload agree on it.
+    // `model_path` empty, so the recorded model is the requested `whisper.model`
+    // ("test-stt" here), not the path stem. The local bundled backend, which only
+    // knows its model as a file on disk, records the `model_path` stem instead.
+    // The catalog row and the webhook payload agree on it.
     assert_eq!(
         body["model"], "test-stt",
         "cloud backend records the requested whisper.model id"
@@ -1564,13 +1565,13 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
     );
 }
 
-/// Strategy B: the summary ENRICHMENT step reads its migrated Playbook ENTRY,
-/// not the legacy `[summary]` section. We migrate the config, then EDIT only the
-/// `summary` entry's prompt (as the Playbook UI would) to a sentinel, and leave
-/// the legacy `[summary].prompt` set to a DIFFERENT sentinel. The mock LLM only
-/// answers a summary request whose body carries the ENTRY's sentinel — so the
-/// summary landing at all proves the step used the edited entry prompt, and a
-/// run that instead sent the legacy prompt would 404 and persist no summary.
+/// Strategy B: the summary enrichment step reads its migrated Playbook entry,
+/// not the legacy `[summary]` section. We migrate the config, then edit only the
+/// `summary` entry's prompt (as the Playbook UI would) to a sentinel, leaving
+/// the legacy `[summary].prompt` set to a different sentinel. The mock LLM only
+/// answers a summary request whose body carries the entry's sentinel, so the
+/// summary landing at all proves the step used the edited entry prompt; a run
+/// that instead sent the legacy prompt would 404 and persist no summary.
 #[tokio::test]
 async fn summary_step_uses_the_edited_playbook_entry_prompt() {
     let server = MockServer::start().await;
@@ -1618,11 +1619,11 @@ async fn summary_step_uses_the_edited_playbook_entry_prompt() {
 
     cfg.summary.auto = true;
     cfg.summary.model = "summary-llm".into();
-    // The LEGACY section prompt is the WRONG one — if the step read this, no
-    // mock would match and the summary would be empty/failed.
+    // The legacy section prompt is the wrong one: if the step read this, no mock
+    // would match and the summary would be empty/failed.
     cfg.summary.prompt = "LEGACY_SUMMARY_PROMPT_DO_NOT_USE".into();
 
-    // Migrate (copies the legacy prompt into the entry), THEN edit the entry
+    // Migrate (copies the legacy prompt into the entry), then edit the entry
     // prompt to the sentinel the way the Playbook UI would. `migrate_playbook`
     // already set `playbook_migrated`, so `test_state`'s re-migration is a no-op
     // and this edit survives.
@@ -1711,7 +1712,7 @@ fn pipeline_types_only_when_the_fast_pass_did_not() {
     assert!(pipeline_should_type(&full, true, false, "words"));
 
     // full_pipeline + type_first: the recorder's type-only pass already typed
-    // the text the moment transcription finished — the pipeline run must NOT
+    // the text the moment transcription finished, so the pipeline run must not
     // land it a second time.
     let type_first = InPlaceConfig {
         full_pipeline: true,
@@ -1731,17 +1732,17 @@ fn pipeline_types_only_when_the_fast_pass_did_not() {
     // Nothing to type, nothing typed.
     assert!(!pipeline_should_type(&full, true, false, ""));
 
-    // Recipe-routed in-place: the recorder ALWAYS skips its type-first pass for
+    // Recipe-routed in-place: the recorder always skips its type-first pass for
     // a recipe binding (the recipe reshapes the text, so the quick raw text is
-    // the wrong thing to type), so the pipeline owns the SINGLE insertion of the
-    // recipe's result — regardless of full_pipeline / type_first. These are the
-    // two states that double-typed (or typed the wrong text) before the gate was
-    // tied to the recorder's actual condition.
+    // the wrong thing to type), so the pipeline owns the single insertion of the
+    // recipe's result, regardless of full_pipeline / type_first. These are the
+    // two states where it's easy to double-type (or type the wrong text) unless
+    // the gate is tied to the recorder's actual condition.
     //
-    // full_pipeline = false, type_first = true: the fast lane no longer fires
-    // (recipe forces the full pipeline), and the recorder skips type-first, so
-    // this run must type — exactly once. (Pre-fix: the recorder type-first AND
-    // this run both typed → the text landed twice.)
+    // full_pipeline = false, type_first = true: the fast lane doesn't fire (the
+    // recipe forces the full pipeline), and the recorder skips type-first, so
+    // this run must type — exactly once. If both the recorder type-first and this
+    // run typed, the text would land twice.
     let recipe_tf_no_full = InPlaceConfig {
         full_pipeline: false,
         type_first: true,
@@ -1755,9 +1756,9 @@ fn pipeline_types_only_when_the_fast_pass_did_not() {
     ));
 
     // full_pipeline = true, type_first = true: still recipe-routed, so the
-    // recorder skipped type-first; this run types the recipe's result. (Pre-fix:
-    // this run suppressed itself AND the recorder type-first typed the RAW text →
-    // the user got the un-transformed text instead of the recipe output.)
+    // recorder skipped type-first; this run types the recipe's result. If this
+    // run suppressed itself while the recorder type-first typed the raw text, the
+    // user would get the un-transformed text instead of the recipe output.
     let recipe_tf_full = InPlaceConfig {
         full_pipeline: true,
         type_first: true,
@@ -1771,15 +1772,16 @@ fn pipeline_types_only_when_the_fast_pass_did_not() {
     assert!(!pipeline_should_type(&recipe_tf_full, true, true, ""));
 }
 
-/// `parse_tag_names` must find the first VALID JSON string-array even when the
-/// model wraps it in bracket-bearing prose. The old first-'['..last-']' slice
-/// spanned the prose, failed to parse, and comma-split the whole reply into
-/// junk candidates instead.
+/// `parse_tag_names` finds the first valid JSON string-array even when the model
+/// wraps it in bracket-bearing prose. A naive first-`[`..last-`]` slice would
+/// span the prose, fail to parse, and comma-split the whole reply into junk
+/// candidates — so the parser has to locate the real array, not just the
+/// outermost brackets.
 #[test]
 fn parse_tag_names_ignores_prose_brackets_around_the_json_array() {
     use crate::pipeline::parse_tag_names;
 
-    // Brackets BEFORE the array (a citation marker).
+    // Brackets before the array (a citation marker).
     assert_eq!(
         parse_tag_names(
             "Sure! Based on the transcript [1], here are the tags: [\"meeting\", \"budget\"]",
@@ -1787,7 +1789,7 @@ fn parse_tag_names_ignores_prose_brackets_around_the_json_array() {
         ),
         vec!["meeting", "budget"],
     );
-    // ... and AFTER it.
+    // ... and after it.
     assert_eq!(
         parse_tag_names("[\"alpha\"] is my final answer [hope that helps]", 5),
         vec!["alpha"],
@@ -1839,10 +1841,10 @@ fn stage_skip_errors_are_recognizable() {
 }
 
 /// A failed optional step (cleanup/title/summary/tag) ends the recording on its
-/// own terminal status — filterable like `hook_failed` — AND persists the
-/// reason on the row (`error_kind` = the status string, `error_message` = the
-/// message) so the failed panel and `phoneme list` show WHY after a restart,
-/// not merely THAT it failed.
+/// own terminal status — filterable like `hook_failed` — and persists the reason
+/// on the row (`error_kind` = the status string, `error_message` = the message)
+/// so the failed panel and `phoneme list` show why it failed after a restart,
+/// not merely that it failed.
 #[tokio::test]
 async fn finalize_step_status_persists_failure_status_and_reason() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1901,7 +1903,7 @@ fn step_label(step: &crate::pipeline::ResolvedStep) -> &'static str {
     }
 }
 
-/// A config carrying the seeded default recipe/playbook PLUS a custom
+/// A config carrying the seeded default recipe/playbook plus a custom
 /// "transform-only" recipe (`hotkey_recipe` → just the `cleanup` transform), so
 /// the recipe-resolution tests can tell the two chains apart by their steps.
 fn config_with_custom_recipe() -> Config {
@@ -1921,7 +1923,7 @@ fn config_with_custom_recipe() -> Config {
     cfg
 }
 
-/// A binding's `recipe_id` resolves THAT recipe (its steps), not the default.
+/// A binding's `recipe_id` resolves that recipe's steps, not the default.
 #[test]
 fn resolve_recipe_uses_the_named_recipe() {
     let cfg = config_with_custom_recipe();
@@ -2009,7 +2011,7 @@ fn resolve_recipe_includes_filler_removal_step() {
     );
 }
 
-/// A binding pointing at a DELETED recipe degrades to the default chain (never a
+/// A binding pointing at a deleted recipe degrades to the default chain (never a
 /// panic, never an empty/transcribe-only run).
 #[test]
 fn resolve_recipe_missing_id_falls_back_to_default() {
@@ -2023,16 +2025,16 @@ fn resolve_recipe_missing_id_falls_back_to_default() {
     );
 }
 
-/// END-TO-END: an IN-PLACE custom-hotkey recording with a per-binding RECIPE +
-/// WHISPER MODEL stashed in the ledgers (exactly as `stash_hotkey_overrides`
-/// does) runs THAT recipe through the FULL pipeline — not the dictation fast
-/// lane — and transcribes with THAT model. (FIX 1: a recipe-bearing in-place
-/// binding takes the full pipeline so its recipe actually executes; the recorder
-/// routes it here via `wants_fast_lane`, and `pipeline::run` then claims both
-/// ledgers and types the recipe's result in place.) Here the binding's recipe is
+/// End to end: an in-place custom-hotkey recording with a per-binding recipe and
+/// whisper model stashed in the ledgers (exactly as `stash_hotkey_overrides`
+/// does) runs that recipe through the full pipeline — not the dictation fast
+/// lane — and transcribes with that model. A recipe-bearing in-place binding
+/// takes the full pipeline so its recipe actually executes: the recorder routes
+/// it here via `wants_fast_lane`, and `pipeline::run` then claims both ledgers
+/// and types the recipe's result in place. Here the binding's recipe is
 /// cleanup-only (no summary/tags), so the recording ends with a cleaned
-/// transcript but NO summary — distinguishing it from the default pipeline. The
-/// per-binding STT model is asserted via the recorded `model` on the row.
+/// transcript but no summary, which distinguishes it from the default pipeline.
+/// The per-binding STT model is asserted via the recorded `model` on the row.
 #[tokio::test]
 async fn custom_hotkey_recording_runs_its_recipe_and_model() {
     let server = MockServer::start().await;
@@ -2064,7 +2066,7 @@ async fn custom_hotkey_recording_runs_its_recipe_and_model() {
     cfg.llm_post_process.provider = "openai".into();
     cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
     cfg.llm_post_process.model = "test-llm".into();
-    // Default pipeline WOULD summarize; the custom recipe must NOT.
+    // The default pipeline would summarize; the custom recipe must not.
     cfg.summary.auto = true;
     cfg.summary.provider = "openai".into();
     cfg.summary.api_url = format!("{}/v1/chat/completions", server.uri());
@@ -2073,8 +2075,8 @@ async fn custom_hotkey_recording_runs_its_recipe_and_model() {
     cfg.hook.run_on_transcribe = false;
 
     let state = test_state(tmp.path(), cfg).await;
-    // An IN-PLACE dictation row: FIX 1 routes a recipe-bearing in-place binding
-    // down the FULL pipeline (which `pipeline::run` IS), so seed the row in-place
+    // An in-place dictation row: a recipe-bearing in-place binding is routed
+    // down the full pipeline (which `pipeline::run` is), so seed the row in-place
     // to mirror the real recording the recorder hands off here.
     let (id, audio_path) = seed_in_place_recording(&state, tmp.path()).await;
 
@@ -2106,11 +2108,11 @@ async fn custom_hotkey_recording_runs_its_recipe_and_model() {
 
     let rec = state.catalog.get(&id).await.unwrap().unwrap();
     assert_eq!(rec.status, RecordingStatus::Done);
-    // It was an in-place dictation that nonetheless took the FULL pipeline (FIX 1).
+    // It was an in-place dictation that nonetheless took the full pipeline.
     assert!(rec.in_place, "the recording stays flagged in-place");
     // The cleanup transform from the custom recipe ran (live transcript cleaned).
     assert_eq!(rec.transcript.as_deref(), Some("CLEANED"));
-    // The custom recipe has NO summary step, so no summary despite summary.auto.
+    // The custom recipe has no summary step, so no summary despite summary.auto.
     assert_eq!(
         rec.summary, None,
         "the cleanup-only recipe must not run the summary step"
@@ -2126,8 +2128,9 @@ async fn custom_hotkey_recording_runs_its_recipe_and_model() {
     assert!(state.pending_overrides.lock().unwrap().is_empty());
 }
 
-/// NO-REGRESSION: a normal recording (no ledger entries) runs the DEFAULT recipe
-/// with the CONFIGURED model — summary present, configured STT model recorded.
+/// The no-regression counterpart: a normal recording (no ledger entries) runs
+/// the default recipe with the configured model — summary present, configured
+/// STT model recorded.
 #[tokio::test]
 async fn normal_recording_runs_default_recipe_and_configured_model() {
     let server = MockServer::start().await;
@@ -2183,7 +2186,7 @@ async fn normal_recording_runs_default_recipe_and_configured_model() {
     let rec = state.catalog.get(&id).await.unwrap().unwrap();
     assert_eq!(rec.status, RecordingStatus::Done);
     assert_eq!(rec.transcript.as_deref(), Some("CLEANED"));
-    // The default recipe DOES summarize.
+    // The default recipe does summarize.
     assert_eq!(
         rec.summary.as_deref(),
         Some("CLEANED"),
@@ -2193,11 +2196,11 @@ async fn normal_recording_runs_default_recipe_and_configured_model() {
     assert_eq!(rec.model.as_deref(), Some("configured-stt"));
 }
 
-/// `entry_config_for_target` resolves the migrated Enrichment ENTRY for a target
+/// `entry_config_for_target` resolves the migrated Enrichment entry for a target
 /// into the same (LlmPostProcessConfig, prompt) the recipe executor dispatches:
-/// it must find the `summary`/`tags` entries (target-matched, not id-matched),
-/// carry their resolved provider/model, and return the entry's prompt — so the
-/// on-demand SuggestTags / rerun_summary paths read the SAME entry the auto
+/// it finds the `summary`/`tags` entries (matched by target, not by id), carries
+/// their resolved provider/model, and returns the entry's prompt, so the
+/// on-demand SuggestTags / rerun_summary paths read the same entry the auto
 /// pipeline does. A target with no Enrichment entry returns `None`.
 #[test]
 fn entry_config_for_target_resolves_summary_and_tags_entries() {
@@ -2239,7 +2242,7 @@ fn entry_config_for_target_resolves_summary_and_tags_entries() {
         "an unknown target has no entry"
     );
 
-    // Pin the id→target mapping: the auto_tag ENTRY writes the `tags` target, so
+    // Pin the id→target mapping: the auto_tag entry writes the `tags` target, so
     // looking up by the literal id would miss it — the lookup is by `target`.
     assert!(
         cfg.playbook
@@ -2249,9 +2252,9 @@ fn entry_config_for_target_resolves_summary_and_tags_entries() {
     );
 }
 
-/// The rerun_summary RESOLUTION seam: the BASE (model, prompt) comes from the
-/// migrated `summary` ENTRY, and the Re-run modal's one-shot model/prompt
-/// overrides layer ON TOP and still win. Exercises the REAL production layering
+/// The rerun_summary resolution seam: the base (model, prompt) comes from the
+/// migrated `summary` entry, and the Re-run modal's one-shot model/prompt
+/// overrides layer on top and still win. Exercises the real production layering
 /// (`apply_oneshot_overrides`) rather than re-implementing it inline, so the test
 /// can't drift from what `rerun_summary` actually does.
 #[test]
@@ -2311,14 +2314,14 @@ fn rerun_summary_base_is_entry_and_oneshot_override_wins() {
     assert_eq!(resolved.provider, "openai");
 }
 
-/// The rerun_cleanup RESOLUTION seam (MED-B): the BASE (model, prompt) comes from
-/// the migrated `cleanup` ENTRY — NOT the legacy `[llm_post_process]` section
-/// directly — so editing the Cleanup entry changes what an on-demand Re-run
+/// The rerun_cleanup resolution seam: the base (model, prompt) comes from the
+/// migrated `cleanup` entry, not the legacy `[llm_post_process]` section
+/// directly, so editing the Cleanup entry changes what an on-demand Re-run
 /// Cleanup does. A non-empty one-shot model/prompt override still wins; a
 /// whitespace override is ignored; and when the `cleanup` entry is gone the
 /// resolver falls back to the legacy config so behavior is never worse than
-/// today. Exercises the REAL production helpers (`cleanup_entry_config` +
-/// `apply_oneshot_overrides`) without a live LLM call.
+/// before the Playbook. Exercises the real production helpers
+/// (`cleanup_entry_config` + `apply_oneshot_overrides`) without a live LLM call.
 #[test]
 fn rerun_cleanup_base_is_entry_and_oneshot_override_wins() {
     let mut cfg = Config::default();
@@ -2328,8 +2331,8 @@ fn rerun_cleanup_base_is_entry_and_oneshot_override_wins() {
     // migration copies these into the `cleanup` Transform entry.
     cfg.llm_post_process.prompt = "ENTRY CLEANUP PROMPT".into();
     cfg.migrate_playbook();
-    // Prove the base comes from the ENTRY, not the legacy section, by editing
-    // ONLY the entry after migration (the legacy section keeps base-model).
+    // Prove the base comes from the entry, not the legacy section, by editing
+    // only the entry after migration (the legacy section keeps base-model).
     let entry = cfg
         .playbook
         .iter_mut()
@@ -2401,11 +2404,11 @@ fn rerun_cleanup_base_is_entry_and_oneshot_override_wins() {
     );
 }
 
-/// FIX 1: the per-recording `pending_focused_app` side-channel is CLAIMED
-/// (removed) by `pipeline::run`, exactly like `pending_recipe` /
-/// `pending_overrides`. The recorder stashes the focused app for a non-fast-lane
-/// in-place dictation so the pipeline's end-of-run typing can honor the per-app
-/// type/paste/off override; the ledger must not leak keyed by a (soon-dead) id.
+/// The per-recording `pending_focused_app` side-channel is claimed (removed) by
+/// `pipeline::run`, just like `pending_recipe` / `pending_overrides`. The
+/// recorder stashes the focused app for a non-fast-lane in-place dictation so the
+/// pipeline's end-of-run typing can honor the per-app type/paste/off override;
+/// the ledger must not leak keyed by a (soon-dead) id.
 #[tokio::test]
 async fn run_claims_and_removes_pending_focused_app() {
     let server = MockServer::start().await;
@@ -2430,7 +2433,7 @@ async fn run_claims_and_removes_pending_focused_app() {
     let state = test_state(tmp.path(), cfg).await;
     let (id, audio_path) = seed_in_place_recording(&state, tmp.path()).await;
 
-    // Stash a focused-app entry exactly as the recorder does for a NON-fast-lane
+    // Stash a focused-app entry exactly as the recorder does for a non-fast-lane
     // in-place dictation.
     state
         .pending_focused_app
@@ -2458,10 +2461,10 @@ async fn run_claims_and_removes_pending_focused_app() {
     );
 }
 
-/// FIX 1 (cont.): a `pending_focused_app` entry is claimed EARLY — before the
-/// transcription/cancel select — so a canceled recording can't leave a stale
-/// entry keyed by a dead id. The token is already canceled when `run` checks it,
-/// settling the recording as Cancelled, yet the ledger is still cleared.
+/// A `pending_focused_app` entry is claimed early — before the transcription /
+/// cancel select — so a canceled recording can't leave a stale entry keyed by a
+/// dead id. The token is already canceled when `run` checks it, settling the
+/// recording as Cancelled, yet the ledger is still cleared.
 #[tokio::test]
 async fn pending_focused_app_absent_after_cancel() {
     let server = MockServer::start().await;
@@ -2515,16 +2518,15 @@ async fn pending_focused_app_absent_after_cancel() {
     );
 }
 
-/// FIX 1 (pure seam): a per-app "off" override resolves through
-/// `resolve_type_mode` and is an ADDITIONAL typing skip layered on top of the
-/// outer `pipeline_should_type` gate — that gate still says "type" (it governs
-/// the type-first split), and the pipeline then suppresses the insert because the
-/// resolved mode is "off". A listed app maps to its override; an unlisted one
-/// falls back to the global mode.
+/// Pure seam: a per-app "off" override resolves through `resolve_type_mode` and
+/// is a second typing skip layered on top of the outer `pipeline_should_type`
+/// gate. That gate still says "type" (it governs the type-first split), and the
+/// pipeline then suppresses the insert because the resolved mode is "off". A
+/// listed app maps to its override; an unlisted one falls back to the global mode.
 #[test]
 fn resolved_off_app_suppresses_pipeline_typing() {
     let mut cfg = Config::default();
-    // A full-pipeline in-place dictation that WOULD type at the end of the run.
+    // A full-pipeline in-place dictation that would type at the end of the run.
     cfg.in_place.full_pipeline = true;
     cfg.in_place.type_first = false;
     cfg.in_place.type_mode = "type".into();
@@ -2598,8 +2600,8 @@ async fn run_hook_steps_honors_trigger_and_required() {
         },
     };
 
-    // A keyword trigger that doesn't match the transcript → the hook is skipped
-    // (webhook never hit, nothing recorded).
+    // A keyword trigger that doesn't match the transcript skips the hook (the
+    // webhook is never hit, nothing recorded).
     let mut sf = None;
     let out = run_hook_steps(
         &state,
@@ -2633,10 +2635,10 @@ async fn run_hook_steps_honors_trigger_and_required() {
     );
 }
 
-/// `skip_active_queue_item` must only honor the global skip broadcast for the
-/// recording that is the queue's CURRENTLY-PROCESSING item — so one ⏭ aborts
-/// just that stage, not every concurrent LLM stage (e.g. an on-demand re-run
-/// streaming at the same time). Locks R4.
+/// `skip_active_queue_item` only honors the global skip broadcast for the
+/// recording that is the queue's currently-processing item, so one ⏭ aborts just
+/// that stage, not every concurrent LLM stage (for example an on-demand re-run
+/// streaming at the same time).
 #[tokio::test]
 async fn skip_only_fires_for_the_active_processing_item() {
     use crate::pipeline::skip_active_queue_item;
@@ -2667,7 +2669,7 @@ async fn skip_only_fires_for_the_active_processing_item() {
         })
     };
 
-    // A skip aimed at a NON-active recording must NOT resolve: the helper wakes
+    // A skip aimed at a non-active recording must not resolve: the helper wakes
     // on each broadcast, sees it isn't the active item, and re-arms. The timeout
     // is the assertion that it stays parked despite the steady pulses.
     let parked = tokio::time::timeout(
@@ -2680,7 +2682,7 @@ async fn skip_only_fires_for_the_active_processing_item() {
         "a skip for a non-active recording must not resolve skip_active_queue_item"
     );
 
-    // A skip aimed at the ACTIVE recording resolves on the next broadcast.
+    // A skip aimed at the active recording resolves on the next broadcast.
     tokio::time::timeout(
         Duration::from_millis(500),
         skip_active_queue_item(&state, &active),
@@ -2691,17 +2693,17 @@ async fn skip_only_fires_for_the_active_processing_item() {
     pulse.abort();
 }
 
-/// Regression (F2): a configured hook fires EXACTLY once per normal transcribe —
-/// never twice. The pipeline still carries both firing paths (the legacy
-/// `[hook].commands`/`keyword_rules`/`webhook_url` loops AND the recipe Hook
-/// executor `run_hook_steps`), so the guarantee that they don't BOTH fire rests
+/// A configured hook fires exactly once per normal transcribe, never twice. The
+/// pipeline still carries both firing paths — the legacy
+/// `[hook].commands`/`keyword_rules`/`webhook_url` loops and the recipe Hook
+/// executor `run_hook_steps` — so the guarantee that they don't both fire rests
 /// on `migrate_hooks` moving the legacy fields into recipe Hook entries and then
-/// CLEARING the legacy fields. This test mirrors the daemon's startup
+/// clearing the legacy fields. This test mirrors the daemon's startup
 /// (`load_config` runs both migrations before any pipeline run): it seeds a
 /// legacy `[hook]` command + webhook, migrates, then runs the full pipeline and
 /// asserts the shell hook ran once (append-and-count, so a second fire would be
-/// visible) and the webhook POSTed once. If the legacy loops ever stop clearing
-/// — or a second path re-fires the migrated entries — the counts double and this
+/// visible) and the webhook POSTed once. If the legacy loops ever stop clearing,
+/// or a second path re-fires the migrated entries, the counts double and this
 /// fails.
 #[tokio::test]
 async fn configured_hook_fires_exactly_once_per_transcribe() {
@@ -2726,8 +2728,8 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         .await;
 
     let tmp = tempfile::tempdir().unwrap();
-    // The marker is APPENDED to (`>>`), not overwritten, so a double-fire would
-    // leave two lines — `>` would hide it.
+    // The marker is appended to (`>>`), not overwritten, so a double-fire leaves
+    // two lines — a plain `>` would hide it.
     let marker = tmp.path().join("hook-fires.txt");
 
     let mut cfg = Config::default();
@@ -2747,9 +2749,9 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
     cfg.hook.keyword_rules.clear();
     cfg.hook.webhook_url = Some(format!("{}/webhook", webhook_server.uri()));
 
-    // Mirror the daemon startup: `load_config` runs BOTH migrations before any
+    // Mirror the daemon startup: `load_config` runs both migrations before any
     // pipeline run. `migrate_hooks` is what moves the legacy fields into recipe
-    // Hook entries and clears them, so only ONE path fires post-migration.
+    // Hook entries and clears them, so only one path fires post-migration.
     // (`test_state` runs `migrate_playbook` again; it's idempotent.)
     cfg.migrate_playbook();
     cfg.migrate_hooks();
@@ -2816,7 +2818,7 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         .await
         .expect("pipeline run should succeed");
 
-    // The shell hook ran EXACTLY once: one appended line, not two.
+    // The shell hook ran exactly once: one appended line, not two.
     let fires = std::fs::read_to_string(&marker).expect("the migrated hook wrote its marker");
     let lines = fires.lines().filter(|l| !l.trim().is_empty()).count();
     assert_eq!(
@@ -2824,7 +2826,7 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         "the configured hook fired exactly once, got: {fires:?}"
     );
 
-    // The webhook POSTed EXACTLY once.
+    // The webhook POSTed exactly once.
     let received = webhook_server.received_requests().await.unwrap();
     assert_eq!(
         received.len(),

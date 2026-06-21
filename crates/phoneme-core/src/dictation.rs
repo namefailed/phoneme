@@ -30,17 +30,17 @@ pub fn fast_polish(raw: &str) -> String {
     text = collapse_doubled_words(&text);
     text = normalize_spacing(&text);
     text = finish_sentence(&text);
-    // Voice commands run LAST: the steps above split on whitespace and would
-    // collapse an inserted newline, so the literal `\n`/`\n\n` are applied to
-    // the otherwise-polished text where they survive to the typed output.
+    // Voice commands run last. The steps above split on whitespace and would
+    // collapse an inserted newline, so the literal `\n`/`\n\n` go onto the
+    // otherwise-polished text, where they survive through to the typed output.
     apply_voice_commands(&text)
 }
 
 /// Spoken editing/formatting commands, applied to already-polished dictation.
 ///
-/// Conservative by design — only the three the roadmap names, and only when a
-/// command is its **own sentence/segment**, so a literal "on a new line of
-/// text" mid-sentence is left untouched (the boundary rule). Recognized:
+/// Conservative by design: only the three the roadmap names, and only when a
+/// command is its own sentence/segment, so a literal "on a new line of text"
+/// mid-sentence is left untouched (the boundary rule). Recognized:
 /// - "new line" / "newline" → a single line break (`\n`)
 /// - "new paragraph" → a blank line (`\n\n`)
 /// - "scratch that" / "delete that" → drop the preceding sentence (the thing
@@ -158,10 +158,10 @@ fn normalize_command(seg: &str) -> String {
 }
 
 /// Remove `[...]`, `(...)`, and `*...*` spans — whisper emits non-speech
-/// annotations in these shapes (`[BLANK_AUDIO]`, `(upbeat music)`). Spans are
-/// dropped only when SHORT (≤ 40 chars) and free of sentence punctuation, so
-/// a real parenthetical the speaker dictated ("(see the attached doc)")
-/// survives anything whisper would never emit as an annotation.
+/// annotations in these shapes (`[BLANK_AUDIO]`, `(upbeat music)`). A span is
+/// dropped only when it is short (≤ 40 chars) and free of sentence punctuation,
+/// so a real parenthetical the speaker dictated ("(see the attached doc)")
+/// survives, while anything whisper would emit as an annotation does not.
 fn strip_annotations(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
@@ -243,11 +243,12 @@ fn strip_fillers(text: &str) -> String {
 }
 
 /// Collapse an immediately repeated word — the classic dictation stutter
-/// ("the the report", "I I think"). Case-insensitive on the comparison, keeps
-/// the first occurrence, only when both are bare words (no punctuation), so
-/// deliberate doubles like "that that" after a comma survive as typed… they
-/// don't — by design: a true intentional double is far rarer in dictation
-/// than the stutter, and the LLM mode exists for prose that needs fidelity.
+/// ("the the report", "I I think"). Compares case-insensitively, keeps the first
+/// occurrence, and only fires when both words are bare (no punctuation). A
+/// deliberate double like "that, that" survives because the comma makes the
+/// first word non-bare; an undeliberate-looking "that that" does not. That
+/// tradeoff is intended: a genuine intentional double is far rarer in dictation
+/// than the stutter, and the LLM mode is there for prose that needs fidelity.
 fn collapse_doubled_words(text: &str) -> String {
     let mut out: Vec<&str> = Vec::new();
     for word in text.split_whitespace() {
@@ -306,9 +307,9 @@ fn finish_sentence(text: &str) -> String {
     out
 }
 
-/// A minimal-churn cursor edit that preserves BOTH the common prefix and the
-/// common suffix (P3 spike). Counts are UTF-16 code units, matching how the OS
-/// arrow/backspace keys move and delete (see `reconcile_edit`'s note).
+/// A minimal-churn cursor edit that preserves both the common prefix and the
+/// common suffix (P3 spike). Counts are in UTF-16 code units, matching how the OS
+/// arrow and backspace keys move and delete (see `reconcile_edit`'s note).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WordReconcile {
     /// Move the caret left this many units, back over the unchanged suffix.
@@ -321,23 +322,24 @@ pub struct WordReconcile {
     pub right: usize,
 }
 
-/// **EXPERIMENTAL (P3 spike — NOT yet wired into the live dictation path.)**
+/// Experimental P3 spike — not yet wired into the live dictation path.
 ///
-/// Word-level reconcile from already-typed `streamed` to `final_text`. Unlike
-/// [`reconcile_edit`] (prefix-only: it backspaces the entire divergent tail from
-/// the end, so a corrected *early* word retypes everything after it), this also
-/// keeps the longest common SUFFIX, so only the genuinely-changed middle is
-/// rewritten. That needs the caret moved left over the suffix, the middle
-/// patched, then the caret moved back — hence the `left`/`right` cursor steps.
+/// Word-level reconcile from already-typed `streamed` to `final_text`.
+/// [`reconcile_edit`] is prefix-only: it backspaces the whole divergent tail from
+/// the end, so correcting an early word retypes everything after it. This version
+/// also keeps the longest common suffix, so only the genuinely changed middle is
+/// rewritten — which means moving the caret left over the suffix, patching the
+/// middle, then moving the caret back, hence the `left`/`right` cursor steps.
 ///
-/// Both the prefix and suffix split points are snapped to whitespace boundaries
-/// so the rewrite always covers WHOLE words (no mid-word caret edits, which look
-/// jarring live and confuse IMEs). When the common suffix is empty this reduces
-/// exactly to [`reconcile_edit`] (`left == right == 0`).
+/// Both the prefix and suffix split points snap to whitespace boundaries so the
+/// rewrite always covers whole words; mid-word caret edits look jarring live and
+/// confuse IMEs. When the common suffix is empty this reduces exactly to
+/// [`reconcile_edit`] (`left == right == 0`).
 ///
-/// Not wired up because the left/right caret moves rely on synthetic Arrow keys,
-/// which are far less reliable across apps than end-anchored backspacing; this
-/// proves the algorithm so the OS-layer cutover can be evaluated separately.
+/// It stays unwired because the left/right caret moves rely on synthetic Arrow
+/// keys, which are far less reliable across apps than end-anchored backspacing.
+/// This proves out the algorithm so the OS-layer cutover can be judged on its
+/// own.
 pub fn reconcile_edit_words(streamed: &str, final_text: &str) -> WordReconcile {
     let s: Vec<char> = streamed.chars().collect();
     let f: Vec<char> = final_text.chars().collect();
@@ -348,7 +350,7 @@ pub fn reconcile_edit_words(streamed: &str, final_text: &str) -> WordReconcile {
     let prefix = snap_prefix_to_word(&s, raw_prefix);
 
     // Longest common suffix, capped so it never overlaps the prefix on either
-    // side, then snapped FORWARD to a word boundary (the suffix begins right
+    // side, then snapped forward to a word boundary (the suffix begins right
     // after a whitespace) for the same whole-word reason.
     let max_suffix = (s.len().min(f.len())).saturating_sub(prefix);
     let raw_suffix = s
@@ -402,12 +404,12 @@ fn snap_suffix_to_word(s: &[char], suffix: usize) -> usize {
 /// rolling preview, and the final batch transcript is more accurate, so this
 /// patches the typed text to the final one with the fewest visible keystrokes.
 ///
-/// The returned `backspaces` is the number of UTF-16 code UNITS in the deleted
-/// tail, not the number of Rust `char`s (audit M4). A Windows Backspace deletes
-/// one UTF-16 code unit, so a deleted astral character (emoji, some CJK/IME
-/// output) is two backspaces, not one — counting `char`s would under-delete and
-/// leave a stray surrogate-pair half behind. The common-prefix split stays on
-/// `char` boundaries (never mid-code-point); only the COUNT is in UTF-16 units.
+/// The returned `backspaces` is the number of UTF-16 code units in the deleted
+/// tail, not the number of Rust `char`s. A Windows Backspace deletes one UTF-16
+/// code unit, so a deleted astral character (emoji, some CJK/IME output) costs
+/// two backspaces, not one; counting `char`s would under-delete and strand a
+/// surrogate-pair half. The common-prefix split itself stays on `char`
+/// boundaries (never mid-code-point) — only the count is in UTF-16 units.
 pub fn reconcile_edit(streamed: &str, final_text: &str) -> (usize, String) {
     let s: Vec<char> = streamed.chars().collect();
     let f: Vec<char> = final_text.chars().collect();
@@ -449,9 +451,9 @@ mod tests {
     #[test]
     fn reconcile_backspaces_count_utf16_units_for_astral_text() {
         // A Windows Backspace deletes one UTF-16 code unit, so an astral emoji
-        // (two code units) in the deleted tail is TWO backspaces, not one — a
-        // char count would under-delete and strand a surrogate half (audit M4).
-        // "hi 😀" → "hi" : the trailing " 😀" is space(1) + emoji(2) = 3 units.
+        // (two code units) in the deleted tail costs two backspaces, not one — a
+        // char count would under-delete and strand a surrogate half.
+        // "hi 😀" → "hi": the trailing " 😀" is space(1) + emoji(2) = 3 units.
         assert_eq!(reconcile_edit("hi 😀", "hi"), (3, String::new()));
         // Replacing the emoji keeps the "hi " prefix and deletes only the emoji
         // (2 units), then types the replacement.
@@ -498,7 +500,7 @@ mod tests {
 
     #[test]
     fn word_reconcile_preserves_the_common_suffix() {
-        // An EARLY change must NOT retype the trailing words — that is the whole
+        // An early change shouldn't retype the trailing words — that's the whole
         // point over the prefix-only reconcile. "world" is untouched (left>0), and
         // far fewer characters are typed than the prefix-only path would.
         let r = reconcile_edit_words("hello there world", "hello big world");
@@ -522,8 +524,8 @@ mod tests {
     fn word_reconcile_no_caret_move_without_a_common_suffix() {
         // "wrld"/"world" share no whole-word suffix, so there's nothing to move
         // the caret back over — it stays an end-anchored backspace+type like
-        // reconcile_edit. (It retypes the WHOLE word, not the char-level tail,
-        // because the prefix is snapped to the word boundary — that's intended.)
+        // reconcile_edit. It retypes the whole word, not the char-level tail,
+        // because the prefix snaps to the word boundary; that's intended.
         let r = reconcile_edit_words("hello wrld", "hello world");
         assert_eq!(r.left, 0);
         assert_eq!(r.right, 0);
@@ -569,9 +571,9 @@ mod tests {
     #[test]
     fn filler_transfers_its_terminal_punctuation_not_just_a_comma() {
         // A filler carrying a sentence-ender keeps the boundary: dropping "um."
-        // must not merge two sentences into a run-on (audit LOW). fast_polish
-        // only capitalizes the first letter, so the second sentence stays as
-        // dictated — the point of this fix is the preserved `. ` boundary.
+        // shouldn't merge two sentences into a run-on. fast_polish only
+        // capitalizes the first letter, so the second sentence stays as dictated —
+        // what matters here is the preserved `. ` boundary.
         assert_eq!(
             fast_polish("that's all um. moving on"),
             "That's all. moving on."

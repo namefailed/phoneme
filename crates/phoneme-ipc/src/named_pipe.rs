@@ -184,7 +184,7 @@ impl NamedPipeListener {
             .take()
             .ok_or_else(|| IpcTransportError::Internal("listener empty".into()))?;
 
-        // Re-arm the listener BEFORE awaiting connect. If the client closes early
+        // Re-arm the listener before awaiting connect. If the client closes early
         // or connect otherwise fails, the `?` below must not leave `self.current`
         // as None — that would make every later accept() fail with "listener
         // empty", locking out all IPC until the daemon restarts.
@@ -224,11 +224,11 @@ impl NamedPipeTransport {
     pub async fn connect(name: &str) -> TransportResult<Self> {
         let path = pipe_path(name);
         // ERROR_PIPE_BUSY (231) means every server instance is momentarily
-        // taken — normal under bursts, so retry. But BOUNDED: a stale handle
-        // (daemon wedged with the pipe held) used to spin this loop forever,
-        // hanging the caller. 5s is far beyond any legitimate busy window;
-        // past it, fail with the underlying error like any other connect
-        // failure so callers surface "daemon not reachable".
+        // taken — normal under bursts, so retry. The retry is bounded, though:
+        // a stale handle (a daemon wedged with the pipe held) would otherwise
+        // spin this loop forever and hang the caller. 5s is far beyond any
+        // legitimate busy window; past it, fail with the underlying error like
+        // any other connect failure so callers surface "daemon not reachable".
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let client = loop {
             match ClientOptions::new().open(&path) {

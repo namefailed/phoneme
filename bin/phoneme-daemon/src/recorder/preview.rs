@@ -10,8 +10,8 @@
 //! The stitcher (`stitch_preview`/`merge_preview_tick`) keeps the displayed
 //! caption from reshuffling words already shown as the audio window slides; the
 //! adaptive cadence (`next_preview_interval`) self-throttles a heavy tick so the
-//! preview never starves the final transcription. All of this lives behind the
-//! same opt-in flags as before — the default path runs no loop at all.
+//! preview never starves the final transcription. All of this lives behind opt-in
+//! flags, and the default path runs no loop at all.
 
 use super::{DaemonRecorder, PreviewKind, PreviewTask};
 use crate::app_state::AppState;
@@ -20,30 +20,29 @@ use phoneme_core::RecordingId;
 use phoneme_ipc::DaemonEvent;
 use std::time::Duration;
 
-/// Base cadence for the streaming-preview loop on a CLOUD transcription provider,
+/// Base cadence for the streaming-preview loop on a cloud transcription provider,
 /// where each tick pays HTTP + file-write overhead and we don't want to hammer the
-/// API. This is NOT the universal cadence: a native (in-process) provider drops the
+/// API. It isn't the universal cadence: a native (in-process) provider drops the
 /// base to 1000 ms inside `start_preview` for smoother real-time captions, since it
 /// has no network round-trip. The adaptive throttle (`preview_adaptive`) can stretch
 /// either base up to `PREVIEW_INTERVAL_CEIL` when a tick overruns.
 const PREVIEW_INTERVAL: Duration = Duration::from_millis(2000);
 
-/// Minimum number of *new* samples (beyond the previous preview) before we spend
-/// a transcription on a fresh tick. At 16 kHz this is ~0.5 s, so the caption
-/// advances about twice as smoothly as the old ~1.0 s gate (the "chunky/laggy"
-/// complaint). A tick that can't get the whisper permit still skips and a heavy
-/// tick still backs off via the adaptive cadence, so weak boxes never thrash —
-/// this only lets capable machines update more often.
+/// Minimum number of new samples (beyond the previous preview) before we spend
+/// a transcription on a fresh tick. At 16 kHz this is ~0.5 s, smooth enough that
+/// the caption doesn't feel chunky. A tick that can't get the whisper permit still
+/// skips and a heavy tick still backs off via the adaptive cadence, so weak boxes
+/// never thrash; the gate just lets capable machines update more often.
 const PREVIEW_MIN_NEW_SAMPLES: usize = 8_000;
 
 /// The streaming preview transcribes only the last `PREVIEW_WINDOW_SAMPLES` of
-/// captured audio each tick — a rolling "live caption" — so per-tick work stays
-/// roughly constant instead of growing with the recording length. Without this
-/// the loop re-transcribed the entire (ever-growing) buffer every tick, which is
-/// O(n²) over a recording and saturates the CPU / whisper-server on long takes.
-/// The authoritative full transcript is still produced from the complete file
-/// after the recording stops (see the pipeline), so this only bounds the live
-/// preview, not the final result. 15 s at 16 kHz.
+/// captured audio each tick (a rolling live caption), so per-tick work stays
+/// roughly constant instead of growing with the recording length. Transcribing the
+/// whole ever-growing buffer every tick would be O(n²) over a recording and
+/// saturate the CPU / whisper-server on long takes. The authoritative full
+/// transcript still comes from the complete file after the recording stops (see the
+/// pipeline), so this bounds only the live preview, not the final result. 15 s at
+/// 16 kHz.
 const PREVIEW_WINDOW_SAMPLES: usize = 16_000 * 15;
 
 /// Adaptive-cadence ceiling: even when ticks keep overrunning (a heavy model on
@@ -52,10 +51,9 @@ const PREVIEW_WINDOW_SAMPLES: usize = 16_000 * 15;
 const PREVIEW_INTERVAL_CEIL: Duration = Duration::from_millis(8000);
 
 /// Pick the wait before the next preview tick. With `adaptive`, never schedule
-/// faster than the last tick actually took — so a slow box/model self-throttles
-/// instead of piling onto the single serial whisper-server and thrashing the
-/// machine (the live-preview record-time crash) — clamped to `[base, ceil]`.
-/// Without it, always `base` (the historical fixed cadence).
+/// faster than the last tick actually took, clamped to `[base, ceil]`, so a slow
+/// box or model self-throttles instead of piling onto the single serial
+/// whisper-server and thrashing the machine. Without it, always `base`.
 fn next_preview_interval(
     base: Duration,
     last_cost: Duration,
@@ -71,7 +69,7 @@ fn next_preview_interval(
 /// Normalized 0.0..=1.0 loudness of a sample block for the overlay's waveform
 /// pill: RMS over the `i16` samples scaled by full scale, then a `sqrt` curve so
 /// ordinary speech still visibly moves the bars (linear RMS sits very low for
-/// voice). Empty input is silence.
+/// voice). Empty input reads as silence.
 fn rms_level_01(samples: &[i16]) -> f32 {
     if samples.is_empty() {
         return 0.0;
@@ -82,41 +80,41 @@ fn rms_level_01(samples: &[i16]) -> f32 {
 }
 
 /// Stitch a freshly-transcribed trailing window onto the preview text already
-/// shown, producing a stable, forward-growing caption instead of a text that
-/// "rewinds" every time the rolling audio window slides.
+/// shown, producing a stable, forward-growing caption rather than one that rewinds
+/// every time the rolling audio window slides.
 ///
-/// Why this exists: the preview transcribes only the last ~15 s of audio each
-/// tick (`PREVIEW_WINDOW_SAMPLES`) to keep per-tick cost constant. While the
-/// recording is shorter than that window, each transcription covers the whole
-/// take and grows monotonically — fine to show directly. But once the window
-/// starts sliding, each transcription begins partway through the speech, so
-/// naively replacing the displayed text makes its *start* jump around (the most
-/// visible jank). We instead treat the previously-shown text as a committed
-/// prefix and append only the genuinely-new tail of the latest window, found by
-/// the longest overlap between the committed text's suffix and the window's
-/// prefix. Word-boundary matching (not raw chars) keeps whisper's minor
-/// re-tokenization from defeating the overlap.
+/// The preview transcribes only the last ~15 s of audio each tick
+/// (`PREVIEW_WINDOW_SAMPLES`) to keep per-tick cost constant. While the recording
+/// is shorter than that window, each transcription covers the whole take and grows
+/// monotonically, which is fine to show directly. Once the window starts sliding,
+/// each transcription begins partway through the speech, so naively replacing the
+/// displayed text makes its start jump around (the most visible jank). Instead we
+/// treat the previously-shown text as a committed prefix and append only the
+/// genuinely-new tail of the latest window, found by the longest overlap between
+/// the committed text's suffix and the window's prefix. Matching on word boundaries
+/// rather than raw chars keeps whisper's minor re-tokenization from defeating the
+/// overlap.
 ///
 /// `committed` is the full text shown so far; `window` is the latest window
-/// transcription. Returns the new full text to display. This is a pure function
-/// so it can be unit-tested without any audio/whisper round trip.
+/// transcription. Returns the new full text to display. Pure, so it can be
+/// unit-tested without any audio/whisper round trip.
 ///
-/// The window is always the freshest source of truth for the speech it covers,
-/// so we *anchor on it*: find where the window re-states the committed tail, keep
-/// the committed prefix older than that anchor, and append only the window words
-/// past the overlap. We never blindly re-append the whole window onto `committed`
-/// — that was the duplication bug. Whisper re-tokenizes/revises the window's
-/// leading words between ticks, so an overlap pinned to the very first window
-/// word often failed to match and ~15 s of already-shown words got re-appended,
-/// permanently (`committed` only grows). Two defenses keep that from happening:
-/// we normalize words (lowercase + strip surrounding punctuation) before
-/// comparing so minor revisions still match, and we let the overlap start a few
-/// words *into* the window (`MAX_LEADING_SKIP`) so a revised/inserted leading
-/// word doesn't defeat the match. Each tick's tail is therefore sourced once,
-/// from the newest transcription, so a word run can never duplicate.
+/// The window is always the freshest source of truth for the speech it covers, so
+/// we anchor on it: find where the window re-states the committed tail, keep the
+/// committed prefix older than that anchor, and append only the window words past
+/// the overlap. We never blindly re-append the whole window onto `committed` — that
+/// duplicates words. Whisper re-tokenizes and revises the window's leading words
+/// between ticks, so an overlap pinned to the very first window word often fails to
+/// match, and then ~15 s of already-shown words get re-appended permanently
+/// (`committed` only grows). Two defenses prevent that: we normalize words
+/// (lowercase, strip surrounding punctuation) before comparing so minor revisions
+/// still match, and we let the overlap start a few words into the window
+/// (`MAX_LEADING_SKIP`) so a revised or inserted leading word doesn't defeat the
+/// match. Each tick's tail is therefore sourced once, from the newest
+/// transcription, so a word run can never duplicate.
 /// Uppercase the first alphabetic character of `s`, leaving the rest untouched.
 /// Streaming-type only: the first word is stable once committed, so this keeps the
-/// live-typed text aligned with the polished final's capitalized start — making the
+/// live-typed text aligned with the polished final's capitalized start, making the
 /// stop reconcile a minimal tail patch instead of a full rewrite. No-op when the
 /// first letter is already uppercase or there is no letter.
 fn capitalize_first(s: &str) -> String {
@@ -163,9 +161,9 @@ fn stitch_preview(committed: &str, window: &str) -> Option<String> {
     let committed_norm: Vec<String> = committed_words.iter().map(|w| norm(w)).collect();
     let window_norm: Vec<String> = window_words.iter().map(|w| norm(w)).collect();
 
-    // Total containment: the window is already a suffix of committed (nothing
-    // new revised in this slide). Leave the caption untouched so we never grow
-    // it with a re-statement of words already shown.
+    // Total containment: the window is already a suffix of committed (nothing new
+    // revised in this slide). Leave the caption untouched so we never grow it with
+    // a re-statement of words already shown.
     if window_norm.len() <= committed_norm.len()
         && committed_norm[committed_norm.len() - window_norm.len()..] == window_norm[..]
     {
@@ -228,11 +226,11 @@ fn stitch_preview(committed: &str, window: &str) -> Option<String> {
 /// audio window has started sliding (the take no longer fits a single window).
 ///
 /// On a no-overlap, no-containment `None`:
-/// - **slid** → the window is a post-silence tail, so append it.
-/// - **not slid** → the take still fits the window, so a `None` means whisper
-///   re-transcribed the whole (still-short) take differently. KEEP `committed`
+/// - slid: the window is a post-silence tail, so append it.
+/// - not slid: the take still fits the window, so a `None` means whisper
+///   re-transcribed the whole (still-short) take differently. Keep `committed`
 ///   untouched and let the next tick re-anchor, rather than replacing it wholesale
-///   and reshuffling every already-shown word. This upholds the subsystem's
+///   and reshuffling every already-shown word. That upholds the subsystem's
 ///   "committed never rewrites" invariant. Pulled out as a pure function so the
 ///   fallback branches are unit-testable without an audio/whisper round trip.
 fn merge_preview_tick(committed: &str, window: &str, window_slid: bool) -> String {
@@ -245,22 +243,22 @@ fn merge_preview_tick(committed: &str, window: &str, window_slid: bool) -> Strin
     })
 }
 
-/// The committed (stable) prefix length to attach to a `TranscriptionPartial`:
-/// the UTF-16 code-unit length, matching the JS overlay which indexes by code unit,
-/// of the caption shown BEFORE this tick's append, clamped to the
-/// merged caption's length. Everything in `merged` past this offset is this tick's
-/// freshly-appended, least-settled tail — the part the overlay dims as tentative.
+/// The committed (stable) prefix length to attach to a `TranscriptionPartial`: the
+/// UTF-16 code-unit length (matching the JS overlay, which indexes by code unit) of
+/// the caption shown before this tick's append, clamped to the merged caption's
+/// length. Everything in `merged` past this offset is this tick's freshly-appended,
+/// least-settled tail — the part the overlay dims as tentative.
 ///
 /// `prev_committed` is the caption from the previous tick (empty on the first
 /// emit); `merged` is the result of [`merge_preview_tick`] for this tick. Because
 /// `merge_preview_tick` only ever keeps `prev_committed` verbatim and appends, the
-/// prefix length is normally `prev_committed.len()` and `≤ merged.len()`; the
-/// clamp is a guard so a future merge that ever shortened the caption could never
-/// produce an out-of-range boundary. On the first emit `prev_committed` is empty
-/// so the boundary is `0` (all fresh). When nothing new was appended the merged
-/// caption equals `prev_committed`, so the boundary equals the full length and the
-/// overlay dims nothing. Pulled out (not inlined) so the boundary rule is unit-
-/// testable without driving an audio/whisper round trip.
+/// prefix length is normally `prev_committed.len()` and `≤ merged.len()`; the clamp
+/// guards against a future merge that ever shortened the caption producing an
+/// out-of-range boundary. On the first emit `prev_committed` is empty so the
+/// boundary is `0` (all fresh). When nothing new was appended the merged caption
+/// equals `prev_committed`, so the boundary equals the full length and the overlay
+/// dims nothing. Pulled out (not inlined) so the boundary rule is unit-testable
+/// without driving an audio/whisper round trip.
 fn preview_committed_len(prev_committed: &str, merged: &str) -> usize {
     // Count UTF-16 code units, not bytes: the JS overlay consumer
     // (frontend/src/overlayTail.ts) indexes the caption by code unit
@@ -273,21 +271,18 @@ fn preview_committed_len(prev_committed: &str, merged: &str) -> usize {
 
 impl DaemonRecorder {
     /// Spawn the streaming-preview loop for `id`, if `recording.streaming_preview`
-    /// is enabled. No-op (and no task) when the flag is off — that default path
-    /// is byte-for-byte the historical behavior. The loop snapshots the live
-    /// recorder (through `snapshot`) every `PREVIEW_INTERVAL`, transcribes the
+    /// is enabled. No-op (and no task) when the flag is off. The loop snapshots the
+    /// live recorder (through `snapshot`) every `PREVIEW_INTERVAL`, transcribes the
     /// audio so far via the configured provider, and emits `TranscriptionPartial`.
-    /// It transcribes one tick at a time (a slow transcription simply means the
-    /// next tick is skipped — never two in flight), and stops when told to via
-    /// `stop_tx`.
+    /// It transcribes one tick at a time (a slow transcription just means the next
+    /// tick is skipped, never two in flight), and stops when told to via `stop_tx`.
     ///
-    /// `snapshot` is a `SnapshotHandle` cloned from the recorder whose audio
-    /// the preview should reflect: the single recording's recorder, or a
-    /// meeting's mic track. Passing the handle (rather than reaching into
-    /// `self.handle`) is what lets one preview implementation serve BOTH the
-    /// single-recording and the meeting path — meetings previously emitted no
-    /// partials at all because their recorder lives inside `ActiveMeeting`, not
-    /// `self.handle`.
+    /// `snapshot` is a `SnapshotHandle` cloned from the recorder whose audio the
+    /// preview should reflect: the single recording's recorder, or a meeting's mic
+    /// track. Passing the handle, rather than reaching into `self.handle`, is what
+    /// lets one preview implementation serve both the single-recording and the
+    /// meeting path; a meeting's recorder lives inside `ActiveMeeting`, not
+    /// `self.handle`, so without this it would emit no partials at all.
     pub(super) async fn start_preview(
         &self,
         state: &AppState,
@@ -308,15 +303,15 @@ impl DaemonRecorder {
             let cfg = state.config.load();
             // The live preview uses its own provider when configured
             // (`preview_whisper`) — a fast local model on a second server, or a
-            // cloud API — so it never contends with the final transcription.
-            // Falls back to the main provider when unset (unchanged behavior).
-            // `apply` swaps in the port the bundled server actually listens on
-            // (it falls back from the configured port when another app holds it).
+            // cloud API — so it never contends with the final transcription. Falls
+            // back to the main provider when unset. `apply` swaps in the port the
+            // bundled server actually listens on (it falls back from the configured
+            // port when another app holds it).
             //
             // `secondary` (meeting "both" mode, 2nd track) points this loop at the
-            // SECOND preview server (its derived port) and gates it on the
-            // independent `preview2_sem` — so the two meeting tracks transcribe
-            // CONCURRENTLY instead of alternating on the shared `whisper_sem`.
+            // second preview server (its derived port) and gates it on the
+            // independent `preview2_sem`, so the two meeting tracks transcribe
+            // concurrently instead of alternating on the shared `whisper_sem`.
             let preview_sem = if secondary {
                 state.preview2_sem.clone()
             } else {
@@ -324,8 +319,8 @@ impl DaemonRecorder {
             };
             let mut provider_cfg = cfg.preview_provider_config().clone();
             if secondary {
-                // Same preview model, the 2nd server's port — `apply` then
-                // resolves it to the live port the 2nd server is listening on.
+                // Same preview model, the 2nd server's port; `apply` then resolves
+                // it to the live port the 2nd server is listening on.
                 provider_cfg.bundled_server_port = cfg.preview2_port();
             }
             let preview_cfg = state.whisper_ports.apply(&cfg, &provider_cfg);
@@ -335,31 +330,31 @@ impl DaemonRecorder {
             );
             let is_native = provider.is_native();
 
-            // If the provider is native (running directly in our RAM), we can safely
-            // drop the interval to 1000ms for real-time streaming without worrying
-            // about HTTP/file-write overhead. Cloud providers get longer intervals
-            // to avoid overwhelming the API.
+            // A native provider runs directly in our process, so we can drop the
+            // interval to 1000 ms for real-time streaming without paying HTTP /
+            // file-write overhead. Cloud providers get longer intervals to avoid
+            // overwhelming the API.
             let base_interval = if is_native {
                 std::time::Duration::from_millis(1000)
             } else {
                 PREVIEW_INTERVAL
             };
             // Adaptive cadence: when a tick's transcription overruns the base
-            // interval (heavy model on a weak box), wait at least that long
-            // before the next one so the preview self-throttles instead of
-            // piling onto the single serial whisper-server and thrashing the
-            // machine. Starts at the base cadence; the first sleep also doubles
-            // as the "don't transcribe near-empty audio" warm-up.
+            // interval (heavy model on a weak box), wait at least that long before
+            // the next one so the preview self-throttles instead of piling onto the
+            // single serial whisper-server and thrashing the machine. Starts at the
+            // base cadence; the first sleep also doubles as the "don't transcribe
+            // near-empty audio" warm-up.
             let adaptive = cfg.recording.preview_adaptive;
             let mut current_wait = base_interval;
 
             let tmp_wav =
                 std::env::temp_dir().join(format!("phoneme-preview-{}.wav", id.file_stem()));
             let mut last_len = 0usize;
-            // The stable, forward-growing caption shown so far. While the
-            // recording is shorter than the audio window each transcription is of
-            // the whole take (authoritative), so we replace this wholesale; once
-            // the window slides we stitch the new tail onto it (see stitch_preview).
+            // The stable, forward-growing caption shown so far. While the recording
+            // is shorter than the audio window each transcription covers the whole
+            // take (authoritative), so we replace this wholesale; once the window
+            // slides we stitch the new tail onto it (see `stitch_preview`).
             let mut committed = String::new();
             // Streaming-type only: what we've typed at the cursor so far (clean
             // extensions of the committed caption, first letter capitalized).
@@ -373,8 +368,8 @@ impl DaemonRecorder {
                 }
 
                 // Start the cadence clock here so the adaptive throttle measures the
-                // TRUE per-tick wall cost it is meant to self-throttle on — snapshot +
-                // WAV encode + write + transcribe — not the transcribe call alone. A
+                // full per-tick wall cost it is meant to self-throttle on — snapshot,
+                // WAV encode, write, transcribe — not the transcribe call alone. A
                 // tick that skips (not enough new audio, or no free whisper permit)
                 // `continue`s before reaching `next_preview_interval`, so it never
                 // feeds this clock; only a tick that actually does the work does.
@@ -389,29 +384,28 @@ impl DaemonRecorder {
                         Ok(s) => s,
                         Err(_) => break,
                     };
-                // Skip until enough *new* audio has accumulated to be worth a tick.
+                // Skip until enough new audio has accumulated to be worth a tick.
                 if total_len < last_len + PREVIEW_MIN_NEW_SAMPLES {
                     continue;
                 }
                 last_len = total_len;
 
-                // Yield to final transcriptions: only run this preview tick if
-                // the permit is free *right now*. The primary loop holds
-                // `whisper_sem`, so it yields to the final transcription (which
-                // previously caused "Whisper timed out after 60s"); the secondary
-                // "both"-mode loop holds the independent `preview2_sem`, so it runs
-                // concurrently on its own server. The permit is held for the
-                // duration of this tick's transcription.
+                // Yield to final transcriptions: only run this preview tick if the
+                // permit is free right now. The primary loop holds `whisper_sem`, so
+                // it yields to the final transcription rather than stalling it into a
+                // timeout; the secondary "both"-mode loop holds the independent
+                // `preview2_sem`, so it runs concurrently on its own server. The
+                // permit is held for the duration of this tick's transcription.
                 let _preview_permit = match preview_sem.try_acquire() {
                     Ok(p) => p,
                     Err(_) => continue,
                 };
 
                 // Write a temp WAV and transcribe via the configured provider. The
-                // hound encode + std::fs syscalls are blocking, so run them on the
-                // blocking pool rather than stalling an async worker every tick
-                // (the preview runs ~1×/s for the whole recording). `samples` is
-                // moved in; the fixed `tmp_wav` path + `audio_cfg` (Copy) are cloned.
+                // hound encode and std::fs syscalls are blocking, so run them on the
+                // blocking pool rather than stalling an async worker every tick (the
+                // preview runs ~1×/s for the whole recording). `samples` is moved in;
+                // the fixed `tmp_wav` path and `audio_cfg` (Copy) are cloned.
                 let wav_path = tmp_wav.clone();
                 let wav_res = tokio::task::spawn_blocking(move || {
                     phoneme_audio::wav::write_wav(&wav_path, &samples, audio_cfg)
@@ -437,26 +431,25 @@ impl DaemonRecorder {
                         let text = text.trim();
                         if !text.is_empty() {
                             // Always stitch, so words already shown are never
-                            // rewritten mid-caption — the old early-phase wholesale
-                            // replace was exactly what made the preview visibly
-                            // reshuffle words as whisper revised the growing take.
-                            // On a no-overlap stitch, fall back by phase: once the
-                            // window has slid it is a post-silence tail, so append;
-                            // while the take still fits the window a no-overlap result
-                            // means whisper re-transcribed the whole (still-short) take
-                            // differently — KEEP committed untouched this tick and let
-                            // the next tick re-anchor, rather than replacing it
-                            // wholesale and reshuffling every shown word (the
-                            // "committed never rewrites" invariant the subsystem is
-                            // built on).
+                            // rewritten mid-caption; a wholesale replace is what
+                            // makes the preview visibly reshuffle words as whisper
+                            // revises the growing take. On a no-overlap stitch, fall
+                            // back by phase: once the window has slid it is a
+                            // post-silence tail, so append; while the take still fits
+                            // the window a no-overlap result means whisper
+                            // re-transcribed the whole (still-short) take differently,
+                            // so keep committed untouched this tick and let the next
+                            // tick re-anchor rather than replacing it wholesale and
+                            // reshuffling every shown word (the "committed never
+                            // rewrites" invariant the subsystem is built on).
                             let window_slid = total_len > PREVIEW_WINDOW_SAMPLES;
                             // The committed (stable) prefix before this tick's append.
                             // Everything in the merged caption past this char boundary
                             // is freshly appended this tick — the least-settled tail the
                             // overlay dims. `merge_preview_tick` only ever keeps
                             // `committed` verbatim and appends, so this prefix length
-                            // stays valid against the merged text; clamp anyway in case
-                            // a future merge ever shortens it. When nothing new was
+                            // stays valid against the merged text; clamp anyway against
+                            // a future merge that shortens it. When nothing new was
                             // appended (caption unchanged) this equals the full length,
                             // so the overlay dims nothing.
                             let prev_committed = std::mem::take(&mut committed);
@@ -468,13 +461,13 @@ impl DaemonRecorder {
                                 committed_len: Some(committed_len),
                             });
                             // Streaming-type (`[in_place].stream_type`): type the
-                            // newly-finalized words live. Only CLEAN forward
-                            // extensions (`backspaces == 0`) are typed mid-stream
-                            // — never a backspace — so the cursor doesn't churn as
-                            // the caption revises; the stop reconcile fixes the
-                            // rest against the accurate final transcript. The first
-                            // letter is capitalized so that stop patch is a small
-                            // tail edit, not a full rewrite vs the polished final.
+                            // newly-finalized words live. Only clean forward
+                            // extensions (`backspaces == 0`) are typed mid-stream,
+                            // never a backspace, so the cursor doesn't churn as the
+                            // caption revises; the stop reconcile fixes the rest
+                            // against the accurate final transcript. The first letter
+                            // is capitalized so that stop patch is a small tail edit,
+                            // not a full rewrite against the polished final.
                             if stream_type {
                                 let target = capitalize_first(&committed);
                                 let (backspaces, insert) =
@@ -499,8 +492,8 @@ impl DaemonRecorder {
                     }
                 }
                 // Adapt the next wait to how long this tick actually took, so a
-                // heavy model on a weak box self-throttles instead of trying to
-                // run every base-interval and thrashing (the record-time crash).
+                // heavy model on a weak box self-throttles instead of trying to run
+                // every base-interval and thrashing the machine.
                 current_wait = next_preview_interval(
                     base_interval,
                     tick_start.elapsed(),
@@ -523,10 +516,10 @@ impl DaemonRecorder {
 
     /// Spawn the cheap live audio-level loop that feeds the overlay's waveform
     /// "it hears me" pill: snapshot a tiny trailing tail at ~15 Hz, compute a
-    /// normalized RMS level, emit `AudioLevelSample`. It never acquires the
-    /// whisper permit or transcribes, so it adds negligible load and runs for any
-    /// capture (including in-place dictation). No-op unless `preview_waveform` is
-    /// on. Stored in `self.preview` so `stop_preview` tears it down too.
+    /// normalized RMS level, emit `AudioLevelSample`. It never acquires the whisper
+    /// permit or transcribes, so it adds negligible load and runs for any capture,
+    /// including in-place dictation. No-op unless `preview_waveform` is on. Stored in
+    /// `self.preview` so `stop_preview` tears it down too.
     pub(super) async fn start_level_loop(
         &self,
         state: &AppState,
@@ -539,7 +532,7 @@ impl DaemonRecorder {
         let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
         let state = state.clone();
         let task = tokio::spawn(async move {
-            // ~100 ms tail at 16 kHz, sampled ~15×/s — lively without measurable cost.
+            // ~100 ms tail at 16 kHz, sampled ~15×/s: lively without measurable cost.
             const LEVEL_TAIL_SAMPLES: usize = 1600;
             let mut interval = tokio::time::interval(Duration::from_millis(66));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -548,7 +541,7 @@ impl DaemonRecorder {
                     _ = &mut stop_rx => break,
                     _ = interval.tick() => {}
                 }
-                // Recorder gone (race with stop) → exit, like the preview loop.
+                // Recorder gone (race with stop): exit, like the preview loop.
                 let (_total, samples) = match snapshot.snapshot_tail(LEVEL_TAIL_SAMPLES).await {
                     Ok(s) => s,
                     Err(_) => break,
@@ -567,12 +560,12 @@ impl DaemonRecorder {
         });
     }
 
-    /// Stop only the CAPTION preview loop(s), leaving the cheap waveform (level)
-    /// loop running. Used by a meeting source-swap so toggling which track feeds
-    /// the caption never kills the "it hears me" waveform (which follows the mic
-    /// for the whole meeting). `abort` tears the loop down without awaiting an
-    /// in-flight tick (see [`Self::stop_preview`]); the caller then cleans up the
-    /// caption loops' temp WAVs.
+    /// Stop only the caption preview loop(s), leaving the cheap waveform (level)
+    /// loop running. Used by a meeting source-swap so toggling which track feeds the
+    /// caption never kills the "it hears me" waveform, which follows the mic for the
+    /// whole meeting. `abort` tears the loop down without awaiting an in-flight tick
+    /// (see [`Self::stop_preview`]); the caller then cleans up the caption loops'
+    /// temp WAVs.
     async fn stop_caption_loops(&self, abort: bool) {
         let mut guard = self.preview.lock().await;
         let (captions, keep): (Vec<PreviewTask>, Vec<PreviewTask>) = std::mem::take(&mut *guard)
@@ -590,17 +583,17 @@ impl DaemonRecorder {
         }
     }
 
-    /// Stop the streaming-preview loop (if running) and wait for it to exit so
-    /// its temp WAV is cleaned up. No-op when no preview is running.
+    /// Stop the streaming-preview loop (if running) and wait for it to exit so its
+    /// temp WAV is cleaned up. No-op when no preview is running.
     ///
-    /// `abort` (in-place dictation only) tears the loop down WITHOUT awaiting an
-    /// in-flight tick: it signals stop and `abort()`s the join handle so the
-    /// held whisper permit is released immediately and the latency-critical
-    /// dictation transcribe isn't delayed. Aborting skips the loop's graceful
-    /// temp-WAV cleanup, so callers that pass `abort = true` must remove the
-    /// preview WAV(s) themselves (see `stop`). Normal recordings and meetings
-    /// pass `abort = false` for the graceful, await-based teardown — that path
-    /// lets the loop delete its own temp WAV and must stay unchanged.
+    /// `abort` (in-place dictation only) tears the loop down without awaiting an
+    /// in-flight tick: it signals stop and `abort()`s the join handle so the held
+    /// whisper permit is released immediately and the latency-critical dictation
+    /// transcribe isn't delayed. Aborting skips the loop's graceful temp-WAV
+    /// cleanup, so callers that pass `abort = true` must remove the preview WAV(s)
+    /// themselves (see `stop`). Normal recordings and meetings pass `abort = false`
+    /// for the graceful, await-based teardown, which lets the loop delete its own
+    /// temp WAV.
     pub(super) async fn stop_preview(&self, abort: bool) {
         let tasks: Vec<PreviewTask> = std::mem::take(&mut *self.preview.lock().await);
         for PreviewTask { stop_tx, task, .. } in tasks {
@@ -620,9 +613,9 @@ impl DaemonRecorder {
     pub async fn set_preview_source(&self, state: &AppState, track: &str) -> Result<()> {
         let cfg = state.config.load();
         // No caption to follow when preview is off, and the source toggle is a
-        // "toggle"-mode affordance only — "both" mode shows every track at once.
-        // The overlay hides the button in those cases, but guard the daemon too
-        // so a stray call is a harmless no-op rather than a confusing error.
+        // "toggle"-mode affordance only ("both" mode shows every track at once).
+        // The overlay hides the button in those cases, but guard the daemon too so
+        // a stray call is a harmless no-op rather than a confusing error.
         if !cfg.recording.streaming_preview || cfg.recording.meeting_preview == "both" {
             return Ok(());
         }
@@ -636,19 +629,19 @@ impl DaemonRecorder {
                 "no active meeting track {track:?} to preview"
             )));
         };
-        // Stop ONLY the caption loop (the waveform loop keeps running so the
-        // "it hears me" pill survives the swap), and ABORT it rather than await
-        // its in-flight tick — so the toggle is snappy even when a heavy preview
-        // model is mid-transcription. Aborting skips the loop's own temp-WAV
-        // cleanup, so remove every meeting track's preview WAV here best-effort.
+        // Stop only the caption loop (the waveform loop keeps running so the
+        // "it hears me" pill survives the swap), and abort it rather than await its
+        // in-flight tick, so the toggle is snappy even when a heavy preview model is
+        // mid-transcription. Aborting skips the loop's own temp-WAV cleanup, so
+        // remove every meeting track's preview WAV here best-effort.
         self.stop_caption_loops(true).await;
         for (sid, _, _) in &sources {
             let tmp = std::env::temp_dir().join(format!("phoneme-preview-{}.wav", sid.file_stem()));
             let _ = tokio::fs::remove_file(&tmp).await;
         }
         // The source toggle always feeds the primary preview server (secondary =
-        // false): the 2nd server only exists to run BOTH tracks at once, never
-        // for a one-track toggle.
+        // false): the 2nd server only exists to run both tracks at once, never for
+        // a one-track toggle.
         self.start_preview(state, id, snapshot, false, false).await;
         state
             .events
@@ -705,12 +698,11 @@ mod tests {
 
     #[test]
     fn stitch_preview_freezes_committed_when_whisper_revises_an_early_word() {
-        // The #21 fix: the loop now ALWAYS stitches (no early-phase wholesale
-        // replace), so a word already shown is never rewritten even when the next
-        // full re-transcription revises it — here whisper changed "meeting" ->
-        // "meaning". Committed's "meeting" is kept (the preview doesn't reshuffle),
-        // and only the genuinely-new tail word is appended. The accurate final
-        // transcript corrects the word later.
+        // The loop always stitches (no wholesale replace), so a word already shown
+        // is never rewritten even when the next full re-transcription revises it.
+        // Here whisper changed "meeting" to "meaning": committed's "meeting" is kept
+        // (the preview doesn't reshuffle) and only the genuinely-new tail word is
+        // appended. The accurate final transcript corrects the word later.
         let committed = "the meeting went";
         let revised_full = "the meaning went well";
         assert_eq!(
@@ -719,7 +711,7 @@ mod tests {
         );
     }
 
-    // ── next_preview_interval (adaptive cadence — the record-time crash fix) ──
+    // ── next_preview_interval (adaptive cadence) ─────────────────────────────
 
     #[test]
     fn adaptive_off_keeps_fixed_cadence() {
@@ -803,20 +795,20 @@ mod tests {
 
     #[test]
     fn stitch_preview_no_duplication_when_window_revises_leading_words() {
-        // The regression this fix targets: between ticks whisper re-tokenizes the
-        // rolling window's LEADING words (here it prepends a filler "um" and
-        // re-cases "How"), so the overlap no longer pins to window[0]. The old
-        // code's blind fallback re-appended the whole ~15 s window, duplicating
-        // words already shown. With normalization + a small leading-skip anchor we
-        // must instead append ONLY the genuinely-new tail, with no run repeated.
+        // Between ticks whisper re-tokenizes the rolling window's leading words
+        // (here it prepends a filler "um" and re-cases "How"), so the overlap no
+        // longer pins to window[0]. A blind fallback would re-append the whole ~15 s
+        // window, duplicating words already shown. With normalization plus a small
+        // leading-skip anchor we instead append only the genuinely-new tail, with no
+        // run repeated.
         let committed = "hello there my friend how are you";
         // Same speech, leading words revised, plus two new words at the end.
         let window = "um How are you doing today";
         let out = stitch_preview(committed, window).expect("overlap found");
         assert_eq!(out, "hello there my friend how are you doing today");
 
-        // Hard guarantee against the actual symptom ("text comes up multiple
-        // times in a row"): no word from the overlapping run appears twice.
+        // Hard guarantee against the symptom (text coming up multiple times in a
+        // row): no word from the overlapping run appears twice.
         let words: Vec<&str> = out.split_whitespace().collect();
         for run in ["how are you", "are you doing"] {
             let occurrences = out.matches(run).count();
@@ -836,7 +828,7 @@ mod tests {
         // take, then a sliding tick revises the leading words and adds a tail.
         // The accumulated caption must read each word once, in order.
         let first_window = "the meeting will start at noon today";
-        // First tick (take fits the window) replaces wholesale — modeled by
+        // First tick (take fits the window) replaces wholesale, modeled by
         // stitching onto an empty caption.
         let committed = stitch_preview("", first_window).expect("seeds from empty");
         assert_eq!(committed, first_window);
@@ -855,14 +847,14 @@ mod tests {
 
     #[test]
     fn merge_preview_tick_non_slid_none_keeps_committed() {
-        // The bug this guards: on a no-overlap `None` while the take still FITS the
-        // window (window_slid == false), the old fallback replaced the caption with
-        // the bare `window`, throwing away everything shown and reshuffling every
-        // word. With the fix, committed is kept verbatim this tick (the next tick
-        // re-anchors) — committed is never wholesale-replaced.
+        // On a no-overlap `None` while the take still fits the window
+        // (window_slid == false), replacing the caption with the bare `window` would
+        // throw away everything shown and reshuffle every word. Instead committed is
+        // kept verbatim this tick (the next tick re-anchors); committed is never
+        // wholesale-replaced.
         let committed = "the quick brown fox jumps";
-        // A wholly different transcription with no overlapping run → `stitch_preview`
-        // returns None.
+        // A wholly different transcription with no overlapping run, so
+        // `stitch_preview` returns None.
         let window = "completely unrelated words here";
         assert!(
             stitch_preview(committed, window).is_none(),
@@ -877,8 +869,8 @@ mod tests {
 
     #[test]
     fn merge_preview_tick_slid_none_appends() {
-        // The slid fallback must NOT regress: once the window has slid a no-overlap
-        // result is a post-silence tail and is appended after committed.
+        // The slid fallback: once the window has slid a no-overlap result is a
+        // post-silence tail and is appended after committed.
         let committed = "the quick brown fox jumps";
         let window = "over the lazy dog";
         assert!(
@@ -891,7 +883,7 @@ mod tests {
 
     #[test]
     fn merge_preview_tick_overlap_stitches_regardless_of_phase() {
-        // When an anchor IS found, the stitch result wins in either phase — the
+        // When an anchor is found, the stitch result wins in either phase; the
         // window_slid flag only governs the no-overlap fallback.
         let committed = "the quick brown fox";
         let window = "brown fox jumps over";
@@ -956,8 +948,8 @@ mod tests {
     #[test]
     fn committed_len_counts_utf16_code_units_not_bytes_or_chars() {
         // The JS overlay indexes the caption by UTF-16 code unit, so the boundary
-        // must be the prev caption's encode_utf16().count() — NOT its byte length
-        // (which inflates for non-ASCII) and NOT its char/codepoint count (which
+        // must be the prev caption's encode_utf16().count(), not its byte length
+        // (which inflates for non-ASCII) and not its char/codepoint count (which
         // under-counts astral chars: an emoji is 1 char but 2 UTF-16 units).
         //
         // "café" — 'é' is 2 bytes / 1 char / 1 UTF-16 unit → 4 bytes, 4 chars, 4 units.

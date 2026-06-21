@@ -46,7 +46,7 @@ impl DaemonHarness {
 
         // Generate a config that points at our stub. External mode makes the
         // daemon use `external_url` (our mock) instead of spawning a bundled
-        // whisper binary, so transcription works in CI without a real
+        // whisper binary, so transcription works in CI with no real
         // whisper-server present.
         let mut cfg = phoneme_core::Config::default();
         cfg.whisper.mode = phoneme_core::config::WhisperMode::External;
@@ -56,7 +56,7 @@ impl DaemonHarness {
         cfg.recording.silence_window_ms = 100;
         // Disable idle pre-roll in tests: it opens a real microphone via cpal,
         // which crashes (STATUS_ACCESS_VIOLATION) on a headless CI runner with no
-        // audio endpoint. Tests must never touch real capture hardware.
+        // audio endpoint. Tests must not touch real capture hardware.
         cfg.recording.pre_roll_ms = 0;
         cfg.hook.commands.clear();
         cfg.daemon.pipe_name = pipe_name.clone();
@@ -64,11 +64,11 @@ impl DaemonHarness {
         let cfg_path = temp.path().join("config.toml");
         std::fs::write(&cfg_path, toml::to_string(&cfg).unwrap()).unwrap();
 
-        // Spawn the daemon binary. The spawned daemon is a normal binary, NOT
-        // `cfg!(test)`, so its only inject-guard is the env var: set it so the
-        // type/paste paths no-op even if a future test drives an in-place
-        // recording (the standing rule — tests must never type into a real
-        // window). See `in_place::input_injection_disabled`.
+        // Spawn the daemon binary. The spawned daemon is a normal binary, not
+        // under `cfg!(test)`, so its only inject-guard is the env var: set it so
+        // the type/paste paths no-op even if a future test drives an in-place
+        // recording. The standing rule is that tests must never type into a real
+        // window. See `in_place::input_injection_disabled`.
         let binary = env!("CARGO_BIN_EXE_phoneme-daemon");
         let daemon = Command::new(binary)
             .arg("--foreground")

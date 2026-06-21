@@ -12,7 +12,7 @@
 //!
 //! The Quit chain is the part with rules. With
 //! `interface.quit_stops_daemon` (default on): Quit first asks the daemon
-//! to `Shutdown` and POLLS until its pipe is gone — the daemon finalizes an
+//! to `Shutdown` and polls until its pipe is gone — the daemon finalizes an
 //! in-flight recording, kills its whisper-server(s), and stops a
 //! Phoneme-launched Ollama on the way out — then exits the tray. The
 //! `DAEMON_STOP_DONE` flag tells the process-wide exit hook (lib.rs) not to
@@ -88,8 +88,8 @@ pub(crate) async fn stop_daemon_for_exit(app: &AppHandle) {
 /// The tray Quit chain. With `interface.quit_stops_daemon` (default on):
 /// stop the daemon first — it finalizes any in-flight recording, kills its
 /// whisper-server(s) and a Phoneme-launched Ollama — then exit the tray.
-/// With the knob off, exit immediately and leave the daemon running, exactly
-/// the old behavior (headless setups).
+/// With the knob off, exit immediately and leave the daemon running (headless
+/// setups).
 fn quit(app: &AppHandle) {
     let cfg = phoneme_core::Config::read_or_default();
     if !cfg.interface.quit_stops_daemon {
@@ -204,8 +204,8 @@ fn build_profiles_submenu(app: &AppHandle) -> Result<Submenu<tauri::Wry>> {
 }
 
 /// Switch the live `config.toml` to a saved profile, then apply its side effects
-/// through the shared `commands::apply_config` — daemon reload, ALL global
-/// hotkeys (record + meeting + in-place), the live-preview overlay, and
+/// through the shared `commands::apply_config` — daemon reload, every global
+/// hotkey (record + meeting + in-place), the live-preview overlay, and
 /// start-at-login. Runs entirely in the tray process so it works whether or not
 /// the main window is open, and behaves identically to the `switch_profile`
 /// Tauri command.
@@ -224,12 +224,12 @@ fn switch_to_profile(app: &AppHandle, name: String) {
             return;
         }
 
-        // Apply the new config through the SAME path the GUI's `switch_profile`
+        // Apply the new config through the same path the GUI's `switch_profile`
         // command uses, so a tray switch behaves identically: daemon reload,
-        // start-at-login, the live-preview overlay, and — the bug this fixes —
-        // ALL THREE global hotkeys (record + meeting + in-place), not just the
-        // main one. Peek the managed `BridgeSlot` (the ONLY `.manage()`d state —
-        // `state::<T>()` panics on an unmanaged type) exactly like the exit hook.
+        // start-at-login, the live-preview overlay, and all three global hotkeys
+        // (record + meeting + in-place) — not just the record one. Peek the
+        // managed `BridgeSlot`, the only `.manage()`d state; `state::<T>()`
+        // panics on an unmanaged type, so we mirror the exit hook here.
         let slot = app.state::<crate::bridge::BridgeSlot>().inner().clone();
         crate::commands::apply_config(&app, &slot, &cfg).await;
 
@@ -309,13 +309,13 @@ pub fn update_state(tray: &TrayIcon, state: TrayState) -> Result<()> {
 mod tests {
     use super::should_stop_daemon_on_exit;
 
-    // NOTE: the profile-switch BLOCKER fix (switch_to_profile now peeks the
-    // managed `BridgeSlot` instead of the unmanaged `Option<Bridge>` that
-    // panicked) had a `tauri::test::mock_app` regression test, but the
-    // `tauri/test` dev-dep made the whole phoneme-tray test binary fail to
-    // launch on Windows (STATUS_ENTRYPOINT_NOT_FOUND — a WebView2/Tauri DLL
-    // entrypoint mismatch). Dropped the dep + test to keep the suite runnable;
-    // the fix is type-checked by the build and exercised live.
+    // No test here for `switch_to_profile` (it peeks the managed `BridgeSlot`
+    // rather than an unmanaged `Option<Bridge>`, which would panic). A
+    // `tauri::test::mock_app` test would cover it, but pulling in the
+    // `tauri/test` dev-dep makes the whole phoneme-tray test binary fail to
+    // launch on Windows: STATUS_ENTRYPOINT_NOT_FOUND, a WebView2/Tauri DLL
+    // entrypoint mismatch. Not worth taking the suite down over, so the path is
+    // covered by the type checker at build time and exercised live instead.
 
     /// The exit-hook policy table: the knob gates everything, and a completed
     /// Quit chain suppresses the second send.
@@ -327,7 +327,7 @@ mod tests {
         // The menu Quit already stopped (and waited for) the daemon — don't
         // send again, and don't block exit on a dead pipe.
         assert!(!should_stop_daemon_on_exit(true, true));
-        // Headless contract: with the knob off the daemon is NEVER stopped by
+        // Headless contract: with the knob off the daemon is never stopped by
         // a tray exit, no matter how the exit happened.
         assert!(!should_stop_daemon_on_exit(false, false));
         assert!(!should_stop_daemon_on_exit(false, true));

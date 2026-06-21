@@ -17,8 +17,8 @@ fn make_payload(id: RecordingId) -> HookPayload {
 
 #[tokio::test]
 async fn claim_next_quarantines_file_with_malformed_id() {
-    // Regression: a file with a non-RecordingId name (e.g. dropped in manually)
-    // must be quarantined, not slice-panic the daemon.
+    // A file with a non-RecordingId name (say, dropped in by hand) must be
+    // quarantined rather than slice-panic the daemon.
     let dir = TempDir::new().unwrap();
     let q = InboxQueue::new(dir.path()).await.unwrap();
     let bad = dir.path().join("pending").join("not-an-id.json");
@@ -101,8 +101,8 @@ async fn claim_next_skips_corrupt_then_serves_valid() {
     let good = RecordingId::from_datetime(Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap());
     q.enqueue(&make_payload(good.clone())).await.unwrap();
 
-    // A single claim quarantines the corrupt file AND serves the valid one in
-    // the same pass — an un-claimable file must never cost a whole poll cycle or
+    // A single claim quarantines the corrupt file and serves the valid one in
+    // the same pass: an un-claimable file must never cost a whole poll cycle or
     // starve the rest of the queue.
     let claimed = q
         .claim_next()
@@ -171,7 +171,7 @@ async fn clear_failed_empties_the_failed_folder() {
             .await
             .unwrap();
     }
-    // A pending item must NOT be touched by clear_failed.
+    // A pending item must be left untouched by clear_failed.
     let pending_id = RecordingId::new();
     q.enqueue(&make_payload(pending_id)).await.unwrap();
 
@@ -381,8 +381,8 @@ proptest! {
 #[tokio::test]
 async fn requeue_returns_a_claimed_item_to_pending() {
     // The transient-failure retry path: a claimed item that hit a whisper
-    // blip goes BACK to pending (same payload), so the very next claim picks
-    // it up again instead of the recording being lost to failed/.
+    // blip goes back to pending with the same payload, so the very next claim
+    // picks it up again instead of the recording being lost to failed/.
     let dir = TempDir::new().unwrap();
     let q = InboxQueue::new(dir.path()).await.unwrap();
     let id = RecordingId::new();

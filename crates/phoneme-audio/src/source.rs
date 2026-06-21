@@ -26,14 +26,14 @@ pub type SampleBlock = Vec<i16>;
 /// momentarily-ahead `delivered` (timing skew) yields 0 rather than
 /// underflowing.
 ///
-/// `delivered` must be the audio clock — samples the device actually handed to
-/// the capture callback (plus fill silence already inserted) — NOT the count
+/// `delivered` has to be the audio clock — samples the device actually handed
+/// to the capture callback, plus fill silence already inserted — not the count
 /// this worker has emitted downstream. Under CPU load the worker drains late,
 /// and measuring its own emissions counts the backlog still sitting in the
-/// channel/accumulator as missing: a scheduler stall then reads as a "gap",
-/// silence is over-inserted, and the late real audio lands on top of it,
-/// running the track long. Samples the device truly delivered can never be
-/// declared a gap, no matter how late they are processed.
+/// channel/accumulator as missing: a scheduler stall reads as a gap, silence is
+/// over-inserted, and the late real audio lands on top of it, running the track
+/// long. Samples the device truly delivered can never be declared a gap, no
+/// matter how late they get processed.
 fn gap_fill_len(expected: usize, delivered: usize, tolerance: usize) -> usize {
     match expected.checked_sub(delivered) {
         Some(gap) if gap > tolerance => gap,
@@ -72,14 +72,14 @@ where
 /// to `f32` (one linear map per sample), and hand the block to the worker
 /// without ever blocking the audio thread.
 ///
-/// `device_lost` / `stop_signal` give the (real-time) error callback a way out:
+/// `device_lost` and `stop_signal` give the real-time error callback a way out:
 /// when CPAL reports a stream error — a mic unplugged mid-recording is the
 /// motivating case — it flags `device_lost` so the source can surface the
 /// failure, and pokes `stop_signal` so the stream-owning thread unblocks from
-/// `stop_rx.recv()` and drops the stream. Without that, the error callback only
-/// logged: the stream thread blocked forever, `raw_tx` never dropped, the
-/// worker's `raw_rx.recv()` never returned `None`, and capture hung silently
-/// until the recorder's max-duration cap fired.
+/// `stop_rx.recv()` and drops the stream. Without the second half, an error
+/// callback that only logged would leave the stream thread blocked forever:
+/// `raw_tx` is never dropped, the worker's `raw_rx.recv()` never returns `None`,
+/// and capture hangs silently until the recorder's max-duration cap fires.
 fn build_input_stream_as_f32<T>(
     device: &cpal::Device,
     stream_cfg: &StreamConfig,
@@ -96,8 +96,8 @@ where
     device.build_input_stream(
         stream_cfg,
         move |data: &[T], _| {
-            // The audio clock: interleaved samples the DEVICE delivered,
-            // counted before any queueing/processing delay can distort them.
+            // The audio clock: interleaved samples the device delivered, counted
+            // before any queueing or processing delay can distort them.
             delivered.fetch_add(data.len(), std::sync::atomic::Ordering::Relaxed);
             // Use a pre-allocated buffer if available, else allocate.
             let mut buf = pool_rx
@@ -201,15 +201,14 @@ impl Source for SyntheticSource {
     }
 }
 
-/// A self-generating source that produces constant-value sample blocks without
-/// any external controller or real audio hardware.
+/// A self-generating source of constant-value sample blocks that needs neither
+/// an external controller nor real audio hardware.
 ///
-/// Unlike [`SyntheticSource`] (which is sink-fed by tests), `GeneratorSource`
-/// needs no external controller — it produces blocks of i16 samples and sleeps
-/// for the corresponding wall-clock duration between blocks to mimic a live
-/// hardware source. Used by the daemon when `PHONEME_AUDIO_BACKEND=synthetic`
-/// is set (CI / headless tests) so the recorder lifecycle can be exercised
-/// without real audio hardware.
+/// Where [`SyntheticSource`] is sink-fed by tests, `GeneratorSource` produces
+/// blocks of i16 samples on its own and sleeps for the corresponding wall-clock
+/// duration between them to mimic a live hardware source. The daemon uses it
+/// when `PHONEME_AUDIO_BACKEND=synthetic` is set (CI / headless tests) so the
+/// recorder lifecycle can run without real audio hardware.
 pub struct GeneratorSource {
     cfg: AudioConfig,
     block_frames: usize,
@@ -290,17 +289,14 @@ pub struct CpalSource {
     /// source was opened with gap filling (loopback).
     rebaseline_fill_clock: Arc<std::sync::atomic::AtomicBool>,
     /// Flipped true by the CPAL error callback when the device fails mid-capture
-    /// (e.g. the mic is unplugged). Checked once the stream drains so the drop
-    /// is reported as an error rather than a clean end-of-stream.
+    /// (e.g. the mic is unplugged). Checked once the stream drains so the drop is
+    /// reported as an error rather than a clean end-of-stream.
     device_lost: Arc<AtomicBool>,
 }
 
 impl CpalSource {
-    /// Open the given device as a microphone (default input) capture.
-    ///
-    /// This is the historical entry point and keeps the original behavior: it
-    /// uses the device's default *input* config and builds a normal input
-    /// stream.
+    /// Open the given device as a microphone (default input) capture: uses the
+    /// device's default input config and builds a normal input stream.
     pub fn open(device: cpal::Device) -> Result<Self> {
         Self::open_with_grace(device, Duration::ZERO)
     }
@@ -377,7 +373,7 @@ impl CpalSource {
         let supported = device
             .default_output_config()
             .map_err(|e| Error::Internal(format!("cpal default_output_config (loopback): {e}")))?;
-        // WASAPI loopback delivers samples ONLY while something is playing — it
+        // WASAPI loopback delivers samples only while something is playing — it
         // hands back nothing during silence (e.g. a paused video), which would
         // collapse silent gaps and desync the meeting's two tracks. Enable
         // wall-clock gap filling so the loopback track stays continuous.
@@ -411,10 +407,9 @@ impl CpalSource {
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<()>>();
 
         // The audio clock: interleaved samples the device has delivered to the
-        // capture callback so far. The gap-fill worker compares THIS (not its
-        // own emission count) against the wall-clock expectation, so worker
-        // scheduling lag under CPU load can never read as a silent gap — see
-        // `gap_fill_len`.
+        // capture callback so far. The gap-fill worker compares this, not its own
+        // emission count, against the wall-clock expectation, so worker scheduling
+        // lag under CPU load can never read as a silent gap — see `gap_fill_len`.
         let delivered_raw = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let delivered_cb = delivered_raw.clone();
 
@@ -431,11 +426,11 @@ impl CpalSource {
         let stream_thread = std::thread::Builder::new()
             .name("phoneme-cpal-stream".into())
             .spawn(move || {
-                // CPAL callback: minimal real-time-safe work — count + convert
-                // + try_send, shared across formats by the generic builder.
-                // Every format cpal 0.15 can report is covered; the enum is
-                // `#[non_exhaustive]`, so a format added by a future cpal must
-                // land in the error arm rather than capturing garbage.
+                // CPAL callback: minimal real-time-safe work (count, convert,
+                // try_send), shared across formats by the generic builder. Every
+                // format cpal 0.15 can report is covered; the enum is
+                // `#[non_exhaustive]`, so a format added by a future cpal lands in
+                // the error arm rather than capturing garbage.
                 let stream_result = match device_format {
                     CpalSampleFormat::F32 => build_input_stream_as_f32::<f32>(
                         &device,
@@ -608,20 +603,20 @@ impl CpalSource {
             };
 
             let mut accumulator = Vec::new();
-            // Max size: 10 seconds of raw float audio per channel. If we hit this, the consumer is dead.
+            // Cap at 10 seconds of raw float audio per channel. Reaching it means
+            // the consumer is dead.
             let max_accumulator_len = device_sample_rate as usize * device_channels * 10;
 
-            // Wall-clock gap filling (loopback only — see `fill_gaps`). A gap
-            // is declared only when the wall clock says more samples should
-            // exist than the device has actually DELIVERED to the capture
-            // callback (`delivered_raw`, the audio clock) plus the silence
-            // already inserted (`filled`). When a block arrives after the
-            // device went quiet, that shortfall is real silence and we insert
-            // it first so the track stays continuous and time-aligned. Blocks
-            // still queued behind a lagging worker are already counted in
-            // `delivered_raw`, so scheduler stalls under CPU load can never
-            // fake a gap (they used to, when this compared against the
-            // worker's own emission count).
+            // Wall-clock gap filling (loopback only — see `fill_gaps`). A gap is
+            // declared only when the wall clock says more samples should exist
+            // than the device has actually delivered to the capture callback
+            // (`delivered_raw`, the audio clock) plus the silence already inserted
+            // (`filled`). When a block arrives after the device went quiet, that
+            // shortfall is real silence; insert it first so the track stays
+            // continuous and time-aligned. Blocks still queued behind a lagging
+            // worker are already counted in `delivered_raw`, so a scheduler stall
+            // under CPU load can't fake a gap — which is exactly what comparing
+            // against the worker's own emission count would do.
             let mut fill_start = std::time::Instant::now();
             // Canonical samples of fill silence inserted so far. Counted
             // separately from device deliveries so an already-filled gap is
@@ -646,12 +641,12 @@ impl CpalSource {
                     let delivered =
                         frames_to_canonical(delivered_frames, device_sample_rate, target_rate)
                             + filled;
-                    // On resume, re-baseline so wall-clock that elapsed during a
-                    // (meeting) pause is forgotten — otherwise we'd insert the
-                    // whole paused span as silence here and desync the tracks.
-                    // After this, `expected == delivered`, so no gap is filled
-                    // for the pause; the post-resume timeline starts fresh in
-                    // step with the mic track (which resumed at the same instant).
+                    // On resume, re-baseline so the wall-clock that elapsed during
+                    // a meeting pause is forgotten — otherwise the whole paused
+                    // span gets inserted here as silence and the tracks desync.
+                    // After this, `expected == delivered`, so the pause fills no
+                    // gap; the post-resume timeline starts fresh in step with the
+                    // mic track, which resumed at the same instant.
                     if rebaseline_worker.swap(false, std::sync::atomic::Ordering::Relaxed) {
                         fill_start = std::time::Instant::now()
                             - std::time::Duration::from_secs_f64(
@@ -766,9 +761,9 @@ impl Source for CpalSource {
 
     async fn stop(&mut self) -> Result<()> {
         // Tell the stream thread to drop its cpal::Stream, which stops capture.
-        // Do NOT close out_rx here: let the worker drain its accumulator and
-        // flush the final partial chunk first. The channel closes naturally when
-        // the worker finishes (out_tx is dropped), which ends the recorder drain.
+        // Don't close out_rx here: let the worker drain its accumulator and flush
+        // the final partial chunk first. The channel closes on its own when the
+        // worker finishes (out_tx is dropped), which ends the recorder drain.
         if let Some(tx) = self.stop_tx.take() {
             let _ = tx.send(());
         }
@@ -845,11 +840,11 @@ mod tests {
     #[test]
     fn gap_fill_ignores_worker_lag() {
         // The worker-lag scenario: 5 s of wall clock elapsed (expected 80 000
-        // canonical samples) and the device HAS delivered all 5 s — the worker
+        // canonical samples) and the device has delivered all 5 s — the worker
         // just hasn't processed the queued blocks yet (CPU load). With the gap
-        // math based on the audio clock (delivered), no gap exists; the old
-        // emission-based accounting saw the backlog as missing and inserted
-        // silence the late blocks then landed on top of.
+        // math based on the audio clock (delivered), no gap exists. Emission-based
+        // accounting would instead see the backlog as missing and insert silence
+        // that the late blocks then land on top of.
         let tol = 1600;
         let delivered = frames_to_canonical(240_000, 48_000, 16_000); // 5 s at 48 kHz
         assert_eq!(delivered, 80_000);

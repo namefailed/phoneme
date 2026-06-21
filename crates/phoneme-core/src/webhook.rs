@@ -5,12 +5,12 @@
 //! local hook ([`crate::hook`]) when one is configured.
 //!
 //! The load-bearing part is the guard, not the POST. Phoneme is local-first, so
-//! the policy is three-tiered (`HostClass`): a webhook into THIS machine
+//! the policy is three-tiered (`HostClass`): a webhook into this machine
 //! (loopback) is the primary use case and always allowed; the LAN needs an
-//! explicit opt-in; the public internet requires TLS. The target is validated —
-//! including resolving a DNS name and classifying *every* address it yields —
-//! before a single byte leaves the machine, and redirects are never followed, so
-//! a mistyped or hostile URL can't bounce transcripts at an internal service
+//! explicit opt-in; the public internet requires TLS. The target is validated
+//! before a single byte leaves the machine — that includes resolving a DNS name
+//! and classifying every address it yields — and redirects are never followed,
+//! so a mistyped or hostile URL can't bounce transcripts at an internal service
 //! (S-H1).
 
 use crate::config::WebhookConfig;
@@ -54,7 +54,7 @@ fn sign_body(secret: &[u8], body: &[u8]) -> String {
 /// SSRF classification of a webhook target address (S-H1).
 ///
 /// Phoneme is local-first, so the policy is deliberately three-tiered rather
-/// than a blanket private-range block: webhooks into THIS machine are the
+/// than a blanket private-range block: webhooks into this machine are the
 /// feature's primary job and stay open, the LAN needs an opt-in, and the
 /// public internet needs TLS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,10 +115,10 @@ fn classify_ip(ip: IpAddr) -> HostClass {
 }
 
 /// The class a resolved hostname gets: the most restrictive among its
-/// addresses (`Private` > `Public` > `Loopback`). A name that resolves to ANY
+/// addresses (`Private` > `Public` > `Loopback`). A name that resolves to any
 /// private address is treated as private, and a name mixing loopback with
-/// public addresses still gets the public-tier HTTPS check — the connection
-/// could land on either.
+/// public addresses still gets the public-tier HTTPS check, since the
+/// connection could land on either.
 fn classify_resolved(addrs: &[IpAddr]) -> HostClass {
     let mut class = HostClass::Loopback;
     for c in addrs.iter().map(|a| classify_ip(*a)) {
@@ -131,7 +131,7 @@ fn classify_resolved(addrs: &[IpAddr]) -> HostClass {
     class
 }
 
-/// Validate a webhook target against the `[webhook]` network policy BEFORE any
+/// Validate a webhook target against the `[webhook]` network policy before any
 /// bytes leave the machine. The rules:
 ///
 /// - **Loopback** (127.0.0.0/8, `::1`, the literal `localhost`) — always
@@ -140,17 +140,17 @@ fn classify_resolved(addrs: &[IpAddr]) -> HostClass {
 ///   `[webhook] allow_private_network = true`.
 /// - **Public** — must be `https` unless `[webhook] allow_http = true`.
 ///
-/// A DNS hostname is resolved here and EVERY address it yields is classified
+/// A DNS hostname is resolved here and every address it yields is classified
 /// ([`classify_resolved`]), so a name pointing at a private IP is private.
 /// `localhost` short-circuits to loopback without touching the resolver, and
 /// the `url` parser canonicalizes IPv4 trickery (decimal/octal literals) into
 /// dotted-quad form before classification.
 ///
-/// On success returns the connection PIN: `Some((host, addrs))` for a resolved
+/// On success returns the connection pin: `Some((host, addrs))` for a resolved
 /// DNS name — the exact validated socket addresses the POST must connect to —
 /// or `None` when no pin is needed (an IP literal, which reqwest dials directly,
 /// or `localhost`, hardcoded to loopback). Pinning closes a TOCTOU window: if
-/// the POST re-resolved the hostname, a hostile/rebinding DNS server could
+/// the POST re-resolved the hostname, a hostile or rebinding DNS server could
 /// answer the guard's lookup with a public IP and the send's lookup with an
 /// internal one (S-H1).
 async fn check_target(
@@ -186,8 +186,8 @@ async fn check_target(
             )));
         }
         let addrs: Vec<IpAddr> = socket_addrs.iter().map(|sa| sa.ip()).collect();
-        // Pin to the host name reqwest will look up (the URL host, already
-        // lowercased by the `url` parser) → the exact addresses we just
+        // Pin the host name reqwest will look up (the URL host, already
+        // lowercased by the `url` parser) to the exact addresses we just
         // classified, so the send can't connect anywhere we didn't validate.
         (
             classify_resolved(&addrs),
@@ -266,13 +266,13 @@ impl WebhookClient {
     ///
     /// Returns [`Error::InvalidConfig`] when the target is disallowed by policy,
     /// [`Error::HookTimeout`] on a slow response, and [`Error::HookFailed`]
-    /// (carrying the status and body) on a non-2xx answer — a 3xx included,
-    /// since redirects are deliberately not followed.
+    /// (carrying the status and body) on a non-2xx answer, a 3xx included, since
+    /// redirects are deliberately not followed.
     ///
     /// **Delivery is at-least-once.** A transient retry (timeout / connection /
     /// 429 / 5xx) re-sends the identical body, so a receiver that committed the
     /// request but whose response was lost (or that 5xx'd after committing) can
-    /// see the same event twice — a non-idempotent receiver (e.g. an "append to
+    /// see the same event twice. A non-idempotent receiver (say, an "append to
     /// note" webhook) should dedupe on the payload's recording id.
     pub async fn post(
         &self,
@@ -285,17 +285,17 @@ impl WebhookClient {
         // also hands back the validated addresses to pin the connection to.
         let pin = check_target(url, policy).await?;
 
-        // Serialize the body ourselves so the signature is over the EXACT bytes
+        // Serialize the body ourselves so the signature covers the exact bytes
         // that go on the wire (rather than trusting `.json()` to round-trip
         // identically), and set the JSON content type to match.
         let body = serde_json::to_vec(payload)
             .map_err(|e| Error::Internal(format!("webhook payload serialization failed: {e}")))?;
 
         // For a resolved DNS name, send through a client that resolves the host
-        // ONLY to the addresses the guard already validated — so reqwest's
-        // own second resolution at send time can't rebind the name to an
-        // internal IP. IP-literal / localhost targets need no pin and reuse the
-        // shared client. The pinned client keeps the same no-redirect policy.
+        // only to the addresses the guard already validated, so reqwest's own
+        // second resolution at send time can't rebind the name to an internal
+        // IP. IP-literal / localhost targets need no pin and reuse the shared
+        // client. The pinned client keeps the same no-redirect policy.
         let http = match &pin {
             Some((host, addrs)) => reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
@@ -332,7 +332,7 @@ impl WebhookClient {
 
         // Deliver with bounded exponential backoff. The SSRF guard, body, and pin
         // are settled above; each attempt only rebuilds the request (reqwest's
-        // builder is consumed by `send`). Only a TRANSIENT failure retries — a
+        // builder is consumed by `send`). Only a transient failure retries — a
         // timeout, a connection error, an HTTP 429, or a 5xx — up to
         // `policy.max_retries` extra tries; a 4xx (the receiver refusing us) and
         // an SSRF block fail immediately.
@@ -539,7 +539,7 @@ mod tests {
 
     // ── Retry / backoff ────────────────────────────────────────────────────
 
-    /// A 4xx is the receiver refusing the request — it is NOT retried even with
+    /// A 4xx is the receiver refusing the request — it is not retried even with
     /// retries enabled. `.expect(1)` proves exactly one POST was sent.
     #[tokio::test]
     async fn post_does_not_retry_4xx() {
@@ -656,7 +656,7 @@ mod tests {
     // ── SSRF guard: policy ─────────────────────────────────────────────────
 
     /// Loopback (and the literal `localhost`, classified without a resolver
-    /// round-trip) is ALWAYS allowed, any scheme, with both knobs off — local
+    /// round-trip) is always allowed, any scheme, with both knobs off — local
     /// n8n / Home Assistant must keep working on a default config.
     #[tokio::test]
     async fn loopback_and_localhost_always_pass_any_scheme() {
@@ -699,7 +699,7 @@ mod tests {
         }
     }
 
-    /// `allow_private_network = true` opens private targets — and ONLY private
+    /// `allow_private_network = true` opens private targets, and only private
     /// targets; public http stays gated by `allow_http`.
     #[tokio::test]
     async fn allow_private_network_opens_private_targets() {
@@ -744,12 +744,13 @@ mod tests {
             .expect("public http allowed once opted in");
     }
 
-    /// The connection-PIN contract: an IP-literal target needs no pin (reqwest
+    /// The connection-pin contract: an IP-literal target needs no pin (reqwest
     /// dials the literal directly, no second resolution) and `localhost` is
     /// hardcoded to loopback, so both return `None`. Only a resolved DNS name —
     /// the path exposed to a second resolution at send time — yields a pin, so
-    /// `post` can lock the connection to the validated addresses. Deterministic:
-    /// every case here classifies without touching the resolver.
+    /// `post` can lock the connection to the validated addresses. Every case
+    /// here classifies without touching the resolver, so the test is
+    /// deterministic.
     #[tokio::test]
     async fn pin_is_none_for_ip_literals_and_localhost() {
         let policy = WebhookConfig {
@@ -855,7 +856,7 @@ mod tests {
     }
 
     /// With a non-empty `hmac_secret`, the POST carries
-    /// `X-Phoneme-Signature: sha256=<hex>` whose value is the HMAC over the EXACT
+    /// `X-Phoneme-Signature: sha256=<hex>` whose value is the HMAC over the exact
     /// body bytes the server received — recomputing it from the body matches.
     #[tokio::test]
     async fn signs_body_when_secret_set() {

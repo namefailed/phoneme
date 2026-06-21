@@ -9,7 +9,7 @@
 //! handles), and the pipe is polled briefly until it answers.
 //!
 //! Unlike the tray's `auto_spawn` (src-tauri), the CLI never puts the daemon
-//! in a job object and has no busy-daemon check — a CLI-spawned daemon is
+//! in a job object and has no busy-daemon check: a CLI-spawned daemon is
 //! always meant to outlive the invocation.
 
 use phoneme_core::Config;
@@ -45,11 +45,10 @@ async fn daemon_version_matches(t: &mut NamedPipeTransport) -> (bool, Option<u32
 /// Returns `true` if the pipe disappeared, `false` if the deadline elapsed
 /// first (the daemon is still holding it).
 async fn wait_for_pipe_gone(pipe_name: &str) -> bool {
-    // Give a shutting-down daemon enough time to release the pipe before the
-    // fresh one tries to bind it (first-pipe-instance wins); 5s was occasionally
-    // too tight and the new daemon would lose the bind race. Still bounded so a
-    // wedged daemon never hangs the CLI — the loop returns the instant the pipe
-    // disappears.
+    // Give a shutting-down daemon time to release the pipe before the fresh one
+    // tries to bind it — the first instance to bind wins, and a shorter window
+    // lets the new daemon lose that race. Still bounded so a wedged daemon never
+    // hangs the CLI: the loop returns the instant the pipe disappears.
     let deadline = std::time::Instant::now() + Duration::from_secs(12);
     while std::time::Instant::now() < deadline {
         if NamedPipeTransport::connect(pipe_name).await.is_err() {
@@ -116,9 +115,9 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
         drop(t);
         let pipe_gone = wait_for_pipe_gone(&cfg.daemon.pipe_name).await;
         // If the stale daemon ignored Shutdown and is still holding the pipe,
-        // force-kill it so the fresh daemon can bind first-pipe-instance. Without
-        // this, the new daemon's bind races a daemon that may never exit, causing
-        // the spawn to silently fail or the CLI to dial the old stale process.
+        // force-kill it so the fresh daemon can win the bind. Otherwise the new
+        // daemon's bind races a daemon that may never exit, and the spawn either
+        // silently fails or the CLI ends up dialing the old stale process.
         if !pipe_gone {
             if let Some(pid) = stale_pid {
                 force_kill_pid(pid);

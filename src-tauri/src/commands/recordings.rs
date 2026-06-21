@@ -217,7 +217,7 @@ pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, CommandError> {
 }
 
 /// Meeting Mode (v1.6): start a dual-track recording. The daemon captures the
-/// microphone AND the system audio (WASAPI loopback) concurrently as two
+/// microphone and the system audio (WASAPI loopback) concurrently as two
 /// separate recordings linked by a shared `meeting_id`. Returns `{ meeting_id }`.
 #[tauri::command]
 pub async fn start_meeting(bridge: Br<'_>) -> Result<Value, CommandError> {
@@ -391,7 +391,7 @@ pub async fn clear_failed(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::ClearFailed).await
 }
 
-/// Dismiss ONE item from the inbox `failed/` quarantine by id. Returns
+/// Dismiss a single item from the inbox `failed/` quarantine by id. Returns
 /// `{"removed":bool}`.
 #[tauri::command]
 pub async fn dismiss_failed(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
@@ -494,7 +494,7 @@ pub async fn undo_forget_named_voice(bridge: Br<'_>, id: String) -> Result<Value
     forward(&bridge, Request::UndoForgetNamedVoice { id }).await
 }
 
-/// Remove ALL still-pending items from the queue ("clear queue").
+/// Remove every still-pending item from the queue ("clear queue").
 #[tauri::command]
 pub async fn cancel_all_queued(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::CancelAllQueued).await
@@ -699,10 +699,10 @@ fn reject_executable_dest(dest: &str) -> Result<(), CommandError> {
 /// file can be dangerous in the wrong place (a dropped `config.toml` next to the
 /// daemon's, a `.url`/`.scr`-adjacent payload in Startup). The save dialog the
 /// user drove is the real boundary, but a compromised WebView could try to push
-/// a path here directly. We canonicalize the dest's PARENT (the dest itself
+/// a path here directly. We canonicalize the dest's parent (the dest itself
 /// doesn't exist yet) and deny if it sits in a guarded root. Roots that can't be
-/// resolved are simply skipped — this only ever tightens, never blocks a write to
-/// a legitimate location.
+/// resolved are simply skipped, so this only ever tightens — it never blocks a
+/// write to a legitimate location.
 fn reject_sensitive_dir_dest(dest: &str) -> Result<(), CommandError> {
     let parent = match std::path::Path::new(dest).parent() {
         // A bare filename (no parent) writes to the cwd — never a guarded root.
@@ -783,9 +783,9 @@ pub async fn export_recording_json(bridge: Br<'_>, id: String) -> Result<String,
 /// Zip-entry name for one audio file under `audio_dir`, preserving its day
 /// folder. WAVs live at `<audio_dir>/<YYYY-MM-DD>/<HHmmssMMM>.wav` and the stem
 /// is time-of-day only, so two recordings at the same ms-of-day on different
-/// days share a stem. Naming the entry from the path RELATIVE to `audio_dir`
+/// days share a stem. Naming the entry from the path relative to `audio_dir`
 /// (backslashes normalized to `/` for a portable archive) keeps the day folder,
-/// so the two never collide to one entry and clobber each other on restore.
+/// so the two never collapse to one entry and clobber each other on restore.
 /// Falls back to the bare filename if the path isn't under `audio_dir`.
 fn audio_zip_entry_name(audio_dir: &std::path::Path, path: &std::path::Path) -> String {
     match path.strip_prefix(audio_dir) {
@@ -1099,7 +1099,7 @@ pub async fn tags_for(bridge: Br<'_>, recording_id: String) -> Result<Value, Com
     forward(&bridge, Request::TagsFor { recording_id }).await
 }
 
-/// Return ALL tags (including orphaned ones with no recordings attached).
+/// Return every tag, including orphaned ones with no recordings attached.
 /// Used by the Tag Manager settings UI.
 #[tauri::command]
 pub async fn list_all_tags(bridge: Br<'_>) -> Result<Value, CommandError> {
@@ -1211,8 +1211,8 @@ mod tests {
     #[test]
     fn zip_entry_distinguishes_same_ms_different_day() {
         // H1: two recordings at the same ms-of-day on different days share a
-        // `143500042.wav` stem. The flat-name entry collapsed them and one was
-        // lost on restore; preserving the day folder keeps both.
+        // `143500042.wav` stem. A flat entry name collapses them into one and
+        // loses a recording on restore; preserving the day folder keeps both.
         let dir = std::path::Path::new("/data/audio");
         let a = audio_zip_entry_name(
             dir,

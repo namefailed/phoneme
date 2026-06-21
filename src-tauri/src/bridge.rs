@@ -16,9 +16,9 @@
 //! to: sync callers (hotkey handler, exit hook) `current()` a non-blocking
 //! peek, async callers `get_or_connect()`, which re-runs auto-spawn +
 //! connect under a write lock (concurrent callers reuse the winner's
-//! connection) and caches the bridge for everyone. Event streaming does NOT
-//! go through here — `events` opens its own dedicated subscription
-//! connection, per the pipe protocol.
+//! connection) and caches the bridge for everyone. Event streaming doesn't go
+//! through here — `events` opens its own dedicated subscription connection, per
+//! the pipe protocol.
 
 use phoneme_core::Config;
 use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport};
@@ -143,9 +143,9 @@ impl Backoff {
 /// creates/mutates state, because the first attempt may already have executed
 /// on the daemon before the connection dropped; a blind re-send would run it
 /// twice (`ImportRecording` would duplicate the recording). The match is
-/// exhaustive ON PURPOSE: a newly-added request variant fails to compile here
-/// until its retry-safety is classified deliberately, rather than defaulting to
-/// the dangerous side.
+/// deliberately exhaustive: a newly-added request variant fails to compile here
+/// until its retry-safety is classified by hand, rather than defaulting to the
+/// dangerous side.
 fn is_retry_safe(req: &Request) -> bool {
     use Request::*;
     match req {
@@ -276,13 +276,12 @@ fn is_retry_safe(req: &Request) -> bool {
 /// Shared, lazily-reconnecting holder for the daemon [`Bridge`].
 ///
 /// The tray can launch before the daemon accepts connections (cold boot,
-/// crash-restart): startup's connect then fails, and before this slot existed
-/// the managed bridge stayed `None` for the tray's whole lifetime —
-/// every command failed until an app restart, even though the startup log
-/// promised "will retry on first action". The slot IS that retry: the first
-/// caller that finds it empty re-runs the auto-spawn + connect and caches the
-/// result for everyone. An ESTABLISHED bridge already self-heals per request
-/// (see [`Bridge::request`]); the slot only covers the never-connected case.
+/// crash-restart), so startup's connect fails. Without this slot the managed
+/// bridge would stay `None` for the tray's whole lifetime and every command
+/// would fail until an app restart. The slot is the retry: the first caller
+/// that finds it empty re-runs the auto-spawn + connect and caches the result
+/// for everyone. An established bridge already self-heals per request (see
+/// [`Bridge::request`]); the slot only covers the never-connected case.
 ///
 /// Reconnect attempts are rate-limited by an internal [`Backoff`]: a failed
 /// connect arms an exponential window, and while inside it `get_or_connect`
@@ -320,8 +319,8 @@ impl BridgeSlot {
         }
     }
 
-    /// Non-blocking peek for SYNC callers (the global-hotkey handler, the exit
-    /// hook). `None` while disconnected — or while another task holds the
+    /// Non-blocking peek for synchronous callers (the global-hotkey handler, the
+    /// exit hook). `None` while disconnected, or while another task holds the
     /// write lock mid-connect, which those callers treat the same way.
     pub fn current(&self) -> Option<Bridge> {
         self.inner.try_read().ok().and_then(|g| g.clone())

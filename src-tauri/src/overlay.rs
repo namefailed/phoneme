@@ -2,36 +2,36 @@
 //!
 //! A second, frameless, always-on-top [`WebviewWindow`] (label
 //! [`OVERLAY_LABEL`]) that floats the live `transcription_partial` text over the
-//! whole desktop — not just inside the app. Its content is `overlay.html` /
-//! `src/overlay.ts`; this module owns the *Rust* side: creating, destroying, and
+//! whole desktop, not just inside the app. Its content is `overlay.html` /
+//! `src/overlay.ts`; this module owns the Rust side: creating, destroying, and
 //! reconciling the window against the `interface.preview_overlay` setting.
 //!
 //! ## How preview text reaches it
-//! Nothing extra is needed: [`crate::events`] re-emits every daemon event with
+//! Nothing extra is needed. [`crate::events`] re-emits every daemon event with
 //! `app.emit("daemon-event", …)`, and Tauri's `Emitter::emit` broadcasts to
-//! **all** webviews. So the moment this window exists it receives the same
+//! every webview. So the moment this window exists it receives the same
 //! `recording_started` / `transcription_partial` / `recording_stopped` stream
 //! the main window does, and `overlay.ts` drives show/hide/auto-dim from it.
 //! That keeps the auto-show-on-record behavior identical for single recordings
 //! and meetings (both emit `recording_started`).
 //!
 //! ## Window lifecycle
-//! * Created **hidden** at startup when the setting is on (so the very first
-//!   recording can show it instantly without a cold window build), and on a
-//!   config save that flips the setting on.
-//! * Destroyed on a config save that flips it off.
-//! * `overlay.ts` shows it on `recording_started` and hides it a few seconds
-//!   after `recording_stopped` — Rust never forces visibility, so a user's
+//! - Created hidden at startup when the setting is on, so the first recording
+//!   can show it instantly without a cold window build, and again on a config
+//!   save that flips the setting on.
+//! - Destroyed on a config save that flips it off.
+//! - `overlay.ts` shows it on `recording_started` and hides it a few seconds
+//!   after `recording_stopped`. Rust never forces visibility, so a user's
 //!   manual ✕ hide is respected until the next recording.
 //!
 //! ## Position persistence
-//! The window is draggable (`overlay.ts` repositions it manually with
-//! `setPosition` on pointer drag — deliberately NOT a `data-tauri-drag-region`,
-//! whose OS modal move-loop freezes this transparent always-on-top window's
-//! shared event loop). Its position is remembered across runs by
-//! `tauri-plugin-window-state`, which saves/restores geometry per window label
-//! automatically — so we don't persist anything by hand here. On first ever
-//! creation (no saved state) we place it bottom-center of the primary monitor.
+//! The window is draggable: `overlay.ts` repositions it manually with
+//! `setPosition` on pointer drag, deliberately not via a `data-tauri-drag-region`
+//! (its OS modal move-loop freezes this transparent always-on-top window's shared
+//! event loop). Position is remembered across runs by `tauri-plugin-window-state`,
+//! which saves and restores geometry per window label automatically, so we don't
+//! persist anything by hand here. On the first ever creation (no saved state) we
+//! place it bottom-center of the primary monitor.
 
 use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 
@@ -46,36 +46,37 @@ pub const OVERLAY_LABEL: &str = "preview-overlay";
 /// live recording. See `frontend/src/overlay.ts`.
 pub const OVERLAY_PREVIEW_EVENT: &str = "overlay-preview";
 
-/// Default overlay width (logical px). Sensible default, horizontally resizable
-/// from there; `tauri-plugin-window-state` then remembers whatever width the
-/// user picks.
+/// Default overlay width (logical px). A sensible starting point, horizontally
+/// resizable from there; `tauri-plugin-window-state` then remembers whatever
+/// width the user picks.
 const OVERLAY_W: f64 = 540.0;
-/// The overlay's ONE-LINE height: a single tight row holding the live dot +
-/// label + waveform + controls and exactly one line of caption text. The default
-/// and the height for single recordings, meeting "toggle" mode, and the dummy
-/// preview. Tuned to fit the chrome row plus one line of `.ov-text` at the
-/// current font + the card's vertical padding.
+/// The overlay's one-line height: a single tight row holding the live dot,
+/// label, waveform, controls, and exactly one line of caption text. This is the
+/// default, and the height for single recordings, meeting "toggle" mode, and the
+/// dummy preview. Tuned to fit the chrome row plus one line of `.ov-text` at the
+/// current font, plus the card's vertical padding.
 const OVERLAY_H: f64 = 32.0;
-/// The overlay's TWO-LINE height, used ONLY for meeting "both" mode (two stacked
-/// per-track caption rows). The builder allows the inner height to range between
+/// The overlay's two-line height, used only for meeting "both" mode (two stacked
+/// per-track caption rows). The builder lets the inner height range between
 /// [`OVERLAY_H`] and this; `overlay.ts` (`resizeForShape`) sets the exact height
 /// per shape, so the window is one line tall normally and grows to two only when
 /// showing both tracks. Kept in sync with `OV_H_BOTH` in `frontend/src/overlay.ts`.
 const OVERLAY_H_BOTH: f64 = 52.0;
-/// Minimum width so the window can't be dragged down to a useless sliver — still
-/// enough for the dot/label/controls plus a few words of caption.
+/// Minimum width so the window can't be dragged down to a useless sliver, while
+/// still fitting the dot/label/controls plus a few words of caption.
 const OVERLAY_MIN_W: f64 = 300.0;
-/// Maximum width — effectively unbounded (a very wide caption is fine); paired
-/// with `OVERLAY_W`-equal min/max HEIGHT so the window resizes horizontally only.
+/// Maximum width, effectively unbounded (a very wide caption is fine). Paired
+/// with an equal min/max height (via `OVERLAY_W`) so the window resizes
+/// horizontally only.
 const OVERLAY_MAX_W: f64 = 4000.0;
 /// Inset from the bottom of the work area for the first-run placement.
 const BOTTOM_MARGIN: f64 = 96.0;
 /// Off-screen sentinel position the builder uses so a never-saved window starts
 /// off every monitor. `tauri-plugin-window-state` overwrites it only when it has
 /// a remembered position to restore, so "is the window on a monitor?" cleanly
-/// distinguishes first-run (sentinel → off-screen → place) from a restored
-/// position (on a monitor → respect) — without guessing from coordinate signs,
-/// which mis-flagged monitors arranged left of / above the primary.
+/// tells first-run (sentinel, off-screen, so place it) from a restored position
+/// (on a monitor, so respect it). This avoids guessing from coordinate signs,
+/// which mis-flagged monitors arranged left of or above the primary.
 const OFFSCREEN_SENTINEL: f64 = -32000.0;
 
 /// Whether the overlay window currently exists.
@@ -86,10 +87,10 @@ pub fn exists(app: &AppHandle) -> bool {
 /// Create the overlay window (hidden) if it doesn't already exist. Idempotent.
 ///
 /// The window is frameless, transparent, always-on-top, skips the taskbar, and
-/// is resizable (the frameless edges are the resize grips) — a floating caption,
-/// not an app window. It starts **hidden**; `overlay.ts` reveals it when a
-/// recording starts. Returns early (and logs) on failure so a broken overlay
-/// never blocks the app.
+/// is resizable (the frameless edges are the resize grips): a floating caption,
+/// not an app window. It starts hidden; `overlay.ts` reveals it when a recording
+/// starts. Returns early (and logs) on failure so a broken overlay never blocks
+/// the app.
 pub fn ensure(app: &AppHandle) {
     if exists(app) {
         return;
@@ -108,24 +109,25 @@ pub fn ensure(app: &AppHandle) {
         // as "not on any monitor"; the window-state plugin overrides this with a
         // remembered position when one exists. See `place_default_if_unpositioned`.
         .position(OFFSCREEN_SENTINEL, OFFSCREEN_SENTINEL)
-        // Tauri has no per-axis resizable flag. We keep the VERTICAL axis on a
-        // tight rail — between one line (OVERLAY_H) and two (OVERLAY_H_BOTH) —
-        // while leaving the width free between OVERLAY_MIN_W and OVERLAY_MAX_W.
+        // Tauri has no per-axis resizable flag, so we keep the vertical axis on a
+        // tight rail (between one line, OVERLAY_H, and two, OVERLAY_H_BOTH) while
+        // leaving the width free between OVERLAY_MIN_W and OVERLAY_MAX_W.
         // `overlay.ts` (resizeForShape) sets the exact height per shape: one line
-        // for single/toggle/dummy, two lines only for meeting "both" mode. Net
-        // effect: the user drags the edges to widen the caption, but the height is
-        // driven by the caption layout, not free-dragged into an ugly tall box.
+        // for single/toggle/dummy, two lines only for meeting "both" mode. The
+        // upshot is that the user drags the edges to widen the caption, but the
+        // height follows the caption layout rather than being free-dragged into an
+        // ugly tall box.
         .min_inner_size(OVERLAY_MIN_W, OVERLAY_H)
         .max_inner_size(OVERLAY_MAX_W, OVERLAY_H_BOTH)
-        // Resizable so the WIDTH can be sized to taste; position AND width are
-        // remembered by tauri-plugin-window-state. Frameless, so the resize grips
-        // are the window edges. (Height is locked by the equal min/max above.)
+        // Resizable so the width can be sized to taste; position and width are
+        // both remembered by tauri-plugin-window-state. Frameless, so the resize
+        // grips are the window edges. (Height is locked by the equal min/max above.)
         .resizable(true)
         .decorations(false)
-        // NOT transparent: a transparent + always-on-top + frameless WebView2
-        // window (especially with a desktop `backdrop-filter: blur`) hard-crashes
-        // the whole app on some Windows/WebView2 builds when shown. The overlay
-        // is an opaque themed panel instead — see overlay.css.
+        // Not transparent: a transparent always-on-top frameless WebView2 window
+        // (especially with a desktop `backdrop-filter: blur`) hard-crashes the
+        // whole app on some Windows/WebView2 builds when shown. The overlay is an
+        // opaque themed panel instead — see overlay.css.
         .always_on_top(true)
         .skip_taskbar(true)
         // Don't steal focus when it pops up mid-recording.
@@ -140,13 +142,14 @@ pub fn ensure(app: &AppHandle) {
         }
     };
 
-    // Force-correct legacy/out-of-range geometry: an earlier build allowed a
-    // tall, freely vertically-resizable overlay, so `tauri-plugin-window-state`
-    // may restore a height outside the new [OVERLAY_H, OVERLAY_H_BOTH] rail. The
-    // min/max on the builder only constrains user resizes, not a programmatic
-    // restore, so clamp the height back into range here while KEEPING the
-    // restored/default width. `overlay.ts` then sets the precise per-shape height
-    // on the first recording. Best-effort: any failure leaves the OS-chosen size.
+    // Clamp out-of-range geometry: an overlay saved by an older build (which
+    // allowed a tall, freely vertically-resizable window) can come back from
+    // `tauri-plugin-window-state` with a height outside the [OVERLAY_H,
+    // OVERLAY_H_BOTH] rail. The builder's min/max only constrain user resizes,
+    // not a programmatic restore, so pull the height back into range here while
+    // keeping the restored/default width. `overlay.ts` then sets the precise
+    // per-shape height on the first recording. Best-effort: any failure leaves
+    // the OS-chosen size.
     if let Ok(scale) = window.scale_factor() {
         if let Ok(size) = window.inner_size() {
             let logical = size.to_logical::<f64>(scale);
@@ -188,12 +191,12 @@ pub fn sync(app: &AppHandle, enabled: bool) {
 }
 
 /// Place the overlay at the bottom-center of its monitor's work area, but only
-/// when there's no remembered position to honor — detected by the window not
-/// sitting on any currently-connected monitor (the off-screen builder sentinel
-/// on first run, or a saved position whose monitor was unplugged). A restored
-/// position on ANY monitor (including ones arranged left of / above the primary,
-/// at negative coordinates) is respected. Best-effort: any failure just leaves
-/// the window where the OS / plugin put it.
+/// when there's no remembered position to honor. We detect that by the window not
+/// sitting on any currently-connected monitor: the off-screen builder sentinel on
+/// first run, or a saved position whose monitor was unplugged. A restored position
+/// on any monitor (including ones arranged left of or above the primary, at
+/// negative coordinates) is respected. Best-effort: any failure just leaves the
+/// window where the OS or plugin put it.
 fn place_default_if_unpositioned(window: &tauri::WebviewWindow) {
     if position_is_on_a_monitor(window) {
         return; // a remembered, on-screen position was restored — respect it
@@ -215,7 +218,8 @@ fn place_default_if_unpositioned(window: &tauri::WebviewWindow) {
 /// bounds. Used to tell a restored on-screen position from the off-screen
 /// first-run sentinel (or a position on a now-disconnected monitor). On any
 /// error reading the position or enumerating monitors, returns `false` so the
-/// caller falls back to placing the window rather than leaving it off-screen.
+/// caller falls back to placing the window rather than leaving it stranded
+/// off-screen.
 fn position_is_on_a_monitor(window: &tauri::WebviewWindow) -> bool {
     let Ok(p) = window.outer_position() else {
         return false;

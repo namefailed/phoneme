@@ -2,19 +2,19 @@
 
 use super::*;
 
-/// Persist every window's position/size NOW. tauri-plugin-window-state only
-/// saves on a graceful exit — a crash, force-kill, or dev-watcher rebuild
+/// Persist every window's position and size right now. tauri-plugin-window-state
+/// only saves on a graceful exit, so a crash, force-kill, or dev-watcher rebuild
 /// loses any move/resize since launch. The live-preview overlay calls this
 /// (debounced) after the user drags or resizes it, so its placement survives
 /// anything.
 #[tauri::command]
 pub fn save_window_state(app: tauri::AppHandle) -> Result<(), CommandError> {
     use tauri_plugin_window_state::{AppHandleExt, StateFlags};
-    // Everything EXCEPT visibility and decorations. Saving "visible" while the
-    // overlay was up made it restore visible and pop open on every start; saving
-    // DECORATIONS would persist a stripped titlebar and recreate the window
+    // Everything except visibility and decorations. Saving "visible" while the
+    // overlay is up restores it visible and pops it open on every start; saving
+    // decorations would persist a stripped titlebar and recreate the window
     // frameless next launch (Windows can't re-add the native frame at runtime).
-    // Must mirror the plugin's flags in lib.rs.
+    // These flags must mirror the plugin's flags in lib.rs.
     app.save_window_state(StateFlags::all() & !StateFlags::VISIBLE & !StateFlags::DECORATIONS)
         .map_err(|e| CommandError::new("internal", e.to_string()))
 }
@@ -100,14 +100,14 @@ pub async fn write_config(
     bridge: Br<'_>,
     mut config: Config,
 ) -> Result<(), CommandError> {
-    // The WebView only ever held masked keys; restore any unchanged secret from
-    // the current on-disk config so saving doesn't overwrite it with the mask.
+    // The WebView only ever held masked keys, so restore any unchanged secret
+    // from the current on-disk config rather than overwriting it with the mask.
     // Propagate a read error rather than defaulting: `config_io::read` returns a
-    // default only when the file is ABSENT (first run, no secrets to lose), and
+    // default only when the file is absent (first run, no secrets to lose), and
     // errors only when an existing file is unparseable. Defaulting in that case
-    // would unmask every still-masked key to empty and silently WIPE the user's
-    // saved secrets on save — so abort loudly and leave the on-disk (encrypted)
-    // secrets intact instead.
+    // would unmask every still-masked key to empty and silently wipe the user's
+    // saved secrets on save. Abort loudly instead and leave the on-disk
+    // (encrypted) secrets intact.
     let current = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
     unmask_config_secrets(&mut config, &current);
     let cfg = config.clone();
@@ -120,15 +120,14 @@ pub async fn write_config(
     Ok(())
 }
 
-/// Register the (enabled) global hotkeys for `config` — the three built-ins
-/// (record, meeting, in-place) AND every enabled custom binding in
+/// Register the enabled global hotkeys for `config`: the three built-ins
+/// (record, meeting, in-place) plus every enabled custom binding in
 /// `config.hotkeys`. Shared by app startup and `apply_config` so every code path
-/// that (re-)registers hotkeys applies them ALL together; previously the logic
-/// was duplicated, risking a path that registered only the main hotkey on a
-/// profile switch. Custom bindings are registered here so their combos reach the
-/// OS; the lib.rs global-shortcut handler matches a fired combo back to its
-/// binding and dispatches it. Does not unregister first — callers re-applying
-/// must `unregister_all`.
+/// that (re-)registers hotkeys applies the whole set together, rather than some
+/// path registering only the main hotkey on a profile switch. Custom bindings
+/// are registered here so their combos reach the OS; the lib.rs global-shortcut
+/// handler matches a fired combo back to its binding and dispatches it. Does not
+/// unregister first, so callers re-applying must `unregister_all` themselves.
 pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
     let entries = [
         ("record", config.hotkey.enabled, &config.hotkey.combo),
@@ -145,9 +144,9 @@ pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
     ];
     // The three built-ins, then every enabled custom binding (`config.hotkeys`).
     // Custom bindings are owned to satisfy the borrow; the built-in tuples borrow
-    // their combos. Iterating them here (not just the three built-ins) is what
-    // makes a custom keybind's combo actually reach the OS — the lib.rs handler
-    // then matches the fired combo back to its binding and dispatches it.
+    // their combos. Iterating the custom ones here is what gets a custom keybind's
+    // combo to the OS; the lib.rs handler then matches the fired combo back to its
+    // binding and dispatches it.
     let custom: Vec<(String, &str)> = config
         .hotkeys
         .iter()
@@ -171,7 +170,7 @@ pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
         register_one(app, label, combo);
     }
 
-    /// Register one combo, warning (never panicking) on a parse or register error.
+    /// Register one combo, warning rather than panicking on a parse or register error.
     fn register_one(app: &tauri::AppHandle, label: &str, combo: &str) {
         use std::str::FromStr;
         use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
@@ -188,7 +187,7 @@ pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
 
 /// Apply the side effects of a config that has just been written to
 /// `config.toml`: refresh the "start at login" registry key, tell the daemon
-/// to reload, sync the live-preview overlay, and re-register ALL global hotkeys.
+/// to reload, sync the live-preview overlay, and re-register every global hotkey.
 /// Shared by `write_config`, `switch_profile`, and the tray's profile-switch
 /// (`tray::switch_to_profile`) so every path that adopts a new config behaves
 /// identically to a manual save.
@@ -254,9 +253,9 @@ pub(crate) async fn apply_config(app: &tauri::AppHandle, slot: &BridgeSlot, conf
     // (hidden) when `interface.recording_indicator` is on, close it when off.
     crate::indicator::sync(app, config.interface.recording_indicator);
 
-    // Dynamically reload hotkeys in the frontend: drop the old set, then
-    // register the new config's hotkeys via the shared helper so all three
-    // (record, meeting, in-place) are always re-applied together.
+    // Reload hotkeys: drop the old set, then register the new config's hotkeys
+    // through the shared helper so all three built-ins (record, meeting,
+    // in-place) and the custom bindings are re-applied together.
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     if let Err(e) = app.global_shortcut().unregister_all() {
         tracing::warn!("failed to unregister shortcuts: {e}");
@@ -270,7 +269,7 @@ pub fn list_profiles() -> Result<Vec<String>, CommandError> {
     phoneme_core::profiles::list_profiles().map_err(|e| CommandError::from(e.to_string()))
 }
 
-/// Snapshot the CURRENT `config.toml` and save it as a profile named `name`.
+/// Snapshot the current `config.toml` and save it as a profile named `name`.
 #[tauri::command]
 pub fn save_profile(name: String) -> Result<(), CommandError> {
     let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
