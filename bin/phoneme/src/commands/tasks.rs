@@ -33,12 +33,7 @@ async fn list(only_open: bool, cfg: &Config, json: bool) -> ExitCode {
         Err(code) => return code,
     };
 
-    let value = match client
-        .send(Request::ListAllTasks {
-            only_open,
-        })
-        .await
-    {
+    let value = match client.send(Request::ListAllTasks { only_open }).await {
         Ok(v) => v,
         Err(code) => return code,
     };

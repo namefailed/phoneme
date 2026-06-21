@@ -95,12 +95,12 @@ fn end_of_day(d: DateTime<Local>) -> DateTime<Local> {
 /// a malformed/invalid custom range.
 pub fn resolve_range(args: &DigestArgs, now: DateTime<Local>) -> Result<ResolvedRange, String> {
     if let (Some(since_s), Some(until_s)) = (&args.since, &args.until) {
-        let since = parse_date(since_s)
-            .ok_or_else(|| format!("invalid --since date: {since_s}"))?;
+        let since =
+            parse_date(since_s).ok_or_else(|| format!("invalid --since date: {since_s}"))?;
         // A bare date parses at start-of-day; extend a date-only --until to
         // end-of-day so the window is inclusive of the whole final day.
-        let until_raw = parse_date(until_s)
-            .ok_or_else(|| format!("invalid --until date: {until_s}"))?;
+        let until_raw =
+            parse_date(until_s).ok_or_else(|| format!("invalid --until date: {until_s}"))?;
         let until = if until_s.len() <= 10 {
             end_of_day(until_raw)
         } else {
@@ -114,7 +114,11 @@ pub fn resolve_range(args: &DigestArgs, now: DateTime<Local>) -> Result<Resolved
             since.format("%Y-%m-%d"),
             until.format("%Y-%m-%d")
         );
-        return Ok(ResolvedRange { since, until, label });
+        return Ok(ResolvedRange {
+            since,
+            until,
+            label,
+        });
     }
 
     if args.weekly {
@@ -234,8 +238,14 @@ mod tests {
         // is stable for a later `--show` the same day.
         let now = Local.with_ymd_and_hms(2026, 6, 21, 14, 30, 0).unwrap();
         let r = resolve_range(&args(true, false, None, None), now).unwrap();
-        assert_eq!(r.since, Local.with_ymd_and_hms(2026, 6, 21, 0, 0, 0).unwrap());
-        assert_eq!(r.until, Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap());
+        assert_eq!(
+            r.since,
+            Local.with_ymd_and_hms(2026, 6, 21, 0, 0, 0).unwrap()
+        );
+        assert_eq!(
+            r.until,
+            Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap()
+        );
         assert_eq!(r.label, "2026-06-21");
     }
 
@@ -254,8 +264,14 @@ mod tests {
     fn default_with_no_flags_is_daily() {
         let now = Local.with_ymd_and_hms(2026, 6, 21, 14, 30, 0).unwrap();
         let r = resolve_range(&args(false, false, None, None), now).unwrap();
-        assert_eq!(r.since, Local.with_ymd_and_hms(2026, 6, 21, 0, 0, 0).unwrap());
-        assert_eq!(r.until, Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap());
+        assert_eq!(
+            r.since,
+            Local.with_ymd_and_hms(2026, 6, 21, 0, 0, 0).unwrap()
+        );
+        assert_eq!(
+            r.until,
+            Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap()
+        );
     }
 
     #[test]
@@ -263,8 +279,14 @@ mod tests {
         let now = Local.with_ymd_and_hms(2026, 6, 21, 14, 30, 0).unwrap();
         let r = resolve_range(&args(false, true, None, None), now).unwrap();
         // Six days ago at midnight → end of today = a 7-calendar-day inclusive window.
-        assert_eq!(r.since, Local.with_ymd_and_hms(2026, 6, 15, 0, 0, 0).unwrap());
-        assert_eq!(r.until, Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap());
+        assert_eq!(
+            r.since,
+            Local.with_ymd_and_hms(2026, 6, 15, 0, 0, 0).unwrap()
+        );
+        assert_eq!(
+            r.until,
+            Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap()
+        );
         assert_eq!(r.label, "week of 2026-06-15");
     }
 
@@ -276,9 +298,15 @@ mod tests {
             now,
         )
         .unwrap();
-        assert_eq!(r.since, Local.with_ymd_and_hms(2026, 6, 15, 0, 0, 0).unwrap());
+        assert_eq!(
+            r.since,
+            Local.with_ymd_and_hms(2026, 6, 15, 0, 0, 0).unwrap()
+        );
         // A bare --until covers the whole final day (inclusive).
-        assert_eq!(r.until, Local.with_ymd_and_hms(2026, 6, 20, 23, 59, 59).unwrap());
+        assert_eq!(
+            r.until,
+            Local.with_ymd_and_hms(2026, 6, 20, 23, 59, 59).unwrap()
+        );
         assert_eq!(r.label, "2026-06-15 – 2026-06-20");
     }
 

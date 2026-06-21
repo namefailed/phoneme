@@ -714,7 +714,7 @@ export class SectionInPlace {
     const host = this.container.querySelector<HTMLElement>("#ip-dictation-history");
     if (!host) return;
 
-    let rows: DictationHistoryRow[] = [];
+    let rows: DictationHistoryRow[];
     try {
       rows = await listDictationHistory(DICTATION_HISTORY_KEEP);
     } catch {

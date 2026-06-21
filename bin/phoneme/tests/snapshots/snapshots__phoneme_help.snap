@@ -18,6 +18,8 @@ Commands:
   suggest-tags      Re-run the LLM tag-suggestion step on a recording on demand
   suggest-entities  Re-run the LLM entity-extraction step on a recording on demand
   chapters          Generate a recording's topic chapters (or view stored ones with --show)
+  digest            Generate (or view) a period digest — one LLM rollup across every recording in a date window (what was discussed, decisions, open items). Distinct from the per-recording `summarize` and the meeting-scoped `meeting digest`
+  suggest-tasks     Re-run the LLM task-extraction step on a recording on demand
   notes             Get or set a recording's free-form notes
   edit              Edit a recording's transcript and/or metadata (title, favorite)
   find-replace      Find-and-replace literal text across a recording's transcript
@@ -37,6 +39,7 @@ Commands:
   hook              Test the configured hook
   tag               Manage recording tags
   entities          List the extracted entities across the library (the cross-recording entity facet: people, orgs, topics, terms — each with a recording count)
+  tasks             List the extracted tasks across the library, or mark one done / not done
   profile           Manage config profiles (named full-config snapshots)
   export            Export all recordings and metadata to a zip file
   import-backup     Restore recordings + audio from a backup zip (the inverse of `export`)

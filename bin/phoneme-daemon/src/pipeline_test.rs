@@ -2220,15 +2220,15 @@ fn parse_tasks_scans_prose_trims_and_dedupes() {
     assert_eq!(parsed.len(), 2);
     assert_eq!(parsed[0].text, "Send the roadmap");
     assert_eq!(parsed[0].due_hint.as_deref(), Some("by Friday"));
-    assert!(!parsed[0].done, "a freshly-extracted task is never pre-checked");
+    assert!(
+        !parsed[0].done,
+        "a freshly-extracted task is never pre-checked"
+    );
     assert_eq!(parsed[1].text, "Book the room");
     assert_eq!(parsed[1].due_hint, None);
 
     // Code-fenced; a bare `{text}` (no due) parses with no due hint.
-    let fenced = parse_tasks(
-        "```json\n[{\"text\":\"Reply to Sam\"}]\n```",
-        10,
-    );
+    let fenced = parse_tasks("```json\n[{\"text\":\"Reply to Sam\"}]\n```", 10);
     assert_eq!(fenced.len(), 1);
     assert_eq!(fenced[0].text, "Reply to Sam");
     assert_eq!(fenced[0].due_hint, None);
@@ -2300,9 +2300,13 @@ async fn extract_tasks_persists_tasks_from_mock_llm() {
     let rec = task_test_recording(&id, "We agreed to send the roadmap and book a room.");
     state.catalog.insert(&rec).await.unwrap();
 
-    let failure =
-        crate::pipeline::extract_tasks(&state, &cfg, &id, "We agreed to send the roadmap and book a room.")
-            .await;
+    let failure = crate::pipeline::extract_tasks(
+        &state,
+        &cfg,
+        &id,
+        "We agreed to send the roadmap and book a room.",
+    )
+    .await;
     assert!(failure.is_none(), "a clean extract is not a failure");
 
     let fetched = state.catalog.get(&id).await.unwrap().expect("exists");
@@ -2321,9 +2325,13 @@ async fn extract_tasks_persists_tasks_from_mock_llm() {
         .unwrap()
         .id;
     state.catalog.set_task_done(roadmap_id, true).await.unwrap();
-    let again =
-        crate::pipeline::extract_tasks(&state, &cfg, &id, "We agreed to send the roadmap and book a room.")
-            .await;
+    let again = crate::pipeline::extract_tasks(
+        &state,
+        &cfg,
+        &id,
+        "We agreed to send the roadmap and book a room.",
+    )
+    .await;
     assert!(again.is_none());
     let after = state.catalog.get(&id).await.unwrap().expect("exists");
     assert!(
@@ -2377,7 +2385,11 @@ async fn extract_tasks_empty_parse_keeps_prior_tasks() {
         )
         .await
         .unwrap();
-    state.catalog.set_tasks_model(&id, "prior-model").await.unwrap();
+    state
+        .catalog
+        .set_tasks_model(&id, "prior-model")
+        .await
+        .unwrap();
 
     let failure =
         crate::pipeline::extract_tasks(&state, &cfg, &id, "Some transcript with no clear actions.")
@@ -2568,6 +2580,7 @@ fn step_label(step: &crate::pipeline::ResolvedStep) -> &'static str {
         Tags { .. } => "tags",
         Entities { .. } => "entities",
         Chapters { .. } => "chapters",
+        Tasks { .. } => "tasks",
         UnsupportedEnrichment { .. } => "unsupported",
         Hook { .. } => "hook",
     }
@@ -2702,7 +2715,12 @@ fn resolve_recipe_missing_id_falls_back_to_default() {
 
 // ── Spoken-language route lookup ─────────────────────────────────────────────
 
-fn route(language: &str, model: &str, recipe: &str, enabled: bool) -> phoneme_core::config::LanguageRoute {
+fn route(
+    language: &str,
+    model: &str,
+    recipe: &str,
+    enabled: bool,
+) -> phoneme_core::config::LanguageRoute {
     phoneme_core::config::LanguageRoute {
         language: language.to_string(),
         whisper_model: model.to_string(),
@@ -2742,7 +2760,10 @@ fn resolve_language_route_falls_back_to_catch_all() {
 
 #[test]
 fn resolve_language_route_none_detected_uses_catch_all() {
-    let routes = vec![route("es", "large-es", "", true), route("*", "", "fallback", true)];
+    let routes = vec![
+        route("es", "large-es", "", true),
+        route("*", "", "fallback", true),
+    ];
     // Provider reported no language → only the catch-all can match.
     let r = crate::pipeline::resolve_language_route(&routes, None).unwrap();
     assert_eq!(r.recipe_id, "fallback");
@@ -2759,7 +2780,10 @@ fn resolve_language_route_no_match_returns_none() {
 fn resolve_language_route_skips_disabled() {
     // The exact `es` rule is disabled, so it never fires; the enabled catch-all
     // takes over instead.
-    let routes = vec![route("es", "large-es", "", false), route("*", "fallback-model", "", true)];
+    let routes = vec![
+        route("es", "large-es", "", false),
+        route("*", "fallback-model", "", true),
+    ];
     let r = crate::pipeline::resolve_language_route(&routes, Some("es")).unwrap();
     assert_eq!(r.whisper_model, "fallback-model");
 
@@ -3844,10 +3868,9 @@ async fn run_meeting_recipe_uses_the_configured_meeting_template_prompt() {
         meeting_track("m-standup", "mic", Some("alpha from the mic")),
         meeting_track("m-standup", "system", Some("beta from the system")),
     ];
-    let (digest, model) =
-        crate::pipeline::run_meeting_recipe(&state, &cfg, &tracks[0].id, &tracks)
-            .await
-            .expect("meeting recipe should produce a digest");
+    let (digest, model) = crate::pipeline::run_meeting_recipe(&state, &cfg, &tracks[0].id, &tracks)
+        .await
+        .expect("meeting recipe should produce a digest");
     assert_eq!(digest, "STANDUP DIGEST");
     assert_eq!(model, "digest-llm");
 }
@@ -3875,7 +3898,9 @@ async fn run_meeting_recipe_falls_back_to_built_in_digest_when_unset_or_missing(
         let (digest, _model) =
             crate::pipeline::run_meeting_recipe(&state, &cfg, &tracks[0].id, &tracks)
                 .await
-                .unwrap_or_else(|e| panic!("recipe_id={recipe_id:?} should fall back, got err: {e}"));
+                .unwrap_or_else(|e| {
+                    panic!("recipe_id={recipe_id:?} should fall back, got err: {e}")
+                });
         assert_eq!(digest, "FALLBACK DIGEST", "recipe_id={recipe_id:?}");
     }
 }
@@ -3939,6 +3964,8 @@ fn period_recording(
         summary_model: None,
         entities_model: None,
         chapters_model: None,
+        tasks_model: None,
+        tasks: vec![],
         title: title.map(str::to_string),
         title_is_auto: true,
         title_model: None,
@@ -3956,12 +3983,28 @@ fn period_recording(
 fn assemble_period_transcript_orders_chronologically_and_prefixes_date_title() {
     // Two recordings out of order on input; the merge re-sorts oldest-first and
     // prefixes each block with its date + title.
-    let later = period_recording(2026, 6, 21, 15, 30, Some("Afternoon sync"), Some("later text"));
-    let earlier = period_recording(2026, 6, 21, 9, 0, Some("Morning note"), Some("earlier text"));
+    let later = period_recording(
+        2026,
+        6,
+        21,
+        15,
+        30,
+        Some("Afternoon sync"),
+        Some("later text"),
+    );
+    let earlier = period_recording(
+        2026,
+        6,
+        21,
+        9,
+        0,
+        Some("Morning note"),
+        Some("earlier text"),
+    );
     let merged = crate::pipeline::assemble_period_transcript(&[later, earlier]);
 
-    assert!(merged.contains("2026-06-21 09:00 — Morning note\nearlier text"));
-    assert!(merged.contains("2026-06-21 15:30 — Afternoon sync\nlater text"));
+    assert!(merged.contains("=== 2026-06-21 09:00 — Morning note ===\nearlier text"));
+    assert!(merged.contains("=== 2026-06-21 15:30 — Afternoon sync ===\nlater text"));
     // Oldest leads: the morning block precedes the afternoon one.
     let morning = merged.find("Morning note").unwrap();
     let afternoon = merged.find("Afternoon sync").unwrap();
@@ -3979,8 +4022,14 @@ fn assemble_period_transcript_skips_empty_and_falls_back_to_id() {
 
     let merged = crate::pipeline::assemble_period_transcript(&[titled, untitled, pending]);
     assert!(merged.contains("Kickoff"));
-    assert!(merged.contains(&id_str), "no-title block uses the recording id");
-    assert!(!merged.contains("Pending"), "an empty-transcript block is skipped");
+    assert!(
+        merged.contains(&id_str),
+        "no-title block uses the recording id"
+    );
+    assert!(
+        !merged.contains("Pending"),
+        "an empty-transcript block is skipped"
+    );
 
     // All empty → empty (the caller treats that as nothing to digest).
     let all_empty = [
@@ -4002,7 +4051,10 @@ fn assemble_period_transcript_truncates_over_budget() {
         period_recording(2026, 6, 2, 8, 0, Some("second"), Some("should be omitted")),
     ];
     let merged = crate::pipeline::assemble_period_transcript(&recs);
-    assert!(merged.contains("transcript truncated"), "marks the cut: {merged:.80}");
+    assert!(
+        merged.contains("transcript truncated"),
+        "marks the cut: {merged:.80}"
+    );
     assert!(
         !merged.contains("should be omitted"),
         "the over-budget tail is dropped"

@@ -859,6 +859,7 @@ pub(crate) fn assemble_meeting_transcript(tracks: &[phoneme_core::Recording]) ->
 /// `LlmActivity`/skip events are keyed on `event_id` (the meeting's first track),
 /// since the activity stream is per-recording; the result is stored against the
 /// meeting, not the track.
+#[allow(dead_code)] // retained primitive: superseded by run_meeting_recipe, kept for tests + as the documented single-step digest path
 pub(crate) async fn generate_meeting_digest(
     state: &AppState,
     cfg: &Config,
@@ -970,7 +971,7 @@ fn resolve_meeting_recipe(cfg: &Config) -> Vec<ResolvedMeetingStep> {
                 let target = entry.target.trim();
                 if target == "meeting_digest" || target == "summary" {
                     steps.push(ResolvedMeetingStep::Digest {
-                        llm_cfg: entry_llm_config(cfg, &entry.llm),
+                        llm_cfg: meeting_entry_llm_config(cfg, &entry.llm),
                         prompt: entry.llm.prompt.clone(),
                     });
                 } else {
@@ -981,7 +982,8 @@ fn resolve_meeting_recipe(cfg: &Config) -> Vec<ResolvedMeetingStep> {
                 }
             }
             PlaybookKind::Hook => {
-                if entry.hook.command.trim().is_empty() && entry.hook.webhook_url.trim().is_empty() {
+                if entry.hook.command.trim().is_empty() && entry.hook.webhook_url.trim().is_empty()
+                {
                     tracing::warn!(step = %step_id, "meeting Hook entry has no command or webhook; skipping");
                 } else {
                     steps.push(ResolvedMeetingStep::Hook {
@@ -1114,7 +1116,11 @@ async fn run_meeting_hook(
 
     let url = hook.webhook_url.trim();
     if !url.is_empty() {
-        if let Err(e) = state.webhook.post(url, timeout, &payload, &cfg.webhook).await {
+        if let Err(e) = state
+            .webhook
+            .post(url, timeout, &payload, &cfg.webhook)
+            .await
+        {
             tracing::warn!(url = %url, error = %e, "meeting webhook failed");
         }
     }
@@ -2508,7 +2514,9 @@ pub(crate) async fn extract_tasks_with(
                         tracing::warn!(error = %e, "failed to persist tasks model");
                     }
                     tracing::info!(id = %id.as_str(), count = tasks.len(), "tasks saved");
-                    state.events.emit(DaemonEvent::TasksUpdated { id: id.clone() });
+                    state
+                        .events
+                        .emit(DaemonEvent::TasksUpdated { id: id.clone() });
                 }
                 Err(e) => tracing::warn!(error = %e, "failed to persist tasks"),
             }
@@ -2743,6 +2751,24 @@ fn entry_llm_config(
     entry: &phoneme_core::config::PlaybookLlm,
 ) -> LlmPostProcessConfig {
     cfg.llm_post_process.resolve_step(
+        &entry.provider,
+        &entry.api_url,
+        entry.api_key_str(),
+        &entry.model,
+    )
+}
+
+/// Like [`entry_llm_config`], but anchored to the `[summary]` connection instead of
+/// `[llm_post_process]` (cleanup). A meeting Digest step reuses the summary
+/// provider/model (see [`summary_llm_config`] and the `resolve_meeting_recipe`
+/// fallback), so a built-in meeting template that carries only a prompt — provider,
+/// URL, key and model all blank — inherits the summary connection the meeting
+/// digest has always used, not the cleanup one.
+fn meeting_entry_llm_config(
+    cfg: &Config,
+    entry: &phoneme_core::config::PlaybookLlm,
+) -> LlmPostProcessConfig {
+    summary_llm_config(cfg).resolve_step(
         &entry.provider,
         &entry.api_url,
         entry.api_key_str(),
@@ -3688,8 +3714,7 @@ pub async fn run(
                 let (routed_cfg, routed_guard) =
                     apply_model_override(state, &cfg.whisper, Some(route_model.to_string())).await;
                 let routed_cfg = state.whisper_ports.apply(cfg, &routed_cfg);
-                let routed_provider =
-                    state.transcription.provider(&routed_cfg, &cfg.diarization);
+                let routed_provider = state.transcription.provider(&routed_cfg, &cfg.diarization);
                 let retried = tokio::select! {
                     biased;
                     _ = cancel.cancelled() => {

@@ -218,5 +218,6 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
         entity_value: None,         // no CLI flag for this yet (see `phoneme entities`)
         entity_kind: None,          // no CLI flag for this yet
         low_confidence_below: None, // no CLI flag for this yet
+        task_state: None,           // no CLI flag for this yet (see `phoneme tasks`)
     }
 }

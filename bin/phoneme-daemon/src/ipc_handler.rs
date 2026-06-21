@@ -2055,10 +2055,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(facets) => Response::Ok(serde_json::to_value(facets).unwrap_or_default()),
             Err(e) => err_response(&e),
         },
-        Request::ListAllTasks { only_open } => match state.catalog.list_all_tasks(only_open).await {
-            Ok(tasks) => Response::Ok(serde_json::to_value(tasks).unwrap_or_default()),
-            Err(e) => err_response(&e),
-        },
+        Request::ListAllTasks { only_open } => {
+            match state.catalog.list_all_tasks(only_open).await {
+                Ok(tasks) => Response::Ok(serde_json::to_value(tasks).unwrap_or_default()),
+                Err(e) => err_response(&e),
+            }
+        }
         Request::MergeTags { from_id, into_id } => {
             match state.catalog.merge_tags(from_id, into_id).await {
                 Ok(()) => {
@@ -2724,7 +2726,7 @@ async fn rerun_summary(
 /// Generate (or regenerate) a whole-meeting digest on demand — the meeting-scope
 /// twin of [`rerun_summary`]. Loads every track of the meeting, assembles the
 /// merged (source-labelled) transcript, and runs the configured meeting template
-/// (a `scope = Meeting` recipe) over it via [`run_meeting_recipe`]. Like
+/// (a `scope = Meeting` recipe) over it via `run_meeting_recipe`. Like
 /// `rerun_summary`, the LLM call runs in a spawned task so it doesn't block the IPC
 /// connection; the result is stored keyed by `meeting_id` and the UI listens for
 /// `MeetingDigestUpdated`. `model` overrides the configured summary model for this
@@ -2934,10 +2936,9 @@ async fn rerun_period_digest(
                     .emit(DaemonEvent::PeriodDigestUpdated { key });
             }
             Err(reason) => {
-                task_state.events.emit(DaemonEvent::PeriodDigestFailed {
-                    key,
-                    error: reason,
-                });
+                task_state
+                    .events
+                    .emit(DaemonEvent::PeriodDigestFailed { key, error: reason });
             }
         }
     });

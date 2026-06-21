@@ -551,7 +551,10 @@ mod tests {
         // RegrabDictation injects text at the cursor — a blind re-send would type
         // it twice into the user's document, the single most important
         // classification for the dictation-history feature.
-        assert!(!is_retry_safe(&Request::RegrabDictation { id: 1, mode: None }));
+        assert!(!is_retry_safe(&Request::RegrabDictation {
+            id: 1,
+            mode: None
+        }));
         // ListDictationHistory is a pure read — safe to silently re-send.
         assert!(is_retry_safe(&Request::ListDictationHistory { limit: 50 }));
         // The history mutations are single-attempt like other deletes/clears.

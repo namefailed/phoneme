@@ -561,6 +561,7 @@ pub fn run() {
             commands::suggest_chapters,
             commands::suggest_tasks,
             commands::set_task_done,
+            commands::list_all_tasks,
             commands::approve_tag_suggestion,
             commands::clear_all_tag_suggestions,
             commands::dismiss_tag_suggestion,

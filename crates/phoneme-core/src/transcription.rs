@@ -780,11 +780,10 @@ pub(crate) async fn diarize_transcript(
     // The detected language is independent of speaker attribution, so the inner
     // diarization paths all build their `Transcription` with `language: None` and
     // this stamps it on whichever result comes back, in one place.
-    let with_language =
-        |mut t: Transcription| -> Transcription {
-            t.language = detected_language.clone();
-            t
-        };
+    let with_language = |mut t: Transcription| -> Transcription {
+        t.language = detected_language.clone();
+        t
+    };
     // Diarization failing must not cost the timeline its timing data, so the
     // fallback carries the whisper segments with no speaker attribution. The
     // words ride along with their timing and confidence but no speaker label
@@ -845,7 +844,12 @@ pub(crate) async fn diarize_transcript(
         return with_language(unlabeled(plain_text, &segments, words));
     }
 
-    with_language(diarize_per_segment(&segments, &diar.spans, plain_text, words))
+    with_language(diarize_per_segment(
+        &segments,
+        &diar.spans,
+        plain_text,
+        words,
+    ))
 }
 
 /// Segment-level attribution: the path for segments-only / cloud-routed inputs
@@ -1556,8 +1560,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                     "completed" => {
                         // Detected language (ISO-639). Empty strings degrade to
                         // `None`. Read before `t.words`/`t.text` are consumed.
-                        let detected_language =
-                            t.language_code.as_deref().and_then(non_empty);
+                        let detected_language = t.language_code.as_deref().and_then(non_empty);
                         // The per-word layer is top-level and independent of
                         // diarization, so capture it once (already ms, carrying
                         // confidence and an optional speaker label) and attach it

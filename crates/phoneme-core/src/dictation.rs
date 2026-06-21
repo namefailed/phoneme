@@ -207,8 +207,7 @@ pub fn apply_snippets(text: &str, snippets: &BTreeMap<String, String>) -> String
             // Word-boundary guard: the char before and after the span must not be
             // alphanumeric, so a trigger never fires inside a larger word.
             let left_ok = i == 0 || !chars[i - 1].is_alphanumeric();
-            let right_ok =
-                i + t.len() == chars.len() || !chars[i + t.len()].is_alphanumeric();
+            let right_ok = i + t.len() == chars.len() || !chars[i + t.len()].is_alphanumeric();
             if left_ok && right_ok {
                 out.push_str(expansion);
                 i += t.len();
@@ -865,7 +864,10 @@ mod tests {
     #[test]
     fn snippets_empty_map_is_a_pure_passthrough() {
         let empty = BTreeMap::new();
-        assert_eq!(apply_snippets("my email is here", &empty), "my email is here");
+        assert_eq!(
+            apply_snippets("my email is here", &empty),
+            "my email is here"
+        );
     }
 
     #[test]

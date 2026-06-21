@@ -69,6 +69,7 @@ fn list_recordings_request_roundtrips() {
         entity_value: None,
         entity_kind: None,
         low_confidence_below: None,
+        task_state: None,
     };
     roundtrip(&Request::ListRecordings { filter });
 }

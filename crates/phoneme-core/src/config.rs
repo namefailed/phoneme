@@ -4649,8 +4649,7 @@ mod tests {
             .collect();
         // Exactly one BUILTIN meeting recipe (the `meeting_digest`); standup/
         // interview are examples (builtin: false).
-        let builtin_meeting: Vec<&&PlaybookRecipe> =
-            meeting.iter().filter(|r| r.builtin).collect();
+        let builtin_meeting: Vec<&&PlaybookRecipe> = meeting.iter().filter(|r| r.builtin).collect();
         assert_eq!(
             builtin_meeting.len(),
             1,
@@ -4680,15 +4679,36 @@ mod tests {
         // A pre-meeting-template config has no `scope` on its recipes and no
         // `meeting_recipe_id`. Both must default cleanly: every recipe loads as
         // Recording, and the meeting-recipe knob is empty (the digest path).
-        let toml = r#"
-            [[recipes]]
-            id = "default"
-            name = "Default pipeline"
-            builtin = true
-            steps = ["cleanup", "summary"]
-        "#;
-        let cfg: Config = toml::from_str(toml).expect("parses without scope/meeting_recipe_id");
-        assert_eq!(cfg.meeting_recipe_id, "", "meeting_recipe_id defaults empty");
+        // Start from a real config (so the required `[whisper]` etc. are present),
+        // give it a non-default scope + meeting_recipe_id, serialize, then strip
+        // those two lines to simulate a config written before the fields existed.
+        let cfg = Config {
+            meeting_recipe_id: "weekly".into(),
+            recipes: vec![PlaybookRecipe {
+                id: "default".into(),
+                name: "Default pipeline".into(),
+                description: String::new(),
+                builtin: true,
+                scope: RecipeScope::Meeting,
+                steps: vec!["cleanup".into(), "summary".into()],
+            }],
+            ..Config::default()
+        };
+        let serialized = toml::to_string(&cfg).unwrap();
+        let stripped: String = serialized
+            .lines()
+            .filter(|l| {
+                let t = l.trim_start();
+                !t.starts_with("scope =") && !t.starts_with("meeting_recipe_id =")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let cfg: Config =
+            toml::from_str(&stripped).expect("parses without scope/meeting_recipe_id");
+        assert_eq!(
+            cfg.meeting_recipe_id, "",
+            "meeting_recipe_id defaults empty"
+        );
         let default = cfg
             .recipes
             .iter()
@@ -5818,12 +5838,16 @@ mod tests {
     #[test]
     fn effective_snippets_drops_blank_triggers() {
         let mut ip = InPlaceConfig::default();
-        ip.snippets.insert("my email".into(), "you@example.com".into());
+        ip.snippets
+            .insert("my email".into(), "you@example.com".into());
         // A whitespace-only trigger must never reach the engine.
         ip.snippets.insert("   ".into(), "junk".into());
         let eff = ip.effective_snippets();
         assert_eq!(eff.len(), 1);
-        assert_eq!(eff.get("my email").map(String::as_str), Some("you@example.com"));
+        assert_eq!(
+            eff.get("my email").map(String::as_str),
+            Some("you@example.com")
+        );
     }
 
     #[test]
@@ -6692,6 +6716,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn language_routes_round_trip() {
         let mut cfg = Config::default();
         cfg.language_routes = vec![

@@ -201,7 +201,10 @@ async fn dictation_history_inserts_lists_newest_first_and_gets_by_id() {
     // get-by-id: hit returns the text, miss returns None.
     let newest_id = all[0].id;
     assert_eq!(
-        db.get_dictation_history(newest_id).await.unwrap().as_deref(),
+        db.get_dictation_history(newest_id)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("third dictation")
     );
     assert_eq!(db.get_dictation_history(999_999).await.unwrap(), None);
@@ -216,7 +219,10 @@ async fn dictation_history_prunes_to_keep_on_insert() {
             .await
             .unwrap();
     }
-    let all = db.list_dictation_history(DICTATION_HISTORY_KEEP).await.unwrap();
+    let all = db
+        .list_dictation_history(DICTATION_HISTORY_KEEP)
+        .await
+        .unwrap();
     assert_eq!(all.len() as i64, DICTATION_HISTORY_KEEP);
     // The newest entry is the last inserted; the oldest kept is offset by 10.
     assert_eq!(
@@ -1889,12 +1895,28 @@ async fn list_all_period_digests_orders_newest_range_first() {
     let newer_since = Local.with_ymd_and_hms(2026, 6, 15, 0, 0, 0).unwrap();
     let newer_until = Local.with_ymd_and_hms(2026, 6, 21, 23, 59, 59).unwrap();
 
-    db.update_period_digest("older", "early June", older_since, older_until, "old", None, 1)
-        .await
-        .unwrap();
-    db.update_period_digest("newer", "mid June", newer_since, newer_until, "new", None, 2)
-        .await
-        .unwrap();
+    db.update_period_digest(
+        "older",
+        "early June",
+        older_since,
+        older_until,
+        "old",
+        None,
+        1,
+    )
+    .await
+    .unwrap();
+    db.update_period_digest(
+        "newer",
+        "mid June",
+        newer_since,
+        newer_until,
+        "new",
+        None,
+        2,
+    )
+    .await
+    .unwrap();
 
     let all = db.list_all_period_digests().await.unwrap();
     assert_eq!(all.len(), 2);
@@ -3647,18 +3669,29 @@ async fn detected_language_round_trips_and_clears() {
     db.insert(&r).await.unwrap();
 
     // Fresh insert: no detected language yet (NULL), the graceful default.
-    assert_eq!(db.get(&r.id).await.unwrap().unwrap().detected_language, None);
+    assert_eq!(
+        db.get(&r.id).await.unwrap().unwrap().detected_language,
+        None
+    );
 
     // Store a code, then read it back through the DTO.
     db.set_detected_language(&r.id, Some("es")).await.unwrap();
     assert_eq!(
-        db.get(&r.id).await.unwrap().unwrap().detected_language.as_deref(),
+        db.get(&r.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .detected_language
+            .as_deref(),
         Some("es")
     );
 
     // A retranscribe that drops to a detection-less provider clears it to NULL.
     db.set_detected_language(&r.id, None).await.unwrap();
-    assert_eq!(db.get(&r.id).await.unwrap().unwrap().detected_language, None);
+    assert_eq!(
+        db.get(&r.id).await.unwrap().unwrap().detected_language,
+        None
+    );
 }
 
 #[tokio::test]
@@ -3668,7 +3701,12 @@ async fn insert_restored_round_trips_detected_language() {
     r.detected_language = Some("fr".into());
     db.insert_restored(&r).await.unwrap();
     assert_eq!(
-        db.get(&r.id).await.unwrap().unwrap().detected_language.as_deref(),
+        db.get(&r.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .detected_language
+            .as_deref(),
         Some("fr")
     );
 }
@@ -4372,9 +4410,7 @@ async fn set_tasks_preserves_done_flag_across_reextraction() {
         .find(|t| t.text == "Send the roadmap")
         .expect("roadmap task")
         .id;
-    db.set_task_done(roadmap_id, true)
-        .await
-        .expect("set done");
+    db.set_task_done(roadmap_id, true).await.expect("set done");
 
     // Re-extraction returns the SAME texts (all freshly done = false). The done
     // flag on the surviving text must be preserved — not silently un-checked.
