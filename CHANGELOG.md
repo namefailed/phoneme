@@ -32,8 +32,48 @@ trust boundary.*
   "run `phoneme daemon restart`" message instead of failing obscurely later.
   Best-effort + backward-compatible: an older daemon that predates the handshake
   is treated as unversioned and the client proceeds on the additive contract.
+- [x] **No `unwrap()` on a runtime path** — every production `unwrap()` now either
+  documents why it can't fail with `.expect("…")` or sits behind a guard that
+  proves it safe (mutex locks, `chunks_exact(4)` conversions, `Option` access after
+  an `is_none()` check, static regexes). A CI step runs `clippy::unwrap_used`
+  against the non-test build so a new panicking `unwrap()` can't slip into a
+  critical task and take the daemon down.
+- [x] **One source of truth for per-step LLM config** — Doctor's connection probe
+  and the pipeline's summary/title/tag/entry steps used to re-derive provider
+  inheritance independently, so Doctor could test a different endpoint than the
+  pipeline actually used. Both now resolve through one `LlmPostProcessConfig::resolve_step`
+  helper, so the probe and the real call can't drift.
+- [x] **Foreign-key integrity on voiceprint links** — `forgotten_voiceprint_links`
+  now carries an `ON DELETE CASCADE` foreign key to `named_voiceprints` (rebuilt
+  via migration, orphans filtered), so a forgotten-voice row can't outlive the
+  voice it points at.
+- [x] **`load_config` is a pure read** — loading config no longer mutates
+  `config.toml` on disk or injects the preview model as a side effect. The read is
+  pure; an explicit `reconcile_and_persist_config` step does the migrate-and-write
+  and `apply_runtime_defaults` does the in-memory preview wiring, each called
+  deliberately at startup.
 
-### Recall
+### Internals & refactors
+
+- [x] **`catalog.rs` split into a module directory** — the 7.6k-line catalog
+  god-object became `catalog/` with per-domain files (`recordings`, `embeddings`,
+  `tags`, `speakers`, `segments`, `saved_search`, plus `mod.rs` for the structs and
+  shared helpers). A pure move: the public API and behavior are byte-for-byte the
+  same, verified by a method-set diff.
+- [x] **Incremental embedding cache** — upserting or deleting one recording's
+  vectors now patches that recording in the in-memory corpus (copy-on-write, with a
+  generation guard against lost updates) instead of dropping the whole 300 MB
+  snapshot and re-decoding the entire library from SQLite on the next query.
+- [x] **Semantic search stops nerfing FTS5** — the query sanitizer now quotes and
+  escapes each term instead of stripping punctuation and force-appending `*` to
+  every word. Phrases (`"exact match"`), hyphenated terms, and code tokens survive;
+  bare words still get prefix matching.
+- [x] **Linear-time `replace_ignore_case`** — the case-insensitive find/replace
+  behind speaker renames is now a single Unicode-safe regex pass instead of an
+  O(N·M) hand-rolled scan.
+- [x] **Overlay frontend split into components** — the 750-line `overlay.ts` became
+  a thin wiring index over focused modules (`waveform`, `drag`, `captions`,
+  `shape`), each unit-testable on its own.
 
 - [x] **Chunked hybrid semantic search** — transcripts are split into overlapping,
   sentence-aware chunks (`phoneme-core::chunk`), each embedded into a new
