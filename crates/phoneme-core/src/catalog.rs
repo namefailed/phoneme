@@ -264,45 +264,29 @@ fn words_table(variant: &str) -> &'static str {
 /// the lowercased copy back onto original byte offsets — keeping byte offsets
 /// valid and the un-matched text byte-for-byte intact.
 fn replace_ignore_case(haystack: &str, needle: &str, replacement: &str) -> (usize, String) {
-    let needle_lower = needle.to_lowercase();
-    let mut out = String::with_capacity(haystack.len());
-    let mut count = 0usize;
-    let mut rest = haystack;
-    loop {
-        // Find the next case-insensitive match start by scanning char boundaries
-        // of `rest` and lowercasing the candidate window for comparison.
-        let mut matched_at: Option<(usize, usize)> = None; // (start_byte, end_byte) in `rest`
-        for (start, _) in rest.char_indices() {
-            let window = &rest[start..];
-            if window.to_lowercase().starts_with(&needle_lower) {
-                // Recover the original-byte length of the matched run: take chars
-                // from `window` until the lowercased prefix covers `needle_lower`.
-                let mut consumed = 0usize;
-                let mut low_len = 0usize;
-                for ch in window.chars() {
-                    consumed += ch.len_utf8();
-                    low_len += ch.to_lowercase().map(|c| c.len_utf8()).sum::<usize>();
-                    if low_len >= needle_lower.len() {
-                        break;
-                    }
-                }
-                matched_at = Some((start, start + consumed));
-                break;
-            }
-        }
-        match matched_at {
-            Some((start, end)) => {
-                out.push_str(&rest[..start]);
-                out.push_str(replacement);
-                count += 1;
-                rest = &rest[end..];
-            }
-            None => {
-                out.push_str(rest);
-                break;
-            }
-        }
+    // An empty needle would match at every position — nothing to replace.
+    if needle.is_empty() {
+        return (0, haystack.to_string());
     }
+    // Case-insensitive LITERAL search: escape the needle so its regex
+    // metacharacters are matched verbatim, and `(?i)` gives Unicode-aware case
+    // folding (so "café" matches "CAFÉ"). `regex::escape` can't produce an invalid
+    // pattern, so the compile only fails on a pathological size limit — treat that
+    // as "no match" rather than panicking on user input.
+    let re = match regex::Regex::new(&format!("(?i){}", regex::escape(needle))) {
+        Ok(re) => re,
+        Err(_) => return (0, haystack.to_string()),
+    };
+    // One pass: the closure counts matches and returns the literal replacement
+    // (a closure replacer does NOT expand `$1`/`$name`, so the replacement is
+    // inserted verbatim, and replace_all never re-scans inserted text).
+    let mut count = 0usize;
+    let out = re
+        .replace_all(haystack, |_: &regex::Captures<'_>| {
+            count += 1;
+            replacement.to_string()
+        })
+        .into_owned();
     (count, out)
 }
 
@@ -4328,6 +4312,22 @@ mod tests {
         let (n, s) = replace_ignore_case("Café CAFÉ déjà", "café", "tea");
         assert_eq!(n, 2);
         assert_eq!(s, "tea tea déjà");
+
+        // Regex metacharacters in the needle are matched LITERALLY (escaped):
+        // "a.b" matches "a.b"/"A.B" but not "axb".
+        let (n, s) = replace_ignore_case("a.b axb A.B", "a.b", "Z");
+        assert_eq!(n, 2);
+        assert_eq!(s, "Z axb Z");
+
+        // A `$`-bearing replacement is inserted verbatim (no capture expansion).
+        let (n, s) = replace_ignore_case("price here", "price", "$5");
+        assert_eq!(n, 1);
+        assert_eq!(s, "$5 here");
+
+        // Empty needle is a no-op (never an every-position match).
+        let (n, s) = replace_ignore_case("text", "", "x");
+        assert_eq!(n, 0);
+        assert_eq!(s, "text");
     }
 
     #[test]
