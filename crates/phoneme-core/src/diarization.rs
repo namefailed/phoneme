@@ -14,10 +14,10 @@ use ndarray::{Array2, Array3};
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
-/// A speaker turn produced by the diarizer: `[start, end)` in **seconds** and an
-/// opaque speaker label. We do NOT assume the label is a bare integer — pyannote
-/// emits `"SPEAKER_00"`-style strings, so we treat it as an arbitrary key and
-/// map it to a stable 1-based index ourselves.
+/// A speaker turn produced by the diarizer: `[start, end)` in seconds and an
+/// opaque speaker label. The label isn't a bare integer — pyannote emits
+/// `"SPEAKER_00"`-style strings — so we treat it as an arbitrary key and map it
+/// to a stable 1-based index ourselves.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpeakerSpan {
     /// Turn start, in seconds from the start of the audio.
@@ -29,7 +29,7 @@ pub struct SpeakerSpan {
     pub label: String,
 }
 
-/// One ASR transcript segment: `[start, end)` in **seconds** plus its text.
+/// One ASR transcript segment: `[start, end)` in seconds plus its text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextSegment {
     /// Segment start, in seconds from the start of the audio.
@@ -43,12 +43,12 @@ pub struct TextSegment {
 /// One transcript word with its audio-relative timing, the unit of per-word
 /// speaker attribution.
 ///
-/// Times are **seconds** from the start of the audio — the same clock the
-/// diarizer's frame matrix uses, so a word's span maps straight onto frame rows
-/// with no offset. This is the diarization-layer mirror of
-/// [`crate::types::TranscriptWord`] (which carries milliseconds): the provider
-/// path converts ms → seconds when handing words to [`assign_words`], keeping
-/// this module free of the persistence type and unit-testable with bare floats.
+/// Times are seconds from the start of the audio — the same clock the diarizer's
+/// frame matrix uses, so a word's span maps straight onto frame rows with no
+/// offset. This mirrors [`crate::types::TranscriptWord`], which carries
+/// milliseconds; the provider path converts ms to seconds when handing words to
+/// [`assign_words`], keeping this module free of the persistence type and
+/// unit-testable with bare floats.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WordSpan {
     /// Word start, in seconds from the start of the audio.
@@ -59,7 +59,7 @@ pub struct WordSpan {
     pub text: String,
     /// Whether this token starts a new written word (whisper's leading-space
     /// marker; see [`crate::types::TranscriptWord::leading_space`]). A token that
-    /// does NOT — punctuation, a clitic (`'s`/`'t`), or a subword continuation —
+    /// doesn't — punctuation, a clitic (`'s`/`'t`), or a subword continuation —
     /// must share its host word's speaker, so [`assign_words`] never strands a
     /// `.` on the next turn or splits `That's` across speakers. Defaults to `true`
     /// (a normal space-separated word) for callers/tests that don't set it.
@@ -84,18 +84,17 @@ fn overlap(span: &SpeakerSpan, start: f64, end: f64) -> f64 {
 }
 
 /// The label of the speaker who owns the transcript interval `[start, end]`: the
-/// span with the **largest temporal overlap** with that interval, or — when no
-/// span overlaps it at all (the line sits in a gap between turns) — the span
-/// *nearest* to the interval's midpoint. Returns `None` only when there are no
-/// speaker spans at all.
+/// span with the largest temporal overlap with that interval, or — when no span
+/// overlaps it at all (the line sits in a gap between turns) — the span nearest
+/// to the interval's midpoint. Returns `None` only when there are no speaker
+/// spans.
 ///
-/// Using max-overlap rather than the old "first span covering the midpoint"
-/// fixes mislabeling when turns overlap (the powerset model emits simultaneous
-/// speakers): a line straddling a hand-off, or sitting inside two overlapping
-/// turns, is attributed to whoever actually speaks for most of it instead of to
-/// whichever turn merely started earliest. Picking the nearest span for a true
-/// gap (rather than defaulting to "speaker 0") keeps a line just outside a turn
-/// attributed to the most plausible speaker instead of a phantom one.
+/// Max-overlap (not "first span covering the midpoint") matters because the
+/// powerset model emits simultaneous speakers, so turns overlap: a line
+/// straddling a hand-off, or sitting inside two overlapping turns, goes to
+/// whoever actually speaks for most of it rather than whichever turn started
+/// earliest. For a true gap, the nearest span keeps the line attributed to the
+/// most plausible speaker instead of defaulting to a phantom speaker 0.
 fn speaker_for_segment(speakers: &[SpeakerSpan], start: f64, end: f64) -> Option<&str> {
     if speakers.is_empty() {
         return None;
@@ -127,13 +126,11 @@ fn speaker_for_segment(speakers: &[SpeakerSpan], start: f64, end: f64) -> Option
 /// Attach speaker labels to transcript segments, producing a `"[Speaker N]: …"`
 /// formatted transcript and the number of distinct speakers actually used.
 ///
-/// - Speaker labels are mapped to **stable 1-based indices in first-appearance
-///   order**, so any label format works (`"SPEAKER_00"`, `"0"`, `"alice"`, …).
-///   This fixes the previous `parse::<u8>()` mapping, which silently collapsed
-///   every non-numeric label to speaker 0 (i.e. one speaker for everyone).
-/// - Each segment is attributed to the speaker turn it overlaps most (by the
-///   internal `speaker_for_segment` helper); one falling in a gap between turns
-///   goes to the nearest turn, never a default speaker 0.
+/// - Speaker labels map to stable 1-based indices in first-appearance order, so
+///   any label format works (`"SPEAKER_00"`, `"0"`, `"alice"`, …).
+/// - Each segment is attributed to the speaker turn it overlaps most (via
+///   `speaker_for_segment`); one falling in a gap between turns goes to the
+///   nearest turn, never a default speaker 0.
 /// - Empty/whitespace segments are skipped.
 ///
 /// When `speakers` is empty (diarization produced nothing) the segments are
@@ -163,10 +160,10 @@ pub fn assign_speakers(segments: &[TextSegment], speakers: &[SpeakerSpan]) -> (S
 
 /// Per-segment speaker attribution: each non-empty transcript segment paired
 /// with its stable 1-based speaker index (0 = no diarization info), plus the
-/// number of distinct speakers used. This is the structural primitive behind
+/// number of distinct speakers used. The structural primitive behind
 /// [`assign_speakers`] — callers that persist segment timing (the timeline
-/// views) take the per-segment indices from here, so the stored `speaker`
-/// labels always agree with the `[Speaker N]` markers in the formatted text.
+/// views) take the per-segment indices from here, so the stored speaker labels
+/// always agree with the `[Speaker N]` markers in the formatted text.
 pub fn label_segments<'a>(
     segments: &'a [TextSegment],
     speakers: &[SpeakerSpan],
@@ -196,25 +193,23 @@ pub fn label_segments<'a>(
 }
 
 /// Label every transcript segment as one fixed speaker, producing the same
-/// `[Speaker N]: …` text and the matching persisted timeline that
-/// [`assign_speakers`] / [`label_segments`] produce — but without running the
-/// diarizer at all.
+/// `[Speaker N]: …` text and matching persisted timeline that [`assign_speakers`]
+/// / [`label_segments`] produce, but without running the diarizer.
 ///
-/// This is the track-aware Meeting-Mode short-circuit: a meeting's mic track is
-/// a single voice (the user's), so there is nothing to diarize. Reusing the
-/// existing `[Speaker N]` machinery (rather than inventing a `[You]` marker)
-/// keeps the pipeline's `diarized` detection (`"[Speaker "`) and the
-/// merged-meeting view (`[Speaker N]:`) working unchanged; when this labelling
-/// actually runs (the result's `fixed_speaker_applied`), the daemon SEEDS label
-/// `speaker_label` as "You" via an if-absent `speaker_names` row — a friendly
-/// default on the first transcribe that never overwrites a row, so a later user
-/// rename survives a retranscribe.
+/// The track-aware Meeting-Mode short-circuit: a meeting's mic track is a single
+/// voice (the user's), so there's nothing to diarize. Reusing the existing
+/// `[Speaker N]` machinery rather than inventing a `[You]` marker keeps the
+/// pipeline's `diarized` detection (`"[Speaker "`) and the merged-meeting view
+/// working unchanged. When this labelling runs, the daemon seeds the label as
+/// "You" via an if-absent `speaker_names` row — a friendly default on first
+/// transcribe that never overwrites an existing row, so a later user rename
+/// survives a retranscribe.
 ///
 /// `speaker_label` is the 1-based index the segments are stamped with (1 for the
-/// mic track). Empty/whitespace segments are skipped, exactly as
-/// [`label_segments`] skips them. Returns the formatted text plus the timeline,
-/// every segment carrying `speaker = Some(speaker_label)` so the stored labels
-/// agree with the `[Speaker N]` markers in the text.
+/// mic track). Empty/whitespace segments are skipped, as [`label_segments`] skips
+/// them. Returns the formatted text plus the timeline, every segment carrying
+/// `speaker = Some(speaker_label)` so the stored labels agree with the
+/// `[Speaker N]` markers in the text.
 pub fn label_all_as(
     segments: &[TextSegment],
     speaker_label: usize,
@@ -226,9 +221,9 @@ pub fn label_all_as(
         if trimmed.is_empty() {
             continue;
         }
-        // One turn for the whole track: the marker is emitted once, then each
-        // subsequent segment's text is space-joined onto it — mirroring the
-        // same-speaker join in `assign_speakers`.
+        // One turn for the whole track: emit the marker once, then space-join
+        // each subsequent segment's text onto it, mirroring the same-speaker
+        // join in assign_speakers.
         if out_segments.is_empty() {
             text.push_str(&format!("[Speaker {speaker_label}]: "));
         } else {
@@ -247,22 +242,20 @@ pub fn label_all_as(
 
 // ── Per-word speaker attribution (from the frame-activation matrix) ──────────
 
-/// The frame row whose window *covers* instant `t` seconds, using speakrs's own
+/// The frame row whose window covers instant `t` seconds, using speakrs's own
 /// frame geometry: `round((t - 0.5 * frame_duration) / frame_step)`.
 ///
-/// speakrs does NOT place frame `f` at `f * STEP`; it centers frame `f` at
-/// `frame_middle(f) = f * FRAME_STEP_SECONDS + 0.5 * FRAME_DURATION_SECONDS`
-/// (speakrs `segment.rs`), which is the geometry behind the very
-/// `result.segments` / [`SpeakerSpan`]s this module also returns. Its canonical
-/// inverse is therefore `closest_frame(t) = round((t - 0.5*FRAME_DURATION)/STEP)`
-/// (speakrs `layout.rs`). Using that exact mapping keeps the per-word frame
-/// window in the SAME time domain as the segment-level spans. Omitting the
-/// half-duration offset (and using `floor` instead of `round`) would bias every
-/// word ~1.8 frames (~30 ms) late and make the word and segment timelines
-/// disagree at speaker hand-offs — exactly the boundary case word-level
-/// attribution exists to get right.
+/// speakrs centers frame `f` at `f * FRAME_STEP_SECONDS + 0.5 *
+/// FRAME_DURATION_SECONDS` (its `frame_middle`), not at `f * STEP` — that's the
+/// geometry behind the `result.segments` / [`SpeakerSpan`]s this module also
+/// returns. The canonical inverse is `closest_frame(t) = round((t -
+/// 0.5*FRAME_DURATION)/STEP)`, which keeps the per-word frame window in the same
+/// time domain as the segment-level spans. Drop the half-duration offset (or use
+/// `floor` instead of `round`) and every word biases ~1.8 frames (~30 ms) late,
+/// making the word and segment timelines disagree at speaker hand-offs — the
+/// boundary case word-level attribution exists to get right.
 ///
-/// `t` at/below the first frame's center clamps to row 0. The index is *not*
+/// `t` at or below the first frame's center clamps to row 0. The index is not
 /// bounds-checked against the matrix height; callers clamp it to the last row,
 /// since the final frame can end slightly before the last word's timestamp.
 fn frame_for_time(t: f64, frame_step: f64, frame_duration: f64) -> usize {
@@ -275,11 +268,11 @@ fn frame_for_time(t: f64, frame_step: f64, frame_duration: f64) -> usize {
 }
 
 /// speakrs labels the `k`-th column of its activation matrix `SPEAKER_{k:02}` —
-/// the exact label its `to_segments` (and therefore `DiarizationResult.segments`,
+/// the same label its `to_segments` (and therefore `DiarizationResult.segments`,
 /// our [`SpeakerSpan`] source) emits. Producing the identical string here lets a
-/// per-word column index flow through the SAME first-appearance map
-/// [`label_segments`] uses, so word-level and segment-level labels share one
-/// stable `[Speaker N]` numbering.
+/// per-word column index flow through the same first-appearance map
+/// [`label_segments`] uses, so word- and segment-level labels share one stable
+/// `[Speaker N]` numbering.
 fn column_label(speaker_idx: usize) -> String {
     format!("SPEAKER_{speaker_idx:02}")
 }
@@ -322,22 +315,21 @@ fn dominant_column(
 /// Per-word speaker attribution from the diarizer's per-frame activation matrix:
 /// each word paired with its stable 1-based speaker index (0 = unattributed),
 /// plus the number of distinct speakers used. The word-level counterpart of
-/// [`label_segments`], and it shares that function's labelling contract:
+/// [`label_segments`], sharing that function's labelling contract:
 ///
 /// - A word's `[start, end]` span maps to the frame range covering it via
 ///   speakrs's `closest_frame` geometry (see `frame_for_time`); the speaker
-///   column with the most summed activation over that range wins (so a word
-///   straddling a hand-off goes to whoever speaks for most of it — the case
+///   column with the most summed activation over that range wins, so a word
+///   straddling a hand-off goes to whoever speaks for most of it (the case
 ///   whole-segment attribution gets wrong).
-/// - The winning column `k` becomes label `SPEAKER_{k:02}` and is mapped to a
-///   stable 1-based index **in first-appearance order**, the identical scheme
-///   [`label_segments`] applies to `DiarizationResult.segments`. So the
+/// - The winning column `k` becomes label `SPEAKER_{k:02}` and maps to a stable
+///   1-based index in first-appearance order — the same scheme
+///   [`label_segments`] applies to `DiarizationResult.segments` — so the
 ///   `[Speaker N]` numbers a word-level transcript shows match what the
-///   segment-level path would have produced for the same speakers.
-/// - A word landing in silence (no activation in its frames) gets index 0 and
-///   is excluded from the speaker count, mirroring the segment-level `None`.
-/// - Empty/whitespace words are skipped (as empty segments are).
-///
+///   segment-level path would produce for the same speakers.
+/// - A word landing in silence (no activation in its frames) gets index 0 and is
+///   excluded from the speaker count, mirroring the segment-level `None`.
+/// - Empty/whitespace words are skipped, as empty segments are.
 /// - Sub-`min_turn` speaker islands are smoothed away before numbering: a single
 ///   short word the diarizer momentarily scored to another speaker (the classic
 ///   "[Speaker 2]: it" flicker) is absorbed into its dominant neighbour, so a
@@ -347,7 +339,7 @@ fn dominant_column(
 ///
 /// `frame_step` / `frame_duration` are `speakrs::pipeline::FRAME_STEP_SECONDS` /
 /// `FRAME_DURATION_SECONDS` in production; `min_turn` is `WORD_MIN_TURN_SECS`.
-/// All three are parameters so the mapping + smoothing are unit-testable with a
+/// All three are parameters so the mapping and smoothing are unit-testable with a
 /// synthetic matrix (the geometry tests pass `min_turn = 0.0`).
 pub fn assign_words<'a>(
     words: &'a [WordSpan],
@@ -371,18 +363,18 @@ pub fn assign_words<'a>(
         })
         .collect();
 
-    // Absorb sub-`min_turn` speaker flips so a monologue doesn't fragment, then
+    // Absorb sub-min_turn speaker flips so a monologue doesn't fragment, then
     // back-fill any word the geometry left unattributed into a neighbouring
     // speaker so it doesn't orphan and split its turn. Both are production
-    // cleanup gated off when `min_turn == 0.0` (the geometry-test "raw" knob).
+    // cleanup, gated off when min_turn == 0.0 (the geometry-test "raw" knob).
     if min_turn > 0.0 {
         smooth_word_speaker_runs(&kept, &mut cols, min_turn);
         backfill_unattributed_words(&kept, &mut cols);
         coalesce_subword_tokens(&kept, &mut cols);
     }
 
-    // Map columns → stable 1-based indices in first-appearance order, via the
-    // same `SPEAKER_{k:02}` label `label_segments` keys on, so word- and
+    // Map columns to stable 1-based indices in first-appearance order, via the
+    // same SPEAKER_{k:02} label label_segments keys on, so word- and
     // segment-level transcripts number identical speakers identically.
     let mut label_to_idx: HashMap<String, usize> = HashMap::new();
     let mut next_idx = 1usize;
@@ -403,9 +395,9 @@ pub fn assign_words<'a>(
     }
 
     // Invert label_to_idx into idx → column, so callers can fetch each speaker's
-    // centroid voiceprint (see `speaker_voiceprints`). 1-based labels are dense,
-    // so `speaker_columns[idx - 1]` holds the discrete-diarization column for
-    // speaker label `idx`.
+    // centroid voiceprint (see speaker_voiceprints). 1-based labels are dense, so
+    // speaker_columns[idx - 1] holds the discrete-diarization column for speaker
+    // label idx.
     let num = next_idx - 1;
     let mut speaker_columns = vec![0usize; num];
     for (label, &idx) in &label_to_idx {
@@ -432,9 +424,9 @@ pub struct SpeakerVoiceprint {
 
 /// Per-speaker centroid voiceprints for a completed diarization, keyed by the
 /// same labels [`assign_words`] assigns (and the transcript + `speaker_names`
-/// use). `speaker_columns` is the `assign_words` third return value (label → the
+/// use). `speaker_columns` is the [`assign_words`] third return value (label → the
 /// discrete-diarization column). Speakers whose column has no finite centroid are
-/// skipped. Used to capture voiceprints for cross-recording recognition (#9).
+/// skipped. Used to capture voiceprints for cross-recording recognition.
 pub fn speaker_voiceprints(
     diar: &LocalDiarization,
     speaker_columns: &[usize],
@@ -455,49 +447,49 @@ pub fn speaker_voiceprints(
 
 /// A per-word speaker turn shorter than this (seconds) is treated as a diarizer
 /// flicker — a single short word ("it", "if") momentarily scored to a second
-/// speaker — and absorbed into the dominant neighbouring speaker. So a one-voice
+/// speaker — and absorbed into the dominant neighbouring speaker, so a one-voice
 /// recording collapses back to a single speaker (and renders as plain prose)
-/// instead of fragmenting into phantom `[Speaker 2]` islands, while genuine
-/// turns (comfortably longer than this) are untouched. The segment path's coarse
+/// instead of fragmenting into phantom `[Speaker 2]` islands. Genuine turns
+/// (comfortably longer than this) are untouched. The segment path's coarse
 /// granularity rarely flips a whole sentence, so this guards the finer word
-/// granularity that word-level attribution introduced; its segment-level analogue
-/// is [`SPEAKER_MERGE_GAP_SECS`].
+/// granularity word-level attribution works at; its segment-level analogue is
+/// [`SPEAKER_MERGE_GAP_SECS`].
 pub(crate) const WORD_MIN_TURN_SECS: f64 = 0.6;
 
-/// A speaker run no longer than this many words, when it sits as an "island"
-/// bracketed by the SAME speaker on both sides, is treated as per-frame flicker
-/// and absorbed into that surrounding speaker. This is the primary guard against
-/// the mid-sentence choppy splits the wall-clock-only `WORD_MIN_TURN_SECS`
+/// A speaker run no longer than this many words, when it sits as an island
+/// bracketed by the same speaker on both sides, is treated as per-frame flicker
+/// and absorbed into that surrounding speaker. The primary guard against the
+/// mid-sentence choppy splits that the wall-clock-only `WORD_MIN_TURN_SECS`
 /// missed: a 2–5 word island inside one continuous speaker's territory (e.g.
 /// "...the fact that women / [Speaker 2] going to do what they / [Speaker 1]
 /// want...") is almost always noise from per-word argmax over short, noisy frame
-/// windows, not a real turn. Genuine turns survive because they are either longer
-/// than this OR sit at a real transition (a DIFFERENT speaker on each side, not
-/// the same one) — only same-speaker-bracketed islands are absorbed. A lone
-/// single word is absorbed regardless of position (one word is never a real
-/// turn). Per-word attribution is kept, so a genuine hand-off INSIDE a whisper
-/// segment is still split — only the noise islands are smoothed.
+/// windows, not a real turn. Genuine turns survive because they're either longer
+/// than this or sit at a real transition (a different speaker on each side) —
+/// only same-speaker-bracketed islands are absorbed. A lone single word is
+/// absorbed regardless of position (one word is never a real turn). Per-word
+/// attribution is kept, so a genuine hand-off inside a whisper segment is still
+/// split; only the noise islands are smoothed.
 ///
-/// NOTE: this counts the diarization layer's word units, which for local
-/// whisper.cpp are SUBWORD tokens ("over ste pped", "don 't" each split into
-/// several), so the bound is roughly twice the spoken-word count it implies
-/// (~10 tokens ≈ ~5 spoken words). It only ever applies to runs bracketed by the
-/// SAME speaker (one voice either side), where even a longish island is almost
-/// always that voice continuing, not a real interjection.
-// TODO(audit): smooth on spoken-word UNITS rather than this subword-token count
-// (coalesce tokens into whole words first, then size islands in words), so the
-// bound stops being a fuzzy "~2x" estimate. Deferred — out of this lane.
+/// This counts the diarization layer's word units, which for local whisper.cpp
+/// are subword tokens ("over ste pped", "don 't" each split into several), so the
+/// bound is roughly twice the spoken-word count it implies (~10 tokens ≈ ~5
+/// spoken words). It only ever applies to runs bracketed by the same speaker,
+/// where even a longish island is almost always that voice continuing, not a real
+/// interjection.
+// TODO: smooth on spoken-word units rather than this subword-token count
+// (coalesce tokens into whole words first, then size islands in words) so the
+// bound stops being a fuzzy "~2x" estimate.
 const MAX_ISLAND_WORDS: usize = 10;
 
 /// The larger ceiling for a same-speaker-bracketed island that is also strictly
-/// shorter than BOTH of its (same-speaker) neighbours. Between [`MAX_ISLAND_WORDS`]
+/// shorter than both of its (same-speaker) neighbours. Between [`MAX_ISLAND_WORDS`]
 /// and this, a run is absorbed only when one voice clearly dominates on both
 /// sides — a brief blip mid-monologue the diarizer mis-scored to the other
 /// speaker (the real case: a ~16-token "cyber weapon? I mean, I mean, because you
 /// don't" stranded inside a 31-token question and a 144-token monologue, both the
-/// same speaker). Above this ceiling a run is treated as a genuine turn and never
-/// silently merged, even if it happens to be shorter than two very long
-/// monologues. ~24 tokens ≈ ~12 spoken words (whisper emits subword tokens).
+/// same speaker). Above this ceiling a run is a genuine turn and never silently
+/// merged, even if it happens to be shorter than two very long monologues. ~24
+/// tokens ≈ ~12 spoken words (whisper emits subword tokens).
 const MAX_BRACKETED_ISLAND_WORDS: usize = 24;
 
 /// A contiguous run of same-speaker words inside the per-word column sequence.
@@ -514,7 +506,7 @@ struct SpeakerRun {
 
 /// The speaker runs in `cols`, in order. `None` (silence) words belong to no run
 /// and split runs, but two runs separated only by silence are still adjacent in
-/// the returned list — so a flip bracketed by silence still smooths against its
+/// the returned list, so a flip bracketed by silence still smooths against its
 /// real neighbours.
 fn speaker_runs(words: &[&WordSpan], cols: &[Option<usize>]) -> Vec<SpeakerRun> {
     let mut runs = Vec::new();
@@ -539,28 +531,26 @@ fn speaker_runs(words: &[&WordSpan], cols: &[Option<usize>]) -> Vec<SpeakerRun> 
 }
 
 /// In-place smoothing of the per-word speaker columns: repeatedly absorb a
-/// "flicker island" speaker run into a neighbour until none remain or only one
+/// flicker-island speaker run into a neighbour until none remain or only one
 /// speaker is left. A run is an island to absorb when it is:
 ///
-/// - a LONE single word (one word is never a real turn);
-/// - a short run bracketed by the SAME speaker on both sides and no longer than
+/// - a lone single word (one word is never a real turn);
+/// - a short run bracketed by the same speaker on both sides and no longer than
 ///   [`MAX_ISLAND_WORDS`] (a noise island inside one continuous speaker's
 ///   territory — the mid-sentence-flip case); or
 /// - shorter than `min_turn` wall-clock seconds (a brief blip).
 ///
-/// It is absorbed into the surrounding speaker when bracketed, otherwise into the
-/// longer neighbour (tie → the previous run). Genuine turns survive: they are
-/// either longer than the island bounds OR sit at a real transition (a different
-/// speaker on each side, so not "bracketed by the same speaker"). Smallest
-/// islands smooth first; only absorptions that actually flip a column count as
-/// progress (a run already matching its chosen neighbour is skipped), so it
-/// always terminates. Silence words stay `None`.
+/// It's absorbed into the surrounding speaker when bracketed, otherwise into the
+/// longer neighbour (tie → the previous run). Genuine turns survive: they're
+/// either longer than the island bounds or sit at a real transition (a different
+/// speaker on each side, so not bracketed by the same speaker). Smallest islands
+/// smooth first; only absorptions that actually flip a column count as progress
+/// (a run already matching its chosen neighbour is skipped), so this always
+/// terminates. Silence words stay `None`.
 ///
-/// This restores coherent turns — like the older whole-segment attribution —
-/// while KEEPING per-word attribution, so a genuine speaker hand-off inside one
-/// whisper segment is still split (only noise islands are removed). It fixes the
-/// regression where a recording was chopped into per-word `[Speaker N]` flips
-/// mid-sentence.
+/// The point is coherent turns — like the older whole-segment attribution — while
+/// keeping per-word attribution, so a genuine speaker hand-off inside one whisper
+/// segment is still split; only noise islands are removed.
 fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min_turn: f64) {
     let words_in = |r: &SpeakerRun| r.end - r.start + 1;
     loop {
@@ -568,8 +558,8 @@ fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min
         if runs.len() < 2 {
             break; // 0 or 1 speaker run — nothing to absorb into.
         }
-        // Same-speaker bracket = a genuine island (one voice either side), as
-        // opposed to a real transition (different voices each side).
+        // Same-speaker bracket = a genuine island (one voice either side), versus
+        // a real transition (different voices each side).
         let bracketed_same = |ri: usize| -> bool {
             match (ri.checked_sub(1), runs.get(ri + 1)) {
                 (Some(p), Some(n)) => runs[p].col == n.col,
@@ -585,8 +575,8 @@ fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min
                 // ri-1 and ri+1 both exist (that's what bracketed_same checks).
                 let prev = words_in(&runs[ri - 1]);
                 let next = words_in(&runs[ri + 1]);
-                // A small island is always flicker; a MEDIUM one is absorbed only
-                // when the SAME speaker dwarfs it on both sides — a brief blip
+                // A small island is always flicker; a medium one is absorbed only
+                // when the same speaker dwarfs it on both sides — a brief blip
                 // inside one continuous monologue, not a real interjection. Large
                 // islands (a genuine turn) are never silently merged.
                 return words_in(r) <= MAX_ISLAND_WORDS
@@ -640,32 +630,32 @@ fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min
 /// Back-fill every still-unattributed (`None`) word into a neighbouring speaker.
 ///
 /// `dominant_column` returns `None` for a word whose frame window carries no
-/// activation in the diarizer's segmentation matrix — i.e. whisper heard a word
-/// where the segmentation model saw no active speaker. This happens routinely at
-/// turn boundaries and during overlaps, NOT only in real silence, so a `None`
-/// word is almost always a genuinely-spoken word the geometry just missed.
+/// activation in the diarizer's segmentation matrix — whisper heard a word where
+/// the segmentation model saw no active speaker. This happens routinely at turn
+/// boundaries and during overlaps, not only in real silence, so a `None` word is
+/// almost always a genuinely-spoken word the geometry just missed.
 ///
-/// Left untouched, such a word renders with no `[Speaker N]:` prefix AND splits
+/// Left untouched, such a word renders with no `[Speaker N]:` prefix and splits
 /// the surrounding turn in two (the transcript builder starts a fresh turn on any
-/// speaker change, and `0`/unattributed counts as a change) — the orphaned-word
-/// chop the user sees as "all chopped up". `smooth_word_speaker_runs` can't fix
-/// it: it only ever rewrites `Some` runs and treats `None` as a gap.
+/// speaker change, and unattributed counts as a change) — the orphaned-word chop
+/// that reads as "all chopped up". `smooth_word_speaker_runs` can't fix it: it
+/// only rewrites `Some` runs and treats `None` as a gap.
 ///
 /// So after smoothing we assign each `None` word the speaker it most likely
 /// belongs to, using the surrounding attributed words as anchors (computed from
 /// the pre-backfill columns, so the result is order-independent):
 ///
-/// - bracketed by the SAME speaker on both sides → that speaker (a momentary
+/// - bracketed by the same speaker on both sides → that speaker (a momentary
 ///   non-speech frame inside one continuous turn);
-/// - at a hand-off (a DIFFERENT speaker each side) → the temporally nearest
+/// - at a hand-off (a different speaker each side) → the temporally nearest
 ///   neighbour (smallest inter-word gap), so the boundary word lands with whoever
 ///   it abuts;
 /// - leading words (before the first attributed word) → the first speaker;
 ///   trailing words (after the last) → the last speaker.
 ///
 /// No-op when no word is attributed at all (the caller's ≤1-speaker gate then
-/// renders plain prose). Never introduces a new speaker column — it only ever
-/// copies an existing neighbour's — so the speaker count is unchanged.
+/// renders plain prose). Never introduces a new speaker column — only copies an
+/// existing neighbour's — so the speaker count is unchanged.
 fn backfill_unattributed_words(words: &[&WordSpan], cols: &mut [Option<usize>]) {
     let n = cols.len();
     // Nearest attributed neighbour to the left of each index (carry forward).
@@ -704,16 +694,16 @@ fn backfill_unattributed_words(words: &[&WordSpan], cols: &mut [Option<usize>]) 
     }
 }
 
-/// Keep written words atomic across speaker attribution: a token that did NOT
+/// Keep written words atomic across speaker attribution: a token that didn't
 /// start a new word — punctuation, a clitic (`'s`/`'t`), or a subword
 /// continuation (`ste`/`pped`) — inherits the speaker of the word-start it
 /// attaches to. A single written word can't have two speakers, so without this a
-/// turn boundary that falls mid-word strands a `.` on the next speaker's turn or
-/// splits `That's` across two (the "cut into each other" artifact the per-word
-/// argmax produces at hand-offs). Applied left-to-right so a run of continuations
-/// all chain back to their word-start's column. Word-start tokens
-/// (`leading_space`) keep their own attribution; a leading continuation token
-/// (index 0, no preceding word) is left as-is.
+/// turn boundary falling mid-word strands a `.` on the next speaker's turn or
+/// splits `That's` across two (the "cut into each other" artifact per-word argmax
+/// produces at hand-offs). Applied left-to-right so a run of continuations all
+/// chain back to their word-start's column. Word-start tokens (`leading_space`)
+/// keep their own attribution; a leading continuation token (index 0, no
+/// preceding word) is left as-is.
 fn coalesce_subword_tokens(words: &[&WordSpan], cols: &mut [Option<usize>]) {
     for i in 1..words.len() {
         if !words[i].leading_space {
@@ -722,11 +712,11 @@ fn coalesce_subword_tokens(words: &[&WordSpan], cols: &mut [Option<usize>]) {
     }
 }
 
-/// Load a WAV as mono f32, asserting it is already in the canonical 16 kHz mono
+/// Load a WAV as mono f32, asserting it's already in the canonical 16 kHz mono
 /// format the diarizer expects. The recorder always writes 16 kHz mono and the
-/// import path decodes to the same canonical format, so a mismatch here is a
-/// real bug — we error loudly rather than feed interleaved / wrong-rate samples
-/// to the model and silently produce garbage speaker segments.
+/// import path decodes to the same format, so a mismatch here is a real bug — we
+/// error loudly rather than feed interleaved or wrong-rate samples to the model
+/// and silently produce garbage speaker segments.
 pub fn load_audio_mono_16khz(path: &Path) -> Result<Vec<f32>> {
     let mut reader = hound::WavReader::open(path)?;
     let spec = reader.spec();
@@ -757,30 +747,30 @@ pub fn load_audio_mono_16khz(path: &Path) -> Result<Vec<f32>> {
 }
 
 /// The maximum gap (in seconds) across which two same-speaker turns are treated
-/// as one continuous turn. speakrs frames are ~16.9 ms apart, so a turn that the
-/// model splits across a brief breath/pause shows up as several spans separated
-/// by tens of ms; coalescing anything under a quarter-second stitches those back
+/// as one continuous turn. speakrs frames are ~16.9 ms apart, so a turn the model
+/// splits across a brief breath or pause shows up as several spans separated by
+/// tens of ms; coalescing anything under a quarter-second stitches those back
 /// together without merging a genuine back-and-forth exchange (turn-taking gaps
 /// are typically a half-second or more).
-/// The production path now reads `DiarizationConfig::merge_gap_secs` (same 0.25
-/// default); this constant remains as the fixed value the unit tests pin against.
+///
+/// The production path reads `DiarizationConfig::merge_gap_secs` (same 0.25
+/// default); this constant is the fixed value the unit tests pin against.
 #[cfg_attr(not(test), allow(dead_code))]
 const SPEAKER_MERGE_GAP_SECS: f64 = 0.25;
 
 /// Post-process raw speakrs turns into clean, assignment-ready speaker spans:
 /// sort by start, merge adjacent same-speaker turns separated by a gap smaller
-/// than `SPEAKER_MERGE_GAP_SECS`, and drop any zero/negative-length span.
+/// than `merge_gap`, and drop any zero/negative-length span.
 ///
-/// This is the fix for the `to_segments` bug. `speakrs::DiarizationResult.segments`
-/// is built internally as `to_segments(..)` (which emits **per-speaker** spans,
-/// merely sorted by start) followed by `merge_segments(.., merge_gap)` with the
-/// pipeline default `merge_gap == 0.0` — i.e. an effective no-op. So the turns we
-/// got back were never actually merged: a single speaker's continuous speech
-/// arrives as many tiny fragments split on every micro-pause, and consecutive
-/// fragments of *different* speakers interleave. Feeding those raw fragments to
-/// [`assign_speakers`] produced unstable, flickering speaker labels. Coalescing
-/// same-speaker runs here (with a real gap) restores stable turns. Kept as a free
-/// function so it can be unit-tested without the ONNX model.
+/// We do the merge ourselves because `speakrs::DiarizationResult.segments` isn't
+/// actually merged: it's `to_segments(..)` (per-speaker spans, sorted by start)
+/// followed by `merge_segments(.., merge_gap)` with the pipeline default
+/// `merge_gap == 0.0`, an effective no-op. So a single speaker's continuous
+/// speech arrives as many tiny fragments split on every micro-pause, and
+/// consecutive fragments of different speakers interleave; feeding those raw to
+/// [`assign_speakers`] yields unstable, flickering labels. Coalescing same-speaker
+/// runs with a real gap restores stable turns. A free function so it can be
+/// unit-tested without the ONNX model.
 fn clean_speaker_spans(mut spans: Vec<SpeakerSpan>, merge_gap: f64) -> Vec<SpeakerSpan> {
     spans.retain(|s| s.end > s.start);
     spans.sort_by(|a, b| {
@@ -815,33 +805,32 @@ fn clean_speaker_spans(mut spans: Vec<SpeakerSpan>, merge_gap: f64) -> Vec<Speak
 
 /// Process-wide lazy cache for the local diarization pipeline.
 ///
-/// Loading the speakrs pipeline pulls the ~500 MB segmentation + embedding
-/// ONNX models off disk and takes seconds; doing that per transcription (the
-/// old behavior) dominated diarization cost. The cache loads the pipeline
-/// once, on the first recording that actually needs it — never at daemon
-/// startup, since most users keep diarization off and shouldn't pay the RAM.
+/// Loading the speakrs pipeline pulls the ~500 MB segmentation + embedding ONNX
+/// models off disk and takes seconds, so doing it per transcription dominates
+/// diarization cost. The cache loads the pipeline once, on the first recording
+/// that needs it — never at daemon startup, since most users keep diarization off
+/// and shouldn't pay the RAM.
 ///
 /// Lifecycle policy:
-/// - **Lazy:** nothing is loaded until [`get_or_load`](Self::get_or_load).
-/// - **Config-keyed:** the cache remembers the `[diarization]` config it was
-///   built under; `get_or_load` under a different config drops and reloads,
-///   so a stale pipeline can never serve a run even if every external
-///   invalidation hook were missed.
-/// - **Load errors are never cached:** a failed load leaves the slot empty
-///   and the next run retries. Worst case (models missing, diarization left
-///   on) equals the pre-cache behavior — one load attempt per transcription —
-///   and it self-heals the moment the cause clears (e.g. the setup wizard
-///   downloads the models mid-session) without requiring a config touch.
-/// - **Invalidation points:** the daemon drops the cache wherever it applies
-///   config — the `ReloadConfig` IPC handler and the queue worker's post-run
-///   reload — via [`invalidate_if_stale`](Self::invalidate_if_stale), and
-///   [`run_local_diarization`] calls [`invalidate`](Self::invalidate) when
-///   the queue worker dies so the next run reloads fresh.
+/// - Lazy: nothing is loaded until [`get_or_load`](Self::get_or_load).
+/// - Config-keyed: the cache remembers the `[diarization]` config it was built
+///   under; `get_or_load` under a different config drops and reloads, so a stale
+///   pipeline can never serve a run even if every external invalidation hook were
+///   missed.
+/// - Load errors are never cached: a failed load leaves the slot empty and the
+///   next run retries. Worst case (models missing, diarization left on) is one
+///   load attempt per transcription, and it self-heals the moment the cause
+///   clears (e.g. the setup wizard downloads the models mid-session) without a
+///   config touch.
+/// - Invalidation points: the daemon drops the cache wherever it applies config —
+///   the `ReloadConfig` IPC handler and the queue worker's post-run reload — via
+///   [`invalidate_if_stale`](Self::invalidate_if_stale), and
+///   [`run_local_diarization`] calls [`invalidate`](Self::invalidate) when the
+///   queue worker dies so the next run reloads fresh.
 ///
-/// Generic over the handle type `H` purely so the lazy-init / invalidation /
+/// Generic over the handle type `H` so the lazy-init / invalidation /
 /// no-double-load logic is unit-testable with a fake loader (the real loader
-/// needs the models, which aren't available in CI); production code uses
-/// [`LocalDiarizerCache`].
+/// needs the models, absent in CI); production code uses [`LocalDiarizerCache`].
 pub struct DiarizerCache<H> {
     slot: Mutex<CacheSlot<H>>,
 }
@@ -868,22 +857,21 @@ impl<H> DiarizerCache<H> {
         }
     }
 
-    /// Lock the slot, recovering from poison. Recovery is sound because the
-    /// slot invariant — `handle` is `None` or a fully-built `Some` — holds at
-    /// every panic point (a loader panic happens before the slot is written),
-    /// so one crashed job can't disable diarization for the rest of the
-    /// daemon's life.
+    /// Lock the slot, recovering from poison. Recovery is sound because the slot
+    /// invariant — `handle` is `None` or a fully-built `Some` — holds at every
+    /// panic point (a loader panic happens before the slot is written), so one
+    /// crashed job can't disable diarization for the rest of the daemon's life.
     fn lock(&self) -> std::sync::MutexGuard<'_, CacheSlot<H>> {
         self.slot.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// The cached handle, or build one with `load` and cache it.
     ///
-    /// The load runs while the slot lock is held — that is the entire
-    /// double-load guard: a second caller racing the first blocks on the lock
-    /// and then takes the cache-hit branch instead of loading again. A cached
-    /// handle built under a *different* `[diarization]` config is dropped and
-    /// rebuilt here, so config staleness is impossible at the point of use.
+    /// The load runs while the slot lock is held — that's the entire double-load
+    /// guard: a second caller racing the first blocks on the lock, then takes the
+    /// cache-hit branch instead of loading again. A cached handle built under a
+    /// different `[diarization]` config is dropped and rebuilt here, so config
+    /// staleness is impossible at the point of use.
     pub fn get_or_load<F>(&self, cfg: &DiarizationConfig, load: F) -> Result<Arc<H>>
     where
         F: FnOnce() -> Result<H>,
@@ -900,8 +888,8 @@ impl<H> DiarizerCache<H> {
             tracing::debug!("local diarization pipeline cache hit");
             return Ok(handle.clone());
         }
-        // Errors are deliberately not cached (the slot stays empty on `?`):
-        // see the type-level policy note.
+        // Errors are not cached (the slot stays empty on `?`); see the
+        // type-level policy note.
         let handle = Arc::new(load()?);
         slot.handle = Some(handle.clone());
         slot.cfg = cfg.clone();
@@ -921,10 +909,10 @@ impl<H> DiarizerCache<H> {
     }
 
     /// Drop the cached handle only if it was built under a different
-    /// `[diarization]` config than `cfg`; returns whether it was dropped.
-    /// Called from the daemon's config-apply points so a backend switch or
-    /// model-path change takes effect — and switching away from `local`
-    /// releases the model RAM — without waiting for the next run.
+    /// `[diarization]` config than `cfg`; returns whether it was dropped. Called
+    /// from the daemon's config-apply points so a backend switch or model-path
+    /// change takes effect — and switching away from `local` releases the model
+    /// RAM — without waiting for the next run.
     pub fn invalidate_if_stale(&self, cfg: &DiarizationConfig) -> bool {
         let mut slot = self.lock();
         if slot.handle.is_some() && slot.cfg != *cfg {
@@ -965,12 +953,12 @@ impl<H> std::fmt::Debug for DiarizerCache<H> {
 /// A loaded local diarization pipeline running on speakrs's background queue
 /// worker thread. The worker owns the models; this handle just feeds it jobs.
 pub struct QueuedDiarizer {
-    /// Sender and receiver under ONE lock: a job is pushed and its result
-    /// received under the same guard, so exactly one job is ever in flight
-    /// and the next result always belongs to the lock holder. This is the
-    /// serialization point for overlapping transcriptions (the queue worker
-    /// is serial, but retranscribe/in-place runs can race the queue) — they
-    /// line up here instead of each loading a private pipeline.
+    /// Sender and receiver under one lock: a job is pushed and its result
+    /// received under the same guard, so exactly one job is ever in flight and the
+    /// next result always belongs to the lock holder. The serialization point for
+    /// overlapping transcriptions (the queue worker is serial, but
+    /// retranscribe/in-place runs can race the queue) — they line up here instead
+    /// of each loading a private pipeline.
     queue: Mutex<(speakrs::QueueSender, speakrs::QueueReceiver)>,
 }
 
@@ -1086,24 +1074,23 @@ impl LocalDiarizer {
 }
 
 /// The full result of one local diarization run: the cleaned speaker turns the
-/// transcript paths consume **plus** the raw model arrays a few of them need.
+/// transcript paths consume, plus the raw model arrays a few of them need.
 ///
 /// `spans` is the post-processed turn list (`clean_speaker_spans`) used by the
-/// segment-level attribution path and the word-level fallback — unchanged from
-/// what [`run_local_diarization`] used to return.
+/// segment-level attribution path and the word-level fallback.
 ///
 /// `discrete_diarization` is the per-frame activation matrix (frames × speakers,
 /// one row per `FRAME_STEP_SECONDS`) that word-level attribution
 /// ([`assign_words`]) sums over to pick each word's speaker. Column `k`
 /// corresponds to label `SPEAKER_{k:02}`.
 ///
-/// `embeddings`, `hard_clusters`, and `segmentations` are surfaced verbatim from
-/// the speakrs result for a **future feature** (persistent named-speaker
-/// voiceprints — "Cluster 5"): per-cluster embedding centroids are aggregated
-/// from `embeddings` (chunks × speakers × dim) over the `(chunk, speaker)` cells
-/// whose `hard_clusters` id matches and that are active in `segmentations`.
-/// Nothing in the current word-level path reads them; they are carried here so
-/// the return type isn't rewritten again when that feature lands.
+/// `embeddings`, `hard_clusters`, and `segmentations` are surfaced from the
+/// speakrs result for the persistent named-speaker voiceprint feature:
+/// per-cluster embedding centroids are aggregated from `embeddings` (chunks ×
+/// speakers × dim) over the `(chunk, speaker)` cells whose `hard_clusters` id
+/// matches and that are active in `segmentations`. The word-level path doesn't
+/// read them; they're carried here so the return type doesn't get rewritten again
+/// when more of that feature lands.
 #[derive(Debug, Clone)]
 pub struct LocalDiarization {
     /// Cleaned, assignment-ready speaker turns (the segment-level path and the
@@ -1127,13 +1114,13 @@ pub struct LocalDiarization {
 
 /// Two speaker clusters whose centroid voiceprints have at least this cosine
 /// similarity are merged into one. speakrs' clustering (AHC seed → VBx) sometimes
-/// over-splits a SINGLE voice into several clusters — a 2-person recording can
+/// over-splits a single voice into several clusters — a 2-person recording can
 /// come back as 3 "speakers" — and the two fragments of one voice score far
 /// higher against each other than two genuinely-different voices do. Calibrated
 /// on real recordings: a same-voice over-split pair measured ~0.57 cosine, while
 /// genuinely-different voices sat ~0.33–0.46, so 0.5 merges the former and keeps
-/// the latter apart. (Distinct from `clean_speaker_spans`/smoothing, which fix
-/// turn TIMING; this fixes the speaker COUNT.)
+/// the latter apart. Distinct from `clean_speaker_spans`/smoothing, which fix turn
+/// timing; this fixes the speaker count.
 const SPEAKER_MERGE_COSINE: f32 = 0.5;
 
 /// L2-normalized centroid embedding per speaker column (cluster id == column
@@ -1189,13 +1176,13 @@ fn cluster_centroids(
 /// centroid never merge. A no-op (identity map) when nothing is similar enough.
 ///
 /// Complete-linkage (not single-linkage) is the point: two groups merge only when
-/// EVERY cross-pair of their members clears `threshold`. Single-linkage would
+/// every cross-pair of their members clears `threshold`. Single-linkage would
 /// chain A~B~C into one speaker off two borderline pairs even when A~C are clearly
 /// distinct voices — under-clustering, the worst diarization failure for a user.
 /// Requiring all cross-pairs to clear keeps that transitive collapse from
 /// happening: a borderline-similar pair only merges its own two fragments.
 ///
-/// This is the *automatic* merge — it only joins clearly-identical voices. The
+/// The automatic merge — it only joins clearly-identical voices. The
 /// caller-supplied expected-speakers prior ([`merge_to_expected_count`]) is the
 /// stronger, count-driven merge that runs after this one.
 fn merge_similar_clusters(
@@ -1258,14 +1245,14 @@ fn merge_similar_clusters(
 }
 
 /// Apply a `canon` column-mapping (column `c` folds into `canon[c]`, with
-/// `canon[c] == c` meaning "stays") to a raw speakrs result in place: sum each
+/// `canon[c] == c` meaning it stays) to a raw speakrs result in place: sum each
 /// non-canonical column of the per-frame matrix into its canonical column (then
 /// zero it), relabel the segment spans through the map, and remap `hard_clusters`
-/// so a merged speaker's persisted voiceprint aggregates ALL its source clusters'
-/// embeddings (audit M1). `canon` must be length `num_cols` (the matrix column
-/// count). Returns whether anything actually moved — a pure-identity map is a
-/// no-op and returns `false`. Shared by the voiceprint-similarity merge and the
-/// expected-speakers prior, so both rewrite the result identically.
+/// so a merged speaker's persisted voiceprint aggregates all its source clusters'
+/// embeddings. `canon` must be length `num_cols` (the matrix column count).
+/// Returns whether anything moved — a pure-identity map is a no-op and returns
+/// `false`. Shared by the voiceprint-similarity merge and the expected-speakers
+/// prior, so both rewrite the result identically.
 fn apply_canon_mapping(result: &mut speakrs::DiarizationResult, canon: &[usize]) -> bool {
     let num_cols = result.discrete_diarization.0.ncols();
     if !(0..num_cols).any(|c| canon[c] != c) {
@@ -1301,24 +1288,24 @@ fn apply_canon_mapping(result: &mut speakrs::DiarizationResult, canon: &[usize])
     true
 }
 
-/// Greedy "expected-speakers" merge (V3): given per-column `centroids` (cluster id
-/// == column index; `None` for a column with no embedding) and the list of
-/// currently-`active` canonical columns, merge the two closest active clusters (by
-/// centroid cosine) over and over until exactly `target` clusters remain, then
-/// return a `canon` map of length `centroids.len()` (column `c` → its surviving
-/// column). The smallest column index in a merged group is the canonical one, so
+/// Greedy expected-speakers merge: given per-column `centroids` (cluster id ==
+/// column index; `None` for a column with no embedding) and the list of currently
+/// `active` canonical columns, merge the two closest active clusters (by centroid
+/// cosine) over and over until exactly `target` clusters remain, then return a
+/// `canon` map of length `centroids.len()` (column `c` → its surviving column).
+/// The smallest column index in a merged group is the canonical one, so
 /// first-appearance numbering stays sensible.
 ///
 /// Unlike [`merge_similar_clusters`] (which only merges pairs over a similarity
-/// threshold), this fires unconditionally to hit the user-asserted count — it is
-/// the "I KNOW there are `n` voices" prior, so it will collapse the closest pair
-/// even when no two are especially similar. A no-op (identity map) when
-/// `active.len() <= target` or when fewer than two mergeable centroids remain;
-/// columns without a centroid can never be a merge target and are left as their
-/// own speaker. Pure and unit-testable on synthetic centroids.
+/// threshold), this fires unconditionally to hit the user-asserted count — the
+/// "I know there are `n` voices" prior, so it collapses the closest pair even when
+/// no two are especially similar. A no-op (identity map) when `active.len() <=
+/// target` or when fewer than two mergeable centroids remain; columns without a
+/// centroid can never be a merge target and stay their own speaker. Pure and
+/// unit-testable on synthetic centroids.
 ///
-/// A merged group keeps comparing on its canonical column's centroid (rather than
-/// re-averaging) — cheap, deterministic, and good enough for this greedy pass;
+/// A merged group keeps comparing on its canonical column's centroid rather than
+/// re-averaging — cheap, deterministic, and good enough for this greedy pass;
 /// every voiceprint already lives on the unit sphere from [`cluster_centroids`].
 fn merge_to_expected_count(
     centroids: &[Option<Vec<f32>>],
@@ -1339,10 +1326,10 @@ fn merge_to_expected_count(
     };
 
     // Each group is one surviving cluster, identified by its canonical (smallest)
-    // column; `rep` is the column whose centroid represents the group for cosine
-    // comparisons. Only clusters WITH a centroid can merge, so seed the working
-    // set from those; centroid-less actives stay their own speaker and still count
-    // toward the live total.
+    // column, which also represents the group for cosine comparisons. Only
+    // clusters with a centroid can merge, so seed the working set from those;
+    // centroid-less actives stay their own speaker and still count toward the live
+    // total.
     let mut groups: Vec<(usize, Vec<usize>)> = active
         .iter()
         .filter(|&&c| centroids[c].is_some())
@@ -1411,10 +1398,10 @@ pub fn preload_local_diarizer(cache: &LocalDiarizerCache, cfg: &DiarizationConfi
 
 /// Run local diarization on a 16 kHz mono WAV, returning the cleaned speaker
 /// turns alongside the raw model arrays (see [`LocalDiarization`]). The pipeline
-/// comes from `cache` — loaded on first use, then reused across recordings (the
-/// per-call `from_pretrained` reload this replaced cost seconds and ~500 MB of
-/// churn per transcription). Blocking for the whole inference; callers run it off
-/// the async runtime (e.g. `spawn_blocking`).
+/// comes from `cache` — loaded on first use, then reused across recordings, so we
+/// don't pay a per-call `from_pretrained` reload (seconds and ~500 MB of churn).
+/// Blocking for the whole inference; callers run it off the async runtime (e.g.
+/// `spawn_blocking`).
 pub fn run_local_diarization(
     audio_path: &Path,
     cache: &LocalDiarizerCache,
@@ -1444,27 +1431,26 @@ pub fn run_local_diarization(
         }
     };
 
-    // Collapse each frame to its single highest-scoring speaker before we read
-    // the matrix for word-level attribution. The powerset model can mark a frame
+    // Collapse each frame to its single highest-scoring speaker before reading the
+    // matrix for word-level attribution. The powerset model can mark a frame
     // active for several speakers at once (overlapping speech); making it
     // exclusive gives each frame one winner, so summing a word's frames over the
-    // speaker columns yields a clean argmax. The `SPEAKER_{k:02}` column labels
-    // are unchanged by this collapse, so word-level columns stay aligned with the
-    // labels speakrs's `to_segments` emits into `result.segments`. (speakrs itself
-    // runs `to_segments` on the reconstructed matrix WITHOUT `make_exclusive` — it
-    // thresholds each speaker column independently at > 0.5 — so this collapse is
-    // ours alone, for the per-word argmax, not a reproduction of how
-    // `result.segments` was built.)
+    // speaker columns is a clean argmax. The SPEAKER_{k:02} column labels are
+    // unchanged, so word-level columns stay aligned with the labels speakrs's
+    // to_segments emits into result.segments. Note speakrs itself runs to_segments
+    // on the reconstructed matrix without make_exclusive — it thresholds each
+    // speaker column independently at > 0.5 — so this collapse is ours alone, for
+    // the per-word argmax, not a reproduction of how result.segments was built.
     result.discrete_diarization.make_exclusive();
 
-    // Voiceprint merge: speakrs' clustering can over-split ONE voice into several
+    // Voiceprint merge: speakrs' clustering can over-split one voice into several
     // clusters (a 2-person recording returned as 3 "speakers"), which both
     // inflates the speaker count and chops a single speaker's turn as the model
     // flip-flops between that voice's fragments. Merge clusters whose centroid
     // voiceprints are similar enough to be the same voice (see
-    // `SPEAKER_MERGE_COSINE`); genuinely-distinct voices stay separate. Fold each
+    // SPEAKER_MERGE_COSINE); genuinely-distinct voices stay separate. Fold each
     // merged column of the per-frame matrix into its canonical column and relabel
-    // the segment spans, so BOTH word-level (argmax over the matrix) and
+    // the segment spans, so both word-level (argmax over the matrix) and
     // segment-level (overlap vs spans) attribution see the merged speakers.
     let num_cols = result.discrete_diarization.0.ncols();
     let canon = merge_similar_clusters(
@@ -1481,14 +1467,14 @@ pub fn run_local_diarization(
         );
     }
 
-    // Expected-speakers prior (V3): if the user told us how many voices to expect
-    // and the pipeline still came back with MORE clusters than that, greedily
-    // merge the closest remaining clusters (by centroid cosine) until exactly that
-    // many remain. This runs AFTER the similarity merge above — it's the harder
-    // prior that fires even between genuinely-distinct-looking voices, so it only
-    // engages when the user has explicitly asserted a count. speakrs has no native
-    // target-count knob (it clusters by threshold only), so the prior lives here
-    // as a post-clustering merge. It never splits: detecting `<= n` is left alone.
+    // Expected-speakers prior: if the user told us how many voices to expect and
+    // the pipeline still came back with more clusters than that, greedily merge
+    // the closest remaining clusters (by centroid cosine) until exactly that many
+    // remain. Runs after the similarity merge above — it's the harder prior that
+    // fires even between genuinely-distinct-looking voices, so it only engages when
+    // the user has explicitly asserted a count. speakrs has no native target-count
+    // knob (it clusters by threshold only), so the prior lives here as a
+    // post-clustering merge. It never splits: detecting <= n is left alone.
     if let Some(target) = cfg.expected_speakers.filter(|&n| n > 0) {
         // Count over the columns the similarity merge left canonical, so "detected"
         // reflects the speakers actually live after that first pass.
@@ -1541,12 +1527,10 @@ pub fn run_local_diarization(
         }
     }
 
-    // `result.segments` carries correctly-scaled (seconds) turns — that part of
-    // the prior fix was right; the old `to_segments(1.0, 1.0)` had passed a frame
-    // STEP/DURATION of 1.0 s against the model's real ~16.9 ms / ~61.9 ms geometry
-    // and inflated every timestamp ~59×. But `result.segments` is NOT actually
-    // merged (speakrs builds it with the default `merge_gap == 0.0`, a no-op), so
-    // we coalesce same-speaker fragments ourselves before handing them off.
+    // result.segments carries correctly-scaled (seconds) turns, but it isn't
+    // actually merged (speakrs builds it with the default merge_gap == 0.0, a
+    // no-op), so we coalesce same-speaker fragments ourselves before handing them
+    // off.
     let raw_spans: Vec<SpeakerSpan> = result
         .segments
         .iter()
@@ -1603,7 +1587,7 @@ mod tests {
         }
     }
     /// Build (words, cols) from `(column, token_count)` runs, with realistic 0.3 s
-    /// words back-to-back — for exercising the run-level smoothing thresholds.
+    /// words back-to-back, for exercising the run-level smoothing thresholds.
     fn seq(spec: &[(usize, usize)]) -> (Vec<WordSpan>, Vec<Option<usize>>) {
         let mut words = Vec::new();
         let mut cols = Vec::new();
@@ -1620,8 +1604,8 @@ mod tests {
 
     #[test]
     fn non_numeric_labels_map_to_distinct_speakers() {
-        // The bug this guards against: pyannote labels like "SPEAKER_00" used to
-        // be parse::<u8>()'d, fail, and collapse everyone to Speaker 0.
+        // Guards label mapping: pyannote labels like "SPEAKER_00" aren't numeric,
+        // so a parse-based mapping would collapse everyone to one speaker.
         let segments = vec![
             seg(0.0, 2.0, "hello there"),
             seg(2.0, 4.0, "hi back"),
@@ -1708,7 +1692,7 @@ mod tests {
     fn label_all_as_skips_empty_segments() {
         // Mirror `empty_segments_are_skipped`: blank/whitespace segments are
         // dropped from both the text and the timeline, and the marker prefixes
-        // the first REAL segment (not a leading blank one).
+        // the first real segment, not a leading blank one.
         let segments = vec![
             seg(0.0, 1.0, "   "),
             seg(1.0, 2.0, "real words"),
@@ -1728,15 +1712,14 @@ mod tests {
         assert!(out.is_empty());
     }
 
-    // ── The `to_segments` bug: fragment coalescing ───────────────────────────
+    // ── Fragment coalescing ──────────────────────────────────────────────────
 
     #[test]
     fn clean_spans_merges_same_speaker_fragments_across_micro_pauses() {
-        // Reproduces the `to_segments` bug. speakrs returns one speaker's
-        // continuous speech as several spans split on every micro-pause (here a
-        // ~50 ms breath at 1.0 and ~80 ms at 2.05), because the pipeline's merge
-        // step runs with `merge_gap == 0.0` and never coalesces them. Those raw
-        // fragments must collapse back into one turn.
+        // speakrs returns one speaker's continuous speech as several spans split
+        // on every micro-pause (here a ~50 ms breath at 1.0 and ~80 ms at 2.05),
+        // because the pipeline's merge step runs with merge_gap == 0.0 and never
+        // coalesces them. Those raw fragments must collapse back into one turn.
         let raw = vec![
             span(0.0, 1.0, "SPEAKER_00"),
             span(1.05, 2.05, "SPEAKER_00"),
@@ -1749,7 +1732,7 @@ mod tests {
 
     #[test]
     fn clean_spans_keeps_genuine_turn_taking_separate() {
-        // A real back-and-forth must NOT be merged: the half-second-plus gap
+        // A real back-and-forth must not be merged: the half-second-plus gap
         // between turns is well above the merge threshold, and the speakers
         // differ regardless.
         let raw = vec![
@@ -1786,18 +1769,18 @@ mod tests {
         assert_eq!(cleaned, vec![span(0.0, 5.0, "SPEAKER_00")]);
     }
 
-    // ── The overlap mis-assignment bug ───────────────────────────────────────
+    // ── Overlapping-turn attribution ─────────────────────────────────────────
 
     #[test]
     fn overlapping_turns_attributed_by_max_overlap_not_earliest_start() {
         // The powerset model emits simultaneous speakers, so turns overlap. Two
         // overlapping turns ([0,9] and [5,12]) and two transcript lines:
         //   - "first speaker" [0,3]: only inside SPEAKER_00 → Speaker 1.
-        //   - "second speaker" [6,11]: midpoint 8.5 is inside BOTH turns, but it
+        //   - "second speaker" [6,11]: midpoint 8.5 is inside both turns, but it
         //     overlaps SPEAKER_01 more (5.0 s vs 3.0 s).
-        // The old midpoint-first-match logic attributed the second line to the
-        // earliest-starting covering span (SPEAKER_00), collapsing the whole
-        // transcript onto ONE speaker. Max-overlap recovers the second speaker.
+        // A midpoint-first-match rule would attribute the second line to the
+        // earliest-starting covering span (SPEAKER_00), collapsing the transcript
+        // onto one speaker. Max-overlap recovers the second speaker.
         let speakers = vec![span(0.0, 9.0, "SPEAKER_00"), span(5.0, 12.0, "SPEAKER_01")];
         let segments = vec![
             seg(0.0, 3.0, "first speaker"),
@@ -1897,9 +1880,9 @@ mod tests {
 
     #[test]
     fn frame_for_time_matches_speakrs_closest_frame_with_real_constants() {
-        // Regression for the half-duration offset: against speakrs's real frame
+        // Half-duration offset regression guard: against speakrs's real frame
         // geometry, t = 1.0 s is frame 57 — round((1.0 - 0.5*FRAME_DURATION)/STEP)
-        // — NOT 59, the offset-free floor(1.0/STEP) the first cut produced.
+        // — not 59, which the offset-free floor(1.0/STEP) would give.
         let step = speakrs::pipeline::FRAME_STEP_SECONDS;
         let dur = speakrs::pipeline::FRAME_DURATION_SECONDS;
         assert_eq!(frame_for_time(1.0, step, dur), 57);
@@ -1909,8 +1892,8 @@ mod tests {
 
     #[test]
     fn column_label_matches_speakrs_to_segments_naming() {
-        // The whole stable-index alignment hinges on this string matching the
-        // label speakrs' `to_segments` emits for column k.
+        // The stable-index alignment hinges on this string matching the label
+        // speakrs' to_segments emits for column k.
         assert_eq!(column_label(0), "SPEAKER_00");
         assert_eq!(column_label(1), "SPEAKER_01");
         assert_eq!(column_label(12), "SPEAKER_12");
@@ -1919,8 +1902,8 @@ mod tests {
     #[test]
     fn each_word_lands_on_its_dominant_speaker_when_the_flip_is_mid_segment() {
         // Two speakers, six frames. Speaker 0 (column 0) owns frames 0–2, speaker
-        // 1 (column 1) owns frames 3–5 — the flip is at frame 3 (t = 0.15 s), in
-        // the MIDDLE of what a single whisper segment might span. Whole-segment
+        // 1 (column 1) owns frames 3–5 — the flip is at frame 3 (t = 0.15 s),
+        // mid-way through what a single whisper segment might span. Whole-segment
         // attribution would put the entire segment on one speaker; per-word
         // attribution splits it correctly.
         let m = array![
@@ -2034,10 +2017,10 @@ mod tests {
     // timings, so these tests hand it realistic-duration words directly (the
     // micro-second frame geometry of the tests above is orthogonal to it).
 
-    /// The exact bug the user hit: a one-voice recording where a single short
-    /// word ("it") momentarily scored to a second speaker. Smoothing absorbs the
-    /// island back into the surrounding speaker, collapsing to one column — which
-    /// makes the caller's ≤1-speaker gate render it as plain prose.
+    /// The classic flicker: a one-voice recording where a single short word ("it")
+    /// momentarily scored to a second speaker. Smoothing absorbs the island back
+    /// into the surrounding speaker, collapsing to one column, which makes the
+    /// caller's ≤1-speaker gate render it as plain prose.
     #[test]
     fn lone_short_word_flip_is_absorbed_into_the_surrounding_speaker() {
         let words = [
@@ -2247,10 +2230,10 @@ mod tests {
         );
     }
 
-    /// The US-Govt opening: a 16-token island scored to speaker 1 sits inside a
-    /// 31-token and a 144-token run of speaker 0 — over MAX_ISLAND_WORDS but
-    /// dwarfed by the SAME speaker on both sides, so it's absorbed (a brief blip
-    /// mid-monologue the diarizer mis-scored, not a real interjection).
+    /// A 16-token island scored to speaker 1 sits inside a 31-token and a
+    /// 144-token run of speaker 0 — over MAX_ISLAND_WORDS but dwarfed by the same
+    /// speaker on both sides, so it's absorbed (a brief blip mid-monologue the
+    /// diarizer mis-scored, not a real interjection).
     #[test]
     fn medium_island_dwarfed_by_same_speaker_is_absorbed() {
         let (words, mut cols) = seq(&[(0, 31), (1, 16), (0, 144)]);
@@ -2262,7 +2245,7 @@ mod tests {
         );
     }
 
-    /// A medium island that is NOT shorter than both neighbours (one side is
+    /// A medium island that isn't shorter than both neighbours (one side is
     /// comparable) is a real turn and survives.
     #[test]
     fn medium_island_not_dwarfed_on_both_sides_survives() {
@@ -2289,10 +2272,10 @@ mod tests {
         );
     }
 
-    /// The mid-sentence-flip regression: a MULTI-word run bracketed by the SAME
-    /// speaker (a noise island inside one voice's continuous speech) is absorbed,
-    /// even though every word is well over the 0.6s wall-clock threshold — so the
-    /// word-count island rule, not the old span guard, does the work.
+    /// A multi-word run bracketed by the same speaker (a noise island inside one
+    /// voice's continuous speech) is absorbed even though every word is well over
+    /// the 0.6 s wall-clock threshold — so the word-count island rule, not the
+    /// wall-clock guard, does the work.
     #[test]
     fn multi_word_island_bracketed_by_same_speaker_is_absorbed() {
         let words = [
@@ -2329,7 +2312,7 @@ mod tests {
     }
 
     /// A genuinely long second-speaker run bracketed by another speaker (a real
-    /// in-the-middle turn, longer than MAX_ISLAND_WORDS) is NOT absorbed — only
+    /// in-the-middle turn, longer than MAX_ISLAND_WORDS) is not absorbed — only
     /// short islands are flicker.
     #[test]
     fn long_bracketed_turn_above_island_max_survives() {
@@ -2354,7 +2337,7 @@ mod tests {
         );
     }
 
-    /// A real transition between two long turns (a DIFFERENT speaker each side,
+    /// A real transition between two long turns (a different speaker each side,
     /// both long) is left intact — coherent two-speaker output, never over-merged.
     #[test]
     fn genuine_transition_between_two_long_turns_survives() {
@@ -2401,7 +2384,7 @@ mod tests {
     }
 
     /// Genuinely-distinct voices (the real 'Preferences' 2-speaker case, ~0.32
-    /// cosine) are NOT merged at the 0.5 threshold.
+    /// cosine) are not merged at the 0.5 threshold.
     #[test]
     fn voiceprint_merge_keeps_distinct_voices_separate() {
         let embeddings =
@@ -2411,7 +2394,7 @@ mod tests {
         assert_eq!(canon, vec![0, 1], "two distinct voices stay separate");
     }
 
-    /// Complete-linkage guard: a borderline chain A~B~C must NOT collapse all
+    /// Complete-linkage guard: a borderline chain A~B~C must not collapse all
     /// three into one speaker. cos(A,B)=cos(B,C)≈0.55 (over threshold) but
     /// cos(A,C)≈0.30 (well under) — A and C are clearly two voices, so the only
     /// merge complete-linkage allows is the closest pair. Single-linkage would
@@ -2461,7 +2444,7 @@ mod tests {
         );
     }
 
-    // ── Expected-speakers prior (V3) ─────────────────────────────────────────
+    // ── Expected-speakers prior ──────────────────────────────────────────────
     //
     // `merge_to_expected_count` is pure over per-column centroids + the active
     // column list, so these synthesize centroids directly (no models). A unit

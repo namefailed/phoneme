@@ -11,32 +11,32 @@
 //! catalog status column tracks the stages step for step.
 //!
 //! Invariants owned here:
-//! - **Whisper-server serialization** — the final transcription holds the
-//!   `whisper_sem` permit for its whole STT call, so the live preview can
-//!   never starve it; a one-job model-override swap also happens UNDER the
-//!   permit, so nothing else talks to the bundled server mid-restart (#49).
-//! - **One-job model overrides** — `apply_model_override` reads the
-//!   recording's pending override, publishes it to the supervisor (local
-//!   backend) or clones it into the per-job config (cloud), and the drop
-//!   guard restores the configured model on EVERY exit path. The
-//!   process-global config is never mutated.
-//! - **Effective ports** — the per-job whisper config is rewritten through
-//!   `whisper_ports.apply` right before building the provider, so the
-//!   request dials the port the server actually bound after any fallback.
-//! - **Cancellation** — the queue worker passes a token; transcription races
-//!   it directly, and checkpoints between stages finalize a canceled item
+//! - Whisper-server serialization: the final transcription holds the
+//!   `whisper_sem` permit for its whole STT call, so the live preview can't
+//!   starve it. A one-job model-override swap happens under the permit too, so
+//!   nothing else talks to the bundled server mid-restart.
+//! - One-job model overrides: `apply_model_override` reads the recording's
+//!   pending override, publishes it to the supervisor (local backend) or
+//!   clones it into the per-job config (cloud), and the drop guard restores
+//!   the configured model on every exit path. The process-global config is
+//!   never mutated.
+//! - Effective ports: the per-job whisper config is rewritten through
+//!   `whisper_ports.apply` right before building the provider, so the request
+//!   dials the port the server actually bound after any fallback.
+//! - Cancellation: the queue worker passes a token; transcription races it
+//!   directly, and checkpoints between stages finalize a canceled item
 //!   (`finalize_canceled`: status `Cancelled`, inbox `finish_cancelled`,
 //!   cancel events) so a cancel always settles.
-//! - **Transient vs permanent failures** — unreachable/timeout STT errors
-//!   leave the inbox item claimed for the worker to requeue and retry;
-//!   permanent errors quarantine it in `failed/` and mark the row failed.
-//! - **Skip** — the in-flight LLM stage races `skip_stage` and aborts as a
+//! - Transient vs permanent failures: unreachable/timeout STT errors leave the
+//!   inbox item claimed for the worker to requeue and retry; permanent errors
+//!   quarantine it in `failed/` and mark the row failed.
+//! - Skip: the in-flight LLM stage races `skip_stage` and aborts as a
 //!   non-fatal stage failure when the user hits skip.
 //!
 //! The helpers here (`run_llm_stage`, `generate_summary`, `suggest_tags`,
-//! `embed_and_store`, the per-step `*_llm_config` builders) are also called
-//! by the IPC re-run handlers, so on-demand re-runs behave byte-for-byte
-//! like their pipeline counterparts.
+//! `embed_and_store`, the per-step `*_llm_config` builders) are also called by
+//! the IPC re-run handlers, so on-demand re-runs behave exactly like their
+//! pipeline counterparts.
 
 use crate::app_state::{AppState, WhisperModelOverride};
 use phoneme_core::config::{
@@ -60,16 +60,16 @@ const MAX_STREAMED_CHARS: usize = 16 * 1024;
 /// Longest we wait for the bundled whisper-server to come back up after a
 /// one-job model-override swap before transcribing anyway. A model load can take
 /// several seconds (large models, cold disk); if it overruns this the transcribe
-/// attempt fails with `WhisperUnreachable`, which the queue worker already
-/// retries with backoff — so this bound only avoids a needless first failure, it
-/// is never a correctness requirement.
+/// attempt fails with `WhisperUnreachable`, which the queue worker retries with
+/// backoff — so this bound only avoids a needless first failure, it's never a
+/// correctness requirement.
 const WHISPER_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Restores the configured whisper model when a one-job model override goes out
 /// of scope. Dropping it pings the supervisor to swap the bundled server back,
-/// so the override is undone on EVERY pipeline exit path (success, transcribe
+/// so the override is undone on every pipeline exit path (success, transcribe
 /// error, cancel) without each path having to remember to clear it. A no-op
-/// (`inner = None`) when the job had no override or used a cloud backend (no
+/// (`inner` is `None`) when the job had no override or used a cloud backend (no
 /// server to restore).
 pub(crate) struct WhisperOverrideGuard {
     inner: Option<Arc<WhisperModelOverride>>,
@@ -78,21 +78,21 @@ pub(crate) struct WhisperOverrideGuard {
 impl Drop for WhisperOverrideGuard {
     fn drop(&mut self) {
         if let Some(o) = self.inner.take() {
-            // Clear the override → supervisor restarts the bundled server back
-            // onto the configured model for subsequent jobs.
+            // Clearing the override makes the supervisor restart the bundled
+            // server back onto the configured model for subsequent jobs.
             o.set(None);
         }
     }
 }
 
-/// Apply a recording's one-time whisper model override for THIS job only,
+/// Apply a recording's one-time whisper model override, scoped to this job,
 /// returning the per-job [`WhisperConfig`] to build the provider from plus a
 /// guard that restores the configured model on drop.
 ///
 /// - No override (or a blank one): returns the configured config unchanged with
-///   a no-op guard — the steady-state path, byte-for-byte the prior behavior.
-/// - Local bundled backend: the override is a model FILE the single shared
-///   server must load, so we publish it to the supervisor (which performs one
+///   a no-op guard — the steady-state path.
+/// - Local bundled backend: the override is a model file the single shared
+///   server must load, so we publish it to the supervisor (which does one
 ///   controlled restart), wait for the server to report ready, and pin the
 ///   per-job `model_path` to the override for labels/stored model. The override
 ///   never touches the process-global config, so previews and other jobs keep
@@ -121,15 +121,15 @@ pub(crate) async fn apply_model_override(
             // Publish the override; the supervisor swaps the server's model.
             state.whisper_model_override.set(Some(model.clone()));
             // Pin the per-job model_path so the activity label and the stored
-            // `model` reflect the override (the local provider talks to the
-            // server over HTTP and ignores model_path itself).
+            // model reflect the override (the local provider talks to the server
+            // over HTTP and ignores model_path itself).
             whisper_cfg.model_path = model;
             // Only the bundled server is ours to wait on; External is a
-            // user-managed endpoint we never restart. The URL is re-resolved
-            // on every poll because the override restart re-runs the
-            // supervisor's port probe — the server can come back on a
-            // different port than the one it left (its preferred port freed
-            // up, or a fresh fallback was assigned).
+            // user-managed endpoint we never restart. The URL is re-resolved on
+            // every poll because the override restart re-runs the supervisor's
+            // port probe — the server can come back on a different port than the
+            // one it left (its preferred port freed up, or a fresh fallback was
+            // assigned).
             if matches!(
                 configured.mode,
                 WhisperMode::BundledModel | WhisperMode::BundledDownload
@@ -165,11 +165,11 @@ pub(crate) async fn apply_model_override(
 }
 
 /// Apply a recording's one-time [`crate::app_state::PendingRerun`] overrides onto
-/// a per-job config CLONE: the hooks toggle, the post-processing opt-out, and the
+/// a per-job config clone: the hooks toggle, the post-processing opt-out, and the
 /// Re-run → "All" cleanup/summary/title values. Pure — it touches no global state
 /// — so `run` builds a private config for the job and the process-global config is
-/// never mutated (a temp-global write here raced a concurrent `ReloadConfig` and
-/// could leak its forced-on pipeline onto another queued job).
+/// never mutated. Mutating the global here would race a concurrent `ReloadConfig`
+/// and could leak the forced-on pipeline onto another queued job.
 fn apply_rerun_overrides(
     mut cfg: phoneme_core::Config,
     rerun: crate::app_state::PendingRerun,
@@ -178,11 +178,11 @@ fn apply_rerun_overrides(
         cfg.hook.run_on_transcribe = rh;
     }
     // Post-processing opt-out: under the Playbook executor a step runs iff it's
-    // a member of the resolved recipe, so disabling the legacy flag is no longer
-    // enough — drop the `cleanup` Transform step from the per-job clone's
-    // `default` recipe so NO Transform runs and the run yields the raw machine
-    // transcript. (Disabling the flag too keeps any non-recipe code path honest;
-    // both are confined to the clone — the persisted recipe is never touched.)
+    // a member of the resolved recipe, so disabling the legacy flag isn't enough
+    // — drop the cleanup Transform step from the per-job clone's default recipe
+    // so no Transform runs and the run yields the raw machine transcript.
+    // (Disabling the flag too keeps any non-recipe path honest; both are confined
+    // to the clone — the persisted recipe is never touched.)
     if rerun.post_process == Some(false) {
         cfg.llm_post_process.enabled = false;
         if let Some(recipe) = cfg.recipes.iter_mut().find(|r| r.id == DEFAULT_RECIPE_ID) {
@@ -206,12 +206,11 @@ fn apply_rerun_overrides(
             cfg.llm_post_process.api_url = u;
         }
         // The recipe executor reads each step's prompt/model/provider/url from
-        // its Playbook ENTRY (Strategy B), so mirror the one-shot overrides into
-        // the matching entries on this per-job CLONE. Without this a Re-run →
-        // "All" with a custom cleanup/summary/title model or prompt would be
-        // silently ignored. The clone is discarded after the run, so the
-        // persisted Playbook is never touched; the api_key is never set here (it
-        // inherits each section, as always).
+        // its Playbook entry, so mirror the one-shot overrides into the matching
+        // entries on this per-job clone. Without this, a Re-run → "All" with a
+        // custom cleanup/summary/title model or prompt would be silently ignored.
+        // The clone is discarded after the run, so the persisted Playbook is
+        // untouched; the api_key is never set here (it inherits each section).
         let (cp, cm, cpr, cu) = (
             cfg.llm_post_process.provider.clone(),
             cfg.llm_post_process.model.clone(),
@@ -232,19 +231,19 @@ fn apply_rerun_overrides(
             cfg.summary.prompt = p;
         }
         // A chosen title model implies "run the title step with it" — enable the
-        // step + LLM path even if globally off.
+        // step and the LLM path even if globally off.
         if let Some(m) = ov.title_model {
             cfg.title.enabled = true;
             cfg.title.use_llm = true;
             cfg.title.model = m;
         }
-        // Mirror the (possibly forced/overridden) `[summary]` + `[title]`
-        // sections onto their Playbook ENTRIES so the Enrichment steps run with
-        // the "All" values. We copy the RAW section fields (blank stays blank):
-        // the executor re-applies the SAME inherit-on-blank overlay against
+        // Mirror the (possibly forced/overridden) `[summary]` and `[title]`
+        // sections onto their Playbook entries so the Enrichment steps run with
+        // the "All" values. We copy the raw section fields (blank stays blank):
+        // the executor re-applies the same inherit-on-blank overlay against
         // `[llm_post_process]` via `entry_llm_config` at resolve time, so the
         // resolved connection matches what `summary_llm_config` / `title_llm_config`
-        // would have produced. Precompute against immutable borrows, THEN mutate
+        // would have produced. Precompute against immutable borrows, then mutate
         // the entries (avoids aliasing `cfg`).
         let summary_entry = section_to_entry_llm(&cfg.summary);
         let title_entry = section_to_entry_llm(&cfg.title);
@@ -254,28 +253,28 @@ fn apply_rerun_overrides(
         if let Some(entry) = cfg.playbook.iter_mut().find(|e| e.id == "title") {
             entry.llm = title_entry;
         }
-        // The executor gates each step on recipe MEMBERSHIP, so forcing the
-        // legacy flags on is not enough — ensure cleanup/title/summary are
-        // members of the per-job clone's `default` recipe (in canonical order).
-        // Tags membership is left as-is: legacy "All" never forced auto-tagging
-        // on (it only set `summary.auto`/`title.enabled`/cleanup), so tags still
-        // run only if they were already a member. Confined to the clone.
+        // The executor gates each step on recipe membership, so forcing the
+        // legacy flags on isn't enough — ensure cleanup/title/summary are members
+        // of the per-job clone's default recipe (in canonical order). Tags
+        // membership is left as-is: legacy "All" never forced auto-tagging on (it
+        // only set `summary.auto`/`title.enabled`/cleanup), so tags still run only
+        // if they were already a member. Confined to the clone.
         ensure_default_recipe_steps(&mut cfg, &["cleanup", "title", "summary"]);
     }
     cfg
 }
 
-/// The canonical order of the built-in `default` recipe's steps — used to slot a
+/// The canonical order of the built-in default recipe's steps — used to slot a
 /// forced-on Re-run "All" step back into its rightful position.
 const CANONICAL_DEFAULT_STEPS: [&str; 4] = ["cleanup", "title", "summary", "auto_tag"];
 
-/// Copy a per-step section (`[summary]` / `[title]`) into a `PlaybookLlm` ENTRY
-/// half, RAW (blank stays blank) — the executor re-applies the inherit-on-blank
+/// Copy a per-step section (`[summary]` / `[title]`) into a `PlaybookLlm` entry
+/// half, raw (blank stays blank) — the executor re-applies the inherit-on-blank
 /// overlay against `[llm_post_process]` at resolve time, so the resolved
 /// connection matches what the legacy `*_llm_config` builder would have produced.
 /// The prompt is the section prompt; the key is the section key (downstream
 /// inheritance fills a blank). `timeout_secs` is irrelevant (the entry overlay
-/// doesn't read it). Used only by the Re-run "All" mirror, on the config CLONE.
+/// doesn't read it). Used only by the Re-run "All" mirror, on the config clone.
 fn section_to_entry_llm<S: PerStepLlmSection>(section: &S) -> phoneme_core::config::PlaybookLlm {
     let mut e = phoneme_core::config::PlaybookLlm {
         provider: section.provider().to_string(),
@@ -336,10 +335,10 @@ impl PerStepLlmSection for phoneme_core::config::TitleConfig {
     }
 }
 
-/// Ensure each id in `want` is a member of the per-job clone's `default` recipe,
+/// Ensure each id in `want` is a member of the per-job clone's default recipe,
 /// inserting any missing one at its canonical position (cleanup → title →
 /// summary → auto_tag). A no-op for ids already present; never reorders or
-/// duplicates. Used only by the Re-run "All" path, on the config CLONE.
+/// duplicates. Used only by the Re-run "All" path, on the config clone.
 fn ensure_default_recipe_steps(cfg: &mut phoneme_core::Config, want: &[&str]) {
     let Some(recipe) = cfg.recipes.iter_mut().find(|r| r.id == DEFAULT_RECIPE_ID) else {
         return;
@@ -405,8 +404,8 @@ async fn wait_for_whisper_ready(base_url: impl Fn() -> String, timeout: Duration
 
 /// Reason string carried by the `Err` a user-initiated stage skip produces
 /// (the queue panel's ⏭ button / `phoneme queue skip`). It reaches the GUI
-/// verbatim inside `SummaryFailed.error`, where the toast layer matches on
-/// the phrase to report "skipped" instead of a failure — keep
+/// verbatim inside `SummaryFailed.error`, where the toast layer matches on the
+/// phrase to report "skipped" instead of a failure — keep
 /// `frontend/src/services/notifications.ts` in sync if it ever changes.
 pub(crate) const STAGE_SKIPPED_REASON: &str = "step skipped by user";
 
@@ -427,7 +426,7 @@ pub(crate) async fn run_llm_stage(
     text: &str,
 ) -> Result<String> {
     // (1) Start event carrying the verbatim prompt. Kept in `exact` so the same
-    // text can be persisted to the durable AI-activity log once the session ends.
+    // text can be persisted to the AI-activity log once the session ends.
     let exact = provider.exact_prompt(prompt, text);
     state.events.emit(DaemonEvent::LlmActivity {
         id: id.clone(),
@@ -471,12 +470,12 @@ pub(crate) async fn run_llm_stage(
         };
         tokio::select! {
             r = provider.process_streaming(prompt, text, &mut on_delta) => r,
-            // `skip_stage` is a global broadcast: `notify_waiters()` wakes EVERY
-            // in-flight LLM stage at once. The user's ⏭ targets the queue's
-            // ACTIVE item only, so honor the wake solely for the recording that
-            // is currently in `state.processing`; any other concurrent stage
-            // (an on-demand re-run, which is never the processing item) re-arms
-            // and keeps streaming instead of being collaterally aborted.
+            // `skip_stage` is a global broadcast: `notify_waiters()` wakes every
+            // in-flight LLM stage at once. The user's ⏭ targets the queue's active
+            // item only, so honor the wake solely for the recording currently in
+            // `state.processing`; any other concurrent stage (an on-demand re-run,
+            // which is never the processing item) re-arms and keeps streaming
+            // instead of being collaterally aborted.
             _ = skip_active_queue_item(state, id) => {
                 tracing::info!(?stage, "stage skipped by user");
                 Err(phoneme_core::Error::Internal(STAGE_SKIPPED_REASON.into()))
@@ -504,8 +503,8 @@ pub(crate) async fn run_llm_stage(
 
     // Persist the completed session so the 🧠 AI-activity log survives an app
     // restart (the live event stream above is in-memory only). Best-effort: a
-    // log-write failure must never fail the actual stage. A skipped/errored stage
-    // is not persisted — only real prompt→response sessions are logged.
+    // log-write failure must never fail the stage. A skipped/errored stage isn't
+    // persisted — only completed prompt→response sessions are logged.
     if let Ok(ref out) = result {
         if let Err(e) = state
             .catalog
@@ -519,18 +518,18 @@ pub(crate) async fn run_llm_stage(
     result
 }
 
-/// Resolve to a completed future ONLY when the user's ⏭ ("skip current step")
-/// is meant for `id` — i.e. `id` is the queue's currently-processing item.
+/// Resolve to a completed future only when the user's ⏭ ("skip current step") is
+/// meant for `id` — i.e. `id` is the queue's currently-processing item.
 ///
 /// `state.skip_stage` is a single global `Notify`: `notify_waiters()` wakes every
 /// LLM stage that happens to be streaming. That over-fires when an on-demand
 /// re-run (`rerun_cleanup` / `rerun_summary`) is in flight at the same time as a
 /// queue stage — one ⏭ would abort both. The queue worker publishes the one
 /// active item in `state.processing`, so we treat the wake as a skip only for
-/// that item; for anything else we simply re-arm and wait again (re-runs are
-/// never the processing item, so they never get skipped this way). Until the
-/// matching item's skip arrives this future stays pending, so the `select!` arm
-/// parks and the stream wins.
+/// that item; for anything else we re-arm and wait again (re-runs are never the
+/// processing item, so they never get skipped this way). Until the matching
+/// item's skip arrives this future stays pending, so the `select!` arm parks and
+/// the stream wins.
 async fn skip_active_queue_item(state: &AppState, id: &RecordingId) {
     loop {
         state.skip_stage.notified().await;
@@ -554,8 +553,8 @@ use std::time::Duration;
 ///
 /// Shared by every place a transcript becomes final or changes (pipeline, manual
 /// edit, cleanup re-run, retroactive backfill) so all paths embed identically.
-/// Best-effort: a failure is logged, never fatal — search degrades gracefully
-/// rather than failing the recording.
+/// Best-effort: a failure is logged, never fatal — search degrades rather than
+/// failing the recording.
 pub(crate) async fn embed_and_store(
     embedder: std::sync::Arc<Embedder>,
     catalog: &Catalog,
@@ -597,12 +596,12 @@ pub(crate) async fn embed_and_store(
     }
 }
 
-/// Mint the LLM provider for a step that is about to RUN, launching the local
+/// Mint the LLM provider for a step that is about to run, launching the local
 /// Ollama first when the effective connection needs it (`ollama_launcher`).
-/// Every actual LLM execution path (cleanup, summary, tags, titles, in-place
-/// polish, the cleanup re-run) resolves its provider through this; validation
-/// and "is this configured?" checks keep calling `LlmPostProcessor::provider`
-/// directly so a mere settings probe can never spawn a process.
+/// Every LLM execution path (cleanup, summary, tags, titles, in-place polish,
+/// the cleanup re-run) resolves its provider through this; validation and "is
+/// this configured?" checks keep calling `LlmPostProcessor::provider` directly so
+/// a settings probe can never spawn a process.
 pub(crate) async fn llm_provider_for_run(
     state: &AppState,
     llm_cfg: &LlmPostProcessConfig,
@@ -616,10 +615,10 @@ pub(crate) async fn llm_provider_for_run(
 
 /// Build the effective LLM config for summaries: start from `[llm_post_process]`
 /// and overlay any summary-specific provider / URL / key / model the user set.
-/// Each blank summary field inherits the cleanup value, so summaries can run on
-/// a fully independent provider+model or simply reuse the cleanup connection.
-/// Always `enabled` — summaries have their own on/off gate (`summary.auto` /
-/// the explicit on-demand request).
+/// Each blank summary field inherits the cleanup value, so summaries can run on a
+/// fully independent provider+model or just reuse the cleanup connection. Always
+/// enabled — summaries have their own on/off gate (`summary.auto` / the explicit
+/// on-demand request).
 pub fn summary_llm_config(cfg: &Config) -> LlmPostProcessConfig {
     let s = &cfg.summary;
     cfg.llm_post_process
@@ -628,27 +627,27 @@ pub fn summary_llm_config(cfg: &Config) -> LlmPostProcessConfig {
 
 /// Generate an LLM summary of `transcript`, returning `(summary, model)` on
 /// success or a human-readable reason on failure — the reason reaches the UI
-/// toast verbatim, so it must say WHAT went wrong (a stale endpoint, an
-/// unreachable provider, an empty reply), not just that something did.
-/// Non-fatal: callers surface the error and continue.
+/// toast verbatim, so it must say what went wrong (a stale endpoint, an
+/// unreachable provider, an empty reply), not just that something did. Non-fatal:
+/// callers surface the error and continue.
 ///
 /// Summaries reuse the `[llm_post_process]` provider connection (endpoint, API
 /// key, provider type) wherever the `[summary]` fields are blank. The
-/// post-processor's `enabled` flag is irrelevant here — summarization is gated
-/// by its own switch — so we force a working config clone with the summary
+/// post-processor's `enabled` flag is irrelevant here — summarization is gated by
+/// its own switch — so we force a working config clone with the summary
 /// model/prompt swapped in.
 pub async fn generate_summary(
     state: &AppState,
     cfg: &Config,
     id: &RecordingId,
     transcript: &str,
-    // `Result` here is std's two-arg form, NOT the crate's `error::Result`
-    // alias that the rest of this module uses — the Err side is a plain
-    // user-facing string, not a phoneme error.
+    // `Result` here is std's two-arg form, not the crate's `error::Result` alias
+    // that the rest of this module uses — the Err side is a plain user-facing
+    // string, not a phoneme error.
 ) -> std::result::Result<(String, String), String> {
     // The legacy/IPC path: provider+prompt+endpoint-hint come from the
     // `[summary]`/`[llm_post_process]` sections. The recipe executor calls
-    // `generate_summary_with` instead, passing the resolved Playbook ENTRY.
+    // `generate_summary_with` instead, passing the resolved Playbook entry.
     let endpoint_hint = cfg.summary.api_url.trim();
     let endpoint_hint = (!endpoint_hint.is_empty()).then(|| endpoint_hint.to_string());
     generate_summary_with(
@@ -662,13 +661,13 @@ pub async fn generate_summary(
     .await
 }
 
-/// The summary generator's core, parameterized by an already-resolved LLM
-/// config + prompt so BOTH the legacy/IPC path ([`generate_summary`], which
-/// reads `[summary]`) and the recipe executor (which reads the migrated
-/// `summary` Playbook entry) share one identical implementation — same events,
-/// same skip/empty/error classification, same recorded model. `endpoint_hint`,
-/// when `Some`, names an overridden endpoint in a real-error message (the
-/// classic stale-URL cause); a skip and "not configured" never carry it.
+/// The summary generator's core, parameterized by an already-resolved LLM config
+/// and prompt so both the legacy/IPC path ([`generate_summary`], which reads
+/// `[summary]`) and the recipe executor (which reads the migrated `summary`
+/// Playbook entry) share one implementation — same events, same
+/// skip/empty/error classification, same recorded model. `endpoint_hint`, when
+/// `Some`, names an overridden endpoint in a real-error message (the classic
+/// stale-URL cause); a skip and "not configured" never carry it.
 pub(crate) async fn generate_summary_with(
     state: &AppState,
     id: &RecordingId,
@@ -719,8 +718,8 @@ pub(crate) async fn generate_summary_with(
         Err(e) => {
             tracing::error!(error = %e, "summary generation failed");
             // Name the endpoint when one is overridden — a stale per-step URL
-            // (e.g. left over from trying a different provider) is the classic
-            // cause and invisible in a generic message.
+            // (e.g. left over from trying a different provider) is a common cause
+            // and invisible in a generic message.
             match endpoint_hint {
                 Some(url) => Err(format!("{e} (summary endpoint override: {url})")),
                 None => Err(e.to_string()),
@@ -731,20 +730,20 @@ pub(crate) async fn generate_summary_with(
 
 /// Whether this pipeline run should type the transcript at the cursor.
 ///
-/// Only in-place dictations type, and only when the text hasn't already
-/// landed. The single subtlety is the recorder's "type-first" pass: with
+/// Only in-place dictations type, and only when the text hasn't already landed.
+/// The one subtlety is the recorder's "type-first" pass: with
 /// `[in_place].full_pipeline` + `[in_place].type_first` the recorder typed the
-/// quick transcription the moment it was ready, so this run owns everything
-/// else (cleanup, summary, tags, hooks, the library copy) but must NOT type
-/// again — the text would land twice.
+/// quick transcription the moment it was ready, so this run owns everything else
+/// (cleanup, summary, tags, hooks, the library copy) but must not type again, or
+/// the text would land twice.
 ///
 /// `recipe_routed` is true when a custom-hotkey in-place binding named a recipe
-/// (the recording was routed to the full pipeline so the recipe could run). For
-/// it the recorder SKIPS the type-first pass — the recipe reshapes the text, so
-/// the quick raw transcription is the wrong thing to type — and this run is the
-/// one and only insertion of the recipe's RESULT. So the suppression mirrors the
+/// (the recording was routed to the full pipeline so the recipe could run). In
+/// that case the recorder skips the type-first pass — the recipe reshapes the
+/// text, so the quick raw transcription is the wrong thing to type — and this run
+/// is the sole insertion of the recipe's result. So the suppression mirrors the
 /// recorder exactly: a type-first pass ran iff `full_pipeline && type_first &&
-/// !recipe_routed`, and this run types iff one did NOT. Pure so the decision is
+/// !recipe_routed`, and this run types iff one did not. Pure, so the decision is
 /// testable without an input simulator.
 fn pipeline_should_type(
     in_place: &InPlaceConfig,
@@ -757,14 +756,15 @@ fn pipeline_should_type(
         && !(in_place.full_pipeline && in_place.type_first && !recipe_routed)
 }
 
-/// Run the summary enrichment step for a recording that the recipe says should
-/// summarize (recipe MEMBERSHIP is the gate — the legacy `summary.auto` flag was
-/// already folded into membership by the migration, so this is NOT re-checked
-/// here). The provider/prompt/model come from the resolved `summary` Playbook
-/// ENTRY (`llm_cfg` + `prompt`), so editing that entry in the UI changes what
-/// the summary step does. Same events / persistence / classification as before.
+/// Run the summary enrichment step for a recording the recipe says should
+/// summarize. Recipe membership is the gate — the legacy `summary.auto` flag was
+/// folded into membership by the migration, so it isn't re-checked here. The
+/// provider/prompt/model come from the resolved `summary` Playbook entry
+/// (`llm_cfg` + `prompt`), so editing that entry in the UI changes what the
+/// summary step does. Same events / persistence / classification as the legacy
+/// path.
 ///
-/// Returns `Some(error)` only when the summary step REALLY failed (a user-skip
+/// Returns `Some(error)` only when the summary step actually failed (a user-skip
 /// and "not configured" are non-failures) — the caller folds that into the
 /// terminal status and persists the message. `None` means no failure.
 async fn run_summary_step(
@@ -780,8 +780,8 @@ async fn run_summary_step(
     });
     // The endpoint hint names an overridden URL in a real-error message — only
     // when the entry actually overrode the URL (a non-blank entry api_url that
-    // differs from the inherited cleanup connection would be the stale-URL
-    // culprit). Mirror the legacy behavior: hint with the resolved URL when set.
+    // differs from the inherited cleanup connection is the stale-URL culprit).
+    // Hint with the resolved URL when set.
     let endpoint_hint = {
         let u = llm_cfg.api_url.trim();
         (!u.is_empty()).then(|| u.to_string())
@@ -818,9 +818,9 @@ async fn run_summary_step(
             }
         }
         Err(reason) => {
-            // Auto-summary failed — surface the REAL reason (the transcript
+            // Auto-summary failed — surface the real reason (the transcript
             // itself is fine; only the optional summary step failed). A user-skip
-            // carries the sentinel and is NOT a failure for the terminal status.
+            // carries the sentinel and isn't a failure for the terminal status.
             let skipped = reason == STAGE_SKIPPED_REASON;
             state.events.emit(DaemonEvent::SummaryFailed {
                 id: id.clone(),
@@ -837,8 +837,8 @@ async fn run_summary_step(
 
 /// Build the effective LLM config for tag suggestions, mirroring
 /// `summary_llm_config`: start from `[llm_post_process]` and overlay any
-/// auto-tag-specific provider / URL / key / model. Always `enabled` — the
-/// auto-tag step has its own gate (`auto_tag.auto` / the on-demand request).
+/// auto-tag-specific provider / URL / key / model. Always enabled — the auto-tag
+/// step has its own gate (`auto_tag.auto` / the on-demand request).
 pub fn auto_tag_llm_config(cfg: &Config) -> LlmPostProcessConfig {
     let t = &cfg.auto_tag;
     cfg.llm_post_process
@@ -851,15 +851,14 @@ pub fn auto_tag_llm_config(cfg: &Config) -> LlmPostProcessConfig {
 /// and case-insensitive duplicates, and caps the list at `max`.
 fn parse_tag_names(raw: &str, max: usize) -> Vec<String> {
     let cleaned = raw.trim();
-    // Find the FIRST valid JSON string-array anywhere in the reply. Scanning
-    // every '[' (instead of slicing first-'[' .. last-']') matters because
-    // chatty models wrap the array in bracket-bearing prose — "[1] as cited"
-    // before it, "[hope that helps]" after — and the old greedy slice spanned
-    // the prose, failed to parse, and comma-split the whole reply into junk
-    // candidates. The stream deserializer parses exactly one value starting
-    // at each '[' and ignores whatever follows, so trailing prose can't break
-    // a well-formed array; a non-string array (e.g. "[1]") just fails fast
-    // and the scan moves to the next bracket.
+    // Find the first valid JSON string-array anywhere in the reply. We scan every
+    // '[' rather than slicing first-'[' .. last-']' because chatty models wrap the
+    // array in bracket-bearing prose — "[1] as cited" before it, "[hope that
+    // helps]" after — and a greedy slice would span the prose, fail to parse, and
+    // comma-split the whole reply into junk candidates. The stream deserializer
+    // parses one value starting at each '[' and ignores what follows, so trailing
+    // prose can't break a well-formed array; a non-string array (e.g. "[1]") fails
+    // fast and the scan moves to the next bracket.
     let jsonish = cleaned
         .char_indices()
         .filter(|(_, c)| *c == '[')
@@ -904,13 +903,13 @@ fn parse_tag_names(raw: &str, max: usize) -> Vec<String> {
 
 /// Ask the LLM for tag suggestions for `transcript` and persist them on the
 /// recording (replacing any previous suggestions), emitting
-/// `TagSuggestionsUpdated` so the UI shows the approval chips. The existing
-/// tag list is included in the prompt so the model prefers reusing tags.
-/// Non-fatal: failures are logged and leave existing suggestions untouched.
-/// Returns `Some(error)` only when the tag step REALLY failed (an LLM call
-/// error) — the caller folds that into the terminal status and persists the
-/// message. An empty transcript, a missing provider, a user-skip, or "nothing
-/// new to suggest" are all non-failures (`None`).
+/// `TagSuggestionsUpdated` so the UI shows the approval chips. The existing tag
+/// list is included in the prompt so the model prefers reusing tags. Non-fatal:
+/// failures are logged and leave existing suggestions untouched. Returns
+/// `Some(error)` only when the tag step actually failed (an LLM call error) — the
+/// caller folds that into the terminal status and persists the message. An empty
+/// transcript, a missing provider, a user-skip, or "nothing new to suggest" are
+/// all non-failures (`None`).
 pub async fn suggest_tags(
     state: &AppState,
     cfg: &Config,
@@ -919,7 +918,7 @@ pub async fn suggest_tags(
 ) -> Option<String> {
     // The legacy/IPC path: the LLM config + base prompt come from the
     // `[auto_tag]` section. The recipe executor calls `suggest_tags_with`
-    // instead, passing the resolved `auto_tag` Playbook ENTRY. The `max_tags` /
+    // instead, passing the resolved `auto_tag` Playbook entry. The `max_tags` /
     // `auto_accept_existing` behavior knobs stay in `[auto_tag]` either way.
     suggest_tags_with(
         state,
@@ -935,9 +934,9 @@ pub async fn suggest_tags(
 /// The tag-suggester's core, parameterized by an already-resolved LLM config +
 /// base prompt so the legacy/IPC path (reads `[auto_tag]`) and the recipe
 /// executor (reads the migrated `auto_tag` entry) share one implementation —
-/// same EXISTING-TAGS guidance, canonicalization, auto-accept, events, and
+/// same existing-tags guidance, canonicalization, auto-accept, events, and
 /// `set_tag_model` write. `base_prompt` is the user's instruction; the runtime
-/// EXISTING-TAGS mix guidance is appended here. `max_tags` / `auto_accept_existing`
+/// existing-tags mix guidance is appended here. `max_tags` / `auto_accept_existing`
 /// remain `[auto_tag]` behavior knobs (not part of the LLM entry).
 pub(crate) async fn suggest_tags_with(
     state: &AppState,
@@ -960,7 +959,7 @@ pub(crate) async fn suggest_tags_with(
             return None;
         }
     };
-    // EVERY existing tag (attached or not) — the model reuses these where they
+    // Every existing tag (attached or not) — the model reuses these where they
     // fit, so the user's tag vocabulary stays canonical.
     let existing: Vec<String> = match state.catalog.list_all_tags().await {
         Ok(tags) => tags.into_iter().map(|t| t.name).collect(),
@@ -991,9 +990,9 @@ pub(crate) async fn suggest_tags_with(
     {
         Ok(reply) => {
             // Record which model ran the auto-tagger (the detail provenance line
-            // names it), once per run and BEFORE the suggest-vs-auto-accept
-            // branch — so it sticks even when every suggestion was auto-accepted
-            // and nothing is left to approve.
+            // names it), once per run and before the suggest-vs-auto-accept branch
+            // — so it sticks even when every suggestion was auto-accepted and
+            // nothing is left to approve.
             if let Err(e) = state.catalog.set_tag_model(id, &llm_cfg.model).await {
                 tracing::warn!(error = %e, "failed to persist tag model");
             }
@@ -1003,11 +1002,11 @@ pub(crate) async fn suggest_tags_with(
                 let have: Vec<String> = rec.tags.iter().map(|t| t.name.to_lowercase()).collect();
                 names.retain(|n| !have.contains(&n.to_lowercase()));
             }
-            // Canonicalize against the EXISTING tag set, case-insensitively:
-            // a suggested "Code" when the library already has "code" becomes
-            // "code" — so a chip can never read as a new tag when it isn't,
-            // and approving can never mint a casing-duplicate. The same model
-            // emitting "Code" AND "code" collapses to one suggestion.
+            // Canonicalize against the existing tag set, case-insensitively: a
+            // suggested "Code" when the library already has "code" becomes "code"
+            // — so a chip can't read as a new tag when it isn't, and approving
+            // can't mint a casing-duplicate. The same model emitting "Code" and
+            // "code" collapses to one suggestion.
             let canonical: std::collections::HashMap<String, String> =
                 match state.catalog.list_all_tags().await {
                     Ok(tags) => tags
@@ -1022,10 +1021,10 @@ pub(crate) async fn suggest_tags_with(
                 .map(|n| canonical.get(&n.to_lowercase()).cloned().unwrap_or(n))
                 .filter(|n| seen.insert(n.to_lowercase()))
                 .collect();
-            // Auto-accept matches of EXISTING tags when enabled: a suggestion
-            // whose tag already exists (any tag, attached anywhere or not) is
-            // attached right away; only names that would CREATE a new tag stay
-            // behind as approve/dismiss chips.
+            // Auto-accept matches of existing tags when enabled: a suggestion
+            // whose tag already exists (attached anywhere or not) is attached
+            // right away; only names that would create a new tag stay behind as
+            // approve/dismiss chips.
             let mut accepted = 0usize;
             if cfg.auto_tag.auto_accept_existing && !names.is_empty() {
                 let (accept, keep): (Vec<String>, Vec<String>) = names
@@ -1070,7 +1069,7 @@ pub(crate) async fn suggest_tags_with(
         Err(e) => {
             tracing::warn!(error = %e, "tag suggestion LLM call failed");
             // Best-effort: no suggestions added; surface the failure for a toast +
-            // the terminal status. A user-skip carries the sentinel and is NOT a
+            // the terminal status. A user-skip carries the sentinel and isn't a
             // failure.
             let skipped = stage_skipped(&e);
             let msg = e.to_string();
@@ -1099,8 +1098,8 @@ fn sanitize_llm_title(raw: &str) -> Option<String> {
     };
     let line = raw.lines().map(str::trim).find(|l| !l.is_empty())?;
     let line = unwrap_quotes(line);
-    // Models love announcing "Title: …" despite instructions — and quote the
-    // value as often as the whole reply, so unwrap on both sides of the strip.
+    // Models tend to announce "Title: …" despite instructions, and quote the value
+    // as often as the whole reply, so unwrap on both sides of the strip.
     let line = line
         .strip_prefix("Title:")
         .or_else(|| line.strip_prefix("title:"))
@@ -1120,23 +1119,23 @@ fn sanitize_llm_title(raw: &str) -> Option<String> {
 }
 
 /// Generate and store the recording's auto title. Runs only when the recipe
-/// contains a `title` step (recipe MEMBERSHIP is the gate — the legacy
-/// `title.enabled` flag was folded into membership by the migration, so it is
-/// NOT re-checked here). The heuristic (first meaningful sentence) is computed
-/// from the clean transcript, falling back to the raw one; when `[title].use_llm`
-/// is on AND a provider resolves, the LLM's title replaces it — and the
-/// heuristic remains the fallback on ANY LLM problem (no provider, call error,
-/// unusable reply). The LLM provider/model/prompt come from the resolved `title`
-/// Playbook ENTRY (`llm_cfg` + `prompt`), so editing that entry changes the
-/// title step. `use_llm` stays a `[title]` behavior knob (it is NOT part of the
-/// LLM entry, and the migration kept it in `[title]`).
+/// contains a `title` step (membership is the gate — the legacy `title.enabled`
+/// flag was folded into membership by the migration, so it isn't re-checked
+/// here). The heuristic (first meaningful sentence) is computed from the clean
+/// transcript, falling back to the raw one; when `[title].use_llm` is on and a
+/// provider resolves, the LLM's title replaces it — and the heuristic stays the
+/// fallback on any LLM problem (no provider, call error, unusable reply). The LLM
+/// provider/model/prompt come from the resolved `title` Playbook entry (`llm_cfg`
+/// and `prompt`), so editing that entry changes the title step. `use_llm` stays a
+/// `[title]` behavior knob (not part of the LLM entry; the migration kept it in
+/// `[title]`).
 ///
-/// The write goes through `Catalog::set_title`'s auto-guard, so a title the
-/// user typed is never overwritten — a retranscribe refreshes auto titles
-/// and silently skips user-owned ones. Best-effort: a failure here costs
-/// only the title. No status flip and no events — the title lands before
-/// `TranscriptionDone`, whose refresh paints it.
-/// Returns `Some(error)` only when the title step REALLY failed (an LLM call
+/// The write goes through `Catalog::set_title`'s auto-guard, so a title the user
+/// typed is never overwritten — a retranscribe refreshes auto titles and silently
+/// skips user-owned ones. Best-effort: a failure here costs only the title. No
+/// status flip and no events — the title lands before `TranscriptionDone`, whose
+/// refresh paints it.
+/// Returns `Some(error)` only when the title step actually failed (an LLM call
 /// error) — the caller folds that into the recording's terminal status and
 /// persists the message. A heuristic title, "nothing usable" (heuristic kept),
 /// or a user-owned title are all non-failures (`None`).
@@ -1221,12 +1220,12 @@ async fn run_tags_step(
 /// Write a recording's terminal status at the end of the pipeline: `Done` on a
 /// clean run, or the earliest failed optional step's status — and in that case
 /// persist its message on the row (`error_kind` = the status string,
-/// `error_message` = the reason) so the failed panel and `phoneme list` show
-/// WHY, surviving a restart. Runs AFTER `update_transcript` (which clears any
-/// stale error from a prior run), so a recording that re-runs cleanly ends with
-/// no error and a fresh failure overwrites an old one. The status write
-/// propagates its error (it's the pipeline's final commit); the error write is
-/// best-effort logging on top.
+/// `error_message` = the reason) so the failed panel and `phoneme list` show why,
+/// surviving a restart. Runs after `update_transcript` (which clears any stale
+/// error from a prior run), so a recording that re-runs cleanly ends with no error
+/// and a fresh failure overwrites an old one. The status write propagates its
+/// error (it's the pipeline's final commit); the error write is best-effort
+/// logging on top.
 async fn finalize_step_status(
     state: &AppState,
     id: &RecordingId,
@@ -1256,8 +1255,8 @@ async fn finalize_step_status(
 /// Finalize an in-flight item canceled by the user: move the inbox file out of
 /// `processing/`, mark the recording `Cancelled`, and emit the cancel events.
 /// Best-effort — logs (but doesn't propagate) errors so a cancel always settles.
-/// `Cancelled` is terminal like the failed states, but it is the user's own
-/// action — it never shows up as a failure in the list or the failed panel.
+/// `Cancelled` is terminal like the failed states, but it's the user's own action
+/// — it never shows up as a failure in the list or the failed panel.
 async fn finalize_canceled(state: &AppState, id: &RecordingId) {
     if let Err(e) = state
         .catalog
@@ -1282,13 +1281,13 @@ async fn finalize_canceled(state: &AppState, id: &RecordingId) {
 // ── Recipe executor ──────────────────────────────────────────────────────────
 // The pipeline's cleanup → title → summary → tags interior is driven by a
 // resolved Playbook recipe instead of a hardcoded sequence. The executor is a
-// thin DISPATCHER over the proven streaming/persistence primitives
-// (`run_llm_stage`, `generate_summary_with`, `suggest_tags_with`, the title +
-// tag persistence) — it never reimplements their event/persistence logic, so
-// parity (and IPC-re-run identicality) is automatic. Each built-in step reads
-// its MIGRATED Playbook ENTRY (Strategy B): membership gates whether it runs,
-// the entry's `PlaybookLlm` (overlaid on `[llm_post_process]`) gives its
-// provider/model/prompt. Hooks stay OUTSIDE the recipe loop (`cfg.hook`).
+// thin dispatcher over the existing streaming/persistence primitives
+// (`run_llm_stage`, `generate_summary_with`, `suggest_tags_with`, the title + tag
+// persistence) — it never reimplements their event/persistence logic, so parity
+// (and IPC-re-run identicality) comes for free. Each built-in step reads its
+// migrated Playbook entry: membership gates whether it runs, the entry's
+// `PlaybookLlm` (overlaid on `[llm_post_process]`) gives its provider/model/
+// prompt. Hooks stay outside the recipe loop (`cfg.hook`).
 
 /// The recipe id the normal recording pipeline runs.
 const DEFAULT_RECIPE_ID: &str = "default";
@@ -1302,11 +1301,11 @@ enum ResolvedStep {
     Transform {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
-        /// Which transcript this step reads (PB-COMPOUND): the running text
-        /// (default, chaining) or the raw base transcription.
+        /// Which transcript this step reads: the running text (default, chaining)
+        /// or the raw base transcription.
         input: phoneme_core::config::StepInput,
     },
-    /// A DETERMINISTIC transform (`PlaybookKind::FillerRemoval`): rewrite the
+    /// A deterministic transform (`PlaybookKind::FillerRemoval`): rewrite the
     /// running transcript by stripping filler words in pure Rust — no provider,
     /// no network. Runs in the same in-memory rewrite phase as `Transform`,
     /// carrying the `[filler]` config it reads.
@@ -1315,19 +1314,19 @@ enum ResolvedStep {
     },
     /// Enrichment writing the recording title. Carries the entry-resolved LLM
     /// config + prompt so the title step reads the migrated `title` Playbook
-    /// entry (Strategy B), not the legacy `[title]` section.
+    /// entry, not the legacy `[title]` section.
     Title {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
     },
     /// Enrichment writing the summary. Carries the entry-resolved LLM config +
-    /// prompt (the migrated `summary` Playbook entry).
+    /// prompt from the migrated `summary` Playbook entry.
     Summary {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
     },
-    /// Enrichment writing tag suggestions. Carries the entry-resolved LLM
-    /// config + prompt (the migrated `auto_tag` Playbook entry).
+    /// Enrichment writing tag suggestions. Carries the entry-resolved LLM config
+    /// and prompt from the migrated `auto_tag` Playbook entry.
     Tags {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
@@ -1344,11 +1343,11 @@ enum ResolvedStep {
 }
 
 /// Overlay a Playbook entry's LLM half onto a clone of `[llm_post_process]`,
-/// mirroring the daemon's per-step `*_llm_config` builders EXACTLY: `enabled`
+/// mirroring the daemon's per-step `*_llm_config` builders exactly: `enabled`
 /// forced true, each blank field inheriting the cleanup value (inherit-on-blank),
-/// and the API key inherited from the cleanup section unless the entry carries
-/// its own non-blank key. Built-in migrated entries carry no key, so they
-/// inherit exactly as the legacy pipeline did.
+/// and the API key inherited from the cleanup section unless the entry carries its
+/// own non-blank key. Built-in migrated entries carry no key, so they inherit just
+/// as the legacy pipeline did.
 fn entry_llm_config(
     cfg: &Config,
     entry: &phoneme_core::config::PlaybookLlm,
@@ -1361,14 +1360,14 @@ fn entry_llm_config(
     )
 }
 
-/// Resolve the migrated Enrichment ENTRY for a given `target` ("summary" /
+/// Resolve the migrated Enrichment entry for a given `target` ("summary" /
 /// "tags" / "title") into the same `(LlmPostProcessConfig, prompt)` pair the
 /// recipe executor dispatches with — so on-demand re-runs (SuggestTags,
-/// rerun_summary) read the SAME Playbook entry the auto-pipeline does, not the
-/// legacy `[summary]` / `[auto_tag]` sections. The first Enrichment whose
-/// trimmed `target` matches wins; returns `None` when no such entry exists (a
-/// user deleted it), letting callers fall back to the legacy path so behavior is
-/// never worse than today.
+/// rerun_summary) read the same Playbook entry the auto-pipeline does, not the
+/// legacy `[summary]` / `[auto_tag]` sections. The first Enrichment whose trimmed
+/// `target` matches wins; returns `None` when no such entry exists (a user deleted
+/// it), letting callers fall back to the legacy path so behavior is never worse
+/// than today.
 pub(crate) fn entry_config_for_target(
     cfg: &Config,
     target: &str,
@@ -1380,17 +1379,17 @@ pub(crate) fn entry_config_for_target(
         .map(|e| (entry_llm_config(cfg, &e.llm), e.llm.prompt.clone()))
 }
 
-/// Resolve the BASE `(LlmPostProcessConfig, prompt)` for an on-demand Re-run
-/// Cleanup from the migrated `cleanup` Playbook ENTRY — so editing the Cleanup
-/// entry in the Playbook changes what a Re-run Cleanup does, exactly like
+/// Resolve the base `(LlmPostProcessConfig, prompt)` for an on-demand Re-run
+/// Cleanup from the migrated `cleanup` Playbook entry — so editing the Cleanup
+/// entry in the Playbook changes what a Re-run Cleanup does, just like
 /// `entry_config_for_target` does for the summary/tags re-runs. Cleanup is a
 /// `Transform` (it rewrites the running text), so it has no Enrichment target and
 /// `entry_config_for_target` can't find it; this resolver matches by `id ==
-/// "cleanup"` AND `kind == Transform` instead.
+/// "cleanup"` and `kind == Transform` instead.
 ///
 /// Falls back to the legacy `[llm_post_process]` config + prompt when no such
 /// entry exists (a user deleted it), so behavior is never worse than today. The
-/// one-shot Re-run overrides layer ON TOP of whichever base this returns.
+/// one-shot Re-run overrides layer on top of whichever base this returns.
 pub(crate) fn cleanup_entry_config(cfg: &Config) -> (LlmPostProcessConfig, String) {
     use phoneme_core::config::PlaybookKind;
     cfg.playbook
@@ -1441,11 +1440,10 @@ pub(crate) fn apply_oneshot_overrides(
 /// missing (a user deleted a custom recipe a binding still points at, or the
 /// requested id was `default` on an empty config) it falls back to the `default`
 /// recipe — first from `cfg.recipes`, then the seeded `default_recipes()` — so a
-/// stale binding degrades to today's pipeline rather than panicking or silently
+/// stale binding degrades to the standard pipeline rather than panicking or
 /// running nothing. Each step id then maps to its `PlaybookEntry`; a dangling id
-/// (entry deleted) or a `Hook` entry (hooks run outside the loop in v1) is
-/// skipped with a warning. An empty recipe yields an empty list: a bare
-/// transcribe-only run.
+/// (entry deleted) or a `Hook` entry (hooks run outside the loop) is skipped with
+/// a warning. An empty recipe yields an empty list: a bare transcribe-only run.
 fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
     use phoneme_core::config::PlaybookKind;
 
@@ -1511,10 +1509,10 @@ fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
                 }
             }
             PlaybookKind::Hook => {
-                // A Hook entry runs as a real recipe step (shell command and/or
-                // webhook POST), gated by its keyword trigger — see
-                // `run_hook_steps`. An entry with neither a command nor a URL is
-                // a no-op, so skip it rather than push an empty step.
+                // A Hook entry runs as a recipe step (shell command and/or webhook
+                // POST), gated by its keyword trigger — see `run_hook_steps`. An
+                // entry with neither a command nor a URL is a no-op, so skip it
+                // rather than push an empty step.
                 if entry.hook.command.trim().is_empty() && entry.hook.webhook_url.trim().is_empty()
                 {
                     tracing::warn!(step = %step_id, "Hook entry has no command or webhook; skipping");
@@ -1529,21 +1527,21 @@ fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
     steps
 }
 
-/// Run the recipe's Transform steps (cleanup) — the IN-MEMORY text rewrites that
-/// must happen BEFORE the transcript-commit writes. Returns the (possibly
-/// rewritten) transcript and the model that produced the LAST transform (the
+/// Run the recipe's Transform steps (cleanup) — the in-memory text rewrites that
+/// must happen before the transcript-commit writes. Returns the (possibly
+/// rewritten) transcript and the model that produced the last transform (the
 /// `cleanup_model` recorded in processing meta).
 ///
-/// Each Transform: best-effort `CleaningUp` status + `PipelineStageChanged`,
-/// then a cancel-raced `run_llm_stage`. On success the running transcript is
-/// replaced and feeds the next Transform; on a real failure (not a user-skip)
-/// the earliest `CleanupFailed` is recorded in `step_failure`. Cancellation
-/// inside a Transform finalizes and returns `None` via the `Cancelled` signal —
-/// the caller treats that as a return from `run`.
+/// Each Transform: best-effort `CleaningUp` status + `PipelineStageChanged`, then
+/// a cancel-raced `run_llm_stage`. On success the running transcript is replaced
+/// and feeds the next Transform; on a real failure (not a user-skip) the earliest
+/// `CleanupFailed` is recorded in `step_failure`. Cancellation inside a Transform
+/// finalizes and returns `None` via the `Cancelled` signal — the caller treats
+/// that as a return from `run`.
 ///
-/// Today's default recipe has exactly one Transform (cleanup); the loop also
-/// supports chained Transforms (each rewrites the text), with only the last
-/// transform's model recorded as `cleanup_model`.
+/// The default recipe has exactly one Transform (cleanup); the loop also supports
+/// chained Transforms (each rewrites the text), with only the last transform's
+/// model recorded as `cleanup_model`.
 async fn run_transform_steps(
     state: &AppState,
     id: &RecordingId,
@@ -1562,18 +1560,18 @@ async fn run_transform_steps(
     use phoneme_core::catalog::TranscriptVersion;
     use phoneme_core::config::StepInput;
     // The immutable raw transcription, for steps configured to read `Base` rather
-    // than the running (chained) text (PB-COMPOUND per-step input).
+    // than the running (chained) text.
     let base = transcript.clone();
     let mut transcript = transcript;
     let mut cleanup_model: Option<String> = None;
-    // Record each step's output (PB-COMPOUND). The caller prepends the raw ASR as
-    // idx 0, so these are the post-step versions (idx 1, 2, …) of the chain.
+    // Record each step's output. The caller prepends the raw ASR as idx 0, so these
+    // are the post-step versions (idx 1, 2, …) of the chain.
     let mut versions: Vec<TranscriptVersion> = Vec::new();
     for step in steps {
-        // Deterministic filler removal: a pure, instant text rewrite — no
-        // provider, no network, never fails. It rewrites the running transcript
-        // like an LLM Transform and feeds the next step, so it chains with
-        // cleanup either way. It doesn't set `cleanup_model` (no model ran).
+        // Deterministic filler removal: a pure, instant text rewrite — no provider,
+        // no network, never fails. It rewrites the running transcript like an LLM
+        // Transform and feeds the next step, so it chains with cleanup either way.
+        // It doesn't set `cleanup_model` (no model ran).
         if let ResolvedStep::FillerRemoval { cfg } = step {
             transcript = phoneme_core::filler::strip_fillers(&transcript, cfg);
             versions.push(TranscriptVersion {
@@ -1593,8 +1591,8 @@ async fn run_transform_steps(
         else {
             continue;
         };
-        // Per-step input (PB-COMPOUND): `Base` reads the raw transcription, else
-        // the running (chained) text so steps compound toward a perfect transcript.
+        // Per-step input: `Base` reads the raw transcription, else the running
+        // (chained) text so steps compound toward a better transcript.
         let source = if *input == StepInput::Base {
             &base
         } else {
@@ -1606,8 +1604,8 @@ async fn run_transform_steps(
             continue;
         };
         // The list/detail/activity views read the DB status, so it tracks the
-        // stage events step for step. Best-effort: a status write failing must
-        // not kill the stage itself.
+        // stage events step for step. Best-effort: a status write failing must not
+        // kill the stage itself.
         let _ = state
             .catalog
             .update_status(id, RecordingStatus::CleaningUp)
@@ -1640,8 +1638,8 @@ async fn run_transform_steps(
             Err(e) => {
                 tracing::error!(error = %e, "LLM post-processing failed, falling back to raw transcript");
                 // Best-effort step: the raw transcript is kept and the recording
-                // stays usable — surface the failure for a toast without flipping
-                // to a terminal status. (Carries the skip sentinel when skipped.)
+                // stays usable — surface the failure for a toast without flipping to
+                // a terminal status. (Carries the skip sentinel when skipped.)
                 let msg = e.to_string();
                 state.events.emit(DaemonEvent::CleanupFailed {
                     id: id.clone(),
@@ -1660,13 +1658,13 @@ async fn run_transform_steps(
 /// `run` (the cancel has already been finalized via `finalize_canceled`).
 struct Canceled;
 
-/// Re-derive the **cleaned** timing variant (TL-CONSISTENCY): take the recording's
-/// raw machine words, realign them to `cleaned_text`, and store the result in the
-/// `*_clean` tables so the Timeline/Synced views can match the cleaned panel text.
-/// The raw machine-truth timeline is never touched. Best-effort + gated by
+/// Re-derive the cleaned timing variant: take the recording's raw machine words,
+/// realign them to `cleaned_text`, and store the result in the `*_clean` tables so
+/// the Timeline/Synced views can match the cleaned panel text. The raw
+/// machine-truth timeline is never touched. Best-effort + gated by
 /// `editor.resync_views_on_edit` (the same switch manual-edit re-flow uses); a
-/// realign that can't map the text simply leaves the cleaned variant absent, and
-/// the views fall back to raw. Shared by the pipeline and `rerun_cleanup`.
+/// realign that can't map the text leaves the cleaned variant absent, and the
+/// views fall back to raw. Shared by the pipeline and `rerun_cleanup`.
 pub(crate) async fn reflow_cleaned_timing(state: &AppState, id: &RecordingId, cleaned_text: &str) {
     if !state.config.load().editor.resync_views_on_edit {
         return;
@@ -1685,8 +1683,8 @@ pub(crate) async fn reflow_cleaned_timing(state: &AppState, id: &RecordingId, cl
     // concurrent retranscribe (queue worker) can commit fresh raw words between
     // our read above and the writes below. Re-read and bail if they shifted — the
     // writer that changed them re-derives the cleaned variant itself, so writing
-    // our now-stale alignment would clobber the correct one. (Best-effort: closes
-    // the wide LLM-call window down to these two adjacent awaits.)
+    // our now-stale alignment would clobber the correct one. (Best-effort: it
+    // closes the wide LLM-call window down to these two adjacent awaits.)
     match state.catalog.words_for(id).await {
         Ok(current) if current == raw_words => {}
         Ok(_) => {
@@ -1714,12 +1712,12 @@ pub(crate) async fn reflow_cleaned_timing(state: &AppState, id: &RecordingId, cl
     }
 }
 
-/// Run the recipe's title enrichment (the only enrichment that lands BEFORE the
+/// Run the recipe's title enrichment (the only enrichment that lands before the
 /// transcript-commit's downstream events — same position as the legacy title
 /// call). Membership is the gate (a `title` step present == the old
-/// `title.enabled`), so this is NOT re-gated here; the title step emits no
-/// status / PipelineStageChanged. The LLM provider/model/prompt come from the
-/// resolved `title` Playbook ENTRY. Folds a real failure into `step_failure`.
+/// `title.enabled`), so this isn't re-gated here; the title step emits no status /
+/// PipelineStageChanged. The LLM provider/model/prompt come from the resolved
+/// `title` Playbook entry. Folds a real failure into `step_failure`.
 async fn run_title_steps(
     state: &AppState,
     cfg: &Config,
@@ -1749,15 +1747,15 @@ async fn run_title_steps(
     }
 }
 
-/// Run the recipe's summary + tags enrichments (the AFTER-commit, after-hooks
-/// enrichments), in recipe order. Membership IS the gate — a `summary`/`tags`
-/// step is present iff the migration found the legacy flag on, so the executor
-/// does NOT re-check `summary.auto` / `auto_tag.auto`. Because membership ==
-/// "this step runs", the `Summarizing`/`Tagging` status is written exactly when
-/// the step runs (so a disabled step — i.e. one absent from the recipe — never
-/// flashes in the UI, identical to before). The LLM provider/model/prompt for
-/// each step come from its resolved Playbook ENTRY. Unsupported `custom:`
-/// targets are a no-op + warn. Folds real failures into `step_failure`.
+/// Run the recipe's summary + tags enrichments (the after-commit, after-hooks
+/// enrichments), in recipe order. Membership is the gate — a `summary`/`tags` step
+/// is present iff the migration found the legacy flag on, so the executor doesn't
+/// re-check `summary.auto` / `auto_tag.auto`. Because membership means "this step
+/// runs", the `Summarizing`/`Tagging` status is written exactly when the step runs
+/// (so a disabled step — one absent from the recipe — never flashes in the UI).
+/// The LLM provider/model/prompt for each step come from its resolved Playbook
+/// entry. Unsupported `custom:` targets are a no-op + warn. Folds real failures
+/// into `step_failure`.
 async fn run_enrichment_steps(
     state: &AppState,
     cfg: &Config,
@@ -1796,7 +1794,7 @@ async fn run_enrichment_steps(
                     "recipe enrichment target has no backing store yet; skipping"
                 );
             }
-            // Transform / FillerRemoval + Title are handled in their own phases
+            // Transform / FillerRemoval / Title are handled in their own phases
             // (before the commit), and Hook steps in run_hook_steps; ignore them
             // here.
             ResolvedStep::Transform { .. }
@@ -1807,13 +1805,6 @@ async fn run_enrichment_steps(
     }
 }
 
-/// Run the recipe's Hook steps (Playbook entries of `kind: Hook`): for each, gate
-/// on its keyword trigger, then run its shell command (`HookRunner`) and/or POST
-/// its webhook (`WebhookClient`, under the global `[webhook]` policy). Non-fatal by
-/// default — a failure is logged and folded into `step_failure` (surfaced like a
-/// failed cleanup/tag step, leaving the transcript intact). A hook marked
-/// `required` short-circuits with `Err`, which the caller turns into a failed
-/// recording (mirroring the legacy always-on command path).
 /// What the recipe's Hook steps did, folded into the recording's hook provenance
 /// (`hook_exit_code` etc., read by the detail-pane Pipeline popover) so it shows
 /// Playbook hooks instead of the retired `[hook]` commands.
@@ -1829,6 +1820,13 @@ struct HookOutcome {
     total_ms: i64,
 }
 
+/// Run the recipe's Hook steps (Playbook entries of `kind: Hook`): for each, gate
+/// on its keyword trigger, then run its shell command (`HookRunner`) and/or POST
+/// its webhook (`WebhookClient`, under the global `[webhook]` policy). Non-fatal by
+/// default — a failure is logged and folded into `step_failure` (surfaced like a
+/// failed cleanup/tag step, leaving the transcript intact). A hook marked
+/// `required` short-circuits with `Err`, which the caller turns into a failed
+/// recording (mirroring the legacy always-on command path).
 async fn run_hook_steps(
     state: &AppState,
     cfg: &Config,
@@ -1847,7 +1845,7 @@ async fn run_hook_steps(
         let timeout = Duration::from_secs(hook.timeout_secs);
 
         // Shell command half. Expand the Phoneme path tokens (%APPDATA%, ~/) the
-        // same way the legacy [hook] path did via cfg.expanded().
+        // same way the legacy [hook] path does via cfg.expanded().
         let cmd = hook.command.trim();
         if !cmd.is_empty() {
             out.ran = true;
@@ -1926,10 +1924,10 @@ pub async fn run(
         id: id.clone(),
         stage: PipelineStage::Transcribing,
     });
-    // The worker has now actually claimed this item — flip Queued → Transcribing.
-    // Enqueue sites set Queued, so a recording WAITING in the queue reads as
-    // "queued" rather than mislabeled "transcribing". Best-effort: a status
-    // write failing must not abort the run.
+    // The worker has now claimed this item — flip Queued → Transcribing. Enqueue
+    // sites set Queued, so a recording waiting in the queue reads as "queued"
+    // rather than mislabeled "transcribing". Best-effort: a status write failing
+    // must not abort the run.
     let _ = state
         .catalog
         .update_status(&id, RecordingStatus::Transcribing)
@@ -1940,11 +1938,11 @@ pub async fn run(
     let cfg_guard = state.config.load();
     // Apply this job's one-time Re-run overrides (hooks toggle / post-processing
     // opt-out / the Re-run "All" cleanup+summary+title values) onto a per-job
-    // CLONE of the config — they must never touch the process-global config,
-    // where a concurrent ReloadConfig could clobber them or they could leak their
+    // clone of the config — they must never touch the process-global config, where
+    // a concurrent ReloadConfig could clobber them or they could leak their
     // forced-on pipeline onto another queued job. Claimed (removed) here so a
     // daemon restart drops them. No override → run with the loaded config as-is
-    // (no clone), exactly as before.
+    // (no clone).
     let cfg_owned;
     let cfg: &phoneme_core::Config = match state
         .pending_all_overrides
@@ -1963,18 +1961,18 @@ pub async fn run(
     let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
 
     // Hold the whisper-server permit for the whole final transcription so the
-    // streaming preview backs off and can't starve it (the "Whisper timed out
-    // after 60s" bug). Acquiring waits for any in-flight preview tick to finish.
-    // Crucially, a model-override swap (below) happens UNDER this permit, so the
-    // preview and any other final transcription never run while the bundled
-    // server is mid-restart for a one-job model override (#49).
+    // streaming preview backs off and can't starve it (it used to time out).
+    // Acquiring waits for any in-flight preview tick to finish. A model-override
+    // swap (below) happens under this permit too, so the preview and any other
+    // final transcription never run while the bundled server is mid-restart for a
+    // one-job model override.
     let _whisper_permit = state.whisper_sem.acquire().await;
 
-    // Apply this recording's one-time model override (if any), scoped to JUST
-    // this job. `override_guard` restores the configured model on every exit
-    // path (success, error, cancel) via Drop, so the override can never leak
-    // onto a later job or persist in config. `whisper_cfg` is the per-job
-    // transcription config the provider is built from.
+    // Apply this recording's one-time model override (if any), scoped to this job.
+    // `override_guard` restores the configured model on every exit path (success,
+    // error, cancel) via Drop, so the override can't leak onto a later job or
+    // persist in config. `whisper_cfg` is the per-job transcription config the
+    // provider is built from.
     // Recover from a poisoned mutex (take the inner map) rather than panicking —
     // this runs on every pipeline job, so an `.unwrap()` here would turn one
     // unrelated panic-while-locked into a daemon-wide crash loop.
@@ -1983,20 +1981,20 @@ pub async fn run(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&id);
-    // Claim this recording's custom-hotkey RECIPE override (if any) at the SAME
-    // early point as the model/all-overrides removals — BEFORE transcription —
-    // so a transcribe failure / cancel can't leave a stale entry keyed by a dead
-    // id (the `resolve_recipe` call is much later, past the failure paths). Empty
-    // / a deleted id degrades to the `default` recipe inside `resolve_recipe`.
+    // Claim this recording's custom-hotkey recipe override (if any) at the same
+    // early point as the model/all-overrides removals — before transcription — so
+    // a transcribe failure / cancel can't leave a stale entry keyed by a dead id
+    // (the `resolve_recipe` call is much later, past the failure paths). Empty /
+    // a deleted id degrades to the `default` recipe inside `resolve_recipe`.
     let requested_recipe_id = state
         .pending_recipe
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&id);
-    // Claim this recording's focused-app override (if any) at the SAME early
-    // point — BEFORE transcription — so a transcribe failure / cancel can't leave
-    // a stale entry keyed by a dead id (the end-of-run typing is much later, past
-    // the failure paths). Only ever populated for a NON-fast-lane in-place
+    // Claim this recording's focused-app override (if any) at the same early point
+    // — before transcription — so a transcribe failure / cancel can't leave a
+    // stale entry keyed by a dead id (the end-of-run typing is much later, past
+    // the failure paths). Only ever populated for a non-fast-lane in-place
     // dictation; `None` degrades to the global `type_mode` in `resolve_type_mode`.
     let focused_app = state
         .pending_focused_app
@@ -2004,30 +2002,30 @@ pub async fn run(
         .unwrap_or_else(|e| e.into_inner())
         .remove(&id);
     // A non-empty bound recipe means this recording was routed off the dictation
-    // fast lane into the full pipeline *because* of its recipe (see the recorder's
+    // fast lane into the full pipeline because of its recipe (see the recorder's
     // `wants_fast_lane`). It governs the end-of-run typing decision: such an
-    // in-place recording gets its single insertion HERE, never a type-first pass.
+    // in-place recording gets its single insertion here, never a type-first pass.
     let recipe_routed = requested_recipe_id
         .as_deref()
         .is_some_and(|r| !r.trim().is_empty());
     let (whisper_cfg, override_guard) =
         apply_model_override(state, &cfg.whisper, requested_override).await;
-    // Dial the port the bundled server is ACTUALLY listening on: the
-    // supervisor falls back to a free port when the configured one is held by
-    // another app, and publishes the live value in `whisper_ports`.
+    // Dial the port the bundled server is actually listening on: the supervisor
+    // falls back to a free port when the configured one is held by another app,
+    // and publishes the live value in `whisper_ports`.
     let whisper_cfg = state.whisper_ports.apply(cfg, &whisper_cfg);
     let provider = state.transcription.provider(&whisper_cfg, &cfg.diarization);
 
-    // Track-aware Meeting Mode: read this recording's track + meeting link
-    // BEFORE transcribing (a narrow two-column read, not the full row + join).
-    // A meeting's mic track is a single voice — the user's — so we label it as
-    // one fixed speaker "You" instead of diarizing it: that halves a meeting's
-    // diarizer work (only the system track runs speakrs) and kills the spurious
-    // multi-speaker labels a single-mic track otherwise produces. The
-    // `FixedSpeaker` hint applies ONLY when the row is genuinely a meeting mic
-    // track (`meeting_id` set AND `track == "mic"`), so a stray `track` value on
-    // a non-meeting row can't change behavior; everything else diarizes as
-    // before. Best-effort: a read failure falls back to `Diarize`.
+    // Track-aware Meeting Mode: read this recording's track + meeting link before
+    // transcribing (a narrow two-column read, not the full row + join). A meeting's
+    // mic track is a single voice — the user's — so we label it as one fixed
+    // speaker "You" instead of diarizing it: that halves a meeting's diarizer work
+    // (only the system track runs speakrs) and kills the spurious multi-speaker
+    // labels a single-mic track otherwise produces. The `FixedSpeaker` hint
+    // applies only when the row is genuinely a meeting mic track (`meeting_id` set
+    // and `track == "mic"`), so a stray `track` value on a non-meeting row can't
+    // change behavior; everything else diarizes as before. Best-effort: a read
+    // failure falls back to `Diarize`.
     let (track, meeting_id) = state
         .catalog
         .track_and_meeting(&id)
@@ -2038,18 +2036,18 @@ pub async fn run(
         DiarizationTrack::FixedSpeaker("You")
     } else if meeting_id.is_none() && cfg.diarization.solo_one_speaker {
         // A solo (non-meeting) recording and the user opted in to "treat single
-        // recordings as one speaker": skip diarization so one voice is never
-        // split into phantom `[Speaker N]` turns. Meeting tracks are excluded
-        // (a meeting's system track still diarizes its multiple participants).
+        // recordings as one speaker": skip diarization so one voice is never split
+        // into phantom `[Speaker N]` turns. Meeting tracks are excluded (a
+        // meeting's system track still diarizes its multiple participants).
         DiarizationTrack::Plain
     } else {
         DiarizationTrack::Diarize
     };
 
     // Report transcription to the unified AI-activity ("brain") popout via the
-    // Transcribing stage of LlmActivity: a start event naming the model/file,
-    // then a done event with timing + size once it finishes. This lets the same
-    // popout that shows cleanup/summary also surface what the STT engine is up to.
+    // Transcribing stage of LlmActivity: a start event naming the model/file, then
+    // a done event with timing + size once it finishes. This lets the same popout
+    // that shows cleanup/summary also surface what the STT engine is up to.
     let model_label = {
         use phoneme_core::config::TranscriptionBackend as TB;
         match whisper_cfg.provider {
@@ -2114,11 +2112,11 @@ pub async fn run(
                     },
                     done: true,
                 });
-                // A transient error (server down / restarting, request timed
-                // out) must NOT bury the item in failed/ — the queue worker
-                // requeues it and retries with backoff, so a whisper-server
-                // blip never costs a recording. Only permanent errors (bad
-                // audio, 4xx, decode failures) take the failed path.
+                // A transient error (server down / restarting, request timed out)
+                // must not bury the item in failed/ — the queue worker requeues it
+                // and retries with backoff, so a whisper-server blip never costs a
+                // recording. Only permanent errors (bad audio, 4xx, decode
+                // failures) take the failed path.
                 if !transient {
                     state
                         .catalog
@@ -2156,19 +2154,19 @@ pub async fn run(
     }
 
     // The segment + word timelines are machine truth (they describe the raw
-    // whisper output, not the LLM-cleaned text), so split them off here — the
-    // rest of the pipeline only transforms the text.
+    // whisper output, not the LLM-cleaned text), so split them off here — the rest
+    // of the pipeline only transforms the text.
     let phoneme_core::transcription::Transcription {
         text: transcript,
         segments,
         words,
-        // Did the local fixed-speaker labelling actually run (mic track with
-        // real segments on the OpenAI-compatible path)? Carried to the "You"
-        // speaker-name write below so a cloud STT backend (which ignores the
-        // hint) or a silent/segment-less mic track never gets an orphan row.
+        // Did the local fixed-speaker labelling actually run (mic track with real
+        // segments on the OpenAI-compatible path)? Carried to the "You"
+        // speaker-name write below so a cloud STT backend (which ignores the hint)
+        // or a silent/segment-less mic track never gets an orphan row.
         fixed_speaker_applied,
         // Per-speaker centroid voiceprints (local diarization only; empty for
-        // cloud/plain paths), persisted below for cross-recording recognition (#9).
+        // cloud/plain paths), persisted below for cross-recording recognition.
         speaker_voiceprints,
     } = transcription;
 
@@ -2186,13 +2184,13 @@ pub async fn run(
         });
     }
 
-    // Restore the configured whisper model (if this job overrode it) BEFORE
-    // releasing the permit, so the bundled server is swapped back while the
-    // preview is still gated — the resumed preview then runs the configured
-    // model, not this job's one-time override. Dropping the guard pings the
-    // supervisor; for non-override jobs it's a no-op. (Both early-return paths
-    // above — cancel and transcribe error — drop this guard implicitly, so the
-    // model is always restored.)
+    // Restore the configured whisper model (if this job overrode it) before
+    // releasing the permit, so the bundled server is swapped back while the preview
+    // is still gated — the resumed preview then runs the configured model, not this
+    // job's one-time override. Dropping the guard pings the supervisor; for
+    // non-override jobs it's a no-op. (Both early-return paths above — cancel and
+    // transcribe error — drop this guard implicitly, so the model is always
+    // restored.)
     drop(override_guard);
 
     // Release the whisper-server permit now that transcription is done — LLM
@@ -2205,34 +2203,31 @@ pub async fn run(
     // always restore to this via "View original transcript" in the detail pane.
     let raw_transcript = transcript.clone();
 
-    // Resolve the recording's recipe (the `default` Playbook recipe) into an
-    // ordered list of dispatchable steps. The migration encoded the legacy
-    // enable flags into recipe MEMBERSHIP, so a step runs iff it's present here;
-    // the per-step on/off semantics (a provider must resolve for cleanup, the
-    // legacy flag still self-gates inside each enrichment helper) are preserved
-    // by the dispatchers below. A dangling step id / empty recipe degrades to a
-    // bare transcribe-only run, never a panic.
-    // Resolve against the recording's recipe id: a custom-hotkey recording carries
-    // its binding's `recipe_id` here; every normal recording carries `None` and
-    // resolves the `default` recipe — unchanged behaviour. A deleted/missing id
-    // falls back to `default` inside `resolve_recipe` (never a panic, never the
-    // wrong chain).
+    // Resolve the recording's recipe into an ordered list of dispatchable steps.
+    // The migration encoded the legacy enable flags into recipe membership, so a
+    // step runs iff it's present here; the per-step on/off semantics (a provider
+    // must resolve for cleanup, the legacy flag still self-gates inside each
+    // enrichment helper) are preserved by the dispatchers below. A custom-hotkey
+    // recording carries its binding's `recipe_id`; every normal recording carries
+    // `None` and resolves the `default` recipe. A dangling step id, an empty
+    // recipe, or a deleted/missing recipe id degrades to a bare transcribe-only
+    // run (falling back to `default` inside `resolve_recipe`), never a panic.
     let recipe_id = requested_recipe_id.as_deref().unwrap_or(DEFAULT_RECIPE_ID);
     let recipe = resolve_recipe(cfg, recipe_id);
 
-    // The earliest optional step (cleanup → title → summary → tag) that REALLY
+    // The earliest optional step (cleanup → title → summary → tag) that actually
     // failed (a user-skip doesn't count) becomes the recording's terminal status
     // instead of `Done`, so a failed enrichment is filterable/searchable — like
     // `HookFailed`, the transcript is still intact and usable. `get_or_insert`
     // keeps the first/most-upstream failure (a single status can't hold several);
     // the paired message is persisted as the row's error so the failed panel +
-    // logs show WHY, surviving a restart (see `finalize_step_status`).
+    // logs show why, surviving a restart (see `finalize_step_status`).
     let mut step_failure: Option<(RecordingStatus, String)> = None;
 
-    // PHASE 1 — Transform steps (cleanup): IN-MEMORY text rewrites that must
-    // happen BEFORE the transcript-commit writes below. Non-fatal: on any
-    // failure the raw transcript is kept. Cancellation inside a Transform has
-    // already finalized the recording, so we return `Ok(())` here.
+    // PHASE 1 — Transform steps (cleanup): in-memory text rewrites that must
+    // happen before the transcript-commit writes below. Non-fatal: on any failure
+    // the raw transcript is kept. Cancellation inside a Transform has already
+    // finalized the recording, so we return `Ok(())` here.
     let (transcript, cleanup_model, step_versions) = match run_transform_steps(
         state,
         &id,
@@ -2250,11 +2245,11 @@ pub async fn run(
     payload.transcript = transcript.clone();
     // Record the model that actually ran, from the per-job whisper config so a
     // one-time model override is reflected. The local bundled backend talks to
-    // whisper.cpp over HTTP and only knows its model as a file on disk, so its
-    // id is the `model_path` stem; the cloud/custom backends send a model id in
-    // the request, so theirs is the REQUESTED `whisper.model` (falling back to
-    // the path stem only when no model was set, which keeps the old behavior
-    // for a misconfigured cloud backend rather than recording an empty string).
+    // whisper.cpp over HTTP and only knows its model as a file on disk, so its id
+    // is the `model_path` stem; the cloud/custom backends send a model id in the
+    // request, so theirs is the requested `whisper.model` (falling back to the
+    // path stem only when no model was set, so a misconfigured cloud backend
+    // records the path stem rather than an empty string).
     payload.model = {
         use phoneme_core::config::TranscriptionBackend as TB;
         let path_stem = || {
@@ -2284,10 +2279,10 @@ pub async fn run(
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
 
-    // Record the compounding chain (PB-COMPOUND): raw ASR as idx 0, then each
-    // Transform step's output. Only when at least one Transform ran, so a plain
-    // transcribe leaves no versions (the Compare-versions UI treats "none" as the
-    // normal single-output case). Best-effort: a failure costs only the chain view.
+    // Record the compounding chain: raw ASR as idx 0, then each Transform step's
+    // output. Only when at least one Transform ran, so a plain transcribe leaves no
+    // versions (the Compare-versions UI treats "none" as the normal single-output
+    // case). Best-effort: a failure costs only the chain view.
     if !step_versions.is_empty() {
         let mut versions = Vec::with_capacity(step_versions.len() + 1);
         versions.push(phoneme_core::catalog::TranscriptVersion {
@@ -2322,27 +2317,26 @@ pub async fn run(
         tracing::warn!(id = %id.as_str(), "failed to persist transcript words: {e}");
     }
 
-    // TL-CONSISTENCY: when a Transform changed the transcript, re-derive a
-    // "cleaned" timing variant (the raw words realigned to the cleaned text) so
-    // Timeline/Synced can match the panel instead of showing the raw ASR. The raw
-    // timing just stored above is untouched; this writes only the *_clean tables.
+    // When a Transform changed the transcript, re-derive a "cleaned" timing
+    // variant (the raw words realigned to the cleaned text) so Timeline/Synced can
+    // match the panel instead of showing the raw ASR. The raw timing just stored
+    // above is untouched; this writes only the *_clean tables.
     if transcript != raw_transcript {
         reflow_cleaned_timing(state, &id, &transcript).await;
     }
 
-    // Persist each speaker's centroid voiceprint (local diarization only; empty
-    // on cloud/plain paths) keyed by the same label as the transcript, so naming
-    // a speaker can enroll it into the cross-recording library and later
-    // recordings can be matched against it (#9). A re-transcribe refreshes the
-    // sample without un-enrolling. Best-effort: a failure costs only recognition.
+    // Persist each speaker's centroid voiceprint (local diarization only; empty on
+    // cloud/plain paths) keyed by the same label as the transcript, so naming a
+    // speaker can enroll it into the cross-recording library and later recordings
+    // can be matched against it. A re-transcribe refreshes the sample without
+    // un-enrolling. Best-effort: a failure costs only recognition.
     //
     // Each capture carries that speaker's total speaking duration (sum of their
-    // segment spans, in ms) as the V4 duration-weight: a long, clean sample
-    // outvotes a brief one when the named voice's centroid is recomputed. The
-    // segment `speaker` field is the decimal label that matches `vp.label`
-    // (`[Speaker N]`); segments with no/other label contribute 0. A speaker with
-    // no matching segment falls back to 0, which the weighted mean treats as
-    // equal weight.
+    // segment spans, in ms) as a duration-weight: a long, clean sample outvotes a
+    // brief one when the named voice's centroid is recomputed. The segment
+    // `speaker` field is the decimal label that matches `vp.label` (`[Speaker N]`);
+    // segments with no/other label contribute 0. A speaker with no matching segment
+    // falls back to 0, which the weighted mean treats as equal weight.
     let mut speaking_ms: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     for seg in &segments {
         if let Some(label) = &seg.speaker {
@@ -2360,21 +2354,21 @@ pub async fn run(
         }
     }
 
-    // Track-aware Meeting Mode: seed label 1 → "You" only when the mic track
-    // was ACTUALLY labelled `[Speaker 1]` in place of a diarizer pass
+    // Track-aware Meeting Mode: seed label 1 → "You" only when the mic track was
+    // actually labelled `[Speaker 1]` in place of a diarizer pass
     // (`fixed_speaker_applied` — the local OpenAI-compatible path with real
-    // segments). Gating on the result flag, not just `is_meeting_mic`, avoids
-    // two bugs: a cloud STT backend ignores the fixed-speaker hint (no
-    // `[Speaker 1]` to attach to → an orphan/mislabelled row), and an
-    // empty/segment-less/silent mic track produces no `[Speaker 1]` either.
+    // segments). Gating on the result flag, not just `is_meeting_mic`, avoids two
+    // bugs: a cloud STT backend ignores the fixed-speaker hint (no `[Speaker 1]` to
+    // attach to → an orphan/mislabelled row), and an empty/segment-less/silent mic
+    // track produces no `[Speaker 1]` either.
     //
-    // The write is `set_speaker_name_if_absent`, NOT the upsert: it seeds the
-    // friendly default on the first transcribe but never clobbers an existing
-    // row, so a user rename (e.g. Speaker 1 → "Alice") survives a Retranscribe /
-    // Re-run / crash-recovery requeue that re-enters this branch. Like any
-    // speaker name, it stays user-renamable and never rewrites the canonical
-    // `[Speaker 1]` markers. Best-effort: a failure costs only the friendly
-    // label, not the recording.
+    // The write is `set_speaker_name_if_absent`, not the upsert: it seeds the
+    // friendly default on the first transcribe but never clobbers an existing row,
+    // so a user rename (e.g. Speaker 1 → "Alice") survives a Retranscribe / Re-run
+    // / crash-recovery requeue that re-enters this branch. Like any speaker name,
+    // it stays user-renamable and never rewrites the canonical `[Speaker 1]`
+    // markers. Best-effort: a failure costs only the friendly label, not the
+    // recording.
     if is_meeting_mic && fixed_speaker_applied {
         if let Err(e) = state
             .catalog
@@ -2386,13 +2380,13 @@ pub async fn run(
     }
 
     // Record which post-processing model was used and whether diarization was
-    // actually applied. Diarization is only meaningfully "applied" when it
-    // produced multi-speaker labels — both the local diarizer (`assign_speakers`)
-    // and the cloud providers emit a "[Speaker N]: " prefix and fall back to
-    // plain, unlabeled text when diarization is off, fails, or finds ≤1 speaker.
-    // So a recording is diarized iff its raw (pre-cleanup) transcript carries
-    // those labels — not merely because the setting is enabled. (Check the raw
-    // transcript: LLM cleanup may strip the labels from the live version.)
+    // actually applied. Diarization is only meaningfully "applied" when it produced
+    // multi-speaker labels — both the local diarizer (`assign_speakers`) and the
+    // cloud providers emit a "[Speaker N]: " prefix and fall back to plain,
+    // unlabeled text when diarization is off, fails, or finds ≤1 speaker. So a
+    // recording is diarized iff its raw (pre-cleanup) transcript carries those
+    // labels, not merely because the setting is enabled. We check the raw
+    // transcript because LLM cleanup may strip the labels from the live version.
     let diarized = raw_transcript.contains("[Speaker ");
     // Name a cloud diarizer's model for the provenance line; the local speakrs
     // diarizer (and "off") has none, so the line shows a plain "diarized".
@@ -2412,12 +2406,12 @@ pub async fn run(
         .await?;
 
     // PHASE 2a — title enrichment, right after the transcript settles (cleanup
-    // included) and before TranscriptionDone fires, so the refreshed list shows
-    // the title together with the new text. A retranscribe re-runs this and
-    // refreshes auto titles; user-set titles are protected inside. Runs only
-    // when the recipe contains a `title` step (membership IS the gate — the
-    // migration folded `cfg.title.enabled` into membership); the title step
-    // reads its migrated Playbook entry for provider/model/prompt.
+    // included) and before TranscriptionDone fires, so the refreshed list shows the
+    // title together with the new text. A retranscribe re-runs this and refreshes
+    // auto titles; user-set titles are protected inside. Runs only when the recipe
+    // contains a `title` step (membership is the gate — the migration folded
+    // `cfg.title.enabled` into membership); the title step reads its migrated
+    // Playbook entry for provider/model/prompt.
     run_title_steps(
         state,
         cfg,
@@ -2432,27 +2426,26 @@ pub async fn run(
     let recording = state.catalog.get(&id).await?;
     if let Some(rec) = recording {
         if pipeline_should_type(&cfg.in_place, rec.in_place, recipe_routed, &transcript) {
-            // Resolve how the text lands for the focused app captured at start:
-            // a per-app override ("type"/"paste"/"off") wins over the global
+            // Resolve how the text lands for the focused app captured at start: a
+            // per-app override ("type"/"paste"/"off") wins over the global
             // `type_mode`; an unlisted (or undetectable) app falls back to the
-            // global mode. This mirrors the dictation FAST LANE exactly — the
-            // pipeline previously typed with the bare global `type_mode`, so a
-            // recipe-routed / full-pipeline in-place recording ignored a per-app
-            // "off" (and any per-app paste/type) the fast lane would honor.
-            // `focused_app` is the side-channel value claimed early above; `None`
-            // (no stash, or a daemon-restart drop) degrades to the global mode.
+            // global mode. This mirrors the dictation fast lane — without it a
+            // recipe-routed / full-pipeline in-place recording would type with the
+            // bare global `type_mode` and ignore a per-app "off" (and any per-app
+            // paste/type) the fast lane honors. `focused_app` is the side-channel
+            // value claimed early above; `None` (no stash, or a daemon-restart
+            // drop) degrades to the global mode.
             let type_mode = cfg.in_place.resolve_type_mode(focused_app.as_deref());
             // Did streaming-type type live this dictation? Reset at every record
-            // start, so non-empty = THIS recording streamed — independent of the
-            // current config (audit M3). Taken (cleared) here regardless.
+            // start, so a non-empty value means this recording streamed —
+            // independent of the current config. Taken (cleared) here regardless.
             let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
             if !streamed.is_empty() {
-                // This recording streamed text live, so there is ALREADY
-                // live-typed text at the cursor — branch on that FIRST, before
-                // the resolved `type_mode` (audit LOW / mode-flip). If a
-                // mid-recording config change flipped the app to paste/off, the
-                // old code fell through and typed the transcript ON TOP of the
-                // orphaned live text. Instead always reconcile the streamed text:
+                // This recording streamed text live, so there's already live-typed
+                // text at the cursor — branch on that before the resolved
+                // `type_mode`. If a mid-recording config change flipped the app to
+                // paste/off, typing the transcript would land it on top of the
+                // orphaned live text, so always reconcile the streamed text instead:
                 // type-mode patches it to the pipeline result, paste/off first
                 // backspaces it away (then paste re-delivers via the clipboard).
                 tracing::info!(id = %id.as_str(), "in-place dictation: reconciling streamed text to pipeline result");
@@ -2463,12 +2456,12 @@ pub async fn run(
                 };
                 let (backspaces, insert) =
                     phoneme_core::dictation::reconcile_edit(&streamed, target);
-                // SAFETY GUARD (audit H1/M14): only backspace while the SAME
-                // window the text streamed into still owns the caret. If focus
-                // moved between live streaming and this end-of-run reconcile,
-                // those backspaces would chew through unrelated content in the
-                // wrong window. On a mismatch skip the destructive part; for
-                // "type" still append the divergent insert at the current caret.
+                // Safety guard: only backspace while the same window the text
+                // streamed into still owns the caret. If focus moved between live
+                // streaming and this end-of-run reconcile, those backspaces would
+                // chew through unrelated content in the wrong window. On a mismatch
+                // skip the destructive part; for "type" still append the divergent
+                // insert at the current caret.
                 let focus_lost = backspaces > 0
                     && !crate::in_place::foreground_still_matches(focused_app.as_deref());
                 if focus_lost {
@@ -2499,7 +2492,7 @@ pub async fn run(
                     }
                 }
             } else if type_mode == "off" {
-                // The user asked dictation NOT to auto-deliver for this app — the
+                // The user asked dictation not to auto-deliver for this app — the
                 // transcript still rides the pipeline into the library, it just
                 // doesn't land at the cursor. Same skip the fast lane does.
                 tracing::info!(
@@ -2508,17 +2501,16 @@ pub async fn run(
                 );
             } else {
                 tracing::info!(id = %id.as_str(), "in-place dictation: typing transcript at cursor");
-                // This is the FULL-PIPELINE dictation path: either [in_place].
-                // full_pipeline = true without `type_first`, or a recipe-bearing
-                // in-place binding (always full-pipeline). The text lands only
-                // after every configured step — for a recipe binding that is the
-                // recipe's RESULT, the single insertion. (With plain `type_first`
-                // the recorder's type-only pass already typed it, so
-                // `pipeline_should_type` keeps this run from landing it twice; for
-                // a recipe binding the recorder skips type-first, so this run owns
-                // the sole insertion.) The insertion itself (typing vs
-                // clipboard-paste, input-simulator failure modes) lives in
-                // `in_place::type_at_cursor`, shared with the fast lane.
+                // The full-pipeline dictation path: either [in_place].full_pipeline
+                // without `type_first`, or a recipe-bearing in-place binding (always
+                // full-pipeline). The text lands only after every configured step —
+                // for a recipe binding that's the recipe's result, the single
+                // insertion. (With plain `type_first` the recorder's type-only pass
+                // already typed it, so `pipeline_should_type` keeps this run from
+                // landing it twice; for a recipe binding the recorder skips
+                // type-first, so this run owns the sole insertion.) The insertion
+                // itself (typing vs clipboard-paste, input-simulator failure modes)
+                // lives in `in_place::type_at_cursor`, shared with the fast lane.
                 // Best-effort — a failure is logged loudly but never fails the
                 // recording.
                 if let Err(e) = crate::in_place::type_at_cursor(&transcript, type_mode).await {
@@ -2536,22 +2528,22 @@ pub async fn run(
         embed_and_store(embedder, &state.catalog, &id, &transcript).await;
     }
 
-    // Hooks are optional. When `run_on_transcribe` is off, finalize the
-    // recording right after transcription without firing hooks or the webhook;
-    // the user can run them on demand later via "Re-fire hook". This is what
-    // lets a re-transcription update the text without re-triggering side effects
-    // (e.g. re-appending to an Obsidian daily note).
+    // Hooks are optional. When `run_on_transcribe` is off, finalize the recording
+    // right after transcription without firing hooks or the webhook; the user can
+    // run them on demand later via "Re-fire hook". This is what lets a
+    // re-transcription update the text without re-triggering side effects (e.g.
+    // re-appending to an Obsidian daily note).
     if !cfg.hook.run_on_transcribe {
-        // PHASE 2b — summary + tags enrichments (the recipe's remaining
-        // Enrichment steps), in recipe order. They run after post-processing so
-        // they see the text the user actually sees; tag suggestions are
-        // approve-to-apply (side-effect free). Each self-gates on its legacy
-        // flag and writes its own status only when it will actually run, so a
-        // disabled step never flashes in the UI.
+        // PHASE 2b — summary + tags enrichments (the recipe's remaining Enrichment
+        // steps), in recipe order. They run after post-processing so they see the
+        // text the user actually sees; tag suggestions are approve-to-apply
+        // (side-effect free). Each self-gates on its legacy flag and writes its own
+        // status only when it will actually run, so a disabled step never flashes in
+        // the UI.
         run_enrichment_steps(state, cfg, &id, &recipe, &transcript, &mut step_failure).await;
         // A failed optional step (cleanup/title/summary/tag) becomes the terminal
         // status — like hook_failed, the transcript is intact and usable, but the
-        // failure is now filterable, with the reason persisted. No failure → Done.
+        // failure is filterable, with the reason persisted. No failure → Done.
         finalize_step_status(state, &id, step_failure).await?;
         state.events.emit(DaemonEvent::TranscriptionDone {
             id: id.clone(),
@@ -2565,7 +2557,7 @@ pub async fn run(
         .catalog
         .update_status(&id, RecordingStatus::HookRunning)
         .await?;
-    // NB: `TranscriptionDone` is NOT emitted here. The UI re-fetches the
+    // Note: `TranscriptionDone` is not emitted here. The UI re-fetches the
     // recording on that event, and the hook provenance (hook_command /
     // hook_exit_code / hook_duration_ms) isn't written until `update_hook_result`
     // runs after all hooks finish — so emitting now would hand the UI a recording
@@ -2587,20 +2579,20 @@ pub async fn run(
     let mut total_duration = 0;
     let mut last_cmd = String::new();
 
-    // Single-fire invariant (F2): a hook fires EXACTLY once per transcribe, never
-    // twice — even though the legacy [hook] loops below AND the recipe Hook executor
-    // (`run_hook_steps`) both live on this path. The H3 cutover's `migrate_hooks`
-    // (run by `load_config` before any pipeline run) MOVES the legacy
-    // commands/keyword_rules/webhook into recipe Hook entries and then CLEARS the
-    // legacy fields, so post-migration these loops iterate an empty list and the
-    // migrated entries fire only via `run_hook_steps`. Pre-migration the default
-    // recipe has no Hook step, so only these loops fire. The two paths never both
-    // fire the same hook. Kept (not deleted) so a config that somehow reaches the
-    // pipeline un-migrated still runs its legacy hooks. Locked by
+    // Single-fire invariant: a hook fires exactly once per transcribe, never twice
+    // — even though the legacy [hook] loops below and the recipe Hook executor
+    // (`run_hook_steps`) both live on this path. `migrate_hooks` (run by
+    // `load_config` before any pipeline run) moves the legacy
+    // commands/keyword_rules/webhook into recipe Hook entries and clears the legacy
+    // fields, so post-migration these loops iterate an empty list and the migrated
+    // entries fire only via `run_hook_steps`. Pre-migration the default recipe has
+    // no Hook step, so only these loops fire. The two paths never both fire the same
+    // hook. Kept (not deleted) so a config that somehow reaches the pipeline
+    // un-migrated still runs its legacy hooks. Locked by
     // `configured_hook_fires_exactly_once_per_transcribe`.
     //
     // Expand env vars / `~` in the legacy [hook].commands. If expansion fails we
-    // fall back to the unexpanded config, but LOG it first: a silent fallback
+    // fall back to the unexpanded config, but log it first: a silent fallback
     // leaves literal `%APPDATA%` / `~/` tokens in the command, so every hook then
     // fails with a confusing path error and no clue why.
     let expanded_cfg = cfg.expanded().unwrap_or_else(|e| {
@@ -2662,10 +2654,10 @@ pub async fn run(
         }
     }
 
-    // Conditional keyword-triggered hooks: run each rule whose pattern matches
-    // the (post-processed) transcript. These are supplementary — a failure is
-    // logged but does NOT fail the recording, since the always-on commands
-    // above already succeeded.
+    // Conditional keyword-triggered hooks: run each rule whose pattern matches the
+    // (post-processed) transcript. These are supplementary — a failure is logged
+    // but doesn't fail the recording, since the always-on commands above already
+    // succeeded.
     for rule in &expanded_cfg.hook.keyword_rules {
         if !rule.matches(&payload.transcript) {
             continue;
@@ -2691,9 +2683,9 @@ pub async fn run(
         }
     }
 
-    // PHASE 2a (recipe) — Playbook Hook steps: shell/webhook side-effects that
-    // live in the recipe. Additive alongside the legacy [hook] config above (the
-    // H3 migration folds [hook] into Hook entries and removes the legacy path). A
+    // PHASE 2a (recipe) — Playbook Hook steps: shell/webhook side-effects that live
+    // in the recipe. Additive alongside the legacy [hook] config above (the
+    // migration folds [hook] into Hook entries and removes the legacy path). A
     // `required` hook failing quarantines the recording like a failed command.
     let hook_outcome = match run_hook_steps(state, cfg, &recipe, &payload, &mut step_failure).await
     {
@@ -2731,7 +2723,7 @@ pub async fn run(
     };
     // Fold the recipe Hook steps into the per-recording hook provenance the
     // Pipeline popover reads (hook_exit_code) — the legacy command/keyword vars
-    // above are empty post-migration, so this is what populates it now.
+    // above are empty post-migration, so this is what populates it.
     if hook_outcome.ran {
         if last_cmd.is_empty() {
             last_cmd = hook_outcome.last_label;
@@ -2742,10 +2734,10 @@ pub async fn run(
         total_duration += hook_outcome.total_ms;
     }
 
-    // PHASE 2b (hooks-ON) — summary + tags enrichments, after post-processing
-    // AND hooks so they see the text the user actually sees; tag suggestions are
+    // PHASE 2b (hooks on) — summary + tags enrichments, after post-processing and
+    // hooks so they see the text the user actually sees; tag suggestions are
     // approve-to-apply (side-effect free). Same recipe-driven dispatch as the
-    // hooks-OFF arm, over the (post-processed) payload transcript.
+    // hooks-off arm, over the (post-processed) payload transcript.
     run_enrichment_steps(
         state,
         cfg,
@@ -2756,7 +2748,7 @@ pub async fn run(
     )
     .await;
 
-    // Record hook provenance ONLY when a hook actually ran (a legacy command or a
+    // Record hook provenance only when a hook actually ran (a legacy command or a
     // recipe Hook step) — otherwise leave hook_exit_code null so the Pipeline
     // popover doesn't show a phantom "Hook ✓" on recordings with no Hook steps.
     if !last_cmd.is_empty() {
@@ -2797,8 +2789,8 @@ pub async fn run(
                 url,
                 Duration::from_secs(cfg.hook.timeout_secs),
                 &payload,
-                // The [webhook] policy (SSRF guard) is read per-run so a
-                // config reload takes effect without restarting the daemon.
+                // The [webhook] policy (SSRF guard) is read per-run so a config
+                // reload takes effect without restarting the daemon.
                 &cfg.webhook,
             )
             .await
