@@ -116,13 +116,11 @@ Speaker diarization backend: `none`, local ONNX, Deepgram, or AssemblyAI, plus a
 
 ![Interface settings](../screenshots/settings-interface.png)
 
-Theme, 24-hour time, visible list columns (reorderable / toggleable), column widths, title-bar stripping, vim navigation, and **animation speed** for pane show/hide (Off / Fast / Normal / Slow — Off makes the sidebar, detail-pane, and focus-mode toggles instant).
+Theme, 24-hour time, visible list columns (reorderable / toggleable), column widths, **arrow-key navigation** (`interface.arrow_nav`) and **vim navigation** (`interface.vim_nav`), **animation speed** for pane show/hide (Off / Fast / Normal / Slow — Off makes the sidebar, detail-pane, and focus-mode toggles instant), and a **roving-cursor animation** (`interface.cursor_animation`: Off / Glide / Glide + smear / Full trail) for the keyboard highlight. See [Keyboard Navigation](keyboard_navigation.md) for the two nav layers. (Title-bar stripping moved to **System → Startup & tray**.)
 
 - **Theme** — pick from a grouped list of faithful ports of established palettes. **Dark:** Catppuccin Mocha (default), Catppuccin Macchiato, Catppuccin Frappé, Dracula, Everforest, Gruvbox, Kanagawa, Nord, One Dark, Rosé Pine, Tokyo Night. **Light:** Catppuccin Latte, Gruvbox Light, Rosé Pine Dawn, Solarized Light, Tokyo Night Day.
 - **UI font** (`interface.ui_font`) — a CSS font-family name (e.g. `Segoe UI`, `JetBrains Mono`); leave it empty to use the bundled default. An uninstalled choice falls back cleanly to the default stack.
 - **UI font size** (`interface.ui_font_size`) — the interface text size in px (10–24, default 14). The whole UI scales from this real root font-size — it's not a zoom, so spacing and boxes stay crisp.
-
-**Strip title bar:** removing the OS title bar applies live. Turning it back **on** needs an app restart on Windows.
 
 ![Editor settings](../screenshots/settings-editor.png)
 
@@ -152,17 +150,20 @@ Named full-config snapshots — save the current configuration and switch betwee
 
 Audio directory, auto-delete by age or count, optional audio-only deletion (keep searchable metadata), an **Import audio** button (bring a `.wav`/`.mp3`/`.m4a`/`.flac` into the pipeline), and export. See [Storage, Paths & Retention](storage_paths_and_retention.md) and [Importing Audio](importing_audio.md).
 
-### System tray
+### Startup & tray
 
 ![Tray settings](../screenshots/settings-system-tray.png)
 
-Show window on startup, minimize to tray on close, start at Windows login.
+Check for updates, show window on startup, minimize to tray on close, start at Windows login. Two window-lifecycle knobs also live here:
 
-### Advanced
+- **Strip system titlebar** (`interface.strip_titlebar`) — remove the OS window frame; the top header becomes draggable instead. Applies live on save, on or off — no restart.
+- **Quit stops the engine** (`interface.quit_stops_daemon`, default on) — Quit also shuts the daemon down (finalizing any in-flight recording first). Turn it off to keep the engine running headless after the tray quits. See the [FAQ](faq.md#quitting--the-background-engine).
+
+### Diagnostics
 
 ![Advanced settings](../screenshots/settings-advanced.png)
 
-Daemon log level, pipe name, re-run the First Run Wizard, and other power-user options.
+Daemon log level (`daemon.log_level`), the in-app **log viewers** (**View hook log** / **View daemon log** — tail the last lines of `hook.log` / `daemon.log` without leaving the app), an **Open config.toml** escape hatch for hand edits, and a **Rerun First Run Wizard** button.
 
 ## Manual editing
 

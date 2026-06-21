@@ -56,7 +56,7 @@ incompatible daemon can send a handshake as its first request:
 The daemon replies with its own view:
 
 ```json
-{"status": "ok", "value": {"protocol_version": 1, "app_version": "2.0.0", "compatible": true}}
+{"status": "ok", "value": {"protocol_version": 1, "app_version": "1.8.1", "compatible": true}}
 ```
 
 `compatible` is simply whether the daemon's `protocol_version` equals the one you
@@ -185,10 +185,12 @@ stored embedding with the current model (use after changing the embedding model)
 **Daemon control:** `daemon_status`, `reload_config`, `shutdown`, `hook_test`,
 `subscribe_events` (see Event Streaming below).
 
-`daemon_status` answers `running`/`pid`/`version` plus the bundled
-whisper-server ports: `whisper_preferred_port` / `whisper_effective_port` and
-the `preview_whisper_*` pair. *Preferred* is the configured
-`bundled_server_port`; *effective* is the port the server is actually
+`daemon_status` answers `running`/`pid`/`version` plus three bundled
+whisper-server port pairs: the main server (`whisper_preferred_port` /
+`whisper_effective_port`), the optional `[preview_whisper]` server
+(`preview_whisper_*`), and the optional dedicated `[in_place.stt]` dictation
+server (`dictation_whisper_*`). *Preferred* is the configured port (`null` when
+that server isn't configured); *effective* is the port the server is actually
 listening on — the daemon falls back to a free port when the preferred one is
 held by another app, and reports `null` while that server isn't running.
 Anything probing the local server should dial the effective port when present.

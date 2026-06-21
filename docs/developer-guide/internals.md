@@ -25,8 +25,9 @@ The daemon is a **Tokio** runtime coordinating several long-lived tasks. `main`
 ([`main.rs`](../../bin/phoneme-daemon/src/main.rs)) wires them: load config →
 build [`AppState`](../../bin/phoneme-daemon/src/app_state.rs) → recover crash
 leftovers ([`reconcile`](../../bin/phoneme-daemon/src/reconcile.rs)) → spawn the
-queue worker, both whisper supervisors, the retention loop, and the embedding
-backfill → serve IPC until shutdown.
+queue worker, the whisper supervisors (one main + three optional: live-preview,
+the meeting "both" second preview, and dictation), the retention loop, and the
+embedding backfill → serve IPC until shutdown.
 
 ```text
   \\.\pipe\phoneme ──accept──► ipc_server ──spawn per client──► ipc_handler task
@@ -52,9 +53,10 @@ backfill → serve IPC until shutdown.
 **Crash discipline.** The IPC serve loop `select`s on the queue-worker and
 main-supervisor join handles, so a crashed critical task takes the whole daemon
 down (children die with the kill-on-close job) rather than leaving a zombie that
-accepts requests it can never serve. The *preview* supervisor is deliberately
-**not** in that select — a preview crash must not kill the daemon — but its
-handle is awaited on shutdown so its server never outlives us. See
+accepts requests it can never serve. The three optional supervisors (preview,
+meeting "both" preview, dictation) are deliberately **not** in that select — a
+non-critical server crash must not kill the daemon — but their handles are all
+awaited on shutdown so no orphaned server outlives us. See
 [`main.rs`](../../bin/phoneme-daemon/src/main.rs).
 
 ### Channel types

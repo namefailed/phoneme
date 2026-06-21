@@ -77,7 +77,7 @@ Once the wizard completes, you'll land on the main Recordings View.
 
 ![Main recordings view](../screenshots/main.png)
 
-1. Click the large **Record** button at the top of the window, or press the global hotkey (default **`Ctrl+Alt+Space`**, disabled until you enable it in **Settings → Capture → Hotkeys**).
+1. Click the large **Record** button at the top of the window, or press the global hotkey (default **`Ctrl+Alt+Space`**, disabled until you enable it in **Settings → Hotkeys**).
 2. Speak clearly into your microphone.
 3. Click **Stop** (or press the hotkey again).
 
@@ -149,9 +149,9 @@ everything it started (the Whisper server, and an Ollama it auto-launched for
 you) stop with it. An Ollama you started yourself is always left running.
 
 If you'd rather keep the engine working after you close the window — for
-hotkey-free, headless use driven by the CLI — turn off **Settings → Appearance →
-"Quit stops the engine"**. The [FAQ](faq.md#quitting--the-background-engine)
-covers both modes in detail.
+hotkey-free, headless use driven by the CLI — turn off **Settings → System →
+Startup & tray → "Quit stops the engine"**. The
+[FAQ](faq.md#quitting--the-background-engine) covers both modes in detail.
 
 ## ⏭️ Next Steps
 

@@ -127,7 +127,7 @@ Set `hook.run_on_transcribe = false` and use **Re-fire hook** per recording.
 
 ### A hook ran but nothing happened — how do I debug it?
 
-Open **Settings → Destination & Integrations → View hook log**. It tails the
+Open **Settings → System → Diagnostics → View hook log**. It tails the
 last few hundred lines of `hook.log` (what your scripts printed) right inside the
 app; **View daemon log** shows the daemon's own log. The full files live in
 `%LOCALAPPDATA%\phoneme\logs`.
@@ -147,8 +147,8 @@ takes the engine and its helpers down — the OS reaps them.
 
 ### Can I keep the engine running headless, without the tray?
 
-Yes — set `interface.quit_stops_daemon = false` (Settings → Appearance → "Quit
-stops the engine"). Quit then only closes the tray; the daemon keeps recording
+Yes — set `interface.quit_stops_daemon = false` (Settings → System → Startup &
+tray → "Quit stops the engine"). Quit then only closes the tray; the daemon keeps recording
 hotkeyless via the CLI (`phoneme record`, `phoneme watch`, hooks, webhooks).
 Stop it explicitly with `phoneme daemon stop` when you want it gone. Flip the
 setting **before** the daemon is (re)started — the OS-level tie between tray

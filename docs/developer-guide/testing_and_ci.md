@@ -8,7 +8,7 @@ Five jobs run on every push/PR to `main`/`master`:
 
 | Job | Commands |
 |-----|----------|
-| **Rust** | `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · an inject-guard assertion step · `cargo test --workspace -- --test-threads=1` (with `PHONEME_DISABLE_INPUT_INJECTION=1`) |
+| **Rust** | `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy --workspace -- -D clippy::unwrap_used` (no `unwrap()` on production paths — `--all-targets` is dropped so test code is exempt) · an inject-guard assertion step · `cargo test --workspace -- --test-threads=1` (with `PHONEME_DISABLE_INPUT_INJECTION=1`) |
 | **Rustdoc** | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` — fails on any rustdoc warning, including a `missing_docs` gap or a broken intra-doc link |
 | **Frontend** | `pnpm install --frozen-lockfile` · `pnpm lint` · `pnpm exec vitest run` · `pnpm type-check` · `pnpm build` |
 | **Tauri build** | `cargo build --workspace` then `cargo tauri build --debug` — runs only after Rust + Frontend pass |
@@ -41,6 +41,7 @@ subsystem-level deep dives in [Internals](internals.md).
 # From repo root
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace -- -D clippy::unwrap_used
 cargo test --workspace -- --test-threads=1
 $env:RUSTDOCFLAGS="-D warnings"; cargo doc --workspace --no-deps
 

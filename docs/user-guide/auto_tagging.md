@@ -50,12 +50,14 @@ summary, live preview, and the semantic embedding model.
 
 ```toml
 [auto_tag]
-auto = true            # suggest on every new recording
-provider = ""          # "" = inherit [llm_post_process]
-api_key = ""           # "" = inherit
-api_url = ""           # "" = inherit / provider default
-model = ""             # "" = the cleanup model
+auto = true                  # suggest on every new recording
+provider = ""                # "" = inherit [llm_post_process]
+api_key = ""                 # "" = inherit
+api_url = ""                 # "" = inherit / provider default
+model = ""                   # "" = the cleanup model
 max_tags = 5
+auto_accept_existing = false # attach a suggestion that matches a tag you
+                             # already have, without waiting for approval
 prompt = "You tag voice-note transcripts. …"
 ```
 

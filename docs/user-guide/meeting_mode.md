@@ -86,7 +86,7 @@ button in the detail pane's transcript box.
 
 ### 🗣️ Adding Speaker Diarization
 
-If you want to take this to the next level, you can enable **Speaker Diarization** in **Settings → Transcription → Speaker Diarization**. Local diarization (the **speakrs** model) runs entirely on your machine; cloud options are available too. See [Whisper & Diarization](diarization_and_whisper.md) for the backends and how they pair with your transcription provider.
+If you want to take this to the next level, you can enable **Speaker Diarization** in **Settings → Diarization → Speaker Diarization**. Local diarization (the **speakrs** model) runs entirely on your machine; cloud options are available too. See [Whisper & Diarization](diarization_and_whisper.md) for the backends and how they pair with your transcription provider.
 
 By default, the System Track is just one long transcript of everyone on the call. But with Diarization enabled, Phoneme uses a powerful AI model (speakrs) to analyze the System Track and separate the different voices.
 

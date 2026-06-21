@@ -40,7 +40,7 @@ The repository is a Cargo workspace of three library crates and three binaries
 | :--- | :--- | :--- |
 | [`phoneme-daemon`](../../bin/phoneme-daemon/src/main.rs) | The brain — IPC server, recorder glue, inbox worker, pipeline, supervisors, event bus | [`main`](../../bin/phoneme-daemon/src/main.rs), [`app_state`](../../bin/phoneme-daemon/src/app_state.rs), [`recorder`](../../bin/phoneme-daemon/src/recorder/mod.rs), [`queue_worker`](../../bin/phoneme-daemon/src/queue_worker.rs), [`pipeline`](../../bin/phoneme-daemon/src/pipeline.rs), [`in_place`](../../bin/phoneme-daemon/src/in_place.rs), [`whisper_supervisor`](../../bin/phoneme-daemon/src/whisper_supervisor.rs), [`ollama_launcher`](../../bin/phoneme-daemon/src/ollama_launcher.rs), [`event_bus`](../../bin/phoneme-daemon/src/event_bus.rs), [`shutdown`](../../bin/phoneme-daemon/src/shutdown.rs), [`reconcile`](../../bin/phoneme-daemon/src/reconcile.rs), [`retention`](../../bin/phoneme-daemon/src/retention.rs) |
 | [`phoneme`](../../bin/phoneme/src/main.rs) | The CLI — one module per subcommand, translating to IPC requests | [`args`](../../bin/phoneme/src/args.rs) (clap), [`client`](../../bin/phoneme/src/client.rs) (spawn vs observe), [`commands/`](../../bin/phoneme/src/commands/mod.rs) |
-| [`src-tauri`](../../src-tauri/src/lib.rs) | The Tauri 2 tray shell — spawn/bridge the daemon, forward commands, re-emit events | [`lib`](../../src-tauri/src/lib.rs), [`auto_spawn`](../../src-tauri/src/auto_spawn.rs), [`bridge`](../../src-tauri/src/bridge.rs), [`commands`](../../src-tauri/src/commands/mod.rs), [`events`](../../src-tauri/src/events.rs), [`tray`](../../src-tauri/src/tray.rs), [`overlay`](../../src-tauri/src/overlay.rs), [`wizard`](../../src-tauri/src/wizard.rs)/[`checksums`](../../src-tauri/src/checksums.rs) |
+| [`src-tauri`](../../src-tauri/src/lib.rs) | The Tauri 2 tray shell — spawn/bridge the daemon, forward commands, re-emit events | [`lib`](../../src-tauri/src/lib.rs), [`auto_spawn`](../../src-tauri/src/auto_spawn.rs), [`bridge`](../../src-tauri/src/bridge.rs), [`commands`](../../src-tauri/src/commands/mod.rs), [`events`](../../src-tauri/src/events.rs), [`tray`](../../src-tauri/src/tray.rs), [`overlay`](../../src-tauri/src/overlay.rs)/[`indicator`](../../src-tauri/src/indicator.rs) (the two overlay windows), [`wizard`](../../src-tauri/src/wizard.rs)/[`checksums`](../../src-tauri/src/checksums.rs) |
 
 **The dependency arrow points one way.** `phoneme-core` is the shared substrate;
 the daemon, CLI, and tray all depend on it (and on `phoneme-ipc`), never the
@@ -106,7 +106,10 @@ are all detailed in
 
 Local transcription runs via a bundled C++ whisper-server. The
 [`whisper_supervisor`](../../bin/phoneme-daemon/src/whisper_supervisor.rs) keeps
-it (and a second, thread-capped preview server when configured) alive:
+it alive, plus up to three optional sibling servers when configured — a
+thread-capped live-preview server (`run_preview`), a second preview server for
+meeting "both" mode (`run_preview2`), and a dedicated dictation server
+(`run_dictation`) — each idle until you opt in:
 
 - **Respawn loop** — spawn the binary, then watch four wake sources at once:
   child exit (respawn with 2 s → 60 s backoff, reset after a healthy minute), a
@@ -153,7 +156,7 @@ silence-padding math lives in
 
 | To add… | Touch | Then |
 | :--- | :--- | :--- |
-| A new IPC command | [`schema.rs`](../../crates/phoneme-ipc/src/schema.rs) (variant + doc), [`ipc_handler.rs`](../../bin/phoneme-daemon/src/ipc_handler.rs) (handler) | a CLI command and/or a tray [`commands.rs`](../../src-tauri/src/commands/mod.rs) forward |
+| A new IPC command | [`schema.rs`](../../crates/phoneme-ipc/src/schema.rs) (variant + doc), [`ipc_handler.rs`](../../bin/phoneme-daemon/src/ipc_handler.rs) (handler) | a CLI command and/or a tray forward in [`commands/`](../../src-tauri/src/commands/mod.rs) |
 | A new transcription/LLM provider | [`transcription.rs`](../../crates/phoneme-core/src/transcription.rs) / [`llm.rs`](../../crates/phoneme-core/src/llm.rs) | config in [`config.rs`](../../crates/phoneme-core/src/config.rs), the picker in [frontend_guide.md](frontend_guide.md) |
 | A new pipeline stage | [`pipeline.rs`](../../bin/phoneme-daemon/src/pipeline.rs) | a `PipelineStage`/`DaemonEvent` if it needs UI progress |
 | A new config key | [`config.rs`](../../crates/phoneme-core/src/config.rs) (`#[serde(default)]`!) | [config_reference.md](config_reference.md) + the masking list if it's a secret |

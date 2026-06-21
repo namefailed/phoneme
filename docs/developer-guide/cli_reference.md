@@ -21,7 +21,7 @@ daemon-is-down state is itself the answer for them, so they print
 
 | Behavior | Commands |
 |----------|----------|
-| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `notes`, `edit`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed/dismiss-failed`, `tag add/update/delete/attach/detach/clear-suggestions/merge`, `profile use`, `hook test`, `export` (zip and `--captions`), `config reload`, `daemon start` |
+| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `suggest-tags`, `notes`, `edit`, `find-replace`, `clip`, `speaker rename/clear/reassign/merge/split`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed/dismiss-failed`, `tag add/update/delete/attach/detach/clear-suggestions/merge`, `profile use`, `hook test`, `export` (zip and `--captions`), `config reload`, `daemon start` |
 | **Observe-only** (fail fast with exit 3 when no daemon) | `list`, `show`, `search`, `watch`, `doctor`, `daemon status`, `queue list/counts/status`, `queue skip`*, `tag list/for/usage`, `meeting tracks`, `profile list` |
 | **Purely local** (no daemon involved at all) | `config` (print), `config path`, `config set`, `profile save`, `version` |
 
@@ -179,11 +179,11 @@ phoneme list
 phoneme list --since 2026-05-19
 phoneme list --since 2026-05-01 --until 2026-05-31
 
-# Filter by status: recording, queued, transcribing, cleaning_up, summarizing,
-# tagging, hook_running, done, transcribe_failed, hook_failed, cleanup_failed,
-# summarize_failed, title_failed, tag_failed, or cancelled.
+# Filter by status: recording, paused, queued, transcribing, cleaning_up,
+# summarizing, tagging, hook_running, done, transcribe_failed, hook_failed,
+# cleanup_failed, summarize_failed, title_failed, tag_failed, or cancelled.
 #  - queued: waiting in the transcription queue (flips to transcribing when the
-#    worker claims it) — so a recording that's only WAITING no longer reads as
+#    worker claims it) — so a recording that's only waiting no longer reads as
 #    "transcribing".
 #  - *_failed for an optional step (cleanup/summary/title/tag) is terminal like
 #    hook_failed: the transcript is intact, only that enrichment didn't land, and
@@ -287,6 +287,12 @@ and are never written to config; passing `--provider` also forces cleanup on.
 | `--api-url <URL>` | Point cleanup at this endpoint for this run. |
 | `--api-key <KEY>` | Authenticate cleanup with this key for this run. |
 
+> Passing a key via `--api-key` exposes it to any local process that can read
+> the process table (`ps`, Task Manager, shell history). Prefer the
+> `PHONEME_CLEANUP_API_KEY` environment variable — `--api-key` reads from it
+> when the flag is omitted, and the env var stays out of the process table and
+> shell history.
+
 ```bash
 phoneme cleanup 20260519T143500823
 phoneme cleanup 20260519T143500823 --provider ollama --model llama3.1
@@ -308,6 +314,7 @@ this run only.
 ```bash
 phoneme summarize 20260519T143500823
 phoneme summarize 20260519T143500823 --model llama3.1
+phoneme summarize 20260519T143500823 --prompt "Three bullet points, no preamble."
 ```
 
 ### ✨ `phoneme suggest-tags <ID>`
@@ -374,6 +381,27 @@ phoneme find-replace 20260519T143500823 "API" "api" --case-sensitive
 # Machine-readable count
 phoneme --json find-replace 20260519T143500823 "teh" "the"   # → {"replaced":3}
 ```
+
+### ✂️ `phoneme clip <ID> <START> <END> [OUT]`
+
+Export a time range of a recording's audio to a new WAV. `START` and `END` are
+seconds as floats (e.g. `12.5`); the range is `[start, end)`, sliced on
+sample-frame boundaries, and `END` is clamped to the recording's duration. The
+clip is written in the source's audio format. When `OUT` is omitted the clip
+lands next to the source recording with a `_clip_<start>-<end>` suffix. Prints
+the path written.
+
+```bash
+# Cut 12.5s–30s into a sibling _clip_ file next to the source audio
+phoneme clip 20260519T143500823 12.5 30
+
+# Write to an explicit path
+phoneme clip 20260519T143500823 12.5 30 highlight.wav
+```
+
+A non-finite or negative bound, `start >= end`, or two seconds that round to the
+same millisecond are rejected locally (exit 1) before any daemon work. With
+`--json`, prints `{"path": "<written-wav>"}`.
 
 ### 🗒️ `phoneme notes <ID>`
 
@@ -734,8 +762,14 @@ consumers keep working.
 Manage configuration.
 
 ```bash
-# With no subcommand: print the active config as TOML
+# With no subcommand: print the active config as TOML. Secret values (API keys,
+# the webhook HMAC secret) are masked as <redacted> so the dump is safe to paste
+# or pipe.
 phoneme config
+
+# Print the real secret values instead of <redacted> — pass it only when you
+# deliberately need the keys.
+phoneme config --show-secrets
 
 # Print the path to the active config file
 phoneme config path

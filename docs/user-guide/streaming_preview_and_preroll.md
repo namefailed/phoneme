@@ -8,7 +8,7 @@ Two recording-quality features that address opposite ends of a capture: **pre-ro
 > so a heavy model can't wedge your recording, word-by-word reveal, a
 > LIVE/LISTENING state, and the "it hears me" waveform (see **Feel &
 > performance** below). The Beta label stays on until it's verified across a
-> long dictation. Turn it on in **Settings → Transcription → Live Preview**.
+> long dictation. Turn it on in **Settings → Live Preview**.
 
 ## Pre-roll buffer
 
@@ -29,7 +29,7 @@ On **Record Start**, those buffered samples are **prepended** to the new WAV bef
 pre_roll_ms = 1500   # 0 = disabled (mic only open while recording)
 ```
 
-Or **Settings → Capture → Pre-roll**.
+Or **Settings → Capture → Recording → Pre-roll**.
 
 ### Notes
 
@@ -70,7 +70,7 @@ streaming_preview = true
 preview_overlay = false
 ```
 
-Or **Settings → Capture → Streaming preview** (and the **System-wide overlay** checkbox under **Settings → Transcription → Live Preview**).
+Or **Settings → Live Preview → "Enable live preview"** (and the **System-wide overlay** checkbox in the same section).
 
 ### System-wide overlay
 
@@ -80,11 +80,11 @@ With `interface.preview_overlay = true`, the live caption also appears in a fram
 
 ### Minimal recording indicator (no captions)
 
-If you want a clear *"you're recording"* cue but **not** the live caption, turn on **Settings → Transcription → Live Preview → "Recording indicator"** (`interface.recording_indicator = true`). It's a separate, tiny always-on-top pill that shows only a pulsing record dot, an audio-reactive waveform, and an mm:ss elapsed timer — no transcription text. Because it carries no captions, it needs no streaming preview at all and works even with live preview entirely off. It's fully independent of the caption overlay above: a different window with its own remembered position, so you can run either, both, or neither. Off by default.
+If you want a clear *"you're recording"* cue but **not** the live caption, turn on **Settings → Live Preview → "Recording indicator"** (`interface.recording_indicator = true`). It's a separate, tiny always-on-top pill that shows only a pulsing record dot, an audio-reactive waveform, and an mm:ss elapsed timer — no transcription text. Because it carries no captions, it needs no streaming preview at all and works even with live preview entirely off. It's fully independent of the caption overlay above: a different window with its own remembered position, so you can run either, both, or neither. Off by default.
 
 ### Feel & performance
 
-**Settings → Transcription → Live Preview → Feel & performance** tunes how the
+**Settings → Live Preview → Feel & performance** tunes how the
 preview reads. The defaults are designed to stay smooth on a modest machine.
 Changes here take effect on your **next recording** — no app restart needed.
 
@@ -121,7 +121,7 @@ In **Meeting Mode**, the preview follows your **microphone** track (your dense l
 ## 👥 Meetings: two tracks in the overlay
 
 A meeting records your **microphone** and the **system audio** as two tracks.
-**Settings → Transcription → Live Preview → Meetings** picks how the overlay
+**Settings → Live Preview → Meetings** picks how the overlay
 captions them:
 
 - **One track at a time** (default) — one caption line plus a **🎤/🔊 button**
@@ -135,7 +135,7 @@ captions them:
   below.
 
 **Stream both tracks concurrently (opt-in).** Turn on
-**Settings → Transcription → Live Preview → "2nd preview server for 'both'"**
+**Settings → Live Preview → "2nd preview server for 'both'"**
 (`recording.meeting_preview_own_server`) and Phoneme runs a **second** preview
 whisper-server so each meeting track captions on its own server, at full rate,
 at the same time. It reuses your existing dedicated preview model (no second

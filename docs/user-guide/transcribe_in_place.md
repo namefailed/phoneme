@@ -6,7 +6,7 @@ Transcribe-in-Place allows you to use Phoneme as a system-wide dictation engine.
 
 ## 🚀 How to use it
 
-1. Ensure the feature is enabled in **Settings → Capture → Hotkeys**.
+1. Ensure the feature is enabled in **Settings → Hotkeys**.
 2. By default, the global hotkey is `Ctrl+Alt+I` (though you can change this to anything, like a spare mouse button or F-key).
 3. Focus any text field in any application (your browser, Discord, a Word document, your code editor).
 4. Press and hold the Transcribe-in-Place hotkey.
@@ -24,14 +24,14 @@ hotkey, the recording takes a **dedicated fast lane**:
    dictation transcribes immediately.
 2. It uses the **fastest available model**: the Live Preview's dedicated fast
    model when that's enabled, else the main transcription provider. Want
-   dictation on its own engine? **Settings → Capture → Dictation → Dictation
-   model** switches from Automatic to a dedicated provider — a fast cloud API
+   dictation on its own engine? **Settings → Dictation → Dictation engine →
+   Dictation model** switches from Automatic to a dedicated provider — a fast cloud API
    like Groq, or a local whisper server that's already running (the main one
    or the preview's — dictation never starts a third).
 3. A **zero-latency polish** cleans the text before it lands: filler words
    ("um", "uh") and whisper's non-speech tags are stripped, stutter-doubled
    words collapsed, capitalization and end punctuation fixed. No AI round-trip
-   — it's instant. (Settings → Capture → Dictation can switch this to raw
+   — it's instant. (Settings → Dictation can switch this to raw
    output, or to a full **AI cleanup** pass if you prefer polish over speed.)
 4. The text is **typed** at your cursor — or **pasted** via the clipboard
    (near-instant for long text, with your previous clipboard restored) when
@@ -84,7 +84,7 @@ model is asked to apply them, which handles looser phrasing too.)
 
 Summaries, auto-tags, and hooks do **not** run for dictations on the fast
 lane. If you want dictations to behave exactly like normal recordings, enable
-**Run the full pipeline** in Settings → Capture → Dictation. With it on,
+**Run the full pipeline** in Settings → Dictation. With it on,
 **When to type** picks between two flavors:
 
 - **Type the text immediately** — the fast transcription is typed the moment

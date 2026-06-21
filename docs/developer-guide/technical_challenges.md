@@ -51,7 +51,7 @@ audio before it spends a transcription; and the cadence is adaptive —
 (clamped to `[base, 8 s]`), so a slow box self-throttles instead of thrashing. The
 authoritative full transcript is still produced from the complete file after stop.
 
-`recorder.rs:56-101` — `PREVIEW_WINDOW_SAMPLES`, `PREVIEW_MIN_NEW_SAMPLES`, `next_preview_interval`
+`recorder/preview.rs:36-79` — `PREVIEW_WINDOW_SAMPLES`, `PREVIEW_MIN_NEW_SAMPLES`, `next_preview_interval`
 
 ### A forward-growing caption stitcher across a sliding window
 
@@ -74,7 +74,7 @@ between the committed suffix and the window prefix. Words are normalized
 few words into the window (`MAX_LEADING_SKIP`) so a revised leading word can't
 defeat the match. It's a pure function, unit-tested with no audio round-trip.
 
-`recorder.rs:118-160` — `stitch_preview`
+`recorder/preview.rs:141-191` — `stitch_preview`
 
 ### An always-on-top overlay that doesn't freeze the app when dragged
 
@@ -95,7 +95,7 @@ geometry per label; and an off-screen sentinel cleanly separates first-run (plac
 bottom-center) from a restored position — instead of guessing from coordinate
 signs, which mis-flags monitors left of or above the primary.
 
-`overlay.rs:27-79` — position persistence, `OFFSCREEN_SENTINEL`, drag rationale
+`overlay.rs:27-111` — position persistence, `OFFSCREEN_SENTINEL`, drag rationale
 
 ---
 
@@ -118,7 +118,7 @@ for its whole STT call, and preview only runs a tick when the permit is free. A
 one-job model-override swap also happens under the permit, so nothing talks to the
 server mid-restart.
 
-`pipeline.rs:13-22` (the serialization invariant), `recorder.rs:26-31`
+`pipeline.rs:13-22` (the serialization invariant), `recorder/preview.rs:296-394` (preview yields the permit)
 
 ### Per-job model override without mutating global config
 
@@ -139,7 +139,7 @@ centralizes "what should the server run right now"; and a `Drop` guard
 (`WhisperOverrideGuard`) clears the override on every pipeline exit path. The swap
 runs under the `whisper_sem` permit and waits for `/health` before transcribing.
 
-`pipeline.rs:74-165` — `WhisperOverrideGuard`, `apply_model_override`; `whisper_supervisor.rs:105-117` — `effective_model_path`
+`pipeline.rs:74-165` — `WhisperOverrideGuard`, `apply_model_override`; `whisper_supervisor.rs:117-130` — `effective_model_path`
 
 ### Effective-port negotiation between two whisper-servers
 
@@ -244,7 +244,7 @@ entirely and wraps segments under one `[Speaker 1]` turn via `label_all_as`, and
 `fixed_speaker_applied` flag gates the daemon's if-absent "You" `speaker_names` write
 so a later rename survives a retranscribe.
 
-`transcription.rs:73-130` — `DiarizationTrack`; `diarization.rs:198-220` — `label_all_as`
+`transcription.rs:87-133` — `DiarizationTrack`; `diarization.rs:213` — `label_all_as`
 
 ---
 
@@ -269,7 +269,7 @@ one winner) and argmaxes via `dominant_column`; columns map to the same stable i
 `label_segments` uses. A graceful fallback to segment-level attribution reproduces the
 old labels exactly when word timings are absent.
 
-`diarization.rs:352-406` — `assign_words`; `diarization.rs:268-291` — `frame_for_time`, `column_label`, `dominant_column`
+`diarization.rs:344-406` — `assign_words`; `diarization.rs:261-291` — `frame_for_time`, `column_label`, `dominant_column`
 
 ### Island-smoothing to kill mid-sentence speaker flips
 
@@ -291,7 +291,7 @@ run strictly shorter than both neighbours under a ~24-token ceiling — into the
 surrounding speaker. Per-word attribution is otherwise kept, so a genuine hand-off
 inside a segment still splits.
 
-`diarization.rs:408-439` — thresholds + rationale; `diarization.rs:513` — `smooth_word_speaker_runs`
+`diarization.rs:482-485` — thresholds + rationale; `diarization.rs:554` — `smooth_word_speaker_runs`
 
 ### Voiceprint centroid merge to fix a wrong speaker count
 
@@ -313,7 +313,7 @@ single-linkage-merges any pair with cosine ≥ 0.50 (`SPEAKER_MERGE_COSINE`) via
 union-find, keeping the smallest column index canonical. Activations and segment spans
 are relabelled accordingly.
 
-`diarization.rs:1068-1167` — `SPEAKER_MERGE_COSINE`, `cluster_centroids`, `merge_similar_clusters`
+`diarization.rs:1124-1188` — `SPEAKER_MERGE_COSINE`, `cluster_centroids`, `merge_similar_clusters`
 
 ### A named voice's cached centroid: robust *and* duration-weighted
 
@@ -367,7 +367,7 @@ attaches cleanly), and in `coalesce_subword_tokens` force every non-word-start t
 inherit its host word's speaker. The marker is persisted (a migration) and sent over
 IPC so the Synced view honours it too.
 
-`diarization.rs:52-67` — `WordSpan.leading_space`; `diarization.rs:666` — `coalesce_subword_tokens`
+`diarization.rs:52-66` — `WordSpan.leading_space`; `diarization.rs:707` — `coalesce_subword_tokens`
 
 ---
 
@@ -395,7 +395,7 @@ and mirrors overrides into entries; `ensure_default_recipe_steps` slots forced-o
 steps back into canonical order; and `playbook_migrated` / `hooks_migrated` latches
 make the migrations idempotent.
 
-`pipeline.rs:167-365` — `apply_rerun_overrides`, `ensure_default_recipe_steps`; `pipeline.rs:1277-1304` — the recipe executor
+`pipeline.rs:173-365` — `apply_rerun_overrides`, `ensure_default_recipe_steps`; `pipeline.rs:1447` (`resolve_recipe`), `pipeline.rs:1545` (`run_transform_steps`, the recipe executor)
 
 ### Robustly parsing tags and titles out of chatty LLMs
 
@@ -417,7 +417,7 @@ length-capped, de-duped, canonicalized against existing tags, and optionally
 auto-accepted. `sanitize_llm_title` strips `Title:` prefixes and wrapping
 quotes/markdown and caps at 8 words.
 
-`pipeline.rs:843-898` — `parse_tag_names`; `pipeline.rs:1085-1115` — `sanitize_llm_title`
+`pipeline.rs:852-898` — `parse_tag_names`; `pipeline.rs:1093-1115` — `sanitize_llm_title`
 
 ### Idle-based streaming timeout for slow local LLMs
 
@@ -459,7 +459,7 @@ input simulator.
 *not*. `spawn_type_first` owns none of the catalog state (the queued pipeline does), so
 there's exactly one authoritative insertion.
 
-`pipeline.rs:713-739` — `pipeline_should_type`; `in_place.rs:84-130` — `spawn_type_first`
+`pipeline.rs:748-774` — `pipeline_should_type`; `in_place.rs:98-130` — `spawn_type_first`
 
 ### A dictation fast lane that never waits behind the queue or a meeting
 
@@ -478,7 +478,7 @@ the dictation provider → rule-based polish (zero latency) → type/paste → p
 background — and in-place dictation skips live preview entirely so the whisper permit is
 free for the latency-critical transcribe.
 
-`in_place.rs:1-19` — fast-lane contract; `recorder.rs:8-9`
+`in_place.rs:1-19` — fast-lane contract; `recorder/mod.rs:8-9` (in-place branches off the queue), `recorder/preview.rs:589-619` (dictation skips live preview)
 
 ### Clipboard-preserving paste delivery
 
@@ -496,7 +496,7 @@ transcript, sends Ctrl+V, sleeps 150 ms so the app consumes it, then restores th
 previous text or image. `type_blocking` is the fallback for apps that block paste, and
 both run on `spawn_blocking`.
 
-`in_place.rs:399-459` — `type_at_cursor`, `paste_blocking`, `type_blocking`
+`in_place.rs:474-600` — `type_at_cursor`, `paste_blocking`, `type_blocking`
 
 ---
 
@@ -658,7 +658,7 @@ recovery detects the `done`+`processing` pair and drops the stale processing fil
 of re-queuing; orphaned `queued`/`paused` rows with no inbox file are swept to
 `transcribe_failed`.
 
-`pipeline.rs:1251-1275` — `finalize_canceled`; CHANGELOG (WAV atomic write, idempotent crash recovery)
+`pipeline.rs:1260-1284` — `finalize_canceled`; CHANGELOG (WAV atomic write, idempotent crash recovery)
 
 ### Full kill-on-close process tree via Windows Job Objects
 

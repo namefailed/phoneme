@@ -52,13 +52,24 @@ recording or processing is left alone.
 
 ## Rebuilding the catalog
 
-If `catalog.db` is lost but WAVs remain:
+Two `doctor` flags cover catalog recovery, and they do opposite things — pick
+deliberately:
 
 ```powershell
+# Non-destructive: re-link any .wav with no catalog row (re-create the row and
+# re-transcribe it). Never deletes anything. Needs a running daemon.
+phoneme doctor --reimport
+
+# Destructive: delete catalog.db so the daemon starts a fresh, empty catalog.
+# Transcripts, tags, notes and titles live only in the DB and are lost; the
+# audio files are kept. Follow up with --reimport to rebuild rows from the WAVs.
 phoneme doctor --rebuild-catalog
 ```
 
-Walks `audio_dir` and `inbox/done/` to reconstruct rows.
+If `catalog.db` is intact but some audio on disk has no row (an orphaned WAV
+after a manual file move), `--reimport` is all you need. Reach for
+`--rebuild-catalog` only when the database itself is corrupt and you want to
+start over from the audio.
 
 ## Factory reset
 

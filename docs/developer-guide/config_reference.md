@@ -22,9 +22,9 @@ A fully-commented `config.example.toml` and `.env.example` live at the **repo ro
 | `model_path` | path | `""` | GGML model path (`.bin`) when `mode = bundled_model` |
 | `bundled_server_port` | u16 | `5809` | **Preferred** local server port — when another app already holds it, the daemon starts whisper-server on a free port instead and every consumer follows automatically (see [troubleshooting](../user-guide/troubleshooting.md#-something-else-is-using-port-5809)) |
 | `bundled_server_args` | string[] | `[]` | Extra whisper-server CLI args |
-| `timeout_secs` | u64 | `60` | Transcription HTTP timeout |
+| `timeout_secs` | u64 | `3600` | Transcription HTTP timeout — a generous flat cap, since a long recording on a slow local model can legitimately take minutes |
 | `language` | string? | `null` | BCP-47 hint; omit for auto-detect |
-| `initial_prompt` | string | `""` | Custom-vocabulary hint — names/jargon/acronyms to bias decoding toward (e.g. `"Phoneme, pyannote, WebView2"`). Sent as the OpenAI `prompt` field on the whisper-family path (local `whisper.cpp`, `openai`, `groq`, `custom`) and as `initial_prompt` on the native path. Keep it short (Whisper conditions on ~the last 224 tokens). `deepgram`/`assemblyai`/`elevenlabs` ignore it. |
+| `initial_prompt` | string | seeded marker hint | Custom-vocabulary hint — names/jargon/acronyms to bias decoding toward (e.g. `"Phoneme, pyannote, WebView2"`). A fresh config ships a short marker hint (`"Voice memo. Common markers: Action Item:, Task:, …"`) so the default keyword hooks transcribe their triggers verbatim; an empty string disables it. Sent as the OpenAI `prompt` field on the whisper-family path (local `whisper.cpp`, `openai`, `groq`, `custom`) and as `initial_prompt` on the native path. Keep it short (Whisper conditions on ~the last 224 tokens). `deepgram`/`assemblyai`/`elevenlabs` ignore it. |
 | `api_key` | string | `""` | Cloud provider key (redacted in logs) |
 | `model` | string | `""` | Cloud model id |
 | `api_url` | string | `""` | Custom provider base URL |
@@ -49,7 +49,7 @@ An optional, **independent** transcription provider used only for the live previ
 | `channels` | u8 | `1` | 1 = mono, 2 = stereo |
 | `silence_threshold_dbfs` | f32 | `-45.0` | Oneshot silence detection |
 | `silence_window_ms` | u32 | `3000` | Contiguous silence to stop oneshot |
-| `max_duration_secs` | u32 | `300` | Hard cap per recording |
+| `max_duration_secs` | u32 | `10800` | Hard cap per recording (3 hours) |
 | `input_device` | string | `default` | CPAL device name |
 | `source` | `microphone` \| `system_audio` | `microphone` | Single-track capture source |
 | `pre_roll_ms` | u32 | `1500` | Idle mic ring buffer; `0` = off. A fresh config ships `1500`; a config file that simply **omits** the key reads as `0` (disabled), so pre-upgrade configs keep the old mic-only-while-recording behavior. |
@@ -164,6 +164,11 @@ followed.
 | `local_model_path` | `""` | **Deprecated / unused** — superseded by `models_dir`; it was never wired into the load path. Kept so older configs keep parsing. |
 | `solo_one_speaker` | `false` | Treat a single (non-meeting) recording as ONE speaker — skip diarization for it so it never splits into `[Speaker N]` turns. Off by default. For when the local diarizer hears two voices in a one-person note (a big tonal shift, or background audio). Meetings and genuinely multi-speaker files are unaffected. Local diarization path. |
 | `expected_speakers` | _(unset)_ | Expected speaker count, used as a *prior* on the auto-detected count. Unset (or `0`) = trust whatever the model clusters (today's behavior). Set to `n` and, if the local pipeline finds **more** than `n` speakers, the closest clusters are greedily merged (by voiceprint cosine) until exactly `n` remain. It never splits — finding `≤ n` is left untouched, since the prior means "no more than this many voices". speakrs has no native target-count knob, so this is enforced as a post-clustering merge; cloud providers ignore it. Use when you know the headcount (a 1:1 call, a fixed panel) and the model over-splits one voice into several. |
+| `merge_gap_secs` | `0.25` | Gap (seconds) below which adjacent same-speaker turns are merged into one. Lower = more, shorter turns; higher = fewer, longer turns. Local diarization path. |
+| `speaker_keep_threshold` | `1e-7` | Speaker-cluster keep threshold — clusters with weaker presence than this are dropped. speakrs' own default; raise it to suppress spurious extra speakers, lower it to keep faint ones. |
+| `reconstruct_method` | `smoothed` | Turn-boundary reconstruction: `standard` (hard boundaries) or `smoothed` (softened by `reconstruct_method_epsilon`). Stored as a plain string. |
+| `reconstruct_method_epsilon` | `0.1` | Smoothing strength for `reconstruct_method = "smoothed"`, in [0, 1] (speakrs' default). Ignored when the method is `standard`. |
+| `preload_at_startup` | `false` | Warm the local diarization models at daemon startup instead of lazily on the first recording that needs them. Off by default so users who keep diarization off (or rarely diarize) don't pay the ~500 MB RAM up front; turn it on to trade that memory for a fast first diarized recording. No-op for `none`/cloud providers. |
 | `recognize_speakers` | `true` | Capture a voiceprint per diarized speaker and match it against the names you've assigned before, suggesting who they are when you open a recording. Naming a speaker enrolls their voice into a cross-recording library. Local diarization only. |
 | `voiceprint_match_threshold` | `0.5` | Cosine-similarity bar (0–1) a voiceprint must clear to be suggested as a known speaker. Higher = stricter (fewer false matches, more misses). Tune to your own recordings. Used when `voiceprint_score_norm = "off"`. |
 | `voiceprint_score_norm` | `off` | Score normalization for speaker matching (V2). `off` (default) compares the raw cosine against `voiceprint_match_threshold` — byte-for-byte the previous behavior. `s_norm` / `as_norm` z-score each comparison against the *other* enrolled voices (the cohort), so one threshold means the same thing across speakers and sessions instead of drifting with how "central" a voice is. `s_norm` normalizes the probe side only; `as_norm` is symmetric (averages probe-side and target-side z-scores). Cohort = the named-voice library; a cohort of one degrades gracefully to the raw score. When on, the bar used is `voiceprint_score_norm_threshold`. Local diarization only; no Settings UI yet (config-only, follow-up). |
@@ -193,7 +198,7 @@ followed.
 | `api_url` | `""` | Override endpoint |
 | `model` | `llama3.2:3b` | Model id |
 | `prompt` | clean-up instruction | System prompt |
-| `timeout_secs` | `30` | LLM HTTP timeout |
+| `timeout_secs` | `300` | LLM HTTP timeout — generous, since an LLM cleaning a long transcript can take minutes; streaming providers bound idle time rather than total, so a slow-but-progressing local model never trips it |
 | `autostart_ollama` | `true` | Launch `ollama serve` on demand when an LLM step's effective connection is a **local** Ollama and nothing answers there. Applies to every step that inherits this connection (cleanup, summary, tags, titles, in-place polish). An Ollama that was already running when the daemon first probed it is never managed; one the daemon launched is stopped again at daemon shutdown. Remote URLs and non-Ollama providers never launch anything. |
 
 The cleanup provider speaks one of four wire protocols: `ollama`, `openai` (OpenAI-compatible chat completions — used by most cloud providers), `groq`, or `anthropic`. See [Providers & Models](../user-guide/providers_and_models.md).

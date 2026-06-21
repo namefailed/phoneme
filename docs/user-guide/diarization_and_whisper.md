@@ -70,7 +70,7 @@ When you record with [Meeting Mode](meeting_mode.md), Phoneme already separates
 *you* (the mic track) from *everyone else* (the system-audio track). Diarization
 goes further and labels the distinct speakers **within** a track.
 
-Pick the backend in **Settings → Transcription → Speaker Diarization**
+Pick the backend in **Settings → Diarization → Speaker Diarization**
 (`diarization.provider`):
 
 | Backend | Where it runs |

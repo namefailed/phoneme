@@ -40,8 +40,8 @@ keyboard-navigated yet, but `Esc` leaves it.)
 | `g` then `A` | Toggle the AI-activity panel (the floating brain/FAB; its log persists across restarts) |
 | `g` then `/` | Highlight the search bar (`h`/`l` then roam the header) |
 | `g` then `T` | Open the Tag Manager (quick popup) |
-| `g` then `P` | Settings → Managers → Profiles |
-| `g` then `S` | Settings → Managers → Saved searches |
+| `g` then `P` | Settings → Profiles |
+| `g` then `S` | Settings → Search (saved searches) |
 | `x` then `b` | Toggle the sidebar (vim twin of `Ctrl + B`) |
 | `x` then `/` | Toggle the top (search/header) bar (vim twin of `Ctrl + /`) |
 | `Ctrl + ,` | Open Settings |

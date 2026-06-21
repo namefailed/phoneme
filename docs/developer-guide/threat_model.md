@@ -13,7 +13,9 @@ update this file in the same PR.
 ## Assets worth protecting
 
 - **Transcripts and audio.** The point of the app; often sensitive (meetings,
-  personal notes). Stored under `%LOCALAPPDATA%\phoneme\data\`.
+  personal notes). Transcripts live in the SQLite catalog under
+  `%LOCALAPPDATA%\phoneme\`; audio files live under `recording.audio_dir`
+  (default `~/Documents/phoneme/audio`). See [Data Directories](data_directories.md).
 - **API keys.** `whisper.api_key` and `llm_post_process.api_key` for cloud
   transcription / LLM post-processing, kept in `config.toml` (DPAPI-encrypted at
   rest — see the mitigations table).

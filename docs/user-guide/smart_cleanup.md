@@ -118,17 +118,18 @@ If you don't have the hardware to run a local model, or want the best reasoning 
 2. Enter the **Model Name** (the model field can fetch the live list via **Refresh**, or type any model).
 3. Enter your **API Key**.
 
-A **timeout** (`[llm_post_process].timeout_secs`, default 30) controls how long Phoneme waits for a *cloud* LLM before falling back to the un-cleaned transcript.
+A **timeout** (`[llm_post_process].timeout_secs`, default 300) controls how long Phoneme waits for the cleanup LLM before falling back to the un-cleaned transcript.
 
 > [!NOTE]
-> **Local Ollama gets extra headroom.** A local model often needs to load into
-> memory before it answers, and the first run after a reboot can be slow. For
-> the local Ollama path Phoneme floors the wait at **at least ~120 seconds** —
-> even when `timeout_secs` is the default 30 — and it measures *idle* time (how
-> long it goes without new output), not total generation time. So a slow first
-> run still finishes: as long as the model keeps producing tokens, it is given
-> all the time it needs. The timeout only fires on a genuine stall, and when it
-> does the message tells you what to do — *try a smaller model or raise
+> **The timeout bounds idle time, not total generation.** A long transcript can
+> legitimately take minutes to clean, so for streaming providers Phoneme measures
+> *idle* time (how long the model goes without producing new output), not total
+> generation time. As long as the model keeps emitting tokens, it is given all the
+> time it needs — the timeout only fires on a genuine stall. The streaming path
+> also floors the wait at **at least ~120 seconds**, so a local model that has to
+> load into memory before its first token (slow right after a reboot) still gets
+> room to start even if you set `timeout_secs` lower. When the timeout does fire,
+> the message tells you what to do — *try a smaller model or raise
 > `timeout_secs`*.
 
 ## 📝 Prompts & Presets

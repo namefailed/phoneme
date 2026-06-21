@@ -216,8 +216,8 @@ fallback.
 ## Live Preview provider
 
 Live Preview can use its **own** transcription provider so it never contends with
-the final transcription. Configure it in **Settings → Transcription → Live
-Preview** (`[preview_whisper]`). Leaving it unset means the preview reuses your
+the final transcription. Configure it in **Settings → Live Preview**
+(`[preview_whisper]`). Leaving it unset means the preview reuses your
 main transcription provider. Good preview choices are a small/fast local model on
 its own server, or a fast cloud API (Groq, OpenAI, Deepgram). See
 [Live Preview & Pre-Roll](streaming_preview_and_preroll.md).
@@ -262,7 +262,7 @@ choose. Nothing — recipe or models — is saved to `config.toml`.
 ## Making the picker readable — interface size & font
 
 If the provider and model dropdowns feel too small (or too big), scale the whole
-interface in **Settings → Interface**. Two appearance knobs control it:
+interface in **Settings → Appearance**. Two appearance knobs control it:
 
 - **UI size** (`interface.ui_font_size`, in **px**) sets the app's real root
   font size — `14` is the baseline. This is a true font size, **not** a zoom of

@@ -86,7 +86,8 @@ Smaller cross-cutting state uses module singletons instead of stores when nothin
 ```
 frontend/src/
 ├── main.ts                 # entry: global CSS + new App(#app)
-├── overlay.ts              # SEPARATE entry: the system-wide live-preview overlay window
+├── overlay.ts              # SEPARATE entry: the system-wide live-preview caption overlay window
+├── indicator.ts            # SEPARATE entry: the minimal recording-indicator pill window (waveform only)
 ├── App.ts                  # root controller: shell, router wiring, app-wide listeners
 ├── router.ts               # ViewName store ("recordings" | "settings" | "doctor" | "wizard")
 ├── components/
@@ -103,7 +104,7 @@ frontend/src/
 │   │   ├── RecordingsList.ts, RecordingDetail.ts, MergedConversationDetail.ts
 │   │   ├── Sidebar.ts, QueuePanel.ts, FailedPanel.ts, BulkActionBar.ts
 │   │   ├── ActionRow.ts, TagChips.ts, TranscriptEditor.ts, NotesEditor.ts
-│   │   ├── WaveformPlayer.ts, TimelineView.ts, TranscriptDiff.ts, ThinkingPopout.ts
+│   │   ├── WaveformPlayer.ts, TimelineView.ts, SyncedTranscript.ts, TranscriptDiff.ts, ThinkingPopout.ts
 │   │   ├── grouping.ts, mergeMeeting.ts, rerunActions.ts   # pure logic, well-tested
 │   │   └── Splitter.ts, RerunForm.ts, styles.css
 │   ├── SettingsView/       # index.ts (tabs/search/save) + one Section* per tab
@@ -122,7 +123,7 @@ frontend/src/
 ├── state/                  # store.ts, filter.ts, openRecording.ts, savedSearches.ts
 ├── data/curatedModels.ts   # shipped per-provider model recommendations
 ├── utils/                  # toast, error, format, date, diff, fuzzy, import, vimrc
-└── styles/                 # theme.css (all themes), reset.css, toast.css, overlay.css
+└── styles/                 # theme.css (all themes), reset.css, toast.css, overlay.css, indicator.css
 ```
 
 **Inside `RecordingsView/`** the panes and floating widgets worth knowing before you read the tree:
@@ -132,9 +133,9 @@ frontend/src/
 - `WaveformPlayer.ts` — wavesurfer.js playback for the open recording, with keyboard scrubbing (Enter enters scrub mode; `h`/`l` ±1s, `H`/`L` ±5s, Space play/pause, Esc leaves).
 - `BulkActionBar.ts` — the floating multi-select toolbar (tag / export / re-run / delete across the selection); `Shift+Enter` hands it the keyboard, then `h`/`l` roam its buttons.
 - `ThinkingPopout.ts` — the 🧠 AI-activity FAB and its floating panel (toggled with `g A`), which streams the live LLM prompt/response and keeps a persisted history of completed sessions across restarts.
-- `ActionRow.ts` / `TagChips.ts` / `TranscriptEditor.ts` / `NotesEditor.ts` / `TimelineView.ts` / `TranscriptDiff.ts` — the detail pane's action buttons, applied/suggested tag chips, the two CodeMirror editors, the synced-timeline view, and the version diff.
+- `ActionRow.ts` / `TagChips.ts` / `TranscriptEditor.ts` / `NotesEditor.ts` / `TimelineView.ts` / `SyncedTranscript.ts` / `TranscriptDiff.ts` — the detail pane's action buttons, applied/suggested tag chips, the two CodeMirror editors, the two read-only time-coded peeks (the "Timeline" segment list and the word-synced "Synced" view), and the version diff.
 
-**The second window:** [`overlay.ts`](../../frontend/src/overlay.ts) is its own Vite entry (`overlay.html`, wired up in `vite.config.ts`'s `rollupOptions.input`) loaded by a separate Tauri `WebviewWindow` that the tray creates for the system-wide live-caption overlay. It is deliberately standalone — no App, no router — and listens to the same `daemon-event` stream. If you add a third window, mirror that pattern.
+**The extra windows:** beyond the main app shell there are two standalone overlay windows, each its own Vite entry (listed in `vite.config.ts`'s `rollupOptions.input`) loaded by a separate Tauri `WebviewWindow` the tray creates: [`overlay.ts`](../../frontend/src/overlay.ts) (`overlay.html`) is the system-wide live-caption overlay, and [`indicator.ts`](../../frontend/src/indicator.ts) (`indicator.html`) is a minimal always-on-top recording-indicator pill — a waveform only, no captions, that works even with live preview off. Both are deliberately standalone (no App, no router) and listen to the same `daemon-event` stream. If you add a fourth window, mirror that pattern.
 
 ---
 
@@ -147,7 +148,7 @@ Every backend call goes through one typed wrapper in [`services/ipc.ts`](../../f
 ```
 ipc.ts listRecordings()
   → tauri invoke("list_recordings", { filter })       (WebView → tray process)
-    → #[tauri::command] in src-tauri/src/commands.rs  (the tray)
+    → #[tauri::command] in src-tauri/src/commands/    (the tray)
       → BridgeSlot: the tray's named-pipe connection to the daemon
         → daemon ipc_handler → catalog (SQLite) → reply travels back up
 ```
@@ -300,7 +301,7 @@ Per-device UI state lives in localStorage, **never** in config.toml (config is f
 
 ### 4.1 Setup
 
-Vitest with the **jsdom** environment (set in [`vite.config.ts`](../../frontend/vite.config.ts) — component tests touch `document`/`window`). Tests are colocated: `foo.ts` → `foo.test.ts`, currently 31 files / 374 tests covering services, state, utils, pure view logic (grouping, merging, diff), and component behavior (modals, forms, panels).
+Vitest with the **jsdom** environment (set in [`vite.config.ts`](../../frontend/vite.config.ts) — component tests touch `document`/`window`). Tests are colocated: `foo.ts` → `foo.test.ts`, currently 37 files / 461 tests covering services, state, utils, pure view logic (grouping, merging, diff), and component behavior (modals, forms, panels).
 
 ```powershell
 cd frontend
@@ -350,7 +351,7 @@ What it provides: a small set of **fully synthetic** recordings / tags / config 
 
 | I want to… | Touch |
 |---|---|
-| **Add a Tauri/IPC call** | Command in `src-tauri/src/commands.rs` (and the daemon request in `crates/phoneme-ipc/src/schema.rs` + `bin/phoneme-daemon/src/ipc_handler.rs` if it reaches the daemon) → typed wrapper in `services/ipc.ts` → payload-pinning test in `ipc.test.ts` → document in `docs/developer-guide/ipc_integration.md` |
+| **Add a Tauri/IPC call** | A `#[tauri::command]` in the right `src-tauri/src/commands/` module (`recordings.rs` / `config.rs` / `files.rs` / `system.rs` / `wizard.rs`), registered in `commands/mod.rs` (and the daemon request in `crates/phoneme-ipc/src/schema.rs` + `bin/phoneme-daemon/src/ipc_handler.rs` if it reaches the daemon) → typed wrapper in `services/ipc.ts` → payload-pinning test in `ipc.test.ts` → document in `docs/developer-guide/ipc_integration.md` |
 | **React to a new daemon event** | Add the variant to `DaemonEvent` in `services/events.ts` (mirroring `schema.rs`) → handle it where it matters (usually `RecordingsView.subscribeToEvents`, `QueuePanel`, or `notifications.ts`) |
 | **React to a new IPC request** | Send it through a typed wrapper in `services/ipc.ts` (camelCase top-level keys, snake_case nested) → call it from the view/widget that needs the data → refresh on the matching daemon event rather than hand-patching local state (mutations resolve `void`); pin the payload in `ipc.test.ts` |
 | **Add a setting** | The serde field in `crates/phoneme-core/src/config.rs` → the right `SettingsView/Section*.ts` (a `renderField` row bound to its dotted path; seed the table if it's new) → intent keywords in `searchKeywords.ts` if the label isn't obvious → `docs/developer-guide/config_reference.md` + the relevant user-guide page |
@@ -364,7 +365,7 @@ What it provides: a small set of **fully synthetic** recordings / tags / config 
 | **Add a theme** | One `html[data-theme="…"]` block in `styles/theme.css` (set every variable) → the theme `<select>` options in `SectionInterface.ts` |
 | **Persist a UI preference** | A `phoneme.`-prefixed localStorage key next to its consumer (try/catch, documented const) → add it to the table in §3.5 |
 | **Change toast behavior** | `utils/toast.ts` (mechanics) vs `services/notifications.ts` (which pipeline events toast, gating) |
-| **Touch the live-preview overlay** | `overlay.ts` + `styles/overlay.css` (window creation lives in `src-tauri/src/overlay.rs`) |
+| **Touch the live-preview overlay** | `overlay.ts` + `styles/overlay.css` (window creation lives in `src-tauri/src/overlay.rs`); the minimal recording-indicator pill is the sibling `indicator.ts` + `styles/indicator.css` / `src-tauri/src/indicator.rs` |
 | **Change Doctor checks** | Backend checks come from the tray/daemon; shared GUI logic (categories, Fix All, badges) in `components/doctorChecks.ts`; surfaces in `DoctorModal.ts` / `DoctorView/` |
 
 ---
