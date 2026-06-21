@@ -351,6 +351,8 @@ let config: Record<string, unknown> = {
   in_place: {
     cleanup: "fast", full_pipeline: false, type_first: false, save_to_library: true,
     type_mode: "type", app_overrides: {}, app_context: false, app_context_denylist: [], stream_type: false,
+    // Empty map = the built-in command set; enabled by default (today's behavior).
+    voice_commands: {}, voice_commands_enabled: true,
   },
   recording: { audio_dir: "~/Documents/phoneme/audio", sample_rate: 16000, channels: 1, silence_threshold_dbfs: -45.0, silence_window_ms: 3000, max_duration_secs: 10800, input_device: "default", source: "microphone", pre_roll_ms: 1500, streaming_preview: false, auto_stop_on_silence: false, meeting_preview: "toggle", meeting_preview_own_server: false, normalize: false, normalize_target_dbfs: -1.0, preview_adaptive: true, preview_reveal_words_per_sec: 12.0, preview_idle_ms: 2500, preview_waveform: true },
   hook: { commands: ["powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-stdout.ps1"], timeout_secs: 30, webhook_url: null, run_on_transcribe: true, keyword_rules: [
@@ -511,7 +513,16 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     case "record_stop":
     case "wizard_download_diarization_model":
     case "wizard_pull_ollama_model":
+    case "ollama_pull_model":
+    case "ollama_delete_model":
     case "wizard_run_installer": return undefined;
+    // Local-Ollama model manager: a stub install list so the manager renders in
+    // the browser preview without a real Ollama.
+    case "ollama_list_installed":
+      return [
+        { name: "llama3.2:3b", size: 2_019_393_189, modified_at: "2026-06-10T09:00:00Z" },
+        { name: "phi3:mini", size: 2_318_920_000, modified_at: "2026-06-01T10:00:00Z" },
+      ];
     case "record_start": return { id: "mock-rec" };
     case "list_recordings": {
       const f = (args.filter ?? {}) as Record<string, unknown>;

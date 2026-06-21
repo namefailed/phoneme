@@ -11,6 +11,15 @@ trust boundary.*
 
 ### Transcripts
 
+- [x] **User-editable dictation voice commands** — the spoken editing phrases
+  ("new line", "new paragraph", "scratch that") are now a customizable
+  phrase → action map under **Settings → Dictation → Voice commands** (and
+  `[in_place.voice_commands]` in config). Add your own wording, localize, disable
+  individual commands, or turn the whole pass off — across every cleanup mode
+  (Fast, Off, and AI cleanup, where a customized map is described to the cleanup
+  model too). An empty map keeps the built-in defaults, so existing configs are
+  unchanged; an entry with an unknown action is dropped on load with a warning
+  rather than failing the config.
 - [x] **Library-wide find & replace** — `phoneme find-replace --library <FIND>
   <REPLACE>` (and the new `find_replace_library` IPC request) runs the same
   literal, revertible replacement across **every** recording's transcript in one
@@ -67,6 +76,20 @@ trust boundary.*
   pure; an explicit `reconcile_and_persist_config` step does the migrate-and-write
   and `apply_runtime_defaults` does the in-memory preview wiring, each called
   deliberately at startup.
+
+### Providers & models
+
+- [x] **Manage your local Ollama models from inside the app** — a new **Manage
+  local models** surface (a button on the Models picker's Post-processing tab and
+  in **Settings → Post-Processing**, both shown when your Cleanup provider is a
+  local Ollama) lists the models installed in Ollama with their on-disk size,
+  pulls a new one with a live progress bar, and deletes ones you no longer use
+  (behind a confirm). Previously the only in-app pull was buried in the first-run
+  wizard; now you can grow or shrink your local model set any time. Backed by the
+  tray's `ollama_list_installed` / `ollama_pull_model` / `ollama_delete_model`
+  commands talking to the local Ollama HTTP API (`/api/tags`, `/api/pull`,
+  `/api/delete`) — the same plane the wizard's pull already used, so there's no
+  daemon round-trip for a purely-local concern.
 
 ### Internals & refactors
 

@@ -8,9 +8,42 @@
 //! self-corrections, tone, list formatting — is out of scope here; that's
 //! what `cleanup = "llm"` is for.
 
+use std::collections::BTreeMap;
+
 /// Filler words dropped when they appear as standalone words. Deliberately
 /// short: "like"/"so"/"well" carry meaning too often to strip safely.
 const FILLERS: &[&str] = &["um", "uh", "uhm", "uhh", "umm", "erm", "ehm", "hmm"];
+
+/// The action strings a voice-command entry may dispatch on — the single source
+/// of truth for both the built-in map and the config validator:
+/// * `"newline"`   inserts a single line break (`\n`)
+/// * `"paragraph"` inserts a blank line (`\n\n`)
+/// * `"scratch"`   retracts the immediately preceding dictated sentence
+///
+/// An entry with any other action is dropped on config load (see
+/// `InPlaceConfig::effective_voice_commands`), so the lookup in
+/// [`apply_voice_commands`] only ever sees these three; an unexpected value is
+/// treated as plain text (a no-op) for safety.
+pub const VOICE_COMMAND_ACTIONS: &[&str] = &["newline", "paragraph", "scratch"];
+
+/// The built-in spoken-command map (phrase to action), the default when a user
+/// hasn't customized `[in_place.voice_commands]`. Phrases are lowercased to
+/// match the lowercased, connective-stripped command segments. This is the one
+/// source of truth for the shipped defaults — both the daemon's effective-map
+/// resolution and the dictation tests read it, so the defaults can never drift
+/// between the engine and the config layer.
+pub fn default_voice_commands() -> BTreeMap<String, String> {
+    [
+        ("new line", "newline"),
+        ("newline", "newline"),
+        ("new paragraph", "paragraph"),
+        ("scratch that", "scratch"),
+        ("delete that", "scratch"),
+    ]
+    .iter()
+    .map(|(phrase, action)| (phrase.to_string(), action.to_string()))
+    .collect()
+}
 
 /// Apply the fast dictation polish to raw whisper output.
 ///
@@ -23,8 +56,13 @@ const FILLERS: &[&str] = &["um", "uh", "uhm", "uhh", "umm", "erm", "ehm", "hmm"]
 /// 4. normalize whitespace and space-before-punctuation;
 /// 5. capitalize the first letter and ensure terminal punctuation.
 ///
+/// `commands` is the effective phrase->action voice-command map (built-in
+/// defaults, the user's override, or empty to disable the pass entirely — see
+/// [`apply_voice_commands`]). It is threaded in rather than read from a global
+/// so the caller controls the table per dictation.
+///
 /// Empty/whitespace input returns an empty string.
-pub fn fast_polish(raw: &str) -> String {
+pub fn fast_polish(raw: &str, commands: &BTreeMap<String, String>) -> String {
     let mut text = strip_annotations(raw);
     text = strip_fillers(&text);
     text = collapse_doubled_words(&text);
@@ -33,32 +71,32 @@ pub fn fast_polish(raw: &str) -> String {
     // Voice commands run last. The steps above split on whitespace and would
     // collapse an inserted newline, so the literal `\n`/`\n\n` go onto the
     // otherwise-polished text, where they survive through to the typed output.
-    apply_voice_commands(&text)
+    apply_voice_commands(&text, commands)
 }
 
 /// Spoken editing/formatting commands, applied to already-polished dictation.
 ///
-/// Conservative by design: only the three the roadmap names, and only when a
-/// command is its own sentence/segment, so a literal "on a new line of text"
-/// mid-sentence is left untouched (the boundary rule). Recognized:
-/// - "new line" / "newline" → a single line break (`\n`)
-/// - "new paragraph" → a blank line (`\n\n`)
-/// - "scratch that" / "delete that" → drop the preceding sentence (the thing
-///   just dictated), plus any line break sitting right after it.
+/// Conservative by design: a phrase is acted on only when it is its own
+/// sentence/segment, so a literal "on a new line of text" mid-sentence is left
+/// untouched (the boundary rule). The recognized phrases and what they do come
+/// from `commands` (phrase to action), so the set is user-configurable:
+/// - action `"newline"`   inserts a single line break (`\n`)
+/// - action `"paragraph"` inserts a blank line (`\n\n`)
+/// - action `"scratch"`   drops the preceding sentence (the thing just
+///   dictated), plus any line break sitting right after it.
 ///
-/// A leading connective ("and new line", "then scratch that") still matches.
-/// Anything not recognized is left exactly as dictated. With no command phrase
-/// present the input is returned byte-for-byte (normal dictation is untouched).
-pub fn apply_voice_commands(text: &str) -> String {
-    const PHRASES: &[&str] = &[
-        "new line",
-        "newline",
-        "new paragraph",
-        "scratch that",
-        "delete that",
-    ];
+/// `commands` is matched against the lowercased, connective-stripped segment,
+/// so its phrases should be lowercase (the built-in [`default_voice_commands`]
+/// already are; the config layer lowercases user phrases on load). A leading
+/// connective ("and new line", "then scratch that") still matches. Anything not
+/// in the map is left exactly as dictated. Pass an **empty** map to disable the
+/// pass entirely — the input is then returned byte-for-byte.
+pub fn apply_voice_commands(text: &str, commands: &BTreeMap<String, String>) -> String {
+    if commands.is_empty() {
+        return text.to_string();
+    }
     let lower = text.to_ascii_lowercase();
-    if !PHRASES.iter().any(|c| lower.contains(c)) {
+    if !commands.keys().any(|c| lower.contains(c.as_str())) {
         return text.to_string();
     }
 
@@ -69,10 +107,16 @@ pub fn apply_voice_commands(text: &str) -> String {
     let mut pieces: Vec<Piece> = Vec::new();
 
     for seg in split_sentences(text) {
-        match normalize_command(&seg).as_str() {
-            "new line" | "newline" => pieces.push(Piece::Break("\n")),
-            "new paragraph" => pieces.push(Piece::Break("\n\n")),
-            "scratch that" | "delete that" => {
+        // Look the segment up by its normalized form; an entry's action decides
+        // what happens. An unknown action (shouldn't occur — the config layer
+        // drops those) falls through to treating the segment as plain text.
+        match commands
+            .get(normalize_command(&seg).as_str())
+            .map(String::as_str)
+        {
+            Some("newline") => pieces.push(Piece::Break("\n")),
+            Some("paragraph") => pieces.push(Piece::Break("\n\n")),
+            Some("scratch") => {
                 // Retract the most recent dictated sentence, discarding any line
                 // break that immediately preceded the command.
                 while let Some(top) = pieces.pop() {
@@ -425,6 +469,12 @@ pub fn reconcile_edit(streamed: &str, final_text: &str) -> (usize, String) {
 mod tests {
     use super::*;
 
+    /// The built-in command map, the table every fast-lane dictation uses by
+    /// default. A short alias keeps the polish assertions below readable.
+    fn dv() -> BTreeMap<String, String> {
+        default_voice_commands()
+    }
+
     #[test]
     fn reconcile_noop_when_identical() {
         assert_eq!(
@@ -545,7 +595,7 @@ mod tests {
     #[test]
     fn polishes_a_typical_dictation() {
         assert_eq!(
-            fast_polish("um so the the meeting went uh pretty well"),
+            fast_polish("um so the the meeting went uh pretty well", &dv()),
             "So the meeting went pretty well."
         );
     }
@@ -553,19 +603,22 @@ mod tests {
     #[test]
     fn strips_whisper_annotations_but_keeps_real_parentheticals() {
         assert_eq!(
-            fast_polish("[BLANK_AUDIO] hello there (coughs)"),
+            fast_polish("[BLANK_AUDIO] hello there (coughs)", &dv()),
             "Hello there."
         );
         assert_eq!(
-            fast_polish("see the doc (it has the numbers, all of them) for details"),
+            fast_polish(
+                "see the doc (it has the numbers, all of them) for details",
+                &dv()
+            ),
             "See the doc (it has the numbers, all of them) for details."
         );
     }
 
     #[test]
     fn eats_filler_commas_without_doubling() {
-        assert_eq!(fast_polish("well um, yes"), "Well, yes.");
-        assert_eq!(fast_polish("so, um, anyway"), "So, anyway.");
+        assert_eq!(fast_polish("well um, yes", &dv()), "Well, yes.");
+        assert_eq!(fast_polish("so, um, anyway", &dv()), "So, anyway.");
     }
 
     #[test]
@@ -575,45 +628,45 @@ mod tests {
         // capitalizes the first letter, so the second sentence stays as dictated —
         // what matters here is the preserved `. ` boundary.
         assert_eq!(
-            fast_polish("that's all um. moving on"),
+            fast_polish("that's all um. moving on", &dv()),
             "That's all. moving on."
         );
-        assert_eq!(fast_polish("done uh! next"), "Done! next.");
-        assert_eq!(fast_polish("really uh? maybe"), "Really? maybe.");
+        assert_eq!(fast_polish("done uh! next", &dv()), "Done! next.");
+        assert_eq!(fast_polish("really uh? maybe", &dv()), "Really? maybe.");
         // Still doesn't double a mark the previous word already carries.
-        assert_eq!(fast_polish("stop. um. go"), "Stop. go.");
+        assert_eq!(fast_polish("stop. um. go", &dv()), "Stop. go.");
     }
 
     #[test]
     fn collapses_stutters_only_on_bare_words() {
         assert_eq!(
-            fast_polish("I I think the the plan works"),
+            fast_polish("I I think the the plan works", &dv()),
             "I think the plan works."
         );
         // The first "that" carries a comma → not a bare double, kept.
         assert_eq!(
-            fast_polish("we know that, that one fails"),
+            fast_polish("we know that, that one fails", &dv()),
             "We know that, that one fails."
         );
     }
 
     #[test]
     fn fixes_spacing_capitalization_and_terminal_punctuation() {
-        assert_eq!(fast_polish("  hello ,  world  "), "Hello, world.");
-        assert_eq!(fast_polish("already done!"), "Already done!");
+        assert_eq!(fast_polish("  hello ,  world  ", &dv()), "Hello, world.");
+        assert_eq!(fast_polish("already done!", &dv()), "Already done!");
     }
 
     #[test]
     fn empty_and_annotation_only_input_yield_empty() {
-        assert_eq!(fast_polish("   "), "");
-        assert_eq!(fast_polish("[BLANK_AUDIO]"), "");
+        assert_eq!(fast_polish("   ", &dv()), "");
+        assert_eq!(fast_polish("[BLANK_AUDIO]", &dv()), "");
     }
 
     #[test]
     fn voice_command_new_line_when_its_own_segment() {
         // "new line" said as its own utterance → a line break between sentences.
         assert_eq!(
-            fast_polish("first point. new line. second point."),
+            fast_polish("first point. new line. second point.", &dv()),
             "First point.\nSecond point."
         );
     }
@@ -621,7 +674,7 @@ mod tests {
     #[test]
     fn voice_command_new_paragraph() {
         assert_eq!(
-            fast_polish("intro here. new paragraph. body here."),
+            fast_polish("intro here. new paragraph. body here.", &dv()),
             "Intro here.\n\nBody here."
         );
     }
@@ -629,7 +682,7 @@ mod tests {
     #[test]
     fn voice_command_scratch_that_drops_prior_sentence() {
         assert_eq!(
-            fast_polish("send it tomorrow. scratch that. send it today."),
+            fast_polish("send it tomorrow. scratch that. send it today.", &dv()),
             "Send it today."
         );
     }
@@ -637,7 +690,7 @@ mod tests {
     #[test]
     fn voice_command_leading_connective_still_matches() {
         assert_eq!(
-            fast_polish("line one. and new line. line two."),
+            fast_polish("line one. and new line. line two.", &dv()),
             "Line one.\nLine two."
         );
     }
@@ -646,7 +699,7 @@ mod tests {
     fn literal_new_line_mid_sentence_is_not_a_command() {
         // The boundary rule: "new line" inside a longer sentence stays literal.
         assert_eq!(
-            fast_polish("put it on a new line of text"),
+            fast_polish("put it on a new line of text", &dv()),
             "Put it on a new line of text."
         );
     }
@@ -655,6 +708,94 @@ mod tests {
     fn no_command_phrase_leaves_text_untouched() {
         // The fast path: normal dictation must be byte-identical to fast_polish
         // without the voice-command step.
-        assert_eq!(apply_voice_commands("Hello, world."), "Hello, world.");
+        assert_eq!(
+            apply_voice_commands("Hello, world.", &dv()),
+            "Hello, world."
+        );
+    }
+
+    #[test]
+    fn default_voice_commands_match_the_legacy_hardcoded_set() {
+        // The built-in map must reproduce the exact phrase→action behavior the
+        // old hardcoded PHRASES const had, so an empty config still dictates
+        // byte-for-byte as before.
+        let d = default_voice_commands();
+        assert_eq!(d.get("new line").map(String::as_str), Some("newline"));
+        assert_eq!(d.get("newline").map(String::as_str), Some("newline"));
+        assert_eq!(
+            d.get("new paragraph").map(String::as_str),
+            Some("paragraph")
+        );
+        assert_eq!(d.get("scratch that").map(String::as_str), Some("scratch"));
+        assert_eq!(d.get("delete that").map(String::as_str), Some("scratch"));
+        assert_eq!(d.len(), 5);
+        // Every default action is a recognized one.
+        for action in d.values() {
+            assert!(
+                VOICE_COMMAND_ACTIONS.contains(&action.as_str()),
+                "default action {action:?} must be a recognized action"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_command_added_to_the_map_is_honored() {
+        // A user adds "break here" → paragraph on top of the defaults; it then
+        // behaves exactly like a built-in paragraph command.
+        let mut cmds = default_voice_commands();
+        cmds.insert("break here".into(), "paragraph".into());
+        assert_eq!(
+            fast_polish("intro here. break here. body here.", &cmds),
+            "Intro here.\n\nBody here."
+        );
+        // The original defaults still work alongside the new entry.
+        assert_eq!(
+            fast_polish("first point. new line. second point.", &cmds),
+            "First point.\nSecond point."
+        );
+    }
+
+    #[test]
+    fn disabled_default_phrase_is_left_literal() {
+        // A user who drops "new line" from their map (keeping the rest) should
+        // have "new line" typed literally instead of breaking the line. The
+        // command pass still runs (other commands are present), and it
+        // re-capitalizes the result's sentence start; mid-text sentences keep
+        // fast_polish's casing (only the first letter is uppercased).
+        let mut cmds = default_voice_commands();
+        cmds.remove("new line");
+        cmds.remove("newline");
+        assert_eq!(
+            fast_polish("first point. new line. second point.", &cmds),
+            "First point. new line. second point."
+        );
+        // A command still in the map keeps working.
+        assert_eq!(
+            fast_polish("send it tomorrow. scratch that. send it today.", &cmds),
+            "Send it today."
+        );
+    }
+
+    #[test]
+    fn empty_command_map_passes_text_through_literally() {
+        // An empty map disables the pass entirely — the daemon passes one when
+        // voice_commands_enabled is false. Command phrases are then just words:
+        // they still go through the rest of fast_polish (first-letter cap +
+        // terminal punct) but are never turned into line breaks or retractions,
+        // and the command pass's extra sentence-start capitalization never runs.
+        let empty = BTreeMap::new();
+        assert_eq!(
+            fast_polish("first point. new line. second point.", &empty),
+            "First point. new line. second point."
+        );
+        assert_eq!(
+            fast_polish("send it tomorrow. scratch that. send it today.", &empty),
+            "Send it tomorrow. scratch that. send it today."
+        );
+        // apply_voice_commands directly is a pure pass-through on an empty map.
+        assert_eq!(
+            apply_voice_commands("scratch that. keep this.", &empty),
+            "scratch that. keep this."
+        );
     }
 }

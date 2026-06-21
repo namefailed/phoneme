@@ -98,7 +98,6 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 - 🔬 **Per-app tone / register** — adapt the polish style (email vs. code vs. prose), not just jargon, per foreground app.
 - 🔬 **Real-time translation dictation** — speak one language, type another (Whisper translate path).
 - 🔬 **Snippet / macro expansion** — "insert my signature / address" expanded inline during dictation.
-- 🔬 **User-defined dictation commands** — make the spoken-command phrase set user-editable. *(The command engine already runs — `apply_voice_commands` handles "new line / scratch that" etc. — but the phrase set is hardcoded; this exposes it. Distinct from the rejected always-listening wake word.)*
 - 🔬 **Dictation history / re-grab last** — a quick popover of recent typed snippets to re-paste when focus was lost or the wrong app got it (the #1 dictation failure mode). Wispr Flow keeps a history for exactly this; dictations are already saved, there's just no fast re-grab affordance.
 - 🔬 **Spoken-language detection → routing** — act on Whisper's auto-detected language per dictation (surface/route) instead of the single configured BCP-47 hint. Detection only; distinct from the translation-dictation item above.
 

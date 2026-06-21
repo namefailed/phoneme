@@ -208,6 +208,28 @@ full_pipeline = false
 # Ignored on the fast lane (full_pipeline = false), which always types at once.
 type_first = false
 
+# Master switch for spoken editing commands ("new line", "scratch that", …).
+# true (default) interprets them; false types every phrase literally.
+voice_commands_enabled = true
+
+# `voice_commands` — OPTIONAL phrase -> action map for spoken editing commands.
+# Action is one of: "newline" (a line break), "paragraph" (a blank line), or
+# "scratch" (drop the sentence you just dictated). A command only triggers when
+# said on its own, so ordinary speech ("on a new line of code") is left alone.
+#
+# Leave this OUT (or empty) to use the BUILT-IN defaults below — that is the
+# shipped behavior. A non-empty table REPLACES the defaults (it is not merged),
+# so copy the ones you want to keep. Phrases are lowercased on load. Entries with
+# an unrecognized action are dropped on load with a warning (config still loads).
+#
+# Built-in defaults (what an empty map gives you):
+# [in_place.voice_commands]
+# "new line"      = "newline"
+# "newline"       = "newline"
+# "new paragraph" = "paragraph"
+# "scratch that"  = "scratch"
+# "delete that"   = "scratch"
+
 # `stt` — OPTIONAL dedicated STT provider for dictation, shaped exactly like
 # [whisper]. Unset (the default): dictation follows the live preview's provider
 # when the preview is enabled, else the main [whisper]. For a local model, point

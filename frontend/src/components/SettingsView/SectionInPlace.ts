@@ -248,6 +248,12 @@ export class SectionInPlace {
     if (!ip.app_overrides || typeof ip.app_overrides !== "object") ip.app_overrides = {};
     if (!Array.isArray(ip.app_context_denylist)) ip.app_context_denylist = [];
     if (typeof ip.app_context !== "boolean") ip.app_context = false;
+    // Voice-command editor bindings. An empty map means "use the built-in
+    // defaults" (the daemon's effective_voice_commands), so the table stays empty
+    // here unless the user customizes it — matching the daemon and keeping a
+    // pristine config byte-for-byte unchanged. The enable flag defaults on.
+    if (!ip.voice_commands || typeof ip.voice_commands !== "object") ip.voice_commands = {};
+    if (typeof ip.voice_commands_enabled !== "boolean") ip.voice_commands_enabled = true;
     const sttMode = this.sttMode();
 
     this.container.innerHTML = `
@@ -397,6 +403,55 @@ export class SectionInPlace {
       </div>
 
       <div class="settings-section">
+        <h3>Voice commands</h3>
+
+        <div class="settings-field">
+          <label>Interpret spoken commands</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "in_place.voice_commands_enabled", label: "", kind: "checkbox" },
+              ip.voice_commands_enabled ?? true,
+            )}</div>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              On by default. While dictating, a few spoken phrases become formatting instead of being
+              typed literally — say <b>"new line"</b> for a line break, <b>"new paragraph"</b> for a
+              blank line, or <b>"scratch that"</b> to drop the sentence you just dictated. A command
+              only triggers when it's said on its own, so ordinary speech ("put it on a new line of
+              code") is left as written. Turn this off to type every phrase literally.
+            </span>
+          </div>
+        </div>
+        ${
+          ip.voice_commands_enabled
+            ? `
+        <div class="settings-field">
+          <label>Command phrases</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Customize the phrase → action map: add your own wording (e.g. <code>break here</code> →
+              <b>Blank line</b>), localize the defaults, or remove ones you don't use. <b>Leave this
+              list empty to use the built-in defaults</b> (new line, new paragraph, scratch / delete
+              that). Once you add a row, the list <b>replaces</b> the defaults — add the ones you want
+              to keep.
+            </span>
+            <div id="ip-voice-commands" style="display: flex; flex-direction: column; gap: 6px; width: 100%;"></div>
+            <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
+              <input id="ip-vc-add-phrase" type="text" placeholder="Phrase (e.g. break here)"
+                style="flex: 1 1 auto; min-width: 0;" />
+              <select id="ip-vc-add-action">
+                <option value="newline">Line break</option>
+                <option value="paragraph">Blank line</option>
+                <option value="scratch">Scratch (drop last sentence)</option>
+              </select>
+              <button id="ip-vc-add-btn" type="button">Add</button>
+            </div>
+          </div>
+        </div>`
+            : ""
+        }
+      </div>
+
+      <div class="settings-section">
         <h3>Dictation pipeline</h3>
 
         <div class="settings-field">
@@ -490,10 +545,89 @@ export class SectionInPlace {
     this.container
       .querySelector<HTMLInputElement>('input[data-key="in_place.app_context"]')
       ?.addEventListener("change", () => this.render());
+    // The voice-commands enable toggle shows/hides the phrase editor; rebuild so
+    // it appears/hides. bindFieldEvents already wrote the new boolean.
+    this.container
+      .querySelector<HTMLInputElement>('input[data-key="in_place.voice_commands_enabled"]')
+      ?.addEventListener("change", () => this.render());
 
     this.renderAppOverrides();
     this.renderContextDenylist();
+    this.renderVoiceCommands();
     this.renderSttDetail();
+  }
+
+  /** Render the voice-command phrase→action rows + the Add control. Each row
+   *  writes straight into `in_place.voice_commands` (phrase keys lowercased to
+   *  match how the daemon compares command segments). An empty map means "use
+   *  the built-in defaults", so the empty state says exactly that. Only present
+   *  while voice commands are enabled (the section rebuilds when that flips). */
+  private renderVoiceCommands() {
+    const host = this.container.querySelector<HTMLElement>("#ip-voice-commands");
+    if (!host) return;
+    const map: Record<string, string> = this.config.in_place.voice_commands ?? {};
+    const phrases = Object.keys(map).sort();
+    // Human-facing label for each action value (the daemon's action strings).
+    const actionLabel: Record<string, string> = {
+      newline: "Line break",
+      paragraph: "Blank line",
+      scratch: "Scratch (drop last sentence)",
+    };
+    const optionFor = (cur: string) =>
+      (["newline", "paragraph", "scratch"] as const)
+        .map(
+          (a) =>
+            `<option value="${a}" ${cur === a ? "selected" : ""}>${escHtml(actionLabel[a])}</option>`,
+        )
+        .join("");
+    host.innerHTML =
+      phrases.length === 0
+        ? `<span style="font-size: 0.7857rem; color: var(--fg-faded);">Using the built-in defaults — add a row to start a custom set (it replaces the defaults).</span>`
+        : phrases
+            .map(
+              (phrase) => `
+        <div class="ip-vc-row" data-phrase="${escHtml(phrase)}"
+          style="display: flex; gap: 6px; width: 100%; align-items: center;">
+          <span style="flex: 1 1 auto; min-width: 0; font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis;">${escHtml(phrase)}</span>
+          <select class="ip-vc-action" data-phrase="${escHtml(phrase)}">${optionFor(map[phrase])}</select>
+          <button class="ip-vc-remove" type="button" data-phrase="${escHtml(phrase)}" title="Remove">✕</button>
+        </div>`,
+            )
+            .join("");
+
+    host.querySelectorAll<HTMLSelectElement>(".ip-vc-action").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        const phrase = sel.getAttribute("data-phrase");
+        if (phrase) this.config.in_place.voice_commands[phrase] = sel.value;
+      });
+    });
+    host.querySelectorAll<HTMLButtonElement>(".ip-vc-remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const phrase = btn.getAttribute("data-phrase");
+        if (phrase) delete this.config.in_place.voice_commands[phrase];
+        this.renderVoiceCommands();
+      });
+    });
+
+    const phraseInput = this.container.querySelector<HTMLInputElement>("#ip-vc-add-phrase");
+    const actionSel = this.container.querySelector<HTMLSelectElement>("#ip-vc-add-action");
+    const addBtn = this.container.querySelector<HTMLButtonElement>("#ip-vc-add-btn");
+    const add = () => {
+      // Lowercase the phrase — the daemon compares against the lowercased,
+      // connective-stripped command segment, so "New Line" / "new line" match.
+      const raw = (phraseInput?.value ?? "").trim().toLowerCase();
+      if (!raw) return;
+      this.config.in_place.voice_commands[raw] = actionSel?.value ?? "newline";
+      if (phraseInput) phraseInput.value = "";
+      this.renderVoiceCommands();
+    };
+    addBtn?.addEventListener("click", add);
+    phraseInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        add();
+      }
+    });
   }
 
   /** Render the per-app delivery rows (app name + mode + remove) and wire the

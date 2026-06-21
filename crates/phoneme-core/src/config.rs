@@ -1506,6 +1506,31 @@ pub struct InPlaceConfig {
     /// committed-word stream this types from.
     #[serde(default)]
     pub stream_type: bool,
+    /// User-editable spoken editing commands: a map of phrase to action, where
+    /// the action is one of `"newline"` (a single line break), `"paragraph"` (a
+    /// blank line), or `"scratch"` (retract the immediately preceding dictated
+    /// sentence). Lets a user add their own phrases ("break here"), disable a
+    /// built-in one (drop it from the map), or localize the wording.
+    ///
+    /// **Default empty**, which means *use the built-in set* (see
+    /// [`effective_voice_commands`](Self::effective_voice_commands)) — so an
+    /// absent/empty `[in_place.voice_commands]` reproduces today's exact
+    /// behavior. A non-empty map fully replaces the built-ins; copy the defaults
+    /// in first if you want to extend rather than override them.
+    ///
+    /// Phrases are lowercased on load (see `deserialize_lowercase_keys`) so a
+    /// cased entry still matches the lowercased, connective-stripped command
+    /// segment the engine compares against. Entries whose action is not one of
+    /// the three recognized values are dropped on load with a warning (the
+    /// config still loads — a typo'd action never hard-fails startup).
+    #[serde(default, deserialize_with = "deserialize_lowercase_keys")]
+    pub voice_commands: std::collections::BTreeMap<String, String>,
+    /// Master switch for the spoken-command pass. **Default true.** When false,
+    /// no phrase is ever interpreted — "new line", "scratch that", etc. are
+    /// typed literally — regardless of `voice_commands`. Lets a user turn the
+    /// whole feature off without clearing their customized map.
+    #[serde(default = "default_true")]
+    pub voice_commands_enabled: bool,
 }
 
 impl Default for InPlaceConfig {
@@ -1524,6 +1549,11 @@ impl Default for InPlaceConfig {
             app_context: false,
             app_context_denylist: Vec::new(),
             stream_type: false,
+            // An empty `voice_commands` map + enabled = the built-in command
+            // set, so dictation interprets "new line"/"scratch that" exactly as
+            // before. `effective_voice_commands` swaps in the defaults at use.
+            voice_commands: std::collections::BTreeMap::new(),
+            voice_commands_enabled: true,
         }
     }
 }
@@ -1576,6 +1606,57 @@ impl InPlaceConfig {
             // (the title — if any — still only flows into the cleanup prompt).
             None => true,
         }
+    }
+
+    /// The spoken-command table the dictation engine should actually use.
+    ///
+    /// An **empty** `voice_commands` map means "use the built-ins", so this
+    /// returns [`dictation::default_voice_commands`] in that case and the user's
+    /// own map otherwise. A non-empty map fully replaces the defaults (it is not
+    /// merged), so a user who wants to extend the set copies the defaults in
+    /// first — matching how every other "empty = built-in" knob in the config
+    /// behaves and keeping the override semantics obvious.
+    ///
+    /// Only entries with a recognized action survive: an unknown action would
+    /// dispatch to nothing in [`dictation::apply_voice_commands`], so it is
+    /// dropped here defensively (the load-time pass in
+    /// [`InPlaceConfig::sanitize_voice_commands`] already removed and warned
+    /// about them, but a programmatically-built config goes through here too).
+    ///
+    /// Note this does **not** consult `voice_commands_enabled` — the daemon
+    /// checks that flag and passes an empty map to disable the pass, keeping the
+    /// "what's the active set" and "is the feature on" questions separate.
+    pub fn effective_voice_commands(&self) -> std::collections::BTreeMap<String, String> {
+        let base = if self.voice_commands.is_empty() {
+            crate::dictation::default_voice_commands()
+        } else {
+            self.voice_commands.clone()
+        };
+        base.into_iter()
+            .filter(|(_, action)| {
+                crate::dictation::VOICE_COMMAND_ACTIONS.contains(&action.as_str())
+            })
+            .collect()
+    }
+
+    /// Drop any `voice_commands` entry whose action is not one of the recognized
+    /// values ([`dictation::VOICE_COMMAND_ACTIONS`]), logging a warning per
+    /// dropped entry. Called once on config load so a typo'd action (e.g.
+    /// `"newpara"`) is surfaced and ignored rather than silently doing nothing
+    /// at every dictation — and crucially without failing the whole load.
+    pub fn sanitize_voice_commands(&mut self) {
+        self.voice_commands.retain(|phrase, action| {
+            let ok = crate::dictation::VOICE_COMMAND_ACTIONS.contains(&action.as_str());
+            if !ok {
+                tracing::warn!(
+                    phrase = %phrase,
+                    action = %action,
+                    "dropping in_place.voice_commands entry with unknown action \
+                     (expected one of: newline, paragraph, scratch)"
+                );
+            }
+            ok
+        });
     }
 }
 
@@ -3578,7 +3659,11 @@ impl Config {
     /// Load and parse a config file from disk.
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)?;
-        let cfg: Self = toml::from_str(&text)?;
+        let mut cfg: Self = toml::from_str(&text)?;
+        // Drop (with a warning) any voice-command entry whose action isn't one
+        // the engine recognizes, so a typo'd action is surfaced and ignored
+        // rather than silently no-opping — never fatal, the config still loads.
+        cfg.in_place.sanitize_voice_commands();
         cfg.validate()?;
         Ok(cfg)
     }
@@ -4631,6 +4716,97 @@ mod tests {
         cfg.in_place.app_context = true;
         cfg.in_place.app_context_denylist.push("1password".into());
         cfg.in_place.stream_type = true;
+        let serialized = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn voice_commands_absent_in_legacy_toml_default_to_the_builtins() {
+        // A config written before user-editable voice commands (no
+        // voice_commands / voice_commands_enabled keys) must still load with the
+        // feature on and the empty map → built-in command set.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(ip) = toml_val.get_mut("in_place").and_then(|v| v.as_table_mut()) {
+            ip.remove("voice_commands");
+            ip.remove("voice_commands_enabled");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy config without voice_commands");
+        // The stored map stays empty (no churn) but enabled defaults true.
+        assert!(parsed.in_place.voice_commands.is_empty());
+        assert!(parsed.in_place.voice_commands_enabled);
+        // And "empty map" resolves to the built-in default set — byte-for-byte
+        // the old hardcoded behavior.
+        assert_eq!(
+            parsed.in_place.effective_voice_commands(),
+            crate::dictation::default_voice_commands()
+        );
+    }
+
+    #[test]
+    fn effective_voice_commands_uses_user_map_when_non_empty() {
+        let mut ip = InPlaceConfig::default();
+        // A user fully replaces the defaults with a single custom phrase.
+        ip.voice_commands
+            .insert("break here".into(), "paragraph".into());
+        let eff = ip.effective_voice_commands();
+        assert_eq!(eff.len(), 1);
+        assert_eq!(eff.get("break here").map(String::as_str), Some("paragraph"));
+        // The built-in "new line" is NOT present — a non-empty map replaces, not
+        // merges.
+        assert!(!eff.contains_key("new line"));
+    }
+
+    #[test]
+    fn sanitize_voice_commands_drops_unknown_actions_without_failing_load() {
+        // A hand-edited config with a typo'd action loads (no hard-fail) and the
+        // bad entry is dropped; the good ones survive.
+        let toml = r#"
+            type_mode = "type"
+
+            [voice_commands]
+            "new line"   = "newline"
+            "blank"      = "newpara"
+        "#;
+        let mut parsed: InPlaceConfig = toml::from_str(toml).unwrap();
+        parsed.sanitize_voice_commands();
+        assert!(parsed.voice_commands.contains_key("new line"));
+        assert!(
+            !parsed.voice_commands.contains_key("blank"),
+            "the unknown-action entry should be dropped"
+        );
+        // effective_voice_commands also filters defensively, so even an
+        // un-sanitized in-memory bad action never reaches the engine.
+        let mut dirty = InPlaceConfig::default();
+        dirty.voice_commands.insert("oops".into(), "bogus".into());
+        assert!(dirty.effective_voice_commands().is_empty());
+    }
+
+    #[test]
+    fn voice_commands_lowercase_cased_phrases_on_load() {
+        // A cased phrase must canonicalize lowercased so it matches the
+        // lowercased command segment the engine compares against.
+        let toml = r#"
+            type_mode = "type"
+
+            [voice_commands]
+            "New Line" = "newline"
+        "#;
+        let parsed: InPlaceConfig = toml::from_str(toml).unwrap();
+        assert!(parsed.voice_commands.contains_key("new line"));
+    }
+
+    #[test]
+    fn voice_commands_round_trip_through_toml() {
+        let mut cfg = Config::default();
+        cfg.in_place
+            .voice_commands
+            .insert("break here".into(), "paragraph".into());
+        cfg.in_place.voice_commands_enabled = false;
         let serialized = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(parsed, cfg);

@@ -75,6 +75,45 @@ speech safe, a command only triggers when it's said on its own — "put it on a
 new line of code" mid-sentence is left as written. (With AI cleanup on, the
 model is asked to apply them, which handles looser phrasing too.)
 
+### Make them your own
+
+The phrase set is **fully editable** under **Settings → Dictation → Voice
+commands**:
+
+- **Add your own wording** — e.g. map `"break here"` to a blank line, or
+  `"clear that"` to scratch.
+- **Localize** — replace the English phrases with ones in your language.
+- **Disable individual commands** — drop a phrase from the list so it's typed
+  literally instead.
+- **Turn the whole thing off** — the **Interpret spoken commands** toggle types
+  every phrase literally without clearing your custom list.
+
+Each command maps to one of three **actions**: a **line break**, a **blank
+line**, or **scratch** (drop the sentence you just dictated). Leave the list
+empty to use the built-in defaults; **once you add a row, your list replaces the
+defaults**, so add the ones you want to keep. A customized map is honored in all
+three cleanup modes — including AI cleanup, where your actual phrases are
+described to the cleanup model.
+
+In `config.toml` the same map lives under `[in_place.voice_commands]` (phrase →
+action), gated by `voice_commands_enabled`:
+
+```toml
+[in_place]
+voice_commands_enabled = true
+
+[in_place.voice_commands]
+"new line"      = "newline"     # keep the defaults you still want…
+"new paragraph" = "paragraph"
+"scratch that"  = "scratch"
+"break here"    = "paragraph"   # …and add your own
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `voice_commands_enabled` | bool | `true` | Master switch. `false` types every phrase literally, regardless of the map. |
+| `voice_commands` | map (phrase → `"newline"` \| `"paragraph"` \| `"scratch"`) | `{}` (empty) | Empty = the built-in set. A non-empty map fully replaces the defaults. Phrases are lowercased on load; entries with an unknown action are dropped with a warning (the config still loads). |
+
 > [!NOTE]
 > In-place runs its own fast path, so the [live streaming
 > preview](streaming_preview_and_preroll.md) is **skipped** during dictation —

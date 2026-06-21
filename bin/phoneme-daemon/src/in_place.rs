@@ -30,11 +30,75 @@ use std::path::{Path, PathBuf};
 /// Prepended to the in-place LLM cleanup prompt so spoken editing commands are
 /// interpreted, not echoed. Kept local to dictation rather than baked into the
 /// global post-processing prompt. The rule-based `fast_polish` fallback applies
-/// the same three commands, so behavior is consistent whether the LLM runs or
-/// not.
+/// the same commands, so behavior is consistent whether the LLM runs or not.
+///
+/// This is the **default-set** directive, used verbatim when the user hasn't
+/// customized `[in_place].voice_commands` (so the built-in phrases are in play).
+/// A customized map gets a directive generated from its own phrases by
+/// [`voice_command_directives`] instead.
 const VOICE_COMMAND_DIRECTIVES: &str = "The text is dictation that may contain spoken editing commands. \
 Treat \"new line\" as a line break, \"new paragraph\" as a blank line, and \"scratch that\" (or \"delete that\") \
 as an instruction to remove the immediately preceding phrase. Apply these edits and do not include the command words in the output.";
+
+/// The voice-command directive to prepend to the LLM cleanup prompt for the
+/// given effective command map, or `None` when there are no commands to
+/// interpret (the map is empty — voice commands are disabled).
+///
+/// * empty map → `None` (commands off; the prompt is sent as-is).
+/// * the built-in default set → the static [`VOICE_COMMAND_DIRECTIVES`], so the
+///   shipped behavior is unchanged byte-for-byte.
+/// * a customized map → a directive listing the user's actual phrases grouped by
+///   action, so the LLM honors the user's wording (and a removed default is not
+///   advertised to the LLM either).
+fn voice_command_directives(cmds: &std::collections::BTreeMap<String, String>) -> Option<String> {
+    if cmds.is_empty() {
+        return None;
+    }
+    if *cmds == phoneme_core::dictation::default_voice_commands() {
+        return Some(VOICE_COMMAND_DIRECTIVES.to_string());
+    }
+    // Group phrases by action so the directive reads "Treat A or B as a line
+    // break" rather than repeating the clause per phrase.
+    let mut newline: Vec<&str> = Vec::new();
+    let mut paragraph: Vec<&str> = Vec::new();
+    let mut scratch: Vec<&str> = Vec::new();
+    for (phrase, action) in cmds {
+        match action.as_str() {
+            "newline" => newline.push(phrase),
+            "paragraph" => paragraph.push(phrase),
+            "scratch" => scratch.push(phrase),
+            _ => {}
+        }
+    }
+    let quote_join = |phrases: &[&str]| -> String {
+        phrases
+            .iter()
+            .map(|p| format!("\"{p}\""))
+            .collect::<Vec<_>>()
+            .join(" or ")
+    };
+    let mut clauses: Vec<String> = Vec::new();
+    if !newline.is_empty() {
+        clauses.push(format!("treat {} as a line break", quote_join(&newline)));
+    }
+    if !paragraph.is_empty() {
+        clauses.push(format!("treat {} as a blank line", quote_join(&paragraph)));
+    }
+    if !scratch.is_empty() {
+        clauses.push(format!(
+            "treat {} as an instruction to remove the immediately preceding phrase",
+            quote_join(&scratch)
+        ));
+    }
+    if clauses.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "The text is dictation that may contain spoken editing commands. {}. \
+         Apply these edits and do not include the command words in the output.",
+        clauses.join(", ")
+    ))
+}
 
 /// Run the fast lane for a just-stopped in-place recording. Detached: errors
 /// surface through the catalog status + `TranscriptionFailed` (toasted by the
@@ -334,10 +398,22 @@ async fn transcribe_polish_type(
     drop(permit);
 
     let raw = transcription.text.clone();
+    // The effective spoken-command table for this dictation, resolved once and
+    // threaded into every polish path below. With voice commands disabled it's
+    // an empty map, which makes apply_voice_commands/fast_polish a pure
+    // pass-through (the phrases are typed literally). With it enabled, an empty
+    // user map resolves to the built-in defaults — byte-for-byte the historic
+    // behavior — and a customized map replaces them.
+    let cmds = if cfg.in_place.voice_commands_enabled {
+        cfg.in_place.effective_voice_commands()
+    } else {
+        std::collections::BTreeMap::new()
+    };
     let polished = match cfg.in_place.cleanup.as_str() {
         // Even with cleanup off, honor the spoken editing commands (the rule
-        // pass is a no-op on dictation that doesn't contain them).
-        "off" => phoneme_core::dictation::apply_voice_commands(&raw),
+        // pass is a no-op on dictation that doesn't contain them, or when the
+        // command map is empty).
+        "off" => phoneme_core::dictation::apply_voice_commands(&raw, &cmds),
         // A full LLM round-trip through the configured post-processing
         // provider — the user explicitly chose polish over latency.
         // `llm_provider_for_run` also launches the local Ollama when the
@@ -348,10 +424,17 @@ async fn transcribe_polish_type(
         // commands rule-based — consistent either way.
         "llm" => match crate::pipeline::llm_provider_for_run(state, &cfg.llm_post_process).await {
             Some(llm) => {
-                let mut prompt = format!(
-                    "{VOICE_COMMAND_DIRECTIVES}\n\n{}",
-                    cfg.llm_post_process.prompt
-                );
+                // The directive that teaches the LLM the spoken-command phrases.
+                // For the default command set (or when voice commands are off,
+                // i.e. `cmds` empty) keep the historic static directive; for a
+                // customized map, describe the actual phrases so the LLM honors
+                // the user's wording too. `voice_command_directives` returns
+                // None when there is nothing to interpret (commands disabled).
+                let directive = voice_command_directives(&cmds);
+                let mut prompt = match directive.as_deref() {
+                    Some(d) => format!("{d}\n\n{}", cfg.llm_post_process.prompt),
+                    None => cfg.llm_post_process.prompt.clone(),
+                };
                 // (6c) Opt-in app-aware context: when enabled (and the app was
                 // not denylisted at capture time), prepend the focused window's
                 // title so the LLM can adapt its polish to what you're working
@@ -368,15 +451,15 @@ async fn transcribe_polish_type(
                     Ok(out) => out,
                     Err(e) => {
                         tracing::warn!(error = %e, "in-place llm cleanup failed; typing raw text");
-                        phoneme_core::dictation::fast_polish(&raw)
+                        phoneme_core::dictation::fast_polish(&raw, &cmds)
                     }
                 }
             }
-            None => phoneme_core::dictation::fast_polish(&raw),
+            None => phoneme_core::dictation::fast_polish(&raw, &cmds),
         },
         // "fast" and anything unrecognized: the zero-latency rule polish
         // (which now includes the voice-command pass).
-        _ => phoneme_core::dictation::fast_polish(&raw),
+        _ => phoneme_core::dictation::fast_polish(&raw, &cmds),
     };
 
     // (6b) Resolve how the text lands for the focused app: a per-app override
@@ -688,5 +771,41 @@ mod tests {
     #[test]
     fn blank_text_yields_empty() {
         assert_eq!(dictation_title_snippet("   \n  "), "");
+    }
+
+    #[test]
+    fn directive_is_none_for_an_empty_command_map() {
+        // Commands disabled (empty map) → no directive, so the LLM prompt is the
+        // user's cleanup prompt verbatim.
+        let empty = std::collections::BTreeMap::new();
+        assert!(super::voice_command_directives(&empty).is_none());
+    }
+
+    #[test]
+    fn directive_is_the_static_default_for_the_builtin_map() {
+        // The default command set must reuse the historic static directive
+        // byte-for-byte, so shipped LLM-cleanup behavior is unchanged.
+        let d = phoneme_core::dictation::default_voice_commands();
+        assert_eq!(
+            super::voice_command_directives(&d).as_deref(),
+            Some(super::VOICE_COMMAND_DIRECTIVES)
+        );
+    }
+
+    #[test]
+    fn directive_lists_custom_phrases_grouped_by_action() {
+        // A customized map produces a directive that names the user's actual
+        // phrases so the LLM honors them; it is NOT the static default.
+        let mut cmds = std::collections::BTreeMap::new();
+        cmds.insert("break here".to_string(), "paragraph".to_string());
+        cmds.insert("zap that".to_string(), "scratch".to_string());
+        let d = super::voice_command_directives(&cmds).expect("custom map yields a directive");
+        assert_ne!(d, super::VOICE_COMMAND_DIRECTIVES);
+        assert!(d.contains("\"break here\""));
+        assert!(d.contains("blank line"));
+        assert!(d.contains("\"zap that\""));
+        assert!(d.contains("remove the immediately preceding phrase"));
+        // The removed default phrasing is not advertised to the LLM.
+        assert!(!d.contains("\"new line\""));
     }
 }
