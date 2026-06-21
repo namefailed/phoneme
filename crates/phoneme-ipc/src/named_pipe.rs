@@ -284,7 +284,10 @@ impl Transport for NamedPipeTransport {
 
         // Take ownership of the framed IO and reframe with DaemonEvent codec.
         // After this point, self.framed is None — further request() calls return Closed.
-        let old = self.framed.take().expect("framed is Some until the stream is closed");
+        let old = self
+            .framed
+            .take()
+            .expect("framed is Some until the stream is closed");
         let parts = old.into_parts();
 
         let mut new_parts =

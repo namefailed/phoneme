@@ -300,7 +300,6 @@ fn replace_ignore_case(haystack: &str, needle: &str, replacement: &str) -> (usiz
     (count, out)
 }
 
-
 mod embeddings;
 mod recordings;
 mod saved_search;
@@ -371,7 +370,12 @@ fn row_to_cached_vector(row: &sqlx::sqlite::SqliteRow) -> Result<CachedVector> {
         Some(
             bytes
                 .chunks_exact(4)
-                .map(|c| f32::from_le_bytes(c.try_into().expect("chunks_exact(4) yields exactly 4 bytes")))
+                .map(|c| {
+                    f32::from_le_bytes(
+                        c.try_into()
+                            .expect("chunks_exact(4) yields exactly 4 bytes"),
+                    )
+                })
                 .collect(),
         )
     } else {

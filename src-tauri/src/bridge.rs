@@ -343,7 +343,12 @@ impl BridgeSlot {
         }
         // Inside a backoff window: report down without re-attempting, so a burst
         // of UI actions during an outage cannot spawn-storm the daemon.
-        if !self.backoff.lock().expect("backoff mutex poisoned").may_attempt(Instant::now()) {
+        if !self
+            .backoff
+            .lock()
+            .expect("backoff mutex poisoned")
+            .may_attempt(Instant::now())
+        {
             return None;
         }
         let config = crate::config_io::read().unwrap_or_default();
@@ -353,7 +358,10 @@ impl BridgeSlot {
         match Bridge::connect(config).await {
             Ok(b) => {
                 tracing::info!("connected to daemon on retry");
-                self.backoff.lock().expect("backoff mutex poisoned").record_success();
+                self.backoff
+                    .lock()
+                    .expect("backoff mutex poisoned")
+                    .record_success();
                 *slot = Some(b.clone());
                 Some(b)
             }

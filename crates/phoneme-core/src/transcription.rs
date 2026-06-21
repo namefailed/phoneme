@@ -1516,7 +1516,9 @@ impl TranscriptionProvider for AssemblyAiProvider {
                             });
                         }
 
-                        let utterances = t.utterances.expect("utterances is Some; the is_none() case returned above");
+                        let utterances = t
+                            .utterances
+                            .expect("utterances is Some; the is_none() case returned above");
                         let mut unique_speakers = std::collections::HashSet::new();
                         for u in &utterances {
                             unique_speakers.insert(u.speaker.clone());

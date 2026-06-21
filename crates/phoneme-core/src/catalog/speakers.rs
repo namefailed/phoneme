@@ -997,5 +997,4 @@ impl Catalog {
         out.sort_by_key(|s| s.speaker_label);
         out
     }
-
 }

@@ -176,5 +176,4 @@ impl Catalog {
         let filter = crate::SavedSearchFilter::parse_to_list_filter(&filter_json)?;
         self.list(&filter).await
     }
-
 }

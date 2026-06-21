@@ -172,7 +172,9 @@ pub fn compute_eer(genuine: &[f32], impostor: &[f32]) -> EerReport {
     // never reaches the all-reject end, `diff = far - frr` never changes sign, and
     // `find_eer` returns `None` instead of the ~0.5 chance EER. The extra point
     // gives the sign change the interpolation needs.
-    let highest = *thresholds.last().expect("thresholds is non-empty; sentinels were inserted above");
+    let highest = *thresholds
+        .last()
+        .expect("thresholds is non-empty; sentinels were inserted above");
     thresholds.push(highest + 1.0);
 
     let g = genuine.len() as f32;

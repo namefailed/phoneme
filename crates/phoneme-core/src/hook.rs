@@ -240,8 +240,8 @@ pub fn redact_secrets(text: &str) -> String {
     .expect("valid static regex");
     // `{8,}` keeps prose like "bearer of bad news" intact; real bearer tokens
     // are far longer.
-    let bearer = regex::Regex::new(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{8,}=*")
-        .expect("valid static regex");
+    let bearer =
+        regex::Regex::new(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{8,}=*").expect("valid static regex");
     // The value may be bare or quoted; the key name and the `=` are kept so the
     // user can still tell which assignment their script printed.
     let assigned = regex::Regex::new(

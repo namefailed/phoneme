@@ -362,7 +362,11 @@ impl Catalog {
 
             let mut vec = Vec::with_capacity(bytes.len() / 4);
             for chunk in bytes.chunks_exact(4) {
-                vec.push(f32::from_le_bytes(chunk.try_into().expect("chunks_exact(4) yields exactly 4 bytes")));
+                vec.push(f32::from_le_bytes(
+                    chunk
+                        .try_into()
+                        .expect("chunks_exact(4) yields exactly 4 bytes"),
+                ));
             }
 
             if let Some(rec_id) = RecordingId::parse(id) {
@@ -459,7 +463,10 @@ impl Catalog {
     /// yet, pending backfill) are folded in from the `embeddings` table so nothing
     /// becomes unsearchable during migration. Dimension-mismatched vectors are
     /// skipped (the same guard as [`Self::semantic_search`]).
-    pub(crate) async fn vector_ranking(&self, query_vec: &[f32]) -> Result<Vec<(String, RecordingId, f32)>> {
+    pub(crate) async fn vector_ranking(
+        &self,
+        query_vec: &[f32],
+    ) -> Result<Vec<(String, RecordingId, f32)>> {
         let dim = query_vec.len();
         let query: Vec<f32> = query_vec.to_vec();
         // The decoded corpus (cached across queries; rebuilt after any write).
@@ -848,7 +855,12 @@ impl Catalog {
             }
             let vec: Vec<f32> = bytes
                 .chunks_exact(4)
-                .map(|c| f32::from_le_bytes(c.try_into().expect("chunks_exact(4) yields exactly 4 bytes")))
+                .map(|c| {
+                    f32::from_le_bytes(
+                        c.try_into()
+                            .expect("chunks_exact(4) yields exactly 4 bytes"),
+                    )
+                })
                 .collect();
             if mean.is_empty() {
                 mean = vec;
@@ -890,5 +902,4 @@ impl Catalog {
         }
         Ok(results)
     }
-
 }

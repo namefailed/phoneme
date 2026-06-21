@@ -811,5 +811,4 @@ impl Catalog {
             .await?;
         Ok(())
     }
-
 }

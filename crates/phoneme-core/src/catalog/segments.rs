@@ -646,5 +646,4 @@ impl Catalog {
             })
             .collect()
     }
-
 }
