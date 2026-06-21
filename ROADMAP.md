@@ -95,7 +95,7 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 
 ### Dictator
 - 📋 **App-aware context, tier 2** — opt-in screenshot → vision-LLM context for the polish prompt (tier 1, window-title context, already ships). The trust-sensitive, later half.
-- 🔬 **Per-app tone / register** — adapt the polish style (email vs. code vs. prose), not just jargon, per foreground app.
+- ✅ **Per-app tone / register** — *shipped:* pick the cleanup recipe (and so the polish style — email vs. code vs. prose) by the app focused at record start, via `[in_place].app_recipes`. See the changelog.
 - 🔬 **Real-time translation dictation** — speak one language, type another (Whisper translate path).
 - 🔬 **Snippet / macro expansion** — "insert my signature / address" expanded inline during dictation.
 - 🔬 **Dictation history / re-grab last** — a quick popover of recent typed snippets to re-paste when focus was lost or the wrong app got it (the #1 dictation failure mode). Wispr Flow keeps a history for exactly this; dictations are already saved, there's just no fast re-grab affordance.

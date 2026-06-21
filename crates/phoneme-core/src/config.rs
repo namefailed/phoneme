@@ -1623,6 +1623,29 @@ pub struct InPlaceConfig {
     /// foreground stem instead of silently no-opping to `type_mode`.
     #[serde(default, deserialize_with = "deserialize_lowercase_keys")]
     pub app_overrides: std::collections::BTreeMap<String, String>,
+    /// Per-app cleanup recipe overrides — pick the post-processing recipe (and so
+    /// the "tone"/register the cleanup LLM rewrites toward) by the foreground app
+    /// focused when dictation STARTS: formal for an email client, terse for an
+    /// editor, prose for a doc. Keyed by the lowercased executable stem (e.g.
+    /// `"code"`, `"outlook"`); the value is a [`PlaybookRecipe::id`]. The app
+    /// focused at record start is matched first; an unlisted (or undetectable) app
+    /// falls back to the binding's own recipe, else the global `default` recipe.
+    ///
+    /// **Precedence:** a custom hotkey that already names its own recipe wins —
+    /// the per-app map only fills in a recipe when the binding left one empty, so
+    /// a deliberately-bound per-key chain is never silently overridden by ambient
+    /// per-app tone. (Enforced daemon-side at record start, not here.)
+    ///
+    /// A matched app routes its dictation through the **full pipeline** (not the
+    /// fast lane) so the recipe's cleanup LLM step — the tone — actually runs;
+    /// that is slightly slower, exactly like binding a recipe to a custom hotkey.
+    ///
+    /// **Default empty** — no per-app tone, so dictation behaves exactly as
+    /// before. Keys are lowercased on load (see `deserialize_lowercase_keys`) so a
+    /// hand-edited cased entry like `Code` still matches the lowercased foreground
+    /// stem instead of silently no-opping.
+    #[serde(default, deserialize_with = "deserialize_lowercase_keys")]
+    pub app_recipes: std::collections::BTreeMap<String, String>,
     /// Opt-in (**default false**): include the focused window's title in the
     /// LLM cleanup prompt so dictation can adapt to what you're working in
     /// (code-ish in an editor, prose in a doc). Only consulted when
@@ -1685,6 +1708,9 @@ impl Default for InPlaceConfig {
             // overrides (every app uses `type_mode`), no app-aware context
             // (titles never read/sent), no streaming type.
             app_overrides: std::collections::BTreeMap::new(),
+            // No per-app tone: every app falls back to the binding/default recipe,
+            // so dictation post-processing is byte-for-byte today's behavior.
+            app_recipes: std::collections::BTreeMap::new(),
             app_context: false,
             app_context_denylist: Vec::new(),
             stream_type: false,
@@ -1722,6 +1748,34 @@ impl InPlaceConfig {
                 .map(|(_, mode)| mode.as_str())
         })
         .unwrap_or(self.type_mode.as_str())
+    }
+
+    /// The cleanup recipe id to run for the given foreground app stem, or `None`
+    /// when no per-app override applies.
+    ///
+    /// `app` is the lowercased executable stem of the window focused when the
+    /// dictation STARTED (`None` when it couldn't be detected). A matching
+    /// `app_recipes` entry with a non-empty value wins; otherwise this returns
+    /// `None` and the caller falls back to the binding's own recipe, then the
+    /// global `default`. With the default (empty) `app_recipes` this is always
+    /// `None` — today's post-processing behavior unchanged.
+    ///
+    /// Matching is case-insensitive on both sides, mirroring `resolve_type_mode`:
+    /// keys loaded from disk are already lowercased (see
+    /// `deserialize_lowercase_keys`), but a key added in memory (the Settings
+    /// form, a test) may carry mixed case. An empty/whitespace value is treated as
+    /// "no override" so a half-filled Settings row never forces an empty recipe.
+    /// This does not validate that the id names a live recipe — a deleted id is
+    /// handled downstream by `resolve_recipe`, which falls back to `default`,
+    /// matching how a per-binding `recipe_id` behaves.
+    pub fn resolve_app_recipe(&self, app: Option<&str>) -> Option<&str> {
+        app.and_then(|name| {
+            self.app_recipes
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, id)| id.as_str())
+                .filter(|id| !id.trim().is_empty())
+        })
     }
 
     /// Whether the focused window's title may be read for app-aware cleanup
@@ -5174,6 +5228,80 @@ mod tests {
             "cased key `Code` should load lowercased as `code`"
         );
         assert_eq!(parsed.resolve_type_mode(Some("code")), "paste");
+    }
+
+    #[test]
+    fn resolve_app_recipe_empty_map_is_none() {
+        // The non-negotiable invariant: a default config has no per-app tone, so
+        // every app (and no-app) resolves to `None` — the caller falls back to the
+        // binding/default recipe, i.e. today's post-processing behavior.
+        let ip = InPlaceConfig::default();
+        assert!(ip.app_recipes.is_empty());
+        assert_eq!(ip.resolve_app_recipe(None), None);
+        assert_eq!(ip.resolve_app_recipe(Some("code")), None);
+    }
+
+    #[test]
+    fn resolve_app_recipe_matches_case_insensitively() {
+        // A populated map picks the recipe by foreground app stem, case-insensitive
+        // on both sides; an unlisted app and an empty value both resolve to `None`
+        // (fall back to the binding/default recipe). Mirrors
+        // `in_place_app_override_resolution`.
+        let mut ip = InPlaceConfig::default();
+        ip.app_recipes
+            .insert("outlook".into(), "formal_email".into());
+        // A cased in-memory key (e.g. straight from the Settings form) must still
+        // resolve against the lowercased foreground stem, not silently no-op.
+        ip.app_recipes.insert("Code".into(), "terse".into());
+        // A half-filled row (empty value) must read as "no override", never force
+        // an empty recipe id downstream.
+        ip.app_recipes.insert("blank".into(), "   ".into());
+
+        assert_eq!(ip.resolve_app_recipe(Some("outlook")), Some("formal_email"));
+        assert_eq!(ip.resolve_app_recipe(Some("code")), Some("terse")); // cased key
+        assert_eq!(ip.resolve_app_recipe(Some("blank")), None); // empty value
+        assert_eq!(ip.resolve_app_recipe(Some("notepad")), None); // unlisted
+        assert_eq!(ip.resolve_app_recipe(None), None); // no app
+    }
+
+    #[test]
+    fn in_place_app_recipes_lowercase_cased_keys_on_load() {
+        // A hand-edited config.toml with a cased key must canonicalize to the
+        // lowercased form so it matches the lowercased foreground stem. Mirrors
+        // `in_place_app_overrides_lowercase_cased_keys_on_load`.
+        let toml = r#"
+            type_mode = "type"
+
+            [app_recipes]
+            Outlook = "formal_email"
+        "#;
+        let parsed: InPlaceConfig = toml::from_str(toml).unwrap();
+        assert!(
+            parsed.app_recipes.contains_key("outlook"),
+            "cased key `Outlook` should load lowercased as `outlook`"
+        );
+        assert_eq!(
+            parsed.resolve_app_recipe(Some("outlook")),
+            Some("formal_email")
+        );
+    }
+
+    #[test]
+    fn in_place_app_recipes_absent_in_legacy_toml_loads_empty() {
+        // A config written before per-app tone (no `app_recipes` key) must still
+        // load, with an empty map and no per-app override. Mirrors
+        // `in_place_phase2_fields_absent_in_legacy_toml_keep_old_behavior`.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(ip) = toml_val.get_mut("in_place").and_then(|v| v.as_table_mut()) {
+            ip.remove("app_recipes");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads config without app_recipes");
+        assert!(parsed.in_place.app_recipes.is_empty());
+        assert_eq!(parsed.in_place.resolve_app_recipe(Some("code")), None);
     }
 
     #[test]

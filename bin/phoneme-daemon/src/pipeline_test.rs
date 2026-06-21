@@ -2541,6 +2541,93 @@ async fn custom_hotkey_recording_runs_its_recipe_and_model() {
     assert!(state.pending_overrides.lock().unwrap().is_empty());
 }
 
+/// Per-app tone end to end: a recipe seeded into `pending_recipe` by the per-app
+/// map resolution (the recorder's `resolve_app_recipe` fill at record start, keyed
+/// by the focused app rather than a binding) runs through the full pipeline and is
+/// claimed-and-removed exactly like a per-binding recipe. The provenance of the
+/// ledger entry doesn't matter to `pipeline::run` — this asserts the per-app path
+/// inherits the recipe lifecycle unchanged: the cleanup-only recipe runs (cleaned
+/// transcript, no summary despite `summary.auto`) and the ledger is left empty.
+#[tokio::test]
+async fn per_app_tone_recipe_runs_and_clears_the_ledger() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "raw words from whisper",
+            "segments": [{"start": 0.0, "end": 1.0, "text": " raw words"}]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "CLEANED" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = config_with_custom_recipe();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "configured-stt".into();
+    cfg.llm_post_process.enabled = true;
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.llm_post_process.model = "test-llm".into();
+    // The default pipeline would summarize; the per-app recipe (cleanup-only) must not.
+    cfg.summary.auto = true;
+    cfg.summary.provider = "openai".into();
+    cfg.summary.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.summary.model = "test-llm".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.hook.run_on_transcribe = false;
+    // The per-app map names the cleanup-only recipe for an app — but the daemon
+    // resolves this against the LIVE foreground window at record start, which a
+    // test can't drive deterministically. The observable contract is identical
+    // either way, so seed the ledger directly to mirror the recorder's fill.
+    cfg.in_place
+        .app_recipes
+        .insert("outlook".into(), "hotkey_recipe".into());
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_in_place_recording(&state, tmp.path()).await;
+
+    // The recorder's per-app fill at record start lands the resolved recipe in
+    // `pending_recipe` keyed by this id (see `DaemonRecorder::start`).
+    state
+        .pending_recipe
+        .lock()
+        .unwrap()
+        .insert(id.clone(), "hotkey_recipe".into());
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("per-app-tone pipeline run should succeed");
+
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(rec.status, RecordingStatus::Done);
+    // The per-app recipe's cleanup transform ran (live transcript cleaned).
+    assert_eq!(rec.transcript.as_deref(), Some("CLEANED"));
+    // The cleanup-only recipe has no summary step, so none despite summary.auto.
+    assert_eq!(
+        rec.summary, None,
+        "the per-app cleanup-only recipe must not run the summary step"
+    );
+    // The recipe ledger was consumed — no stale entry for the dead id.
+    assert!(state.pending_recipe.lock().unwrap().is_empty());
+}
+
 /// The no-regression counterpart: a normal recording (no ledger entries) runs
 /// the default recipe with the configured model — summary present, configured
 /// STT model recorded.

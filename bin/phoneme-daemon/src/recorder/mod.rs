@@ -441,6 +441,35 @@ impl DaemonRecorder {
                 && c.in_place.resolve_type_mode(focused_app.as_deref()) == "type"
         };
 
+        // Per-app tone: pick the cleanup recipe (and so the LLM's register) by the
+        // app focused at record START. Resolve `[in_place].app_recipes` against the
+        // foreground stem now, while `focused_app` is still in hand; the resulting
+        // id is seeded into the `pending_recipe` ledger only after the catalog row
+        // commits (below), so an insert failure can't leak an entry.
+        //
+        // Seeding the same ledger a custom-hotkey recipe uses makes the per-app
+        // recipe behave identically for the rest of the lifecycle: it forces the
+        // full pipeline at `stop()` via `has_recipe`, is claimed+resolved by
+        // `pipeline::run`, and is dropped by `cancel()` — with no other code change.
+        //
+        // Precedence is binding-wins: this seed happens inside `start()`, BEFORE the
+        // `RecordStart`/`RecordToggle` handler calls `stash_hotkey_overrides`, which
+        // overwrites the entry with the binding's own non-empty recipe. So a
+        // deliberately-bound per-key chain always wins; the per-app map only fills
+        // in a recipe when the binding left one empty. With the default empty
+        // `app_recipes`, `resolve_app_recipe` returns `None` and nothing is seeded —
+        // today's behavior, byte-for-byte.
+        let app_recipe: Option<String> = if in_place {
+            state
+                .config
+                .load()
+                .in_place
+                .resolve_app_recipe(focused_app.as_deref())
+                .map(str::to_string)
+        } else {
+            None
+        };
+
         // Reserve the active slot immediately so concurrent starts fail.
         *active = Some(ActiveRecording {
             id: id.clone(),
@@ -514,6 +543,18 @@ impl DaemonRecorder {
         if let Err(e) = state.catalog.insert(&row).await {
             *self.active.lock().await = None;
             return Err(e);
+        }
+
+        // Seed the per-app tone recipe (resolved above) now that the row is
+        // committed — so an insert failure that bailed out above never leaves a
+        // stray `pending_recipe` entry. From here it rides the existing recipe
+        // lifecycle (see the `app_recipe` resolution comment above).
+        if let Some(recipe) = app_recipe {
+            state
+                .pending_recipe
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id.clone(), recipe);
         }
 
         // If idle pre-roll pre-capture is running, stop it and grab the buffered
@@ -1185,7 +1226,11 @@ pub(crate) mod tests {
         // Plain in-place dictation, no recipe → fast lane.
         assert!(wants_fast_lane(true, false, false));
         // In-place dictation carrying a recipe → full pipeline: the fast lane
-        // never runs `pipeline::run`, so a recipe must not be fast-laned.
+        // never runs `pipeline::run`, so a recipe must not be fast-laned. This is
+        // the exact case per-app tone produces — a recipe seeded into
+        // `pending_recipe` at record start (by app, not by binding) sets
+        // `has_recipe`, so a matched-app dictation auto-routes off the fast lane
+        // with no extra wiring.
         assert!(!wants_fast_lane(true, false, true));
         // Explicit `full_pipeline` opt-in always leaves the fast lane.
         assert!(!wants_fast_lane(true, true, false));
@@ -1306,5 +1351,83 @@ pub(crate) mod tests {
             state.pending_recipe.lock().unwrap().get(&id).is_none(),
             "a canceled recording must not leave a pending recipe entry"
         );
+    }
+
+    /// Per-app tone, default path: with the default empty `[in_place].app_recipes`,
+    /// starting an in-place dictation must seed NO recipe — `resolve_app_recipe`
+    /// returns `None` for any foreground app, so `pending_recipe` stays empty and
+    /// the dictation keeps the fast lane exactly as before. Deterministic
+    /// regardless of which window is focused on the test box.
+    #[tokio::test]
+    async fn start_with_no_app_recipes_seeds_no_recipe() {
+        let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        assert!(
+            state.config.load().in_place.app_recipes.is_empty(),
+            "test precondition: default config has no per-app recipes"
+        );
+
+        let id = state
+            .recorder
+            .start(&state, RecordMode::Hold, true, None)
+            .await
+            .expect("start synthetic in-place recording");
+
+        assert!(
+            state.pending_recipe.lock().unwrap().get(&id).is_none(),
+            "an empty app_recipes map must seed no recipe (today's behavior)"
+        );
+
+        // Don't leave a recording in flight for the temp-dir teardown.
+        let _ = state.recorder.cancel(&state).await;
+    }
+
+    /// Per-app tone, match path: when `[in_place].app_recipes` names a recipe for
+    /// the FOCUSED app, starting an in-place dictation seeds that recipe into the
+    /// `pending_recipe` ledger at record start — the same ledger a custom-hotkey
+    /// recipe uses, so `has_recipe` then routes the dictation off the fast lane and
+    /// `pipeline::run` resolves the tone. The map is keyed to whatever window is
+    /// actually focused (the daemon resolves against the live `foreground_app()`),
+    /// so on a headless CI box where no app is detectable this asserts the
+    /// no-detectable-app fallback (seed nothing) instead — both are correct.
+    #[tokio::test]
+    async fn start_seeds_per_app_recipe_for_the_focused_app() {
+        let _backend = EnvVarGuard::set("PHONEME_AUDIO_BACKEND", "synthetic");
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+
+        // Key the per-app map to the live foreground stem so the daemon's
+        // resolution actually matches. `None` (headless CI / non-Windows) means no
+        // app to key on — fall through to the no-detectable-app assertion below.
+        let focused = phoneme_core::foreground::foreground_app().map(|a| a.exe_name);
+        let mut cfg = (*state.config.load_full()).clone();
+        if let Some(ref app) = focused {
+            cfg.in_place
+                .app_recipes
+                .insert(app.clone(), "formal_email".into());
+        }
+        state.config.store(std::sync::Arc::new(cfg));
+
+        let id = state
+            .recorder
+            .start(&state, RecordMode::Hold, true, None)
+            .await
+            .expect("start synthetic in-place recording");
+
+        let seeded = state.pending_recipe.lock().unwrap().get(&id).cloned();
+        match focused {
+            Some(_) => assert_eq!(
+                seeded.as_deref(),
+                Some("formal_email"),
+                "a per-app recipe for the focused app must be seeded at record start"
+            ),
+            None => assert!(
+                seeded.is_none(),
+                "no detectable foreground app must seed no recipe"
+            ),
+        }
+
+        let _ = state.recorder.cancel(&state).await;
     }
 }

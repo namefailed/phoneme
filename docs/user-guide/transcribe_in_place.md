@@ -192,6 +192,46 @@ chrome      = "type"          # browser: force keystrokes
 > With `app_overrides` empty (the default), behavior is byte-for-byte unchanged
 > — every app uses your global delivery mode exactly as before.
 
+## 🎚️ Per-app tone
+
+Per-app delivery (above) decides **how** the text lands; **per-app tone** decides
+**how it reads**. It picks the cleanup **recipe** — and so the register the AI
+rewrites toward — by the app you're dictating *into*: a **formal** pass for your
+email client, a **terse** one for your editor, plain prose for a document. Build
+those recipes in the **Playbook** settings section, then map apps to them.
+
+The app is detected the same way (lowercased executable stem) but at the moment
+you **start** dictating — that's the window you're aiming the text at, before the
+brief recording can shift focus.
+
+A matched app runs the recipe through the **full pipeline** rather than the fast
+lane, because the recipe's AI cleanup (the tone) has to run. That's a little
+slower than a plain fast-lane dictation — the same trade you make when you bind a
+recipe to a custom hotkey. Apps you don't list keep the fast lane and today's
+behavior.
+
+```toml
+[in_place.app_recipes]
+outlook = "formal_email"      # email client → a formal rewrite
+code    = "terse"             # editor → short, no fluff
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `app_recipes` | map (stem → recipe id) | `{}` (empty) | Per-app cleanup recipe (tone), keyed by the lowercased executable stem of the app focused when you **start** dictating. The value is a recipe id from your Playbook. A listed app runs that recipe via the full pipeline; an unlisted (or undetectable) app falls back to the hotkey's recipe, then the default. |
+
+> [!NOTE]
+> **A custom hotkey wins.** If you trigger dictation with a custom hotkey that
+> already names its own recipe, that recipe is used — the per-app map only fills
+> one in when the hotkey didn't, so a deliberate per-key chain is never
+> overridden by ambient per-app tone.
+
+> [!TIP]
+> Naming a recipe you later delete is harmless — the dictation falls back to the
+> default cleanup (it never runs *nothing* and never errors). Foreground-app
+> detection is Windows-only, so on other platforms `app_recipes` simply never
+> matches. Empty (the default) = no per-app tone, unchanged behavior.
+
 ## 🧠 App-aware AI cleanup (opt-in)
 
 When **AI cleanup** is your dictation cleanup mode, Phoneme can optionally tell

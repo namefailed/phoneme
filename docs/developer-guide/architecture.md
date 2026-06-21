@@ -322,11 +322,19 @@ pipeline.
 the result of `resolve_recipe(cfg, recipe_id)`, which expands a named
 [Playbook](../../crates/phoneme-core/src/config.rs) recipe into ordered steps
 (falling back to the `default` recipe for an empty or unknown id, never a panic).
-A custom hotkey's recipe and a **Re-run → "Recipe to run"** pick reach the
-pipeline by the *same* path: the id is stashed per-job in the `pending_recipe`
-ledger ([`app_state.rs`](../../bin/phoneme-daemon/src/app_state.rs)) when the job
-is created, claimed by `pipeline::run` *before* transcription (so a transcribe
-failure can't strand a stale entry), and never written to global config. The
+A custom hotkey's recipe, a **Re-run → "Recipe to run"** pick, and **per-app
+tone** all reach the pipeline by the *same* path: the id is stashed per-job in the
+`pending_recipe` ledger ([`app_state.rs`](../../bin/phoneme-daemon/src/app_state.rs))
+when the job is created, claimed by `pipeline::run` *before* transcription (so a
+transcribe failure can't strand a stale entry), and never written to global
+config. **Per-app tone** (`[in_place].app_recipes`) is resolved entirely
+daemon-side at record start: `DaemonRecorder::start` runs
+`InPlaceConfig::resolve_app_recipe` against the foreground app it already snapshots
+and seeds the result into that same `pending_recipe` ledger — so a matched app's
+dictation routes off the fast lane (via the existing `has_recipe`/`wants_fast_lane`
+check) and runs its recipe with **no new IPC, request, or event**. A custom
+hotkey's own recipe wins: it is stashed *after* `start()` returns and overwrites
+the per-app seed when non-empty. The
 Re-run modal's per-step model tabs layer one-time overrides *on top of* whichever
 recipe you pick — `apply_rerun_overrides` mutates the matching cleanup / summary /
 title Playbook entries on a per-job config **clone** (the executor reads each

@@ -251,6 +251,18 @@ voice_commands_enabled = true
 # provider = "local"
 # external_url = "http://127.0.0.1:5810"
 
+# `app_recipes` — OPTIONAL per-app TONE: pick the cleanup RECIPE (and so the
+# register the AI rewrites toward) by the app focused when you START dictating —
+# formal for an email client, terse for an editor. Keyed by the lowercased
+# executable stem (matched case-insensitively); the value is a recipe id from
+# [[recipes]]. A listed app runs the FULL pipeline (so the recipe's AI cleanup
+# runs), which is a little slower than the fast lane. A custom hotkey that already
+# names its own recipe WINS over this map; unlisted (or undetectable) apps keep
+# the default behavior. Empty/unset (the default) = no per-app tone.
+# [in_place.app_recipes]
+# outlook = "formal_email"
+# code    = "terse"
+
 
 # -----------------------------------------------------------------------------
 # [hook] — scripts/webhook fired after a successful transcription

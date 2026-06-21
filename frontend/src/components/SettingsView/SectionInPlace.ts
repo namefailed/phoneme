@@ -1,4 +1,4 @@
-import { escapeHtml as escHtml } from "../../utils/format";
+import { escapeHtml as escHtml, escapeAttr } from "../../utils/format";
 import { invoke } from "@tauri-apps/api/core";
 import { curatedSttModels } from "../../services/sttProviders";
 import { curatedTranscriptionModels } from "../../data/curatedModels";
@@ -6,6 +6,7 @@ import { mountConnectionField } from "./connectionField";
 import { mountModelField } from "./modelField";
 import { bindFieldEvents, renderField } from "./form";
 import { effectiveLocalWhisperHint, type WhisperPortStatus } from "./SectionWhisper";
+import type { PlaybookRecipe } from "../../services/ipc";
 
 
 /** Friendly label for a downloaded whisper model filename (mirrors the Live
@@ -246,6 +247,9 @@ export class SectionInPlace {
     // to (a config saved before these existed simply lacks the keys). Empty map +
     // context off = today's behavior unchanged.
     if (!ip.app_overrides || typeof ip.app_overrides !== "object") ip.app_overrides = {};
+    // Per-app tone (app → cleanup recipe id). Empty map = no per-app tone, the
+    // default — dictation post-processing is unchanged until the user adds a row.
+    if (!ip.app_recipes || typeof ip.app_recipes !== "object") ip.app_recipes = {};
     if (!Array.isArray(ip.app_context_denylist)) ip.app_context_denylist = [];
     if (typeof ip.app_context !== "boolean") ip.app_context = false;
     // Voice-command editor bindings. An empty map means "use the built-in
@@ -359,6 +363,28 @@ export class SectionInPlace {
                 <option value="off">Off</option>
               </select>
               <button id="ip-app-add-btn" type="button">Add</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label>Per-app tone</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Pick the cleanup <b>recipe</b> — and so the tone the AI rewrites toward — by the app
+              focused when you <b>start</b> dictating: formal for an email client, terse for an editor.
+              Matched by executable name (e.g. <code>Outlook.exe</code> or just <code>outlook</code>,
+              case-insensitive). A listed app runs the <b>full pipeline</b> (the recipe's AI cleanup),
+              which is a little slower than the fast lane — the same trade as giving a custom hotkey a
+              recipe. A custom hotkey that already names its own recipe <b>wins</b>; apps not listed
+              keep the default behavior. Build recipes under <b>Playbook</b>.
+            </span>
+            <div id="ip-app-recipes" style="display: flex; flex-direction: column; gap: 6px; width: 100%;"></div>
+            <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
+              <input id="ip-app-recipe-add-name" type="text" placeholder="App executable (e.g. Outlook.exe)"
+                style="flex: 1 1 auto; min-width: 0;" />
+              <select id="ip-app-recipe-add-recipe">${this.recipeOptions("")}</select>
+              <button id="ip-app-recipe-add-btn" type="button">Add</button>
             </div>
           </div>
         </div>
@@ -552,9 +578,46 @@ export class SectionInPlace {
       ?.addEventListener("change", () => this.render());
 
     this.renderAppOverrides();
+    this.renderAppRecipes();
     this.renderContextDenylist();
     this.renderVoiceCommands();
     this.renderSttDetail();
+  }
+
+  /** The recipes a per-app tone row can pick — `config.recipes` (seeded to `[]`
+   *  when absent), the same source SectionHotkeys offers a binding. */
+  private get recipes(): PlaybookRecipe[] {
+    return Array.isArray(this.config.recipes) ? (this.config.recipes as PlaybookRecipe[]) : [];
+  }
+
+  /** Build the recipe `<option>` list for a per-app tone select, mirroring
+   *  SectionHotkeys' picker: every named recipe by id. Unlike the hotkey picker
+   *  there is no empty "Default pipeline" choice — a per-app row only exists to
+   *  name a specific recipe (remove the row to drop the override). A value that
+   *  no longer names a live recipe keeps a visible "(missing)" option so a save
+   *  never silently rewrites it; the daemon's `resolve_recipe` falls back to the
+   *  default chain for a deleted id. */
+  private recipeOptions(selected: string): string {
+    const opts: string[] = [];
+    let matched = false;
+    for (const r of this.recipes) {
+      const sel = r.id === selected;
+      if (sel) matched = true;
+      opts.push(
+        `<option value="${escapeAttr(r.id)}" ${sel ? "selected" : ""}>${escHtml(r.name || r.id)}</option>`,
+      );
+    }
+    // No recipes defined yet: offer a disabled hint so the control isn't an empty
+    // box. The Add handler guards on an empty value, so nothing can be added.
+    if (opts.length === 0) {
+      return `<option value="" disabled selected>No recipes — create one in Playbook</option>`;
+    }
+    if (!matched && selected) {
+      opts.push(
+        `<option value="${escapeAttr(selected)}" selected>${escHtml(selected)} (missing)</option>`,
+      );
+    }
+    return opts.join("");
   }
 
   /** Render the voice-command phrase→action rows + the Add control. Each row
@@ -682,6 +745,70 @@ export class SectionInPlace {
       this.config.in_place.app_overrides[raw.toLowerCase()] = modeSel?.value ?? "type";
       if (nameInput) nameInput.value = "";
       this.renderAppOverrides();
+    };
+    addBtn?.addEventListener("click", add);
+    nameInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        add();
+      }
+    });
+  }
+
+  /** Render the per-app tone rows (app name + recipe picker + remove) and wire
+   *  the Add control. Each row writes straight into `in_place.app_recipes`; the
+   *  daemon keys it by the lowercased executable stem at record start and seeds
+   *  the matching recipe into the pipeline. Mirrors `renderAppOverrides`, with a
+   *  recipe `<select>` (from `config.recipes`) in place of the type/paste/off
+   *  picker. */
+  private renderAppRecipes() {
+    const host = this.container.querySelector<HTMLElement>("#ip-app-recipes");
+    if (!host) return;
+    const map: Record<string, string> = this.config.in_place.app_recipes ?? {};
+    const names = Object.keys(map).sort();
+    host.innerHTML =
+      names.length === 0
+        ? `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No per-app tone — every app uses the default (or its hotkey's) recipe.</span>`
+        : names
+            .map(
+              (name) => `
+        <div class="ip-app-recipe-row" data-name="${escHtml(name)}"
+          style="display: flex; gap: 6px; width: 100%; align-items: center;">
+          <span style="flex: 1 1 auto; min-width: 0; font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis;">${escHtml(name)}</span>
+          <select class="ip-app-recipe" data-name="${escHtml(name)}">${this.recipeOptions(map[name])}</select>
+          <button class="ip-app-recipe-remove" type="button" data-name="${escHtml(name)}" title="Remove">✕</button>
+        </div>`,
+            )
+            .join("");
+
+    host.querySelectorAll<HTMLSelectElement>(".ip-app-recipe").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        const name = sel.getAttribute("data-name");
+        if (name) this.config.in_place.app_recipes[name] = sel.value;
+      });
+    });
+    host.querySelectorAll<HTMLButtonElement>(".ip-app-recipe-remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const name = btn.getAttribute("data-name");
+        if (name) delete this.config.in_place.app_recipes[name];
+        this.renderAppRecipes();
+      });
+    });
+
+    const nameInput = this.container.querySelector<HTMLInputElement>("#ip-app-recipe-add-name");
+    const recipeSel = this.container.querySelector<HTMLSelectElement>("#ip-app-recipe-add-recipe");
+    const addBtn = this.container.querySelector<HTMLButtonElement>("#ip-app-recipe-add-btn");
+    const add = () => {
+      // Store the stem lowercased — the daemon matches the focused process's
+      // lowercased file stem, so "Outlook.exe" / "outlook" / "OUTLOOK" all match.
+      const raw = (nameInput?.value ?? "").trim().replace(/\.exe$/i, "");
+      const recipe = (recipeSel?.value ?? "").trim();
+      // Both an app name and a recipe are required — an empty recipe would be a
+      // no-op override (the resolver treats it as "no match"), so don't add it.
+      if (!raw || !recipe) return;
+      this.config.in_place.app_recipes[raw.toLowerCase()] = recipe;
+      if (nameInput) nameInput.value = "";
+      this.renderAppRecipes();
     };
     addBtn?.addEventListener("click", add);
     nameInput?.addEventListener("keydown", (e) => {

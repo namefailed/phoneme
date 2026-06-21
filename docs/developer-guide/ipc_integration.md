@@ -93,6 +93,14 @@ start — the recording's `track` then records which source it actually used. `s
 is **ignored for meetings** (a meeting always records both tracks). On
 `record_toggle` all three apply only to the **start** half (a toggle that stops the
 active recording has nothing new to attach them to):
+
+> **Per-app tone** (`[in_place].app_recipes`) needs **none** of these fields. When
+> a `record_start` / `record_toggle` for an in-place dictation omits `recipe_id`,
+> the daemon resolves the per-app map against the foreground app it captures at
+> record start and seeds the *same* `pending_recipe` ledger itself — so a matched
+> app runs its recipe with no extra IPC. A `recipe_id` the binding *did* send wins
+> (it overwrites the per-app seed). See `InPlaceConfig::resolve_app_recipe`.
+
 - `record_start` (`in_place`, `recipe_id`, `whisper_model`, `source` optional), `record_stop`, `record_cancel`, `record_pause`, `record_resume`
 - `record_toggle` (`in_place`, `recipe_id`, `whisper_model`, `source` optional), `record_status`
 

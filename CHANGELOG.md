@@ -68,6 +68,18 @@ trust boundary.*
   model too). An empty map keeps the built-in defaults, so existing configs are
   unchanged; an entry with an unknown action is dropped on load with a warning
   rather than failing the config.
+- [x] **Per-app tone / register** — dictation can now pick its cleanup **recipe**
+  (and so the register the AI rewrites toward — formal for an email client, terse
+  for an editor, prose for a doc) by the app focused when you **start** dictating,
+  via a new `[in_place.app_recipes]` map (app stem → recipe id) editable under
+  **Settings → Capture → Dictation → Per-app tone**. A matched app runs the recipe
+  through the full pipeline (so its AI cleanup actually runs — a little slower than
+  the fast lane, the same trade as a custom-hotkey recipe). A custom hotkey that
+  already names its own recipe **wins**; unlisted (or undetectable) apps fall back
+  to today's behavior, and a named-but-deleted recipe degrades to the default
+  cleanup. Resolved entirely daemon-side at record start over the existing
+  `pending_recipe` path — no new IPC, bridge, or migration. Empty (default) =
+  unchanged. Windows-only (foreground-app detection).
 - [x] **Library-wide find & replace** — `phoneme find-replace --library <FIND>
   <REPLACE>` (and the new `find_replace_library` IPC request) runs the same
   literal, revertible replacement across **every** recording's transcript in one
