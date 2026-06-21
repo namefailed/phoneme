@@ -494,7 +494,16 @@ impl Catalog {
     /// error → falls back to a full invalidation so a stale vector can never be
     /// served. The generation bump makes a full rebuild that snapshotted an older
     /// generation back off, exactly as coarse invalidation did.
+    ///
+    /// Race guard (mirrors the rebuild path): the loaded vectors are a snapshot of
+    /// SQLite taken OUTSIDE the cache lock, so if any other write — another patch
+    /// or an invalidation — lands between the load and the store, this corpus can't
+    /// be trusted (a concurrent same-id patch could otherwise lose its update). We
+    /// snapshot the generation before the load and, under the write lock, drop to a
+    /// coarse invalidation instead of writing a possibly-stale COW when it moved.
+    /// The common (uncontended) case still does the cheap incremental patch.
     async fn patch_recording_in_cache(&self, id: &RecordingId) {
+        let gen_at_load = self.embedding_cache_gen.load(Ordering::Acquire);
         let (new_chunks, new_legacy) = match self.load_recording_vectors(id).await {
             Ok(v) => v,
             Err(e) => {
@@ -508,9 +517,18 @@ impl Catalog {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
+        // A write raced our load (gen moved): our loaded vectors may be stale
+        // relative to the current cache, so don't COW from it. Bump + drop to cold;
+        // the next query rebuilds from SQLite (which holds the latest committed
+        // rows). Bumping still makes any in-flight rebuild back off.
+        let raced = self.embedding_cache_gen.load(Ordering::Acquire) != gen_at_load;
         // Bump under the lock so a rebuild that snapshotted an older generation
         // (it may have read SQLite before this change committed) declines to cache.
         self.embedding_cache_gen.fetch_add(1, Ordering::Release);
+        if raced {
+            *guard = None;
+            return;
+        }
         let Some(corpus) = guard.as_ref() else {
             return; // cold: next query rebuilds from SQLite, including this change
         };
