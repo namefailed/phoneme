@@ -59,7 +59,7 @@ bundled_server_port = 5809
 bundled_server_args = []
 
 # Max seconds to wait for a transcription response before timing out.
-timeout_secs = 60
+timeout_secs = 3600
 
 # Cloud transcription model id (e.g. "whisper-1" for OpenAI, "whisper-large-v3"
 # for Groq). Empty = the provider's default. Ignored for "local".
@@ -77,6 +77,11 @@ api_key = ""
 # entirely by default, which means auto-detect (recommended). Uncomment to pin:
 # language = "en"
 
+# `initial_prompt` — biases decoding toward expected vocabulary and formatting.
+# Ships seeded with common note markers; set to "" to disable, or replace with
+# your own names/jargon to improve how often Whisper gets them right.
+initial_prompt = "Voice memo. Common markers: Action Item:, Task:, To-do:, Follow up:, Decision:, Idea:, Question:, Reminder:."
+
 
 # -----------------------------------------------------------------------------
 # [preview_whisper] — OPTIONAL independent provider for the LIVE PREVIEW only
@@ -92,7 +97,7 @@ api_key = ""
 # provider = "local"
 # model_path = "C:/models/ggml-tiny.en.bin"
 # bundled_server_port = 5810
-# timeout_secs = 60
+# timeout_secs = 3600
 
 
 # -----------------------------------------------------------------------------
@@ -117,7 +122,7 @@ silence_window_ms = 3000
 
 # Hard ceiling on a single recording's length, in seconds — it stops here no
 # matter what.
-max_duration_secs = 300
+max_duration_secs = 10800
 
 # Input device name to record from, or "default" for the system default.
 input_device = "default"
@@ -387,6 +392,20 @@ models_dir = ""
 # Deprecated / unused — superseded by models_dir (it was never wired into the load
 # path). Kept so older configs keep parsing.
 local_model_path = ""
+# Local-pipeline tuning (provider = "local"). The defaults are good; change these
+# only to chase a specific diarization artifact.
+# Merge adjacent same-speaker turns separated by a gap shorter than this (seconds).
+merge_gap_secs = 0.25
+# Minimum per-frame activation for a speaker to count as present (noise floor).
+speaker_keep_threshold = 1e-7
+# How overlapped speech is reconstructed: "smoothed" (softened by the epsilon
+# below) or "raw".
+reconstruct_method = "smoothed"
+# Smoothing strength for reconstruct_method = "smoothed", in [0, 1].
+reconstruct_method_epsilon = 0.1
+# Load the diarization models at daemon startup instead of on first use (trades a
+# slower start + more memory for a faster first diarized recording).
+preload_at_startup = false
 # Expected speaker count, as a PRIOR on the auto-detected count. Unset (or 0) =
 # trust whatever the model clusters (the default). Set to n and, if the local
 # pipeline finds MORE than n speakers, the closest voices are greedily merged (by
@@ -497,7 +516,7 @@ model = "llama3.2:3b"
 # System prompt instructing the LLM how to clean the transcript.
 prompt = "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone."
 # Max seconds to wait for the cleanup LLM before falling back to the raw transcript.
-timeout_secs = 30
+timeout_secs = 300
 # Launch `ollama serve` on demand when a step's effective connection is a LOCAL
 # Ollama and nothing answers there. Applies to every inheriting step
 # (cleanup, summary, tags, titles, in-place polish). An Ollama already running
