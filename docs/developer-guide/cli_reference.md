@@ -140,7 +140,20 @@ phoneme meeting rename 20260519T143500823 "Q3 Planning Sync"
 # Clear a meeting's name (omit NAME and pass --clear) — reverts to the
 # auto-generated label.
 phoneme meeting rename 20260519T143500823 --clear
+
+# Generate (or regenerate) the whole-meeting digest — one AI synthesis across
+# ALL of a meeting's tracks (mic + system together), distinct from the
+# per-recording `phoneme summarize`. Reuses the configured summary provider;
+# `--model` overrides the summary model for this run only. The daemon ACKs
+# immediately and generates in the background.
+phoneme meeting digest 20260519T143500823
+phoneme meeting digest 20260519T143500823 --model llama3.2:3b
 ```
+
+A digest is also generated automatically when a meeting finishes (after both
+tracks transcribe), gated on the same `[summary].auto` switch as the
+per-recording auto-summary — so meetings get a digest with no extra step when
+auto-summary is on.
 
 ### 📥 `phoneme import <FILE-OR-URL>`
 

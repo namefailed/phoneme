@@ -162,6 +162,7 @@ fn is_retry_safe(req: &Request) -> bool {
         | RecognizeSpeakers { .. }
         | ListNamedVoices
         | ListMeeting { .. }
+        | GetMeetingDigest { .. }
         | GetSegments { .. }
         | GetWords { .. }
         | ListTranscriptVersions { .. }
@@ -215,6 +216,9 @@ fn is_retry_safe(req: &Request) -> bool {
         | RefireHook { .. }
         | RerunCleanup { .. }
         | RerunSummary { .. }
+        // Whole-meeting digest re-run: re-enqueues an LLM call, so single-attempt
+        // like RerunSummary (a blind re-send could fire the model twice).
+        | RerunMeetingDigest { .. }
         // Transcript & metadata edits.
         | UpdateTranscript { .. }
         // Find-replace mutates the transcript; classified single-attempt like

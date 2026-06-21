@@ -328,6 +328,32 @@ fn all_daemon_events_roundtrip() {
 }
 
 #[test]
+fn meeting_digest_requests_and_events_roundtrip() {
+    // The on-demand digest re-run request (with and without a one-shot model
+    // override) and the read request.
+    roundtrip(&Request::RerunMeetingDigest {
+        meeting_id: "meeting-abc".into(),
+        model: None,
+    });
+    roundtrip(&Request::RerunMeetingDigest {
+        meeting_id: "meeting-abc".into(),
+        model: Some("llama3.2:3b".into()),
+    });
+    roundtrip(&Request::GetMeetingDigest {
+        meeting_id: "meeting-abc".into(),
+    });
+    // The result + failure events (the meeting-scope twins of SummaryUpdated /
+    // SummaryFailed).
+    roundtrip(&DaemonEvent::MeetingDigestUpdated {
+        meeting_id: "meeting-abc".into(),
+    });
+    roundtrip(&DaemonEvent::MeetingDigestFailed {
+        meeting_id: "meeting-abc".into(),
+        error: "no usable AI provider".into(),
+    });
+}
+
+#[test]
 fn all_error_kinds_have_distinct_serialized_form() {
     let kinds = [
         IpcErrorKind::AlreadyRecording,

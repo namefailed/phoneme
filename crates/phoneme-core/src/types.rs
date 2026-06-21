@@ -584,6 +584,26 @@ pub struct SpeakerName {
     pub name: String,
 }
 
+/// A whole-meeting digest: one LLM-generated synthesis across **all** tracks of a
+/// meeting (mic + system together), distinct from the per-recording
+/// [`Recording::summary`] which summarizes a single track.
+///
+/// A meeting isn't its own table — it's the set of [`Recording`] rows sharing a
+/// `meeting_id` — so the digest lives in its own `meeting_digests` table keyed by
+/// `meeting_id` (one row per meeting), not on any single track row (either track
+/// can be deleted, and there is no canonical "primary" track). `digest_model`
+/// records which LLM produced it, mirroring [`Recording::summary_model`]; it is
+/// `None` for an older row or when the provider didn't report a model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeetingDigest {
+    /// The meeting session id every track of the meeting shares.
+    pub meeting_id: String,
+    /// The LLM-generated digest text spanning every track of the meeting.
+    pub digest: String,
+    /// The LLM model that produced `digest`, when known.
+    pub digest_model: Option<String>,
+}
+
 /// One machine transcript segment with its audio-relative timing.
 ///
 /// Captured from the transcription provider (whisper `verbose_json` segments,

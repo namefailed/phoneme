@@ -2850,6 +2850,33 @@ ph-sidebar .queue-item-main.kbd-cursor {
   color: var(--fg-default);
   border-color: var(--fg-muted);
 }
+
+/* Whole-meeting digest card (the LLM synthesis across every track) — the
+   meeting-scope twin of a recording's summary peek. */
+.merged-digest {
+  margin: 10px 16px 0;
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+.merged-digest-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.merged-digest-label {
+  font-size: 0.7857rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.merged-digest-body {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: var(--fg-default);
+}
 .merged-body {
   padding: 10px 16px 28px;
   display: flex;

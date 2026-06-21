@@ -196,6 +196,18 @@ trust boundary.*
 
 ### Meetings
 
+- [x] **Whole-meeting digest** — one AI digest synthesized across **all** of a
+  meeting's tracks (mic + system together), distinct from the per-recording
+  summary. The daemon assembles the merged meeting transcript (every track,
+  source-labelled) and runs it through the **configured summary provider** — no
+  new provider keys — storing the result keyed by `meeting_id` in a new
+  `meeting_digests` table. It generates automatically when a meeting finalizes
+  (after both tracks transcribe), gated on the same `[summary].auto` switch as
+  the per-recording auto-summary, and on demand via a ✨ digest card in the merged
+  meeting view, `phoneme meeting digest <meeting_id> [--model …]`, or the
+  `RerunMeetingDigest` IPC. Surfaced over `GetMeetingDigest`, with
+  `meeting_digest_updated` / `meeting_digest_failed` events mirroring
+  `summary_updated` / `summary_failed` at meeting scope.
 - [x] **Merged meeting view** — selecting a meeting's group header opens a single,
   read-only reading of every track, labelled 🎤 Microphone / 🔊 System audio with the
   diarizer's `[Speaker N]` turns surfaced, plus Copy / Export

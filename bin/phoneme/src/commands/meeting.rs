@@ -73,7 +73,17 @@ pub async fn run(args: MeetingArgs, cfg: &Config, json: bool) -> ExitCode {
             name,
             clear: _,
         } => Request::UpdateMeetingName { meeting_id, name },
+        // The whole-meeting digest re-run mirrors `phoneme summarize`: the daemon
+        // ACKs immediately and generates in the background, storing the result and
+        // emitting `MeetingDigestUpdated` / `MeetingDigestFailed`.
+        MeetingAction::Digest { meeting_id, model } => {
+            Request::RerunMeetingDigest { meeting_id, model }
+        }
     };
+
+    // The digest re-run ACKs with `null` (it runs in the background), so it has no
+    // `meeting_id` to echo — print a confirmation instead, mirroring `summarize`.
+    let is_digest = matches!(req, Request::RerunMeetingDigest { .. });
 
     match client.send(req).await {
         Ok(value) => {
@@ -81,6 +91,8 @@ pub async fn run(args: MeetingArgs, cfg: &Config, json: bool) -> ExitCode {
                 crate::output::print_json(&value);
             } else if let Some(session) = value.get("meeting_id").and_then(|v| v.as_str()) {
                 println!("{session}");
+            } else if is_digest {
+                println!("meeting digest requested");
             }
             ExitCode::SUCCESS
         }

@@ -487,6 +487,8 @@ pub fn run() {
             commands::get_recording,
             commands::list_ai_activity,
             commands::list_meeting,
+            commands::get_meeting_digest,
+            commands::rerun_meeting_digest,
             commands::get_segments,
             commands::get_words,
             commands::list_transcript_versions,

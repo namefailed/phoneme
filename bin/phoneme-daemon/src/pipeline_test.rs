@@ -2846,3 +2846,128 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         "the configured webhook fired exactly once"
     );
 }
+
+// ── Whole-meeting digest ───────────────────────────────────────────────────
+
+/// Build one meeting track row carrying a transcript, sharing `meeting_id`.
+fn meeting_track(meeting_id: &str, track: &str, transcript: Option<&str>) -> Recording {
+    Recording {
+        id: RecordingId::new(),
+        started_at: chrono::Local::now(),
+        duration_ms: 1000,
+        audio_path: format!("{track}.wav"),
+        transcript: transcript.map(str::to_string),
+        model: None,
+        status: RecordingStatus::Done,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: Some(meeting_id.to_string()),
+        meeting_name: None,
+        track: Some(track.to_string()),
+        in_place: false,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        pinned: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        title: None,
+        title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
+        mean_confidence: None,
+        tags: vec![],
+        speaker_names: vec![],
+    }
+}
+
+#[test]
+fn assemble_meeting_transcript_labels_sources_and_skips_empty() {
+    // Both tracks present: each is prefixed with its source label, mic first.
+    let mic = meeting_track("m1", "mic", Some("hello there"));
+    let sys = meeting_track("m1", "system", Some("hi, thanks for joining"));
+    let merged = crate::pipeline::assemble_meeting_transcript(&[mic.clone(), sys.clone()]);
+    assert!(merged.contains("=== Microphone ===\nhello there"));
+    assert!(merged.contains("=== System audio ===\nhi, thanks for joining"));
+
+    // A track with no transcript (still transcribing / failed) contributes
+    // nothing; only the transcribed track appears.
+    let pending = meeting_track("m1", "system", None);
+    let merged = crate::pipeline::assemble_meeting_transcript(&[mic, pending]);
+    assert!(merged.contains("Microphone"));
+    assert!(!merged.contains("System audio"));
+
+    // No transcribed tracks → empty (the caller treats that as nothing to digest).
+    let both_empty = [
+        meeting_track("m1", "mic", None),
+        meeting_track("m1", "system", Some("   ")),
+    ];
+    assert!(crate::pipeline::assemble_meeting_transcript(&both_empty)
+        .trim()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn generate_meeting_digest_runs_summary_provider_over_merged_transcript() {
+    // The digest reuses the summary provider over the MERGED meeting transcript.
+    // Mock an OpenAI-compatible chat endpoint and assert: (1) it returns the
+    // model's output as the digest, (2) both tracks' text reached the model (the
+    // merge spanned every track), and (3) the recorded model is the summary model.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        // The prompt body must carry BOTH tracks' transcripts — proving the merge
+        // synthesizes across tracks rather than digesting one.
+        .and(body_string_contains("alpha from the mic"))
+        .and(body_string_contains("beta from the system"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "MEETING DIGEST" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.summary.provider = "openai".into();
+    cfg.summary.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.summary.model = "digest-llm".into();
+    let state = test_state(tmp.path(), cfg.clone()).await;
+
+    let tracks = vec![
+        meeting_track("m-digest", "mic", Some("alpha from the mic")),
+        meeting_track("m-digest", "system", Some("beta from the system")),
+    ];
+    let event_id = tracks[0].id.clone();
+
+    let (digest, model) =
+        crate::pipeline::generate_meeting_digest(&state, &cfg, &event_id, &tracks)
+            .await
+            .expect("digest generation should succeed");
+    assert_eq!(digest, "MEETING DIGEST");
+    assert_eq!(model, "digest-llm", "records the summary model that ran");
+}
+
+#[tokio::test]
+async fn generate_meeting_digest_errors_when_no_tracks_transcribed() {
+    // Nothing transcribed yet → a clear error, never a silent empty digest.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = Config::default();
+    let state = test_state(tmp.path(), cfg.clone()).await;
+    let tracks = vec![
+        meeting_track("m-empty", "mic", None),
+        meeting_track("m-empty", "system", None),
+    ];
+    let err = crate::pipeline::generate_meeting_digest(&state, &cfg, &tracks[0].id, &tracks)
+        .await
+        .expect_err("no transcribed tracks → error");
+    assert!(err.contains("nothing to digest"), "got: {err}");
+}

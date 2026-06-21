@@ -102,6 +102,14 @@ pub async fn list_meeting(bridge: Br<'_>, meeting_id: String) -> Result<Value, C
     forward(&bridge, Request::ListMeeting { meeting_id }).await
 }
 
+/// Fetch a meeting's whole-meeting digest (the LLM synthesis across all tracks),
+/// or `null` when none has been generated yet. The merged meeting view fetches it
+/// alongside `list_meeting`.
+#[tauri::command]
+pub async fn get_meeting_digest(bridge: Br<'_>, meeting_id: String) -> Result<Value, CommandError> {
+    forward(&bridge, Request::GetMeetingDigest { meeting_id }).await
+}
+
 /// Fetch one recording's machine transcript segments in timeline order
 /// (start/end ms into the track's audio, text, optional speaker label). An
 /// empty list is normal — older recordings predate segment capture and some
@@ -371,6 +379,19 @@ pub async fn rerun_summary(
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::RerunSummary { id, model, prompt }).await
+}
+
+/// Generate (or regenerate) a meeting's whole-meeting digest on demand — the
+/// LLM synthesis across all of a meeting's tracks. `model` overrides the
+/// configured summary model for this run only. The digest arrives via the
+/// `MeetingDigestUpdated` daemon event. Meeting-scope twin of `rerun_summary`.
+#[tauri::command]
+pub async fn rerun_meeting_digest(
+    bridge: Br<'_>,
+    meeting_id: String,
+    model: Option<String>,
+) -> Result<Value, CommandError> {
+    forward(&bridge, Request::RerunMeetingDigest { meeting_id, model }).await
 }
 
 /// List the transcription pipeline queue (pending + processing items).

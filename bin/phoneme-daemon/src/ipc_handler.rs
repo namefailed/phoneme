@@ -325,6 +325,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        // An unknown/never-digested meeting yields `null` (not `NotFound`): "no
+        // digest yet" is a normal state, and the merged view treats null as "show
+        // nothing / offer to generate", mirroring how segments/words return empty.
+        Request::GetMeetingDigest { meeting_id } => {
+            match state.catalog.meeting_digest(&meeting_id).await {
+                Ok(digest) => serialize_response(digest),
+                Err(e) => err_response(&e),
+            }
+        }
         // An unknown id yields an empty list, not `NotFound`: "no segments" is a
         // normal state (pre-capture recordings, providers without timing) and
         // callers treat the two identically.
@@ -731,6 +740,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         .events
                         .emit(DaemonEvent::RecordingDeleted { id: r.id.clone() });
                     deleted += 1;
+                }
+                // Drop the whole-meeting digest too — its table is keyed by
+                // meeting_id with no FK to recordings, so deleting the tracks
+                // doesn't cascade it. Best-effort: a leftover digest row is
+                // harmless, so a cleanup error never fails the session delete.
+                if let Err(e) = state.catalog.delete_meeting_digest(&meeting_id).await {
+                    tracing::warn!(session = %meeting_id, error = %e, "session delete: digest cleanup failed");
                 }
                 // Report any failure to the client instead of silently returning
                 // Ok when some tracks were removed, matching `DeleteRecording`,
@@ -1489,6 +1505,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::RerunSummary { id, model, prompt } => {
             rerun_summary(state, id, model, prompt).await
+        }
+        Request::RerunMeetingDigest { meeting_id, model } => {
+            rerun_meeting_digest(state, meeting_id, model).await
         }
         Request::RunDoctor => {
             let cfg = state.config.load();
@@ -2463,6 +2482,97 @@ async fn rerun_summary(
                 task_state
                     .events
                     .emit(DaemonEvent::SummaryFailed { id, error: reason });
+            }
+        }
+    });
+
+    ok_null()
+}
+
+/// Generate (or regenerate) a whole-meeting digest on demand — the meeting-scope
+/// twin of [`rerun_summary`]. Loads every track of the meeting, assembles the
+/// merged (source-labelled) transcript, and runs it through the configured summary
+/// provider with the meeting-scope prompt. Like `rerun_summary`, the LLM call runs
+/// in a spawned task so it doesn't block the IPC connection; the result is stored
+/// keyed by `meeting_id` and the UI listens for `MeetingDigestUpdated`. `model`
+/// overrides the configured summary model for this run only (never persisted).
+async fn rerun_meeting_digest(
+    state: &AppState,
+    meeting_id: String,
+    model: Option<String>,
+) -> Response {
+    let tracks = match state.catalog.list_by_meeting(&meeting_id).await {
+        Ok(rows) if !rows.is_empty() => rows,
+        Ok(_) => return not_found(format!("meeting {meeting_id} not found")),
+        Err(e) => return err_response(&e),
+    };
+
+    // Need at least one track with a transcript to have anything to digest. The
+    // generator re-checks this defensively, but report it up front so the caller
+    // gets a clear error instead of a silent no-op.
+    let merged = crate::pipeline::assemble_meeting_transcript(&tracks);
+    if merged.trim().is_empty() {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::Internal,
+            message: "no transcribed tracks yet — nothing to digest".into(),
+        });
+    }
+
+    // Bake the one-shot model override into a [summary] clone, then let the digest
+    // generator resolve the summary connection exactly as the auto-digest does.
+    // The digest reuses the summary provider/key/url; only the model can differ
+    // per-run, mirroring `phoneme summarize --model`.
+    let mut cfg = (**state.config.load()).clone();
+    if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+        cfg.summary.model = m;
+    }
+
+    // Require a usable LLM provider up front so the user gets a clear error rather
+    // than a silent failure inside the spawned task.
+    if state
+        .llm
+        .provider(&crate::pipeline::summary_llm_config(&cfg))
+        .is_none()
+    {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::InvalidConfig,
+            message: "no LLM provider configured for summaries (set a summary or [llm_post_process] provider)".into(),
+        });
+    }
+
+    // The LlmActivity/skip stream is keyed per-recording, so attribute this run to
+    // the meeting's first track; the digest itself is stored against the meeting.
+    let event_id = tracks[0].id.clone();
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        task_state.events.emit(DaemonEvent::PipelineStageChanged {
+            id: event_id.clone(),
+            stage: PipelineStage::Summarizing,
+        });
+        match crate::pipeline::generate_meeting_digest(&task_state, &cfg, &event_id, &tracks).await
+        {
+            Ok((digest, model)) => {
+                if let Err(e) = task_state
+                    .catalog
+                    .update_meeting_digest(&meeting_id, &digest, Some(&model))
+                    .await
+                {
+                    tracing::error!(error = %e, "rerun_meeting_digest: failed to persist digest");
+                    task_state.events.emit(DaemonEvent::MeetingDigestFailed {
+                        meeting_id,
+                        error: e.to_string(),
+                    });
+                    return;
+                }
+                task_state
+                    .events
+                    .emit(DaemonEvent::MeetingDigestUpdated { meeting_id });
+            }
+            Err(reason) => {
+                task_state.events.emit(DaemonEvent::MeetingDigestFailed {
+                    meeting_id,
+                    error: reason,
+                });
             }
         }
     });

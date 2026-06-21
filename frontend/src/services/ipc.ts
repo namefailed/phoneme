@@ -106,6 +106,15 @@ export type Recording = {
  *  `speaker_label` is the 1-based index from a `[Speaker N]` marker. */
 export type SpeakerName = { speaker_label: number; name: string };
 
+/** A whole-meeting digest: one LLM synthesis across all of a meeting's tracks
+ *  (mic + system together), distinct from a single track's `summary`. Keyed by
+ *  `meeting_id`; `digest_model` is the LLM that produced it (null when unknown). */
+export type MeetingDigest = {
+  meeting_id: string;
+  digest: string;
+  digest_model?: string | null;
+};
+
 /** How a recording started via `recordStart` decides to stop: "hold" = on the
  *  explicit stop signal (Stop click / hotkey release), "oneshot" = by itself
  *  on silence (or the max-duration ceiling), `duration:N` = after exactly N
@@ -425,6 +434,29 @@ export async function ask(
  */
 export async function listSession(meetingId: string): Promise<Recording[]> {
   return await tauriInvoke<Recording[]>("list_meeting", { meetingId });
+}
+
+/**
+ * Fetch a meeting's whole-meeting digest (the LLM synthesis across all of its
+ * tracks), or `null` when none has been generated yet. The merged meeting view
+ * fetches this alongside {@link listSession}.
+ */
+export async function getMeetingDigest(meetingId: string): Promise<MeetingDigest | null> {
+  return await tauriInvoke<MeetingDigest | null>("get_meeting_digest", { meetingId });
+}
+
+/**
+ * Generate (or regenerate) a meeting's whole-meeting digest on demand — one LLM
+ * synthesis across every track (mic + system together), distinct from a single
+ * track's {@link rerunSummary}. Reuses the configured summary provider; `model`
+ * overrides the summary model for this run only (never persisted). The digest
+ * arrives via the `MeetingDigestUpdated` daemon event — re-fetch when it fires.
+ */
+export async function rerunMeetingDigest(
+  meetingId: string,
+  model: string | null = null,
+): Promise<void> {
+  await tauriInvoke("rerun_meeting_digest", { meetingId, model });
 }
 
 /**

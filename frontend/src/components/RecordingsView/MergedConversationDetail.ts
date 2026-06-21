@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing, PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listSession, setSpeakerName, getSegments, saveTextExport, recognizeSpeakers, dismissSpeakerSuggestion, type Recording, type TranscriptSegment, type SpeakerSuggestion } from "../../services/ipc";
+import { listSession, setSpeakerName, getSegments, saveTextExport, recognizeSpeakers, dismissSpeakerSuggestion, getMeetingDigest, rerunMeetingDigest, type Recording, type TranscriptSegment, type SpeakerSuggestion, type MeetingDigest } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { formatDuration, fmtClock } from "../../utils/format";
 import { invoke } from "@tauri-apps/api/core";
@@ -76,6 +76,15 @@ export class MergedConversationDetail extends LitElement {
    *  the recordings list). */
   @state() private config: any = null;
 
+  /** The stored whole-meeting digest (LLM synthesis across every track), or null
+   *  when none has been generated yet. The meeting-scope twin of a recording's
+   *  `summary`; fetched alongside the tracks. */
+  @state() private digest: MeetingDigest | null = null;
+  /** Whether a digest (re)generation is in flight, so the card shows a pending
+   *  state and the button is disabled. Cleared by the `meeting_digest_*` daemon
+   *  event (the parent calls `reload()`), or on a request error. */
+  @state() private digestPending = false;
+
   private onConfigSaved = (e: Event) => {
     this.config = (e as CustomEvent).detail ?? null;
   };
@@ -138,10 +147,16 @@ export class MergedConversationDetail extends LitElement {
         }),
       );
       this.segmentsMap = new Map(entries);
+      // The whole-meeting digest is fetched alongside the tracks; a missing
+      // digest is the normal "not generated yet" state (null), not an error.
+      this.digest = await getMeetingDigest(this.meetingId).catch(() => null);
+      // A finished (re)generation clears the pending state when reload() lands.
+      this.digestPending = false;
     } catch (e) {
       this.error = errText(e);
       this.recordings = [];
       this.segmentsMap = new Map();
+      this.digest = null;
     } finally {
       this.loading = false;
     }
@@ -297,6 +312,21 @@ export class MergedConversationDetail extends LitElement {
     applyMoreLikeThis(seed.id, this.recordings[0]?.meeting_name || null);
   }
 
+  /** Generate (or regenerate) the whole-meeting digest. The daemon ACKs
+   *  immediately and runs the LLM in the background; the result lands via the
+   *  `meeting_digest_updated` event, which the parent turns into a `reload()` —
+   *  so we only flip the pending state here and let the reload paint the result. */
+  private async handleGenerateDigest() {
+    if (this.digestPending || !this.meetingId) return;
+    this.digestPending = true;
+    try {
+      await rerunMeetingDigest(this.meetingId);
+    } catch (e) {
+      this.digestPending = false;
+      showToast(`Couldn't generate meeting digest: ${errText(e)}`, "error");
+    }
+  }
+
   private async handleExport() {
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
@@ -405,6 +435,8 @@ export class MergedConversationDetail extends LitElement {
             </div>`
           : nothing}
 
+        ${this.renderDigest(blocks.length > 0)}
+
         ${blocks.length === 0
           ? html`<div class="empty">No transcript yet for this meeting.</div>`
           : chrono
@@ -414,6 +446,44 @@ export class MergedConversationDetail extends LitElement {
             : html`<div class="merged-body">
                 ${blocks.map((b, i) => this.renderBlock(b, blocks[i - 1]))}
               </div>`}
+      </div>
+    `;
+  }
+
+  /** Render the whole-meeting digest card — the LLM synthesis across every
+   *  track, the meeting-scope twin of a recording's summary peek. Shows the
+   *  stored digest (with the model that produced it) plus a Regenerate button;
+   *  when none exists yet, a "Generate digest" affordance. `haveTranscript` gates
+   *  the generate button so it isn't offered before any track has transcribed. */
+  private renderDigest(haveTranscript: boolean) {
+    const d = this.digest;
+    const modelNote = d?.digest_model
+      ? html` · <span style="opacity:0.8">${d.digest_model}</span>`
+      : nothing;
+    const btnLabel = this.digestPending
+      ? "Generating…"
+      : d
+        ? "↻ Regenerate"
+        : "✨ Generate digest";
+    // Nothing to generate from yet: no transcript and no stored digest → hide
+    // the card entirely (matches "No transcript yet for this meeting" below).
+    if (!d && !haveTranscript && !this.digestPending) return nothing;
+    return html`
+      <div class="merged-digest">
+        <div class="merged-digest-head">
+          <span class="merged-digest-label">✨ Meeting digest${modelNote}</span>
+          <button
+            class="inline-button"
+            ?disabled=${this.digestPending || !haveTranscript}
+            title="Generate one AI digest synthesizing every track of this meeting"
+            @click=${this.handleGenerateDigest}
+          >${btnLabel}</button>
+        </div>
+        ${this.digestPending && !d
+          ? html`<div class="merged-digest-body" style="color: var(--fg-muted)">Generating the meeting digest…</div>`
+          : d
+            ? html`<div class="merged-digest-body">${d.digest}</div>`
+            : html`<div class="merged-digest-body" style="color: var(--fg-muted)">No digest yet — generate one cohesive summary across both tracks.</div>`}
       </div>
     `;
   }

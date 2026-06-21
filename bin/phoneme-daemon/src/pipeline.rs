@@ -788,6 +788,102 @@ pub(crate) async fn generate_summary_with(
     }
 }
 
+/// The instruction the whole-meeting digest is generated with. A meeting digest
+/// synthesizes ACROSS every track (the user's mic + the system/other-party
+/// audio), so it asks for an overview/decisions/action-items shaped at meeting
+/// scope — deliberately distinct from the per-recording `[summary]` prompt, which
+/// summarizes a single track. Reuses the `[summary]` provider/model connection
+/// (see [`summary_llm_config`]); only the prompt differs, so no new provider keys.
+pub(crate) const MEETING_DIGEST_PROMPT: &str = "You are summarizing a whole meeting. The transcript below interleaves every participant's audio track (the local microphone and the system/other-party audio), each turn prefixed with its source. Write one cohesive digest of the entire meeting: a short overview, the key topics discussed, decisions reached, and any action items (with the owner when stated). Synthesize across all tracks into a single account — do not summarize each track separately. Output only the digest, with no preamble.";
+
+/// Human source label for one meeting track, used when assembling the merged
+/// transcript the digest reads. Mirrors the frontend `sourceFor` mapping
+/// (mic → Microphone, system → System audio) so the digest's view of who-said-what
+/// matches the merged meeting view.
+fn track_source_label(track: Option<&str>) -> &'static str {
+    match track {
+        Some("mic") => "Microphone",
+        Some("system") => "System audio",
+        _ => "Track",
+    }
+}
+
+/// Assemble a single merged transcript spanning every track of a meeting, for the
+/// whole-meeting digest. Tracks are ordered like the merged meeting view (by
+/// `started_at`, ties broken by track name so "mic" leads "system"); each track's
+/// stored live transcript is prefixed with its source label so the LLM can tell
+/// the local speaker from the other party. Tracks with no transcript yet (still
+/// transcribing, or failed) contribute nothing. Returns an empty string when no
+/// track has any transcript — the caller treats that as "nothing to digest".
+///
+/// This is the coarse by-source merge (the same structure
+/// `frontend/.../mergeMeeting.ts` falls back to), not the chronological segment
+/// interleave: for an LLM digest the per-track text with source labels carries the
+/// needed structure without depending on segment timing being present.
+pub(crate) fn assemble_meeting_transcript(tracks: &[phoneme_core::Recording]) -> String {
+    let mut ordered: Vec<&phoneme_core::Recording> = tracks
+        .iter()
+        .filter(|r| {
+            r.transcript
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|t| !t.is_empty())
+        })
+        .collect();
+    ordered.sort_by(|a, b| {
+        a.started_at.cmp(&b.started_at).then_with(|| {
+            a.track
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.track.as_deref().unwrap_or(""))
+        })
+    });
+    ordered
+        .iter()
+        .map(|r| {
+            let label = track_source_label(r.track.as_deref());
+            let text = r.transcript.as_deref().unwrap_or("").trim();
+            format!("=== {label} ===\n{text}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Generate an LLM digest of a whole meeting: assemble every track's transcript
+/// into one merged document ([`assemble_meeting_transcript`]) and run it through
+/// the same summary provider + streaming/persistence path the per-recording
+/// summary uses ([`generate_summary_with`]), but with the meeting-scope
+/// [`MEETING_DIGEST_PROMPT`]. Returns `(digest, model)` on success or a
+/// human-readable reason on failure (reaches the UI toast verbatim). The
+/// `LlmActivity`/skip events are keyed on `event_id` (the meeting's first track),
+/// since the activity stream is per-recording; the result is stored against the
+/// meeting, not the track.
+pub(crate) async fn generate_meeting_digest(
+    state: &AppState,
+    cfg: &Config,
+    event_id: &RecordingId,
+    tracks: &[phoneme_core::Recording],
+) -> std::result::Result<(String, String), String> {
+    let merged = assemble_meeting_transcript(tracks);
+    if merged.trim().is_empty() {
+        return Err("no transcribed tracks yet — nothing to digest".into());
+    }
+    let endpoint_hint = cfg.summary.api_url.trim();
+    let endpoint_hint = (!endpoint_hint.is_empty()).then(|| endpoint_hint.to_string());
+    // Reuse the summary connection (provider/model/key/url) but the meeting-scope
+    // prompt. `generate_summary_with` gives identical events + skip/empty/error
+    // classification + recorded model as the per-recording summary.
+    generate_summary_with(
+        state,
+        event_id,
+        &merged,
+        summary_llm_config(cfg),
+        MEETING_DIGEST_PROMPT,
+        endpoint_hint.as_deref(),
+    )
+    .await
+}
+
 /// Whether this pipeline run should type the transcript at the cursor.
 ///
 /// Only in-place dictations type, and only when the text hasn't already landed.

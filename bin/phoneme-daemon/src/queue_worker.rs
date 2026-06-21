@@ -63,6 +63,99 @@ pub(crate) fn classify_transient_outcome(attempts: u32, max: u32) -> TransientOu
     }
 }
 
+/// After a recording finishes its pipeline run, generate the whole-meeting digest
+/// if this was the *last* meeting track to settle. Mirrors the per-recording
+/// auto-summary's gate (`summary.auto`) at meeting scope, but the trigger is the
+/// meeting finalizing — i.e. every track of the meeting has reached a terminal
+/// status — so the digest sees both tracks' final transcripts, not a half-done
+/// meeting.
+///
+/// Best-effort and quiet: the recordings are all complete; only the optional
+/// meeting digest is affected by a failure here. A no-op when the recording isn't
+/// a meeting track, when `summary.auto` is off, when a sibling track is still in
+/// flight, or when no track has a transcript.
+///
+/// The LlmActivity/skip stream is keyed per-recording, so the run is attributed to
+/// the finished track (`rec_id`); the digest is stored against the `meeting_id`.
+async fn maybe_generate_meeting_digest(state: &AppState, rec_id: &phoneme_core::RecordingId) {
+    // Cheap narrow read first: bail unless this row is a meeting track.
+    let meeting_id = match state.catalog.track_and_meeting(rec_id).await {
+        Ok((_track, Some(mid))) => mid,
+        Ok((_, None)) => return,
+        Err(e) => {
+            tracing::warn!(id = %rec_id, error = %e, "meeting digest: meeting lookup failed");
+            return;
+        }
+    };
+
+    let cfg = (**state.config.load()).clone();
+    // Reuse the per-recording auto-summary gate: a meeting digest is the meeting
+    // twin of the auto-summary, so it auto-generates only when auto-summary is on.
+    if !cfg.summary.auto {
+        return;
+    }
+
+    let tracks = match state.catalog.list_by_meeting(&meeting_id).await {
+        Ok(rows) if !rows.is_empty() => rows,
+        Ok(_) => return,
+        Err(e) => {
+            tracing::warn!(session = %meeting_id, error = %e, "meeting digest: track list failed");
+            return;
+        }
+    };
+
+    // Only fire once the meeting has finalized: every track must have reached a
+    // terminal status (Done / a failure / Cancelled). While any sibling is still
+    // queued or processing, defer — that sibling's own completion will re-run this
+    // and be the one that finds the meeting fully settled.
+    if !tracks.iter().all(|t| t.status.is_terminal()) {
+        return;
+    }
+
+    // Need a usable summary provider, like the auto-summary step. Quiet no-op
+    // otherwise (the user simply hasn't configured one).
+    if state
+        .llm
+        .provider(&crate::pipeline::summary_llm_config(&cfg))
+        .is_none()
+    {
+        return;
+    }
+
+    let event_id = tracks[0].id.clone();
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: event_id.clone(),
+        stage: phoneme_ipc::PipelineStage::Summarizing,
+    });
+    match crate::pipeline::generate_meeting_digest(state, &cfg, &event_id, &tracks).await {
+        Ok((digest, model)) => {
+            if let Err(e) = state
+                .catalog
+                .update_meeting_digest(&meeting_id, &digest, Some(&model))
+                .await
+            {
+                tracing::warn!(session = %meeting_id, error = %e, "meeting digest: persist failed");
+                state.events.emit(DaemonEvent::MeetingDigestFailed {
+                    meeting_id,
+                    error: e.to_string(),
+                });
+                return;
+            }
+            tracing::info!(session = %meeting_id, "auto meeting digest saved");
+            state
+                .events
+                .emit(DaemonEvent::MeetingDigestUpdated { meeting_id });
+        }
+        Err(reason) => {
+            tracing::warn!(session = %meeting_id, reason = %reason, "auto meeting digest failed");
+            state.events.emit(DaemonEvent::MeetingDigestFailed {
+                meeting_id,
+                error: reason,
+            });
+        }
+    }
+}
+
 pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow::Result<()> {
     let mut backoff = Duration::from_secs(30);
     let max_backoff = Duration::from_secs(300);
@@ -153,6 +246,12 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                                 .events
                                 .emit(DaemonEvent::WhisperStatusChanged { reachable: true });
                         }
+                        // Whole-meeting digest: if this finished recording was a
+                        // meeting track and every track is now settled, auto-generate
+                        // the meeting digest. A single, all-pipeline-exit-paths-covering
+                        // hook (the pipeline's `run` has several success returns), so
+                        // it triggers exactly once — after the *last* track lands.
+                        maybe_generate_meeting_digest(&state, &rec_id).await;
                     }
                     Err(e @ Error::WhisperUnreachable { .. })
                     | Err(e @ Error::WhisperTimeout { .. }) => {

@@ -28,8 +28,9 @@ use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
 use crate::types::{
-    AiActivityEntry, ListFilter, NamedVoice, PropagationCandidate, Recording, RecordingStatus,
-    SavedSearch, SpeakerName, SpeakerSuggestion, TranscriptSegment, TranscriptWord,
+    AiActivityEntry, ListFilter, MeetingDigest, NamedVoice, PropagationCandidate, Recording,
+    RecordingStatus, SavedSearch, SpeakerName, SpeakerSuggestion, TranscriptSegment,
+    TranscriptWord,
 };
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -381,6 +382,7 @@ fn replace_ignore_case(haystack: &str, needle: &str, replacement: &str) -> (usiz
 pub mod ann;
 mod embeddings;
 pub use embeddings::AnnHealth;
+mod meeting_digests;
 mod recordings;
 mod saved_search;
 mod segments;

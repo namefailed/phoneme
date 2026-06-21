@@ -101,6 +101,7 @@ active recording has nothing new to attach them to):
 
 **Catalog & import:**
 - `list_recordings` (with a `filter`), `kind_counts` (per-Library-kind totals for the sidebar badges), `get_recording`, `list_meeting`, `get_segments` (machine transcript segments with ms timing + speaker labels; empty list when none are stored)
+- `get_meeting_digest` (`{ "meeting_id" }`) — the **whole-meeting digest**: one LLM synthesis across **all** of a meeting's tracks (mic + system together), distinct from a single track's `summary`. Ok = the digest DTO `{ meeting_id, digest, digest_model }` or `null` when none has been generated yet (a normal state, not `not_found`). The merged meeting view fetches it alongside `list_meeting`.
 - `get_words` (machine transcript **words** — the finer per-word layer beneath `get_segments`; ordered JSON array of `{ idx, start_ms, end_ms, text, speaker, confidence }`, where `confidence` is a 0..1 per-word score or `null` when the provider gives none — whisper-family endpoints emit only segment-level logprobs, so only Deepgram/AssemblyAI populate it. `speaker` is the `[Speaker N]` label (or `null` when undiarized): Deepgram/AssemblyAI tag words from their own speaker labels, and local diarization now tags each word too — it assigns speakers per word off the diarizer's per-frame activation matrix rather than per whole segment. Empty list when none are stored. Fetched lazily by the word-level features — word↔waveform seek and confidence highlighting)
 - `delete_recording` (`keep_audio` bool), `import_recording` (`.wav`/`.mp3`/`.m4a`/`.flac`)
 - `list_saved_searches`, `upsert_saved_search`, `delete_saved_search`, and `run_saved_search` (`{ "id" }`) — execute a stored saved search server-side: the daemon parses the saved `filter_json` into a `ListFilter` and runs the same query as `list_recordings`, returning the same recordings array. `not_found` for an unknown id, `invalid_config` when the stored filter won't parse.
@@ -156,6 +157,7 @@ as a failure.
 - `retranscribe_recording` (optional `model`, `run_hooks`, `post_process`, `recipe_id`). `recipe_id` re-runs the recording through any named Playbook recipe (empty/omitted = the global `default` recipe); it is stashed in the `pending_recipe` ledger for this job only and claimed by `pipeline::run` → `resolve_recipe` — the **same** one-time mechanism a custom hotkey's recipe uses, never persisted. The Re-run modal's per-step model tabs layer on top as separate one-time overrides.
 - `rerun_cleanup` (re-runs only LLM cleanup against the preserved original; optional `model`/`provider`/`prompt`/`api_url`/`api_key`)
 - `rerun_summary` (generate/regenerate an LLM summary; optional `model`/`prompt`)
+- `rerun_meeting_digest` (`{ "meeting_id", "model"? }`) — generate/regenerate the **whole-meeting digest** (one LLM synthesis across all of a meeting's tracks), the meeting-scope twin of `rerun_summary`. Reuses the configured summary provider over the merged meeting transcript; `model` overrides the summary model for this run only. Acks `null` immediately and runs detached, emitting `pipeline_stage_changed` + `llm_activity` (keyed on the meeting's first track) and finally `meeting_digest_updated` (or `meeting_digest_failed`). Errors up front: `not_found` for an unknown meeting, no transcribed tracks, or `invalid_config` when no usable summary LLM provider is configured. A digest is **also** generated automatically when a meeting finalizes (both tracks done), gated on `[summary].auto`.
 - `refire_hook` (optional `command`, restricted to the configured allowlist)
 
 **Pipeline & preview control:**
@@ -241,7 +243,13 @@ field naming the variant, plus that variant's fields alongside it.
 {"event": "queue_depth_changed", "pending": 1, "processing": 0, "failed": 0}
 {"event": "transcription_done", "id": "20260519T143500823", "transcript": "Hello, this is a live preview."}
 {"event": "summary_updated", "id": "20260519T143500823"}
+{"event": "meeting_digest_updated", "meeting_id": "meeting-20260519T143500823"}
 ```
+
+The whole-meeting digest emits `meeting_digest_updated` (success) or
+`meeting_digest_failed` (`{ meeting_id, error }`) — the meeting-scope twins of
+`summary_updated` / `summary_failed`, keyed by `meeting_id` rather than a
+recording `id`.
 
 **Ask my archive stream** (`ask_activity`, after sending `ask` with a
 `request_id`): the daemon ships the citation `sources` first (before any token),

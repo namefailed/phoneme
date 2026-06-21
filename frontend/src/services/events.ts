@@ -83,6 +83,10 @@ export type DaemonEvent =
   | { event: "transcript_updated"; id: string }
   | { event: "summary_updated"; id: string }
   | { event: "summary_failed"; id: string; error: string }
+  // Whole-meeting digest (the LLM synthesis across all of a meeting's tracks),
+  // keyed by meeting_id — the meeting-scope twin of summary_updated/_failed.
+  | { event: "meeting_digest_updated"; meeting_id: string }
+  | { event: "meeting_digest_failed"; meeting_id: string; error: string }
   | { event: "cleanup_failed"; id: string; error: string }
   | { event: "title_failed"; id: string; error: string }
   | { event: "tag_failed"; id: string; error: string }

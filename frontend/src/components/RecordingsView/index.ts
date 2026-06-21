@@ -2128,6 +2128,20 @@ export class RecordingsView {
   private async subscribeToEvents() {
     const unsub = await subscribe((event: DaemonEvent) => {
       const eventName = (event as { event: string }).event;
+      // Whole-meeting digest result: re-fetch the merged view directly when it's
+      // the meeting on screen, so the digest card repaints (and clears its pending
+      // state) the moment the daemon finishes. The id is a meeting_id, not a
+      // recording id, so it doesn't ride the recording-keyed refresh path below.
+      if (
+        eventName === "meeting_digest_updated" ||
+        eventName === "meeting_digest_failed"
+      ) {
+        const mid = (event as { meeting_id?: string }).meeting_id;
+        if (mid && this.mergedDetail.meetingId === mid) {
+          void this.mergedDetail.reload();
+        }
+        return;
+      }
       if (
         eventName === "recording_stopped" ||
         eventName === "transcription_done" ||

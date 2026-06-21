@@ -270,6 +270,16 @@ pub enum Request {
         /// The shared meeting session id both tracks carry.
         meeting_id: String,
     },
+    /// Fetch a meeting's whole-meeting digest (the LLM synthesis across all
+    /// tracks), if one has been generated. Additive to `ListMeeting`, which
+    /// returns the tracks — the merged meeting view fetches the digest
+    /// alongside them, the same way it fetches per-track segments. Ok = the
+    /// digest DTO (`{meeting_id, digest, digest_model}`) or `null` when none has
+    /// been generated yet. GUI merged meeting view.
+    GetMeetingDigest {
+        /// The meeting session whose digest to fetch.
+        meeting_id: String,
+    },
     /// Fetch one recording's machine transcript segments in timeline order.
     /// Ok = JSON array (possibly empty) of `TranscriptSegment` objects:
     /// `start_ms`/`end_ms` offsets into the track's audio, the segment text,
@@ -541,6 +551,26 @@ pub enum Request {
         /// One-time summary prompt override (never persisted).
         #[serde(default)]
         prompt: Option<String>,
+    },
+    /// Generate (or regenerate) the whole-meeting digest: one LLM synthesis
+    /// across ALL tracks of a meeting (mic + system together), distinct from
+    /// the per-recording [`Request::RerunSummary`]. The daemon assembles the
+    /// merged meeting transcript (every track, source-labelled) and runs it
+    /// through the configured summary provider, storing the result keyed by
+    /// `meeting_id` (the `meeting_digests` table). Reuses the summary connection;
+    /// `model` optionally overrides the summary model for this run only (never
+    /// persisted). Ok `null` immediately — the LLM call runs detached, emitting
+    /// `PipelineStageChanged(Summarizing)` + [`DaemonEvent::LlmActivity`], and
+    /// the result arrives as [`DaemonEvent::MeetingDigestUpdated`] (or
+    /// `MeetingDigestFailed`). Errors up front: `not_found` for an unknown
+    /// meeting, no transcribed tracks, or `invalid_config` when no usable LLM
+    /// provider is configured. GUI merged meeting view, `phoneme meeting digest`.
+    RerunMeetingDigest {
+        /// The meeting session to digest (the shared `meeting_id`).
+        meeting_id: String,
+        /// One-time summary model override (never persisted).
+        #[serde(default)]
+        model: Option<String>,
     },
 
     // ── Library: transcript & metadata edits ────────────────────────────
@@ -1691,6 +1721,24 @@ pub enum DaemonEvent {
     MeetingNameUpdated {
         /// The renamed meeting session.
         meeting_id: String,
+    },
+    /// A meeting's whole-meeting digest was (re)generated and stored — the
+    /// result of `RerunMeetingDigest` or the on-finalize auto-digest. The
+    /// meeting scope twin of [`DaemonEvent::SummaryUpdated`]; merged meeting
+    /// views re-fetch the digest.
+    MeetingDigestUpdated {
+        /// The meeting whose digest changed.
+        meeting_id: String,
+    },
+    /// Whole-meeting digest generation failed. Distinct from a track's
+    /// `SummaryFailed` — every track's transcript is fine; only the optional
+    /// meeting-digest step failed. `error` carries the user-skip sentinel when
+    /// the stage was skipped, which the GUI toasts as "skipped".
+    MeetingDigestFailed {
+        /// The meeting whose digest step failed.
+        meeting_id: String,
+        /// Human-readable reason (endpoint, model, empty output, skip).
+        error: String,
     },
     /// A tag was created (`AddTag`, or an approval that minted a new tag).
     /// Tag lists refresh.

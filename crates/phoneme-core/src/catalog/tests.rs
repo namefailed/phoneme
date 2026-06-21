@@ -1654,6 +1654,44 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
     assert_eq!(with_session.len(), 2, "both meeting tracks must be listed");
 }
 
+#[tokio::test]
+async fn meeting_digest_set_get_upsert_and_delete() {
+    // The whole-meeting digest (the meeting-scope twin of `summary`): set →
+    // read back → regenerate (upsert overwrites) → delete. Keyed by meeting_id,
+    // independent of the recordings table.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let meeting_id = "meeting-digest-1";
+
+    // Nothing stored yet.
+    assert!(db.meeting_digest(meeting_id).await.unwrap().is_none());
+
+    // Store a digest with a model; it round-trips with both fields intact.
+    db.update_meeting_digest(meeting_id, "Overview: shipped v2.", Some("llama3.2:3b"))
+        .await
+        .unwrap();
+    let got = db.meeting_digest(meeting_id).await.unwrap().unwrap();
+    assert_eq!(got.meeting_id, meeting_id);
+    assert_eq!(got.digest, "Overview: shipped v2.");
+    assert_eq!(got.digest_model.as_deref(), Some("llama3.2:3b"));
+
+    // Regenerate: the upsert replaces the digest + model in place (one row per
+    // meeting), not a second row.
+    db.update_meeting_digest(meeting_id, "Revised digest.", None)
+        .await
+        .unwrap();
+    let got = db.meeting_digest(meeting_id).await.unwrap().unwrap();
+    assert_eq!(got.digest, "Revised digest.");
+    assert_eq!(
+        got.digest_model, None,
+        "a None model clears the stored model"
+    );
+
+    // Delete removes it; a second delete is a harmless no-op.
+    db.delete_meeting_digest(meeting_id).await.unwrap();
+    assert!(db.meeting_digest(meeting_id).await.unwrap().is_none());
+    db.delete_meeting_digest(meeting_id).await.unwrap();
+}
+
 // ── Named speakers ────────────────────────────────────────────────────────
 
 #[tokio::test]

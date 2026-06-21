@@ -180,6 +180,16 @@ pub enum MeetingAction {
     Toggle,
     /// List every recording (track) belonging to a meeting session.
     Tracks { meeting_id: String },
+    /// Generate (or regenerate) the whole-meeting digest: one LLM synthesis
+    /// across ALL tracks of a meeting (mic + system together), distinct from the
+    /// per-recording `phoneme summarize`. Stored on the meeting and shown in the
+    /// merged meeting view.
+    Digest {
+        meeting_id: String,
+        /// Override the summary model for this run only (never persisted).
+        #[arg(long)]
+        model: Option<String>,
+    },
     /// Set or clear a meeting session's display name. Give a NAME to set it, or
     /// pass --clear (with no NAME) to remove the name and fall back to the
     /// auto-generated label.

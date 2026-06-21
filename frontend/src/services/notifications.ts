@@ -123,6 +123,15 @@ function onEvent(event: DaemonEvent) {
     case "summary_updated":
       if (stepsEnabled) showToast("Summary ready", "success");
       return;
+    // Whole-meeting digest (across all of a meeting's tracks) — the meeting-scope
+    // twin of summary_updated/_failed. A failure is best-effort like the summary
+    // (the meeting's tracks are all fine; only the optional digest failed).
+    case "meeting_digest_updated":
+      if (stepsEnabled) showToast("Meeting digest ready", "success");
+      return;
+    case "meeting_digest_failed":
+      stepFailedToast("Meeting digest", String(e.error ?? ""), stepsEnabled);
+      return;
     case "tag_suggestions_updated": {
       if (!stepsEnabled) return;
       // Only toast when the suggestion count GROWS — dismissing, approving, or
