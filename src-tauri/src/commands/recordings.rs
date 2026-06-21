@@ -1009,6 +1009,15 @@ pub async fn suggest_tags(bridge: Br<'_>, id: String) -> Result<Value, CommandEr
     forward(&bridge, Request::SuggestTags { id }).await
 }
 
+/// Run the LLM entity-extraction step for one recording on demand. The
+/// structured entities land on the recording and arrive via the
+/// `EntitiesUpdated` daemon event. Entity counterpart of `suggest_tags`.
+#[tauri::command]
+pub async fn suggest_entities(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SuggestEntities { id }).await
+}
+
 /// Approve one suggested tag (create if needed + attach + drop the suggestion).
 #[tauri::command]
 pub async fn approve_tag_suggestion(

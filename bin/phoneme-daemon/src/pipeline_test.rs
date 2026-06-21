@@ -50,6 +50,7 @@ async fn seed_recording(
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -57,6 +58,7 @@ async fn seed_recording(
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -101,6 +103,7 @@ async fn seed_in_place_recording(
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -108,6 +111,7 @@ async fn seed_in_place_recording(
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -243,6 +247,7 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -250,6 +255,7 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -369,6 +375,7 @@ async fn seed_meeting_track(
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -376,6 +383,7 @@ async fn seed_meeting_track(
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -1396,6 +1404,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1403,6 +1412,7 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -1834,6 +1844,172 @@ fn parse_tag_names_fallback_split_cap_and_dedupe() {
     assert!(parse_tag_names("", 5).is_empty());
 }
 
+/// `parse_entities` finds the first valid JSON array-of-objects even when the
+/// model wraps it in bracket-bearing prose, normalizes unknown/blank kinds to
+/// `topic`, drops empties + over-long values, and de-dupes case-insensitively
+/// on `(kind, value)` with a cap.
+#[test]
+fn parse_entities_scans_prose_normalizes_kind_and_dedupes() {
+    use crate::pipeline::parse_entities;
+    use phoneme_core::Entity;
+
+    // Wrapped in prose with stray brackets before/after the real array.
+    let parsed = parse_entities(
+        "Here you go [1]: [{\"kind\":\"person\",\"value\":\"Ada\"},{\"kind\":\"org\",\"value\":\"ACME\"}] (done)",
+        10,
+    );
+    assert_eq!(
+        parsed,
+        vec![
+            Entity {
+                kind: "person".into(),
+                value: "Ada".into()
+            },
+            Entity {
+                kind: "org".into(),
+                value: "ACME".into()
+            },
+        ],
+    );
+
+    // Code-fenced; an unknown/blank kind normalizes to "topic".
+    let fenced = parse_entities(
+        "```json\n[{\"kind\":\"place\",\"value\":\"Paris\"},{\"value\":\"no-kind\"}]\n```",
+        10,
+    );
+    assert_eq!(
+        fenced,
+        vec![
+            Entity {
+                kind: "topic".into(),
+                value: "Paris".into()
+            },
+            Entity {
+                kind: "topic".into(),
+                value: "no-kind".into()
+            },
+        ],
+    );
+
+    // Case-insensitive (kind, value) dedupe + the cap.
+    let deduped = parse_entities(
+        "[{\"kind\":\"topic\",\"value\":\"Rust\"},{\"kind\":\"topic\",\"value\":\"rust\"},{\"kind\":\"topic\",\"value\":\"async\"}]",
+        2,
+    );
+    assert_eq!(
+        deduped,
+        vec![
+            Entity {
+                kind: "topic".into(),
+                value: "Rust".into()
+            },
+            Entity {
+                kind: "topic".into(),
+                value: "async".into()
+            },
+        ],
+    );
+
+    // No JSON array at all → nothing extracted (no comma-split fallback for the
+    // structured shape).
+    assert!(parse_entities("just some prose, no json here", 10).is_empty());
+    assert!(parse_entities("", 10).is_empty());
+}
+
+/// End-to-end on-demand entity extraction against a mocked LLM: the model
+/// returns a JSON entity array, and `extract_entities` parses it, stores the
+/// typed entities (`set_entities`), records the model (`set_entities_model`), and
+/// the result is readable back off the recording.
+#[tokio::test]
+async fn extract_entities_persists_typed_entities_from_mock_llm() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content":
+                "[{\"kind\":\"person\",\"value\":\"Ada\"},{\"kind\":\"org\",\"value\":\"ACME\"},{\"kind\":\"place\",\"value\":\"Paris\"}]"
+            } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    // The `entities` Playbook entry inherits provider/url/model from
+    // `[llm_post_process]` (its own llm fields are blank), so pointing the
+    // cleanup connection at the mock routes the entity step there.
+    cfg.llm_post_process.enabled = true;
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.llm_post_process.model = "test-llm".into();
+
+    let state = test_state(tmp.path(), cfg.clone()).await;
+
+    // A Done recording with a transcript to extract from.
+    let id = RecordingId::new();
+    let rec = Recording {
+        id: id.clone(),
+        started_at: chrono::Local::now(),
+        duration_ms: 1000,
+        audio_path: "x.wav".into(),
+        transcript: Some("Ada from ACME met in Paris.".into()),
+        model: Some("tiny".into()),
+        status: RecordingStatus::Done,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: None,
+        meeting_name: None,
+        track: None,
+        in_place: false,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        pinned: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        entities_model: None,
+        title: None,
+        title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
+        mean_confidence: None,
+        tags: vec![],
+        entities: vec![],
+        speaker_names: vec![],
+    };
+    state.catalog.insert(&rec).await.unwrap();
+
+    let failure =
+        crate::pipeline::extract_entities(&state, &cfg, &id, "Ada from ACME met in Paris.").await;
+    assert!(failure.is_none(), "a clean extract is not a failure");
+
+    let fetched = state.catalog.get(&id).await.unwrap().expect("exists");
+    // person + org survive; the unknown "place" kind normalized to "topic".
+    assert_eq!(fetched.entities.len(), 3);
+    assert!(fetched
+        .entities
+        .iter()
+        .any(|e| e.kind == "person" && e.value == "Ada"));
+    assert!(fetched
+        .entities
+        .iter()
+        .any(|e| e.kind == "org" && e.value == "ACME"));
+    assert!(fetched
+        .entities
+        .iter()
+        .any(|e| e.kind == "topic" && e.value == "Paris"));
+    assert_eq!(fetched.entities_model.as_deref(), Some("test-llm"));
+}
+
 /// A user skip must stay distinguishable from a real stage failure all the way
 /// to the wire — the GUI matches the sentinel to toast "skipped" instead of an
 /// error (notifications.ts pins the other half of this contract).
@@ -1908,6 +2084,7 @@ fn step_label(step: &crate::pipeline::ResolvedStep) -> &'static str {
         Title { .. } => "title",
         Summary { .. } => "summary",
         Tags { .. } => "tags",
+        Entities { .. } => "entities",
         UnsupportedEnrichment { .. } => "unsupported",
         Hook { .. } => "hook",
     }
@@ -2804,6 +2981,7 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -2811,6 +2989,7 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
@@ -2879,6 +3058,7 @@ fn meeting_track(meeting_id: &str, track: &str, transcript: Option<&str>) -> Rec
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -2886,6 +3066,7 @@ fn meeting_track(meeting_id: &str, track: &str, transcript: Option<&str>) -> Rec
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     }
 }

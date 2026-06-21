@@ -7,38 +7,39 @@ Phoneme CLI
 Usage: phoneme.exe [OPTIONS] <COMMAND>
 
 Commands:
-  record         Push-to-talk: read stdin until EOF / Enter, then stop
-  meeting        Meeting Mode: record mic + system audio as two linked recordings
-  import         Import a local audio file (wav/mp3/m4a/flac) — or an http(s) URL (e.g. a YouTube link, downloaded via yt-dlp) — and transcribe it
-  list           List recordings
-  show           Show one recording
-  retranscribe   Re-transcribe a saved recording
-  cleanup        Re-run only the LLM cleanup step on a stored transcript
-  summarize      Generate (or regenerate) an LLM summary of a recording
-  suggest-tags   Re-run the LLM tag-suggestion step on a recording on demand
-  notes          Get or set a recording's free-form notes
-  edit           Edit a recording's transcript and/or metadata (title, favorite)
-  find-replace   Find-and-replace literal text across a recording's transcript
-  clip           Export a time range of a recording's audio to a new WAV
-  speaker        Rename or clear a recording's diarized speaker labels
-  search         Semantic (embedding) search over transcripts
-  ask            Ask a question answered from your own transcripts, with citations (local RAG over the same hybrid retriever as `search`)
-  reembed        Clear all embeddings and re-embed the whole library with the current model
-  queue          Inspect and manage the transcription queue
-  refire-hook    Re-fire the post-processing hook on a recording's stored transcript
-  delete         Delete a recording
-  doctor         Health check
-  config         Configuration management
-  daemon         Daemon control
-  watch          Subscribe to the daemon's event stream
-  hook           Test the configured hook
-  tag            Manage recording tags
-  profile        Manage config profiles (named full-config snapshots)
-  export         Export all recordings and metadata to a zip file
-  import-backup  Restore recordings + audio from a backup zip (the inverse of `export`)
-  completions    Print a shell-completion script for the given shell to stdout
-  version        Print version + commit info
-  help           Print this message or the help of the given subcommand(s)
+  record            Push-to-talk: read stdin until EOF / Enter, then stop
+  meeting           Meeting Mode: record mic + system audio as two linked recordings
+  import            Import a local audio file (wav/mp3/m4a/flac) — or an http(s) URL (e.g. a YouTube link, downloaded via yt-dlp) — and transcribe it
+  list              List recordings
+  show              Show one recording
+  retranscribe      Re-transcribe a saved recording
+  cleanup           Re-run only the LLM cleanup step on a stored transcript
+  summarize         Generate (or regenerate) an LLM summary of a recording
+  suggest-tags      Re-run the LLM tag-suggestion step on a recording on demand
+  suggest-entities  Re-run the LLM entity-extraction step on a recording on demand
+  notes             Get or set a recording's free-form notes
+  edit              Edit a recording's transcript and/or metadata (title, favorite)
+  find-replace      Find-and-replace literal text across a recording's transcript
+  clip              Export a time range of a recording's audio to a new WAV
+  speaker           Rename or clear a recording's diarized speaker labels
+  search            Semantic (embedding) search over transcripts
+  ask               Ask a question answered from your own transcripts, with citations (local RAG over the same hybrid retriever as `search`)
+  reembed           Clear all embeddings and re-embed the whole library with the current model
+  queue             Inspect and manage the transcription queue
+  refire-hook       Re-fire the post-processing hook on a recording's stored transcript
+  delete            Delete a recording
+  doctor            Health check
+  config            Configuration management
+  daemon            Daemon control
+  watch             Subscribe to the daemon's event stream
+  hook              Test the configured hook
+  tag               Manage recording tags
+  profile           Manage config profiles (named full-config snapshots)
+  export            Export all recordings and metadata to a zip file
+  import-backup     Restore recordings + audio from a backup zip (the inverse of `export`)
+  completions       Print a shell-completion script for the given shell to stdout
+  version           Print version + commit info
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
       --no-color  Disable colored output (or set NO_COLOR=1)

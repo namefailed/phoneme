@@ -122,6 +122,9 @@ active recording has nothing new to attach them to):
 **Tag suggestions (LLM auto-tag):**
 - `suggest_tags` (on-demand suggest for one recording), `approve_tag_suggestion`, `dismiss_tag_suggestion`, `clear_all_tag_suggestions` (library-wide bulk clear)
 
+**Entity extraction (LLM structured entities):**
+- `suggest_entities` (`{ "id" }`) — on-demand run of the entity-extraction step for one recording (regardless of recipe membership). Awaits the model like `suggest_tags`; the typed entities (`person` / `org` / `topic` / `term`) land on the recording, **replacing** any previous set, and `entities_updated` fires (or `entities_failed`). The `Recording` DTO carries them as `entities: [{kind, value}, …]` plus the `entities_model` provenance field.
+
 The `list_recordings` filter takes `limit`/`offset` (pagination),
 `since`/`until` (RFC 3339), `status` (one of the recording statuses below),
 `search` (FTS5), `tag_id`, `sort_desc`, plus the type filters applied in SQL
@@ -250,6 +253,12 @@ The whole-meeting digest emits `meeting_digest_updated` (success) or
 `meeting_digest_failed` (`{ meeting_id, error }`) — the meeting-scope twins of
 `summary_updated` / `summary_failed`, keyed by `meeting_id` rather than a
 recording `id`.
+
+Entity extraction emits `entities_updated` (`{ id }`) when the typed entities are
+stored, or `entities_failed` (`{ id, error }`) on failure — the entity twins of
+`tag_suggestions_updated` / `tag_failed`. A failure is best-effort: the
+transcript stays intact and the recording usable; only the optional entity step
+failed.
 
 **Ask my archive stream** (`ask_activity`, after sending `ask` with a
 `request_id`): the daemon ships the citation `sources` first (before any token),

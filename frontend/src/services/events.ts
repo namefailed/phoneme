@@ -90,6 +90,8 @@ export type DaemonEvent =
   | { event: "cleanup_failed"; id: string; error: string }
   | { event: "title_failed"; id: string; error: string }
   | { event: "tag_failed"; id: string; error: string }
+  | { event: "entities_updated"; id: string }
+  | { event: "entities_failed"; id: string; error: string }
   | { event: "notes_updated"; id: string }
   | { event: "speaker_name_updated"; id: string }
   | { event: "tag_created"; id: number }

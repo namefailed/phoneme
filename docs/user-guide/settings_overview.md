@@ -82,7 +82,7 @@ See [Smart Cleanup](smart_cleanup.md) and [Providers & Models](providers_and_mod
 The Playbook is where post-transcription processing lives. A **recipe** is one ordered chain of steps:
 
 - **Transform** — rewrites the transcript in place (e.g. cleanup, formalize, bulletize).
-- **Enrichment** — derives metadata: a **title**, a **summary**, or **tags**.
+- **Enrichment** — derives metadata: a **title**, a **summary**, **tags**, or **entities** (structured, typed people / orgs / topics / terms).
 - **Hook** — runs a side-effect: a **shell command** and/or an **outbound webhook**, optionally **keyword-gated** (only fire when the transcript contains a phrase) and optionally flagged **"fail the recording"** (by default a failed hook is surfaced but non-fatal).
 
 Each step reads its own provider/model/prompt, so a recipe is fully self-contained. The built-in **`default` recipe** runs for normal recordings; a custom **Hotkey** can point at any other recipe so that combo's recordings run a different chain. A one-time migration folded any legacy `[hook]` config into Hook entries on the `default` recipe.

@@ -2284,9 +2284,9 @@ impl PlaybookHook {
 /// A reusable "move" in the Playbook. A flat struct with a `kind` discriminant +
 /// per-kind sub-objects (TOML-friendly): `llm` drives `Transform`/`Enrichment`,
 /// `hook` drives `Hook`, and `target` names the field an `Enrichment` writes —
-/// built-in `title` / `summary` / `tags`, or `custom:<key>` for user-defined
-/// metadata. Curated entries are `builtin` (editable; "reset to default" restores
-/// the seed); user entries are not.
+/// built-in `title` / `summary` / `tags` / `entities`, or `custom:<key>` for
+/// user-defined metadata. Curated entries are `builtin` (editable; "reset to
+/// default" restores the seed); user entries are not.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlaybookEntry {
     /// Stable unique id — the key recipes and hotkeys reference.
@@ -2312,7 +2312,7 @@ pub struct PlaybookEntry {
     #[serde(default)]
     pub llm: PlaybookLlm,
     /// For `Enrichment`: the field to write — `title` | `summary` | `tags` |
-    /// `custom:<key>`. Ignored for other kinds.
+    /// `entities` | `custom:<key>`. Ignored for other kinds.
     #[serde(default)]
     pub target: String,
     /// Hook config (used for `Hook`).
@@ -2516,6 +2516,22 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             input: StepInput::Previous,
             llm: llm("Extract the 3-7 most important topics or keywords from this transcript. Reply with only a comma-separated list, lowercase."),
             target: "custom:keywords".into(),
+            hook: PlaybookHook::default(),
+        },
+        // Entity extraction — a REAL enrichment (target `entities`, backed by the
+        // `entities` child table), unlike the `custom:*` examples above which have
+        // no store yet. Add it to a recipe (or the `default` recipe) to extract
+        // typed entities on every recording, or run it on demand from the detail
+        // pane / `phoneme suggest-entities`.
+        PlaybookEntry {
+            id: "entities".into(),
+            name: "Extract entities".into(),
+            description: "Pull structured, typed entities (people, orgs, topics, terms) out of the transcript — richer than the flat auto-tags.".into(),
+            builtin: true,
+            kind: PlaybookKind::Enrichment,
+            input: StepInput::Previous,
+            llm: llm("Extract the key named entities from this transcript. Reply with ONLY a JSON array of objects, each {\"kind\":\"...\",\"value\":\"...\"}, where kind is one of: person, org, topic, term. Use \"person\" for people, \"org\" for organizations/companies, \"topic\" for subjects discussed, \"term\" for notable jargon or proper terms. Output at most 20 entities, no duplicates, no preamble, no code fences."),
+            target: "entities".into(),
             hook: PlaybookHook::default(),
         },
         PlaybookEntry {

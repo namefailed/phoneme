@@ -28,8 +28,8 @@ use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
 use crate::types::{
-    AiActivityEntry, ListFilter, MeetingDigest, NamedVoice, PropagationCandidate, Recording,
-    RecordingStatus, SavedSearch, SpeakerName, SpeakerSuggestion, TranscriptSegment,
+    AiActivityEntry, Entity, ListFilter, MeetingDigest, NamedVoice, PropagationCandidate,
+    Recording, RecordingStatus, SavedSearch, SpeakerName, SpeakerSuggestion, TranscriptSegment,
     TranscriptWord,
 };
 use chrono::{DateTime, Local};
@@ -382,6 +382,7 @@ fn replace_ignore_case(haystack: &str, needle: &str, replacement: &str) -> (usiz
 pub mod ann;
 mod embeddings;
 pub use embeddings::AnnHealth;
+mod entities;
 mod meeting_digests;
 mod recordings;
 mod saved_search;
@@ -534,6 +535,9 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
             .unwrap_or_default(),
         summary: row.try_get("summary").unwrap_or(None),
         summary_model: row.try_get("summary_model").unwrap_or(None),
+        // The entity-extraction model (nullable). `unwrap_or(None)` keeps older
+        // rows that predate the column NULL.
+        entities_model: row.try_get("entities_model").unwrap_or(None),
         title: row.try_get("title").unwrap_or(None),
         title_is_auto: row.try_get("title_is_auto").unwrap_or(true),
         title_model: row.try_get("title_model").unwrap_or(None),
@@ -543,6 +547,8 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         // rows that predate the column NULL — no badge, never flagged.
         mean_confidence: row.try_get("mean_confidence").unwrap_or(None),
         tags: Vec::new(),
+        // Populated separately (child query against `entities`) by list/get, like `tags`.
+        entities: Vec::new(),
         // Populated separately (joined from `speaker_names`) by list/get/list_by_meeting.
         speaker_names: Vec::new(),
     })

@@ -74,6 +74,17 @@ trust boundary.*
   disagreed with the panel. Cleanup now re-aligns the words onto the cleaned text
   into a separate "cleaned" timing layer (the raw machine truth is preserved), and
   both views gained a **Raw ⇄ Cleaned** toggle.
+- [x] **Entity extraction** — a real Playbook **Enrichment** step (target
+  `entities`) that pulls **structured, typed entities** (`person` / `org` /
+  `topic` / `term`) out of a transcript with an LLM — richer than the flat
+  auto-tags. Stored in a new `entities` child table (with the per-recording
+  `entities_model` provenance, mirroring `summary_model`), surfaced as typed chips
+  grouped by kind in the detail pane with a 🔎 **Extract** button, and available on
+  demand via `SuggestEntities` / `phoneme suggest-entities <ID>`. Add the built-in
+  `entities` entry to a recipe to run it automatically, or run it ad hoc; a re-run
+  replaces the set. Reuses the existing auto-tag/summary LLM machinery (same
+  provider resolution, streaming, skip/empty/error handling); the default pipeline
+  is unchanged unless the recipe includes the step.
 
 ### Reliability & foundation
 

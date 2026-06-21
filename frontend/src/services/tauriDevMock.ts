@@ -686,6 +686,22 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       }
       return undefined;
     }
+    // ── Entity extraction (the 🔎 chips): synthesize a few typed entities so the
+    //    grouped chips render in dev. ──
+    case "suggest_entities": {
+      const r = RECORDINGS.find((x) => x.id === id);
+      if (r) {
+        r.entities = [
+          { kind: "person", value: "Ada Lovelace" },
+          { kind: "org", value: "ACME Corp" },
+          { kind: "topic", value: "project roadmap" },
+          { kind: "term", value: "RRF" },
+        ];
+        r.entities_model = "phi3:mini";
+        emitDaemon({ event: "entities_updated", id });
+      }
+      return undefined;
+    }
     case "approve_tag_suggestion": {
       const r = RECORDINGS.find((x) => x.id === id);
       const name = String(args.name ?? "");

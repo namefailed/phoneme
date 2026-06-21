@@ -2154,6 +2154,9 @@ export class RecordingsView {
         eventName === "recording_deleted" ||
         eventName === "transcript_updated" ||
         eventName === "summary_updated" ||
+        // Entity extraction landed — refresh so the detail provenance line
+        // (entities_model) and any list signal update live.
+        eventName === "entities_updated" ||
         eventName === "speaker_name_updated" ||
         // Tag mutations change the Tags column — refresh so it updates live
         // instead of needing a manual reload.

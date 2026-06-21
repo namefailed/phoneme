@@ -713,6 +713,19 @@ pub enum Request {
         /// The recording to suggest tags for.
         id: RecordingId,
     },
+    /// Run the LLM entity-extraction step for one recording on demand (regardless
+    /// of whether the recipe includes an `entities` step). Mirrors
+    /// [`Request::SuggestTags`]: it awaits the step — Ok `null` arrives after the
+    /// model replies. Streams [`DaemonEvent::LlmActivity`] (Tagging stage) while
+    /// running; the structured entities land on the recording (replacing any
+    /// previous set) and [`DaemonEvent::EntitiesUpdated`] fires (or
+    /// `EntitiesFailed`). Errors: `invalid_config` when the recording has no
+    /// transcript yet, `not_found`. GUI 🔎 Extract button, `phoneme
+    /// suggest-entities <id>`.
+    SuggestEntities {
+        /// The recording to extract entities for.
+        id: RecordingId,
+    },
     /// Approve one suggested tag: create the tag if needed, attach it, and
     /// remove the name from the recording's suggestion list. Ok = the tag
     /// object `{"id":n,"name":…,"color":…}`; emits
@@ -1684,6 +1697,24 @@ pub enum DaemonEvent {
         /// The recording whose auto-tag step failed.
         id: RecordingId,
         /// Human-readable reason (endpoint, model, parse error).
+        error: String,
+    },
+    /// A recording's structured entities were (re)extracted and stored — the
+    /// result of `SuggestEntities` or the auto-pipeline entity-extraction step.
+    /// Views re-fetch the recording to show the new typed entity chips. Mirrors
+    /// [`DaemonEvent::TagSuggestionsUpdated`].
+    EntitiesUpdated {
+        /// The recording whose entities changed.
+        id: RecordingId,
+    },
+    /// Entity extraction failed. Best-effort like the other optional enrichment
+    /// steps: the recording keeps its transcript and stays usable (no entities
+    /// added); this only surfaces the failure for the toast. `error` carries the
+    /// user-skip sentinel when skipped. Mirrors [`DaemonEvent::TagFailed`].
+    EntitiesFailed {
+        /// The recording whose entity-extraction step failed.
+        id: RecordingId,
+        /// Human-readable reason (endpoint, model, parse error, skip).
         error: String,
     },
     /// A recording's free-form notes were replaced (`UpdateNotes`).

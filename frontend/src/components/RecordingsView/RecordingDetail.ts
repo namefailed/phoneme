@@ -31,6 +31,7 @@ import { ActionRow, readPlaybackSpeed } from "./ActionRow";
 import { ClipExport } from "./ClipExport";
 import { isLowConfidence, lowConfidenceThreshold } from "../../utils/confidence";
 import { TagChips } from "./TagChips";
+import { EntityChips } from "./EntityChips";
 import { TranscriptDiff } from "./TranscriptDiff";
 import { TranscriptEditor } from "./TranscriptEditor";
 import { NotesEditor } from "./NotesEditor";
@@ -324,6 +325,7 @@ export class RecordingDetail {
         <div id="clip-export"></div>
         <div id="actions"></div>
         <div id="tags"></div>
+        <div id="entities"></div>
         <div class="transcript-block">
           <div id="editor" style="flex: 1; display: flex; flex-direction: column; min-height: 0;"></div>
           <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
@@ -398,6 +400,9 @@ export class RecordingDetail {
 
     const tagsRoot = this.container.querySelector<HTMLElement>("#tags");
     if (tagsRoot) new TagChips(tagsRoot, r.id);
+
+    const entitiesRoot = this.container.querySelector<HTMLElement>("#entities");
+    if (entitiesRoot) new EntityChips(entitiesRoot, r.id);
 
     this.wirePipeline();
 
@@ -1308,6 +1313,9 @@ function modelsSteps(r: Recording): PipelineStep[] {
   //    from pending suggestions (the only per-recording signal the tagger ran).
   if (r.tag_model) steps.push({ icon: "🏷️", label: "Tagged", value: escapeHtml(r.tag_model) });
   else if (r.tag_suggestions && r.tag_suggestions.length) steps.push({ icon: "🏷️", label: "Tagged", value: "Suggestions pending" });
+
+  // 8. Entity extraction — names the model once persisted.
+  if (r.entities_model) steps.push({ icon: "🔎", label: "Entities", value: escapeHtml(r.entities_model) });
 
   return steps;
 }

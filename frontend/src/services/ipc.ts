@@ -73,6 +73,13 @@ export type Recording = {
   summary?: string | null;
   /** The LLM model used to produce `summary`, if any. */
   summary_model?: string | null;
+  /** Structured, typed entities (person/org/topic/term) extracted from the
+   *  transcript by the entity-extraction step — richer than the flat
+   *  `tag_suggestions`. Empty until extracted. */
+  entities?: Entity[];
+  /** The LLM model used by the entity-extraction step, when recorded. Null for
+   *  older rows or recordings whose entities were never extracted. */
+  entities_model?: string | null;
   /** Display title — auto-generated (heuristic/LLM) or user-set. Null until
    *  generated; the UI falls back to the started-at timestamp. */
   title?: string | null;
@@ -105,6 +112,11 @@ export type Recording = {
 /** A custom display name for one diarized speaker label within a recording.
  *  `speaker_label` is the 1-based index from a `[Speaker N]` marker. */
 export type SpeakerName = { speaker_label: number; name: string };
+
+/** One structured, typed entity extracted from a recording's transcript.
+ *  `kind` is `person` | `org` | `topic` | `term` (an unknown kind from the model
+ *  is stored as `topic`); `value` is the surface text. */
+export type Entity = { kind: string; value: string };
 
 /** A whole-meeting digest: one LLM synthesis across all of a meeting's tracks
  *  (mic + system together), distinct from a single track's `summary`. Keyed by
@@ -886,6 +898,13 @@ export async function skipCurrentStage(): Promise<void> {
  *  land on the recording; a `tag_suggestions_updated` event fires when ready. */
 export async function suggestTags(id: string): Promise<void> {
   await tauriInvoke("suggest_tags", { id });
+}
+
+/** Ask the LLM to extract structured entities for a recording now (on demand).
+ *  The typed entities land on the recording; an `entities_updated` event fires
+ *  when ready. Entity counterpart of {@link suggestTags}. */
+export async function suggestEntities(id: string): Promise<void> {
+  await tauriInvoke("suggest_entities", { id });
 }
 
 /** Approve one suggested tag: creates the tag if needed, attaches it, and

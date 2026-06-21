@@ -277,6 +277,11 @@ fn all_daemon_events_roundtrip() {
             track: None,
         },
         DaemonEvent::TagSuggestionsUpdated { id: id.clone() },
+        DaemonEvent::EntitiesUpdated { id: id.clone() },
+        DaemonEvent::EntitiesFailed {
+            id: id.clone(),
+            error: "parse error".into(),
+        },
         DaemonEvent::PreviewSourceChanged {
             track: "mic".into(),
         },
@@ -325,6 +330,13 @@ fn all_daemon_events_roundtrip() {
     for e in &events {
         roundtrip(e);
     }
+}
+
+#[test]
+fn entity_request_roundtrips() {
+    roundtrip(&Request::SuggestEntities {
+        id: RecordingId::new(),
+    });
 }
 
 #[test]

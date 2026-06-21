@@ -549,6 +549,7 @@ pub fn run() {
             commands::set_preview_source,
             commands::skip_current_stage,
             commands::suggest_tags,
+            commands::suggest_entities,
             commands::approve_tag_suggestion,
             commands::clear_all_tag_suggestions,
             commands::dismiss_tag_suggestion,

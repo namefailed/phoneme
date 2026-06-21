@@ -406,6 +406,7 @@ fn embedded_recording(meeting_id: Option<&str>) -> Recording {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -413,6 +414,7 @@ fn embedded_recording(meeting_id: Option<&str>) -> Recording {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     }
 }
@@ -1284,6 +1286,7 @@ async fn test_insert_and_get() {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1291,6 +1294,7 @@ async fn test_insert_and_get() {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     db.insert(&r).await.expect("insert");
@@ -1348,6 +1352,7 @@ async fn original_transcript_preserved_across_user_edit() {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1355,6 +1360,7 @@ async fn original_transcript_preserved_across_user_edit() {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     db.insert(&r).await.expect("insert");
@@ -1420,6 +1426,7 @@ async fn notes_round_trip_and_survive_transcription() {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1427,6 +1434,7 @@ async fn notes_round_trip_and_survive_transcription() {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     db.insert(&r).await.expect("insert");
@@ -1577,6 +1585,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1584,6 +1593,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     let mic = make("mic");
@@ -1631,6 +1641,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -1638,6 +1649,7 @@ async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     db.insert(&solo).await.expect("insert solo");
@@ -3732,6 +3744,235 @@ async fn retrieve_context_drops_weak_semantic_and_scopes_by_filter() {
             .any(|c| c.recording_id.as_str() == keep.id.as_str()),
         "the in-scope strong match survives the filter"
     );
+}
+
+/// Minimal `Done` recording for the entity tests — only the columns
+/// `set_entities` / `list_entities` care about matter; the rest are inert.
+fn entity_test_recording() -> Recording {
+    Recording {
+        id: RecordingId::new(),
+        started_at: Local::now(),
+        duration_ms: 1000,
+        audio_path: "x.wav".into(),
+        transcript: Some("hello".into()),
+        model: Some("tiny".into()),
+        status: RecordingStatus::Done,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: None,
+        meeting_name: None,
+        track: None,
+        in_place: false,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        pinned: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        entities_model: None,
+        title: None,
+        title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
+        mean_confidence: None,
+        tags: vec![],
+        entities: vec![],
+        speaker_names: vec![],
+    }
+}
+
+#[tokio::test]
+async fn entities_round_trip_and_populate_on_get_and_list() {
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r = entity_test_recording();
+    db.insert(&r).await.expect("insert");
+
+    let entities = vec![
+        Entity {
+            kind: "person".into(),
+            value: "Ada Lovelace".into(),
+        },
+        Entity {
+            kind: "org".into(),
+            value: "Analytical Engine Co".into(),
+        },
+        Entity {
+            kind: "topic".into(),
+            value: "compiler design".into(),
+        },
+    ];
+    db.set_entities(&r.id, &entities)
+        .await
+        .expect("set entities");
+    db.set_entities_model(&r.id, "phi3:mini")
+        .await
+        .expect("set entities model");
+
+    // list_entities returns them kind-then-value sorted.
+    let listed = db.list_entities(&r.id).await.expect("list entities");
+    assert_eq!(listed.len(), 3);
+    assert_eq!(
+        listed[0],
+        Entity {
+            kind: "org".into(),
+            value: "Analytical Engine Co".into()
+        }
+    );
+    assert_eq!(
+        listed[1],
+        Entity {
+            kind: "person".into(),
+            value: "Ada Lovelace".into()
+        }
+    );
+    assert_eq!(
+        listed[2],
+        Entity {
+            kind: "topic".into(),
+            value: "compiler design".into()
+        }
+    );
+
+    // get() populates Recording::entities + entities_model.
+    let fetched = db.get(&r.id).await.expect("get").expect("some");
+    assert_eq!(fetched.entities.len(), 3);
+    assert_eq!(fetched.entities_model.as_deref(), Some("phi3:mini"));
+
+    // list() populates them per-row too.
+    let rows = db
+        .list(&ListFilter {
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await
+        .expect("list");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].entities.len(), 3);
+}
+
+#[tokio::test]
+async fn set_entities_replaces_wholesale_and_empty_clears() {
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r = entity_test_recording();
+    db.insert(&r).await.expect("insert");
+
+    db.set_entities(
+        &r.id,
+        &[Entity {
+            kind: "person".into(),
+            value: "First".into(),
+        }],
+    )
+    .await
+    .expect("set 1");
+    // A second set replaces (DELETE-then-insert), it does not accumulate.
+    db.set_entities(
+        &r.id,
+        &[Entity {
+            kind: "topic".into(),
+            value: "Second".into(),
+        }],
+    )
+    .await
+    .expect("set 2");
+    let listed = db.list_entities(&r.id).await.expect("list");
+    assert_eq!(
+        listed,
+        vec![Entity {
+            kind: "topic".into(),
+            value: "Second".into()
+        }]
+    );
+
+    // An empty slice clears the set.
+    db.set_entities(&r.id, &[]).await.expect("clear");
+    assert!(db.list_entities(&r.id).await.expect("list").is_empty());
+}
+
+#[tokio::test]
+async fn list_all_entities_dedupes_and_filters_by_kind() {
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r1 = entity_test_recording();
+    let r2 = entity_test_recording();
+    db.insert(&r1).await.expect("insert r1");
+    db.insert(&r2).await.expect("insert r2");
+
+    // The same (kind, value) appears in both recordings — list_all_entities
+    // de-dupes it to one row.
+    let shared = Entity {
+        kind: "topic".into(),
+        value: "shared topic".into(),
+    };
+    db.set_entities(
+        &r1.id,
+        &[
+            shared.clone(),
+            Entity {
+                kind: "person".into(),
+                value: "Alice".into(),
+            },
+        ],
+    )
+    .await
+    .expect("set r1");
+    db.set_entities(
+        &r2.id,
+        &[
+            shared.clone(),
+            Entity {
+                kind: "person".into(),
+                value: "Bob".into(),
+            },
+        ],
+    )
+    .await
+    .expect("set r2");
+
+    let all = db.list_all_entities().await.expect("list all");
+    // shared topic (once) + Alice + Bob = 3 distinct.
+    assert_eq!(all.len(), 3);
+    assert_eq!(all.iter().filter(|e| e.value == "shared topic").count(), 1);
+
+    // entities_by_kind slices to one kind.
+    let people = db.entities_by_kind("person").await.expect("by kind");
+    assert_eq!(people.len(), 2);
+    assert!(people.iter().all(|e| e.kind == "person"));
+}
+
+#[tokio::test]
+async fn deleting_a_recording_cascades_its_entities() {
+    let db = Catalog::open(Path::new("sqlite::memory:"))
+        .await
+        .expect("open db");
+    let r = entity_test_recording();
+    db.insert(&r).await.expect("insert");
+    db.set_entities(
+        &r.id,
+        &[Entity {
+            kind: "term".into(),
+            value: "FK cascade".into(),
+        }],
+    )
+    .await
+    .expect("set");
+    db.delete(&r.id).await.expect("delete");
+    // The FK ON DELETE CASCADE took the entity rows with the recording.
+    assert!(db.list_all_entities().await.expect("list all").is_empty());
 }
 
 // ── ANN (approximate nearest-neighbour) index ───────────────────────────────

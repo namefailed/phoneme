@@ -236,6 +236,9 @@ fn is_retry_safe(req: &Request) -> bool {
         | SetRecordingTitle { .. }
         // Tag suggestions.
         | SuggestTags { .. }
+        // Entity extraction — awaits an LLM call like SuggestTags; single-attempt
+        // so a blind re-send after a lost reply can't fire the model twice.
+        | SuggestEntities { .. }
         | ApproveTagSuggestion { .. }
         | DismissTagSuggestion { .. }
         | ClearAllTagSuggestions

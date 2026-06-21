@@ -252,6 +252,13 @@ pub async fn restore_from_zip(
             catalog.attach_tag(&rec.id, created.id).await?;
         }
 
+        // Restore the recording's structured entities (the `entities` child table
+        // the DTO carries). `set_entities` replaces wholesale, so the freshly
+        // inserted row's entities land exactly as exported.
+        if !rec.entities.is_empty() {
+            catalog.set_entities(&rec.id, &rec.entities).await?;
+        }
+
         report.imported += 1;
     }
 
@@ -345,6 +352,7 @@ mod tests {
             tag_suggestions: vec![],
             summary: Some("short summary".into()),
             summary_model: Some("phi3:mini".into()),
+            entities_model: None,
             title: Some("My Title".into()),
             title_is_auto: false,
             title_model: None,
@@ -352,6 +360,7 @@ mod tests {
             diarization_model: None,
             mean_confidence: Some(0.82),
             tags: vec![],
+            entities: vec![],
             speaker_names: vec![],
         }
     }

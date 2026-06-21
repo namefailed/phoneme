@@ -516,6 +516,11 @@ pub struct Recording {
     /// The LLM model used to produce `summary`, if any.
     #[serde(default)]
     pub summary_model: Option<String>,
+    /// The LLM model the entity-extraction step used for this recording, if it
+    /// ran. `None` for older rows or recordings whose entities were never
+    /// extracted. Mirrors [`Self::summary_model`].
+    #[serde(default)]
+    pub entities_model: Option<String>,
     /// Display title for the recording — auto-generated (heuristic or LLM) or
     /// set by the user. `None` until generated; the UI falls back to the
     /// `started_at` timestamp.
@@ -554,6 +559,12 @@ pub struct Recording {
     /// not a column on the recordings table (joined from `recording_tags`).
     #[serde(default)]
     pub tags: Vec<crate::tags::Tag>,
+    /// Structured, typed entities extracted from this recording's transcript.
+    /// Populated by `Catalog::list`/`get` (an N+1 child query against the
+    /// `entities` table, like `tags`); not a column on the recordings table.
+    /// Empty when the entity-extraction step never ran.
+    #[serde(default)]
+    pub entities: Vec<Entity>,
     /// Custom display names for this recording's diarized speaker labels, e.g.
     /// `[Speaker 1]` → "Sarah". Populated by `Catalog::list`/`get`/`list_by_meeting`
     /// from the `speaker_names` table (not a column on `recordings`). The stored
@@ -582,6 +593,23 @@ pub struct SpeakerName {
     pub speaker_label: i64,
     /// The user-chosen display name for that speaker.
     pub name: String,
+}
+
+/// One structured, typed entity extracted from a recording's transcript by the
+/// LLM entity-extraction enrichment step — richer than the flat auto-tag names.
+///
+/// `kind` is a coarse class the UI groups by — `person`, `org`, `topic`, or
+/// `term` (an unrecognized class the model emits is normalized to `topic`); it is
+/// stored as a stable lowercase string in the `entities.kind` column. `value` is
+/// the surface text (a name, an organization, a concept). Stored in the
+/// `entities` table, keyed per recording and unique on `(recording_id, kind,
+/// value)`; populated onto [`Recording::entities`] by `Catalog::list`/`get`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Entity {
+    /// The entity class: `person` / `org` / `topic` / `term`.
+    pub kind: String,
+    /// The entity's surface text (a name, organization, concept, or term).
+    pub value: String,
 }
 
 /// A whole-meeting digest: one LLM-generated synthesis across **all** tracks of a

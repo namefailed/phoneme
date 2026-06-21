@@ -49,6 +49,8 @@ pub enum Command {
     Summarize(SummarizeArgs),
     /// Re-run the LLM tag-suggestion step on a recording on demand.
     SuggestTags(SuggestTagsArgs),
+    /// Re-run the LLM entity-extraction step on a recording on demand.
+    SuggestEntities(SuggestEntitiesArgs),
     /// Get or set a recording's free-form notes.
     Notes(NotesArgs),
     /// Edit a recording's transcript and/or metadata (title, favorite).
@@ -331,6 +333,11 @@ pub struct SummarizeArgs {
 
 #[derive(Debug, clap::Args)]
 pub struct SuggestTagsArgs {
+    pub id: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SuggestEntitiesArgs {
     pub id: String,
 }
 

@@ -46,7 +46,7 @@ use phoneme_core::config::{
 use phoneme_core::error::Result;
 use phoneme_core::transcription::DiarizationTrack;
 use phoneme_core::{
-    Catalog, Embedder, HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus,
+    Catalog, Embedder, Entity, HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus,
 };
 use phoneme_ipc::{DaemonEvent, PipelineStage};
 use std::sync::Arc;
@@ -1373,6 +1373,227 @@ async fn run_tags_step(
     suggest_tags_with(state, cfg, id, transcript, llm_cfg, prompt).await
 }
 
+/// The built-in instruction the entity-extraction step uses when the recording
+/// has no migrated `entities` Playbook entry (a user deleted it) — the entity
+/// counterpart of `[auto_tag].prompt`. Asks for a small JSON array of
+/// `{kind,value}` so [`parse_entities`] can scan it robustly. Kept in code (not
+/// a config section) because there is no `[entities]` section today; the Playbook
+/// `entities` entry is the editable source of truth.
+pub(crate) const DEFAULT_ENTITY_PROMPT: &str = "Extract the key named entities from this transcript. Reply with ONLY a JSON array of objects, each {\"kind\":\"...\",\"value\":\"...\"}, where kind is one of: person, org, topic, term. Use \"person\" for people, \"org\" for organizations/companies, \"topic\" for subjects discussed, \"term\" for notable jargon or proper terms. Output at most 20 entities, no duplicates, no preamble, no code fences.";
+
+/// The valid entity kinds. An LLM-emitted kind that isn't one of these is
+/// normalized to `topic` by [`parse_entities`] — the most general bucket — so a
+/// stray class never drops the entity.
+const ENTITY_KINDS: [&str; 4] = ["person", "org", "topic", "term"];
+
+/// Hard cap on how many entities one extraction run stores, mirroring the
+/// auto-tag list cap. Keeps a chatty model from flooding the child table.
+const MAX_ENTITIES: usize = 20;
+
+/// Build the effective LLM config for entity extraction, mirroring
+/// `auto_tag_llm_config`: resolve the migrated `entities` Playbook entry's LLM
+/// half against `[llm_post_process]` (inherit-on-blank). Falls back to the bare
+/// cleanup connection when no `entities` entry exists, so the on-demand path
+/// always has a usable provider.
+pub fn entities_llm_config(cfg: &Config) -> LlmPostProcessConfig {
+    match entry_config_for_target(cfg, "entities") {
+        Some((llm_cfg, _)) => llm_cfg,
+        None => cfg.llm_post_process.clone(),
+    }
+}
+
+/// One parsed `{kind, value}` shape from the model's JSON reply, before
+/// normalization. `kind` is optional so a model that emits a bare `{"value":…}`
+/// still parses (it defaults to `topic`).
+#[derive(serde::Deserialize)]
+struct RawEntity {
+    #[serde(default)]
+    kind: Option<String>,
+    value: String,
+}
+
+/// Parse the entity-extractor's reply into clean, typed [`Entity`] values.
+///
+/// Mirrors `parse_tag_names`' robustness: scan every `[` and take the first
+/// position that deserializes as a JSON array of `{kind,value}` objects, so
+/// chatty models that wrap the array in bracket-bearing prose don't poison it.
+/// Each entry is trimmed; an empty or over-long value is dropped; the `kind` is
+/// lowercased and normalized to one of [`ENTITY_KINDS`] (an unknown kind →
+/// `topic`); case-insensitive `(kind, value)` duplicates collapse; the list is
+/// capped at `max`. Returns an empty vec when nothing usable parses (no JSON
+/// array, all-empty values) — the caller treats that as "nothing extracted".
+fn parse_entities(raw: &str, max: usize) -> Vec<Entity> {
+    let cleaned = raw.trim();
+    // Find the first valid JSON array-of-objects anywhere in the reply, scanning
+    // each '[' (same rationale as parse_tag_names): a greedy first-'['..last-']'
+    // slice would span bracket-bearing prose and fail to parse.
+    let parsed: Option<Vec<RawEntity>> = cleaned
+        .char_indices()
+        .filter(|(_, c)| *c == '[')
+        .find_map(|(start, _)| {
+            serde_json::Deserializer::from_str(&cleaned[start..])
+                .into_iter::<Vec<RawEntity>>()
+                .next()?
+                .ok()
+        });
+    let Some(candidates) = parsed else {
+        return Vec::new();
+    };
+    let mut seen: Vec<(String, String)> = Vec::new();
+    let mut out: Vec<Entity> = Vec::new();
+    for c in candidates {
+        let value = c
+            .value
+            .trim()
+            .trim_matches(|ch| ch == '"' || ch == '\'' || ch == '`')
+            .trim()
+            .to_string();
+        // Entity values are short surface strings; anything sentence-length is the
+        // model ignoring instructions — drop it rather than storing junk.
+        if value.is_empty() || value.chars().count() > 80 {
+            continue;
+        }
+        // Normalize the kind to a known bucket; an unknown/blank kind → "topic".
+        let kind_lc = c.kind.unwrap_or_default().trim().to_lowercase();
+        let kind = if ENTITY_KINDS.contains(&kind_lc.as_str()) {
+            kind_lc
+        } else {
+            "topic".to_string()
+        };
+        let key = (kind.clone(), value.to_lowercase());
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(Entity { kind, value });
+        if out.len() >= max {
+            break;
+        }
+    }
+    out
+}
+
+/// Extract structured entities for `transcript` and persist them on the recording
+/// (replacing any previous set), emitting `EntitiesUpdated` so the UI shows the
+/// typed chips. The entity counterpart of [`suggest_tags`]: the legacy/IPC path
+/// reads the migrated `entities` Playbook entry (or the built-in default prompt
+/// when absent). Non-fatal: failures are logged and surfaced. Returns
+/// `Some(error)` only when the step actually failed (an LLM call error) — the
+/// caller folds that into the terminal status. An empty transcript, a missing
+/// provider, a user-skip, or "nothing extracted" are all non-failures (`None`).
+pub async fn extract_entities(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    transcript: &str,
+) -> Option<String> {
+    let (llm_cfg, prompt) = match entry_config_for_target(cfg, "entities") {
+        Some(pair) => pair,
+        None => (entities_llm_config(cfg), DEFAULT_ENTITY_PROMPT.to_string()),
+    };
+    extract_entities_with(state, id, transcript, llm_cfg, &prompt).await
+}
+
+/// The entity-extractor's core, parameterized by an already-resolved LLM config +
+/// prompt so the legacy/IPC path ([`extract_entities`]) and the recipe executor
+/// (reads the `entities` entry) share one implementation — same provider mint,
+/// streaming, parse, persistence, events, and skip/empty/error classification as
+/// the auto-tag path it is modelled on. Records the model via `set_entities_model`
+/// once per run (before the parse) so the provenance line shows it even when the
+/// reply parsed to nothing.
+pub(crate) async fn extract_entities_with(
+    state: &AppState,
+    id: &RecordingId,
+    transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    prompt: &str,
+) -> Option<String> {
+    if transcript.trim().is_empty() {
+        return None;
+    }
+    let llm = match llm_provider_for_run(state, &llm_cfg).await {
+        Some(llm) => llm,
+        None => {
+            tracing::warn!(
+                provider = %llm_cfg.provider,
+                "entity extraction requested but no usable LLM provider is configured"
+            );
+            return None;
+        }
+    };
+    match run_llm_stage(
+        state,
+        id,
+        // No dedicated `Extracting` stage exists (see the IPC `PipelineStage`
+        // note) — reuse Tagging for the live activity stream; the dedicated
+        // EntitiesUpdated/Failed events carry the structured result.
+        PipelineStage::Tagging,
+        &*llm,
+        prompt,
+        transcript,
+    )
+    .await
+    {
+        Ok(reply) => {
+            // Record which model ran the extractor (the detail provenance line
+            // names it), once per run and before the parse — so it sticks even
+            // when the reply parsed to nothing.
+            if let Err(e) = state.catalog.set_entities_model(id, &llm_cfg.model).await {
+                tracing::warn!(error = %e, "failed to persist entities model");
+            }
+            let entities = parse_entities(&reply, MAX_ENTITIES);
+            if entities.is_empty() {
+                tracing::info!(id = %id.as_str(), "entity extraction produced nothing");
+                return None;
+            }
+            match state.catalog.set_entities(id, &entities).await {
+                Ok(()) => {
+                    tracing::info!(id = %id.as_str(), count = entities.len(), "entities saved");
+                    state
+                        .events
+                        .emit(DaemonEvent::EntitiesUpdated { id: id.clone() });
+                }
+                Err(e) => tracing::warn!(error = %e, "failed to persist entities"),
+            }
+            None
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "entity extraction LLM call failed");
+            // Best-effort: no entities added; surface the failure for a toast +
+            // the terminal status. A user-skip carries the sentinel and isn't a
+            // failure.
+            let skipped = stage_skipped(&e);
+            let msg = e.to_string();
+            state.events.emit(DaemonEvent::EntitiesFailed {
+                id: id.clone(),
+                error: msg.clone(),
+            });
+            if skipped {
+                None
+            } else {
+                Some(msg)
+            }
+        }
+    }
+}
+
+/// Run the entity-extraction step from the recipe executor: emit the
+/// `PipelineStageChanged(Tagging)` the UI reads, then run the shared
+/// [`extract_entities_with`] core. Mirrors [`run_tags_step`].
+async fn run_entities_step(
+    state: &AppState,
+    id: &RecordingId,
+    transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    prompt: &str,
+) -> Option<String> {
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Tagging,
+    });
+    extract_entities_with(state, id, transcript, llm_cfg, prompt).await
+}
+
 /// Write a recording's terminal status at the end of the pipeline: `Done` on a
 /// clean run, or the earliest failed optional step's status — and in that case
 /// persist its message on the row (`error_kind` = the status string,
@@ -1484,6 +1705,13 @@ enum ResolvedStep {
     /// Enrichment writing tag suggestions. Carries the entry-resolved LLM config
     /// and prompt from the migrated `auto_tag` Playbook entry.
     Tags {
+        llm_cfg: LlmPostProcessConfig,
+        prompt: String,
+    },
+    /// Enrichment writing structured, typed entities (person/org/topic/term).
+    /// Carries the entry-resolved LLM config + prompt from the `entities`
+    /// Playbook entry. The entity counterpart of [`ResolvedStep::Tags`].
+    Entities {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
     },
@@ -1656,6 +1884,10 @@ fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
                         prompt: entry.llm.prompt.clone(),
                     }),
                     "tags" => steps.push(ResolvedStep::Tags {
+                        llm_cfg: entry_llm_config(cfg, &entry.llm),
+                        prompt: entry.llm.prompt.clone(),
+                    }),
+                    "entities" => steps.push(ResolvedStep::Entities {
                         llm_cfg: entry_llm_config(cfg, &entry.llm),
                         prompt: entry.llm.prompt.clone(),
                     }),
@@ -1940,6 +2172,22 @@ async fn run_enrichment_steps(
                     .await;
                 if let Some(msg) =
                     run_tags_step(state, cfg, id, transcript, llm_cfg.clone(), prompt).await
+                {
+                    step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
+                }
+            }
+            ResolvedStep::Entities { llm_cfg, prompt } => {
+                // Reuse the Tagging status + stage for the live view (no dedicated
+                // `Extracting` status was added — see the IPC `PipelineStage`
+                // note); the dedicated EntitiesUpdated/Failed events carry the
+                // result. A real failure folds into TagFailed for the terminal
+                // status (the transcript is intact, like the other enrichments).
+                let _ = state
+                    .catalog
+                    .update_status(id, RecordingStatus::Tagging)
+                    .await;
+                if let Some(msg) =
+                    run_entities_step(state, id, transcript, llm_cfg.clone(), prompt).await
                 {
                     step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
                 }

@@ -66,9 +66,9 @@ impl Catalog {
                  error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
                  transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
                  cleanup_model, diarized, user_edited, favorite, pinned, tag_suggestions, summary,
-                 summary_model, title, title_is_auto, title_model, tag_model, diarization_model,
-                 mean_confidence
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 summary_model, entities_model, title, title_is_auto, title_model, tag_model,
+                 diarization_model, mean_confidence
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -97,6 +97,7 @@ impl Catalog {
         .bind(tag_suggestions)
         .bind(r.summary.as_deref())
         .bind(r.summary_model.as_deref())
+        .bind(r.entities_model.as_deref())
         .bind(r.title.as_deref())
         .bind(r.title_is_auto)
         .bind(r.title_model.as_deref())
@@ -693,6 +694,10 @@ impl Catalog {
         // Tags are deliberately left out here — the detail view loads those
         // separately via `tags_for`.
         rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
+        // Entities populate here (unlike tags): the detail view's entity surface
+        // reads `Recording::entities` straight off GetRecording, with no separate
+        // fetch of its own. Best-effort — a child-query failure leaves it empty.
+        rec.entities = self.list_entities(&rec.id).await.unwrap_or_default();
         Ok(Some(rec))
     }
 
@@ -859,6 +864,7 @@ impl Catalog {
         // acceptable for desktop UI scale).
         for rec in &mut recs {
             rec.tags = self.tags_for(&rec.id).await.unwrap_or_default();
+            rec.entities = self.list_entities(&rec.id).await.unwrap_or_default();
             rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
         }
         Ok(recs)

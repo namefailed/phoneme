@@ -120,6 +120,12 @@ function onEvent(event: DaemonEvent) {
     case "tag_failed":
       stepFailedToast("Auto-tagging", String(e.error ?? ""), stepsEnabled);
       return;
+    case "entities_failed":
+      stepFailedToast("Entity extraction", String(e.error ?? ""), stepsEnabled);
+      return;
+    case "entities_updated":
+      if (stepsEnabled) showToast("Entities extracted", "success");
+      return;
     case "summary_updated":
       if (stepsEnabled) showToast("Summary ready", "success");
       return;

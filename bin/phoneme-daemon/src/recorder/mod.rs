@@ -499,6 +499,7 @@ impl DaemonRecorder {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            entities_model: None,
             title: None,
             title_is_auto: true,
             title_model: None,
@@ -506,6 +507,7 @@ impl DaemonRecorder {
             diarization_model: None,
             mean_confidence: None,
             tags: vec![],
+            entities: vec![],
             speaker_names: vec![],
         };
         if let Err(e) = state.catalog.insert(&row).await {

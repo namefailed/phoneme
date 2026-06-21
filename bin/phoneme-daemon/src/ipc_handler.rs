@@ -926,6 +926,47 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        Request::SuggestEntities { id } => {
+            // On-demand entity extraction (the UI's 🔎 Extract button). Runs the
+            // same step as the auto pipeline, regardless of recipe membership.
+            let cfg = state.config.load();
+            match state.catalog.get(&id).await {
+                Ok(Some(rec)) => {
+                    let transcript = rec.transcript.unwrap_or_default();
+                    if transcript.trim().is_empty() {
+                        Response::Err(IpcError {
+                            kind: IpcErrorKind::InvalidConfig,
+                            message: "recording has no transcript to extract entities from yet"
+                                .into(),
+                        })
+                    } else {
+                        // Read the migrated `entities` enrichment entry (provider,
+                        // model, prompt) so editing it in the Playbook changes what
+                        // an on-demand re-run does. Fall back to the built-in
+                        // default entity prompt when no such entry exists.
+                        match crate::pipeline::entry_config_for_target(&cfg, "entities") {
+                            Some((llm_cfg, prompt)) => {
+                                crate::pipeline::extract_entities_with(
+                                    state,
+                                    &id,
+                                    &transcript,
+                                    llm_cfg,
+                                    &prompt,
+                                )
+                                .await;
+                            }
+                            None => {
+                                crate::pipeline::extract_entities(state, &cfg, &id, &transcript)
+                                    .await;
+                            }
+                        }
+                        ok_null()
+                    }
+                }
+                Ok(None) => not_found(format!("no recording {}", id.as_str())),
+                Err(e) => err_response(&e),
+            }
+        }
         Request::ApproveTagSuggestion { id, name } => {
             // Create-or-fetch the tag, attach it, then drop the suggestion.
             match state.catalog.add_tag(&name, None).await {
@@ -2701,6 +2742,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        entities_model: None,
         title: None,
         title_is_auto: true,
         title_model: None,
@@ -2708,6 +2750,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         diarization_model: None,
         mean_confidence: None,
         tags: vec![],
+        entities: vec![],
         speaker_names: vec![],
     };
     if let Err(e) = state.catalog.insert(&row).await {
@@ -2972,6 +3015,7 @@ async fn reimport_from_disk(state: &AppState, dry_run: bool) -> Response {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            entities_model: None,
             title: None,
             title_is_auto: true,
             title_model: None,
@@ -2979,6 +3023,7 @@ async fn reimport_from_disk(state: &AppState, dry_run: bool) -> Response {
             diarization_model: None,
             mean_confidence: None,
             tags: vec![],
+            entities: vec![],
             speaker_names: vec![],
         };
         if let Err(e) = state.catalog.insert(&row).await {
@@ -3417,6 +3462,7 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            entities_model: None,
             title: None,
             title_is_auto: true,
             title_model: None,
@@ -3424,6 +3470,7 @@ mod tests {
             diarization_model: None,
             mean_confidence: None,
             tags: vec![],
+            entities: vec![],
             speaker_names: vec![],
         };
         state.catalog.insert(&row).await.unwrap();

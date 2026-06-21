@@ -342,6 +342,20 @@ transcript yet (exit 6) or the id is unknown (exit 7).
 phoneme suggest-tags 20260519T143500823
 ```
 
+### 🔎 `phoneme suggest-entities <ID>`
+
+Re-run the LLM entity-extraction step on a recording on demand (the CLI face of
+the GUI 🔎 Extract button), regardless of whether the recipe includes an
+`entities` step. Like `suggest-tags`, the command awaits the model, then returns;
+the structured, typed entities (`person` / `org` / `topic` / `term`) land on the
+recording, **replacing** any previous set. Review them with `phoneme show <ID>`.
+Errors when the recording has no transcript yet (exit 6) or the id is unknown
+(exit 7).
+
+```bash
+phoneme suggest-entities 20260519T143500823
+```
+
 ### ✏️ `phoneme edit <ID>`
 
 Edit a recording's transcript and/or metadata. Any combination of the edits
