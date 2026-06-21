@@ -145,26 +145,56 @@ const AI_ACTIVITY_KEEP: i64 = 1_000;
 /// truncated (with a marker) rather than stored in full.
 const AI_ACTIVITY_FIELD_MAX_CHARS: usize = 64 * 1024;
 
-/// Sanitizes a user-provided string for use in an FTS5 MATCH query.
+/// Turn a user's search box text into a safe FTS5 MATCH expression.
 ///
-/// Extracts alphanumeric terms and joins them with `* AND ` to perform a robust
-/// prefix search that won't crash SQLite on invalid syntax.
+/// Each term is wrapped in a double-quoted FTS5 string rather than stripped down
+/// to bare alphanumerics, so punctuation inside a term (`react-router`,
+/// `O'Connor`, a code snippet) is handed to FTS5's tokenizer instead of being
+/// thrown away. Embedded double-quotes are escaped by doubling them, so the input
+/// can never break out of the quoting (no MATCH syntax error, no injection).
+///
+/// - A run of non-whitespace is one term, matched as a prefix (`"term"*`).
+/// - A `"quoted span"` is kept together as an exact phrase (no prefix), so a user
+///   who quotes "fix the bug" gets that phrase, not three prefix terms.
+/// - Terms are AND-ed: every one must match. An empty/whitespace query yields an
+///   empty string (callers treat that as "no query").
 fn sanitize_fts5_query(query: &str) -> String {
-    let mut terms = Vec::new();
-    let mut current_term = String::new();
+    let mut terms: Vec<String> = Vec::new();
+    let mut buf = String::new();
+    let mut in_quote = false;
+
+    // Emit `buf` as one quoted FTS5 term (prefix unless it was an explicit
+    // phrase), escaping embedded quotes. Blank buffers are dropped.
+    fn flush(buf: &mut String, terms: &mut Vec<String>, prefix: bool) {
+        let t = buf.trim();
+        if !t.is_empty() {
+            let escaped = t.replace('"', "\"\"");
+            terms.push(if prefix {
+                format!("\"{escaped}\"*")
+            } else {
+                format!("\"{escaped}\"")
+            });
+        }
+        buf.clear();
+    }
 
     for c in query.chars() {
-        if c.is_alphanumeric() {
-            current_term.push(c);
-        } else if !current_term.is_empty() {
-            terms.push(format!("{}*", current_term));
-            current_term.clear();
+        match c {
+            '"' if in_quote => {
+                in_quote = false;
+                flush(&mut buf, &mut terms, false); // closed phrase → exact
+            }
+            '"' => {
+                flush(&mut buf, &mut terms, true); // flush the pending bare term
+                in_quote = true;
+            }
+            c if c.is_whitespace() && !in_quote => flush(&mut buf, &mut terms, true),
+            c => buf.push(c),
         }
     }
-
-    if !current_term.is_empty() {
-        terms.push(format!("{}*", current_term));
-    }
+    // Trailing bare term, or an unterminated quote (treated as a plain phrase —
+    // its `OR`/`AND`/`*` are literal tokens inside quotes, so still injection-safe).
+    flush(&mut buf, &mut terms, !in_quote);
 
     terms.join(" AND ")
 }
@@ -4521,16 +4551,39 @@ mod tests {
 
     #[test]
     fn test_sanitize_fts5_query() {
-        assert_eq!(sanitize_fts5_query("hello"), "hello*");
-        assert_eq!(sanitize_fts5_query("hello world"), "hello* AND world*");
-        assert_eq!(sanitize_fts5_query("O'Connor"), "O* AND Connor*");
+        // Bare words become quoted prefix terms, AND-ed.
+        assert_eq!(sanitize_fts5_query("hello"), "\"hello\"*");
         assert_eq!(
-            sanitize_fts5_query("some-bad*characters"),
-            "some* AND bad* AND characters*"
+            sanitize_fts5_query("hello world"),
+            "\"hello\"* AND \"world\"*"
         );
-        assert_eq!(sanitize_fts5_query("\"quotes\""), "quotes*");
-        assert_eq!(sanitize_fts5_query("   spaces   "), "spaces*");
+        assert_eq!(sanitize_fts5_query("   spaces   "), "\"spaces\"*");
         assert_eq!(sanitize_fts5_query(""), "");
+
+        // Punctuation inside a term is KEPT (quoted, for FTS5 to tokenize) rather
+        // than stripped — the old sanitizer split these into prefix-AND soup.
+        assert_eq!(sanitize_fts5_query("O'Connor"), "\"O'Connor\"*");
+        assert_eq!(sanitize_fts5_query("react-router"), "\"react-router\"*");
+        assert_eq!(
+            sanitize_fts5_query("std::collections::HashMap"),
+            "\"std::collections::HashMap\"*"
+        );
+
+        // An explicitly quoted span is an EXACT phrase (no trailing prefix star).
+        assert_eq!(sanitize_fts5_query("\"fix the bug\""), "\"fix the bug\"");
+        // A quoted phrase plus a trailing bare word: phrase exact + word prefix.
+        assert_eq!(
+            sanitize_fts5_query("\"fix the bug\" now"),
+            "\"fix the bug\" AND \"now\"*"
+        );
+
+        // Injection attempt: the user's quotes are consumed as phrase delimiters,
+        // never passed through raw, so the output's quotes stay balanced and the
+        // FTS5 operators in the payload become literal phrase tokens.
+        assert_eq!(
+            sanitize_fts5_query("foo\" OR bar"),
+            "\"foo\"* AND \"OR bar\""
+        );
     }
 
     /// A minimal `Done` recording for embedding/search tests. `semantic_search`
