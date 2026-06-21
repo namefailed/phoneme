@@ -244,8 +244,10 @@ mod imp {
             Ok(matches.keys.into_iter().zip(matches.distances).collect())
         }
 
-        /// Persist the index to its sidecar. Called on the idle checkpoint
-        /// cadence when dirty, not per insert, to avoid an fsync per recording.
+        /// Persist the index to its sidecar. Called on graceful daemon shutdown,
+        /// not per insert, to avoid an fsync per recording. The sidecar is
+        /// disposable: if it's missing or stale on the next start, the index is
+        /// rebuilt from SQLite.
         pub fn save(&self) -> Result<()> {
             let sidecar_str = self
                 .sidecar

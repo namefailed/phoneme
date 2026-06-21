@@ -1842,6 +1842,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         *embedder_guard = None;
                     }
 
+                    // Re-apply the ANN tuning config to the live catalog so a
+                    // runtime enable/disable/tuning change takes effect without a
+                    // restart. `set_ann_config` drops the warm index + sidecar when
+                    // ANN is turned off; turning it on (or retuning) is picked up by
+                    // the daemon's next background rebuild. A no-op on a default
+                    // build (the `ann-usearch` feature isn't compiled).
+                    state
+                        .catalog
+                        .set_ann_config(cfg_arc.semantic_search.ann.clone());
+
                     // Drop the cached local diarization pipeline when
                     // `[diarization]` changed (backend switch / model path) —
                     // the next run reloads under the new config, and switching

@@ -1295,7 +1295,14 @@ impl Catalog {
             q = q.bind(k);
         }
         match q.fetch_all(&self.pool).await {
-            Ok(ids) => Some(ids.into_iter().collect()),
+            // Hits that resolve to at least one recording → narrow to that set.
+            Ok(ids) if !ids.is_empty() => Some(ids.into_iter().collect()),
+            // Hits that resolve to ZERO rows (every key was a dead node, or
+            // ann_keys drifted from the graph) must fall back, not return an empty
+            // set — an empty set would make the scan skip every chunk and silently
+            // serve near-empty semantic results. Mirrors the `hits.is_empty()`
+            // guard above: a candidate set we can't trust → brute force.
+            Ok(_) => None,
             Err(e) => {
                 tracing::warn!(error = %e, "ann index: key resolution failed; falling back to brute force");
                 None
@@ -1519,8 +1526,66 @@ impl Catalog {
             tracing::debug!("ann index: no on-disk sidecar (in-memory db); skipping build");
             return Ok(());
         };
+
+        // Serialize the read-snapshot → build → swap window against concurrent
+        // incremental adds (`sync_recording_to_ann`). An add commits its DB row,
+        // patches the warm cache (bumping `embedding_cache_gen` under the cache
+        // write lock), THEN touches the ANN graph — so a bump is the canonical
+        // "an add happened" signal. If a recording is added while we hold a stale
+        // read snapshot, our freshly-built index would silently miss it: when its
+        // `sync_recording_to_ann` ran, the index was either still `None` (so the
+        // add only landed in SQLite, which our snapshot may predate) or it mutated
+        // the previous index we're about to overwrite. We re-check the generation
+        // under the `ann.write()` lock at swap time and replay if it advanced, so
+        // no add is lost. Bounded so a steady write stream can't starve the build;
+        // once we swap the warm index in, subsequent adds re-sync into it directly.
+        const MAX_REBUILD_REPLAYS: u32 = 8;
+        for _ in 0..MAX_REBUILD_REPLAYS {
+            let gen_at_snapshot = self.embedding_cache_gen.load(Ordering::Acquire);
+            let Some((dim, pairs)) = self.collect_ann_build_pairs().await? else {
+                // Nothing to index yet — drop any stale index so search falls back.
+                self.drop_ann_index();
+                return Ok(());
+            };
+            let index = match ann::AnnIndex::build_from_pairs(sidecar.clone(), dim, &pairs, &cfg) {
+                Ok(index) => index,
+                Err(e) => {
+                    tracing::warn!(error = %e, "ann index: build failed; staying on brute force");
+                    self.drop_ann_index();
+                    self.delete_ann_sidecar();
+                    return Ok(());
+                }
+            };
+
+            // Swap under the write lock and re-check the generation while holding
+            // it. `sync_recording_to_ann` takes `ann.read()` only AFTER its cache
+            // patch bumps the generation, so observing the same generation here —
+            // with the write lock held — means no add committed during our window
+            // and the built index is complete.
+            let mut guard = match self.ann.write() {
+                Ok(g) => g,
+                Err(poison) => poison.into_inner(),
+            };
+            if self.embedding_cache_gen.load(Ordering::Acquire) == gen_at_snapshot {
+                if let Err(e) = index.save() {
+                    tracing::warn!(error = %e, "ann index: save after build failed (index still usable in memory)");
+                }
+                *guard = Some(index);
+                tracing::info!(vectors = pairs.len(), dim, "ann index: built");
+                return Ok(());
+            }
+            // An add raced the build. Drop the lock and rebuild from a fresh
+            // snapshot so the new recording is included.
+            drop(guard);
+            tracing::debug!("ann index: incremental add raced the build; replaying");
+        }
+
+        // Exhausted the bounded replays under sustained writes. Build one final
+        // index from the latest snapshot and swap it in: it's at worst missing the
+        // very last in-flight add, which the now-warm index picks up on its next
+        // `sync_recording_to_ann` (the index is no longer `None`). Never leave the
+        // search on a stale or empty graph indefinitely.
         let Some((dim, pairs)) = self.collect_ann_build_pairs().await? else {
-            // Nothing to index yet — drop any stale index so search falls back.
             self.drop_ann_index();
             return Ok(());
         };
@@ -1534,7 +1599,11 @@ impl Catalog {
                     Err(poison) => poison.into_inner(),
                 };
                 *guard = Some(index);
-                tracing::info!(vectors = pairs.len(), dim, "ann index: built");
+                tracing::info!(
+                    vectors = pairs.len(),
+                    dim,
+                    "ann index: built (after replay cap)"
+                );
                 Ok(())
             }
             Err(e) => {
@@ -1558,19 +1627,17 @@ impl Catalog {
         let Some(sidecar) = self.ann_sidecar.clone() else {
             return Ok(());
         };
-        // Expected count + dim from SQLite (the source of truth) to verify the
-        // sidecar against.
-        let expected_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM ann_keys ak JOIN embedding_chunks ec \
-                ON ak.recording_id = ec.recording_id AND ak.chunk_index = ec.chunk_index",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .unwrap_or(0);
+        // Dim + expected count from SQLite (the source of truth) to verify the
+        // sidecar against. `expected_count` must reflect ONLY the actually-
+        // indexable vectors — those `collect_ann_build_pairs` would keep — not
+        // every chunk row. A single corrupt or off-dimension blob is skipped by
+        // the build, so counting all rows would make the count check fail forever
+        // (rebuild every startup). Count only well-formed blobs at this dim, which
+        // is exactly the set the index was built from.
         let dim = self.ann_dim_from_sqlite().await;
         if let (true, Some(dim)) = (sidecar.exists(), dim) {
-            match ann::AnnIndex::load_verified(sidecar.clone(), dim, expected_count as usize, &cfg)
-            {
+            let expected_count = self.ann_indexable_count(dim).await;
+            match ann::AnnIndex::load_verified(sidecar.clone(), dim, expected_count, &cfg) {
                 Ok(index) => {
                     let mut guard = match self.ann.write() {
                         Ok(g) => g,
@@ -1592,6 +1659,28 @@ impl Catalog {
         self.rebuild_ann_index().await
     }
 
+    /// How many chunk vectors are actually indexable at `dim` — the count
+    /// `collect_ann_build_pairs` would keep. A vector is kept iff its blob is
+    /// well-formed and decodes to exactly `dim` floats, i.e. its byte length is
+    /// `dim * 4` (which is non-empty and a multiple of 4 for any `dim >= 1`).
+    /// Joining to `ann_keys` mirrors the build's join so a chunk without a key row
+    /// (not yet allocated) isn't counted as a sidecar vector. This is the count
+    /// `load_verified` checks the persisted graph against, so a corrupt or
+    /// off-dimension blob can't make a healthy sidecar fail its count check.
+    async fn ann_indexable_count(&self, dim: usize) -> usize {
+        let want_bytes = (dim * 4) as i64;
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ann_keys ak JOIN embedding_chunks ec \
+                ON ak.recording_id = ec.recording_id AND ak.chunk_index = ec.chunk_index \
+             WHERE LENGTH(ec.vector) = ?",
+        )
+        .bind(want_bytes)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+        count as usize
+    }
+
     /// The embedding dimension implied by the stored chunk vectors (length of the
     /// first well-formed blob), or `None` when there are no chunks.
     async fn ann_dim_from_sqlite(&self) -> Option<usize> {
@@ -1604,10 +1693,11 @@ impl Catalog {
         bytes.and_then(|b| (b.len().is_multiple_of(4) && !b.is_empty()).then_some(b.len() / 4))
     }
 
-    /// Persist the warm index to its sidecar if one is present. The daemon
-    /// piggybacks this on the idle `checkpoint()` cadence so a steady stream of
-    /// incremental `add`s isn't an fsync each. A no-op unless ANN is enabled and
-    /// an index is warm.
+    /// Persist the warm index to its sidecar if one is present. The daemon calls
+    /// this on graceful shutdown so the incremental `add`s since the last build
+    /// survive a restart, instead of an fsync per recording. The sidecar is
+    /// disposable: a missing or stale one is rebuilt from SQLite on the next
+    /// start. A no-op unless ANN is enabled and an index is warm.
     pub async fn save_ann_index(&self) {
         if !self.ann_enabled() {
             return;

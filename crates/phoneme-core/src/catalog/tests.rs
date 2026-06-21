@@ -3876,4 +3876,114 @@ mod ann_tests {
         let res = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
         assert_eq!(res[0].1.as_str(), a.id.as_str(), "cold index → brute force");
     }
+
+    /// Regression: an ANN search that returns hits but resolves ZERO `ann_keys`
+    /// rows (every top-K node is stranded — its key row is gone) must fall back to
+    /// brute force, not return an empty candidate set that makes `vector_ranking`
+    /// skip every chunk. Strand the keys (the index still holds the vectors), then
+    /// assert the search still returns the brute-force result.
+    #[tokio::test]
+    async fn ann_empty_key_resolution_falls_back_to_brute_force() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = open_ann_catalog(dir.path(), enabled_cfg()).await;
+
+        let a = embedded_recording(None);
+        let b = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.insert(&b).await.unwrap();
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&b.id, &[vec![0.0, 1.0, 0.0]])
+            .await
+            .unwrap();
+        db.rebuild_ann_index().await.unwrap();
+
+        // Sanity: with keys intact, the ANN path resolves and a-axis query wins a.
+        let warm = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(warm[0].1.as_str(), a.id.as_str());
+        assert!(db.ann_health().await.index_loaded, "index is warm");
+
+        // Strand every node: the graph still returns hits, but their keys no
+        // longer resolve to any recording. Delete the ann_keys rows directly (the
+        // in-memory index is untouched, so search still produces top-K keys).
+        sqlx::query("DELETE FROM ann_keys")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        // The index still holds the vectors (resolution, not the graph, is empty).
+        assert_eq!(
+            db.ann_health().await.index_vectors,
+            2,
+            "the in-memory graph is untouched by the ann_keys delete"
+        );
+
+        // The ANN candidate resolution is now empty for any query → fall back to
+        // brute force, which scans the (still-present) embedding corpus and finds
+        // the right recording. Before the fix this returned an empty candidate set
+        // and `vector_ranking` produced no chunk hits.
+        let after = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(
+            after[0].1.as_str(),
+            a.id.as_str(),
+            "empty key resolution must fall back to brute force, not drop results"
+        );
+        let after_b = db.vector_ranking(&[0.0, 1.0, 0.0]).await.unwrap();
+        assert_eq!(after_b[0].1.as_str(), b.id.as_str());
+    }
+
+    /// Regression: a recording added (via the incremental `sync_recording_to_ann`
+    /// path inside `upsert_chunk_embeddings`) while a `rebuild_ann_index` is in its
+    /// read-snapshot → build → swap window must not be silently missing from the
+    /// rebuilt index. The rebuild re-checks the embedding generation under the
+    /// swap lock and replays if an add raced it. Drive an add concurrently with the
+    /// rebuild over several iterations and assert the warm index always covers
+    /// every chunk in SQLite (no add lost until restart).
+    #[tokio::test]
+    async fn ann_rebuild_does_not_drop_concurrent_add() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = std::sync::Arc::new(open_ann_catalog(dir.path(), enabled_cfg()).await);
+
+        // Seed a small corpus and build once so the index is warm.
+        for _ in 0..5 {
+            let r = embedded_recording(None);
+            db.insert(&r).await.unwrap();
+            db.upsert_chunk_embeddings(&r.id, &[vec![1.0, 0.0, 0.0]])
+                .await
+                .unwrap();
+        }
+        db.rebuild_ann_index().await.unwrap();
+
+        // Repeatedly race a fresh add against a full rebuild. Whatever the
+        // interleaving, the post-condition must hold: the warm index covers every
+        // chunk row in SQLite.
+        for _ in 0..6 {
+            let r = embedded_recording(None);
+            db.insert(&r).await.unwrap();
+            let rid = r.id.clone();
+
+            let rebuild_db = db.clone();
+            let add_db = db.clone();
+            let (rebuild_res, add_res) = tokio::join!(
+                async move { rebuild_db.rebuild_ann_index().await },
+                async move {
+                    add_db
+                        .upsert_chunk_embeddings(&rid, &[vec![1.0, 0.0, 0.0]])
+                        .await
+                }
+            );
+            rebuild_res.unwrap();
+            add_res.unwrap();
+
+            // One more deterministic rebuild settles any in-flight replay so the
+            // count assertion isn't itself racing a build.
+            db.rebuild_ann_index().await.unwrap();
+
+            let health = db.ann_health().await;
+            assert_eq!(
+                health.index_vectors, health.sqlite_vectors,
+                "every chunk in SQLite must be in the warm index (no add lost)"
+            );
+        }
+    }
 }

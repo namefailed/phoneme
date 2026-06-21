@@ -397,9 +397,9 @@ impl Catalog {
     /// - `journal_mode=WAL` + `synchronous=NORMAL` → ACID with crash safety,
     ///   no fsync per write.
     /// - `wal_autocheckpoint=1000` triggers an automatic checkpoint when the
-    ///   WAL reaches ~1000 pages (~4 MB). Long-lived readers can still defer
-    ///   the checkpoint, so `Catalog::checkpoint()` is called explicitly from
-    ///   the daemon on idle to keep WAL growth bounded.
+    ///   WAL reaches ~1000 pages (~4 MB), which bounds WAL growth day-to-day.
+    ///   Long-lived readers can still defer a checkpoint, so
+    ///   [`Catalog::checkpoint`] is available to force one on demand.
     /// - `journal_size_limit=67108864` caps the WAL at 64 MB regardless.
     /// - `busy_timeout=5s` makes a connection wait for a contended lock rather
     ///   than failing immediately with SQLITE_BUSY ("database is locked").

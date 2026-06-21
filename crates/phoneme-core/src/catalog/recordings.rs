@@ -935,10 +935,10 @@ impl Catalog {
     }
 
     /// Run an explicit WAL checkpoint. PASSIVE mode is non-blocking — readers
-    /// can keep going while the checkpoint runs. The daemon calls this on idle
-    /// (e.g., when the queue worker has been quiet for a few minutes) to keep
-    /// the `-wal` file from growing unbounded under sustained read pressure
-    /// from `SubscribeEvents` subscribers.
+    /// can keep going while the checkpoint runs. Day-to-day the `-wal` file is
+    /// bounded by the `wal_autocheckpoint=1000` pragma set at open (see
+    /// [`Catalog::open`]), which checkpoints automatically as the WAL grows; this
+    /// is an explicit on-demand checkpoint for callers that want to force one.
     pub async fn checkpoint(&self) -> Result<()> {
         sqlx::query("PRAGMA wal_checkpoint(PASSIVE)")
             .execute(&self.pool)
