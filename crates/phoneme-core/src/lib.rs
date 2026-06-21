@@ -141,8 +141,8 @@ pub use transcription::{
     AssemblyAiProvider, DeepgramProvider, OpenAiCompatProvider, Transcriber, TranscriptionProvider,
 };
 pub use types::{
-    Chapter, ConfidenceAggregate, Entity, EntityFacet, HookMetadata, HookPayload, ListFilter,
-    ListKind, MeetingDigest, MeetingTrack, RecordMode, Recording, RecordingStatus, SavedSearch,
-    SavedSearchFilter, SavedSearchKind, SavedSearchTagState, SpeakerName, TranscriptSegment,
-    TranscriptWord,
+    Chapter, ConfidenceAggregate, DictationHistoryEntry, Entity, EntityFacet, HookMetadata,
+    HookPayload, ListFilter, ListKind, MeetingDigest, MeetingTrack, RecordMode, Recording,
+    RecordingStatus, SavedSearch, SavedSearchFilter, SavedSearchKind, SavedSearchTagState,
+    SpeakerName, TranscriptSegment, TranscriptWord,
 };

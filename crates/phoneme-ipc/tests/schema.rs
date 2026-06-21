@@ -379,6 +379,32 @@ fn chapter_wire_shape_roundtrips() {
 }
 
 #[test]
+fn dictation_history_requests_roundtrip() {
+    // The four dictation re-grab requests on the wire.
+    roundtrip(&Request::ListDictationHistory { limit: 50 });
+    roundtrip(&Request::RegrabDictation { id: 7, mode: None });
+    roundtrip(&Request::RegrabDictation {
+        id: 7,
+        mode: Some("paste".into()),
+    });
+    roundtrip(&Request::DeleteDictationHistory { id: 7 });
+    roundtrip(&Request::ClearDictationHistory);
+}
+
+#[test]
+fn regrab_dictation_without_mode_field_still_deserializes() {
+    // An older client omits `mode` entirely — serde default must absorb it
+    // (None → the daemon falls back to the configured type_mode).
+    let json = r#"{"type":"regrab_dictation","id":7}"#;
+    let parsed: Request = serde_json::from_str(json).unwrap();
+    let Request::RegrabDictation { id, mode } = parsed else {
+        panic!("expected regrab_dictation");
+    };
+    assert_eq!(id, 7);
+    assert_eq!(mode, None);
+}
+
+#[test]
 fn meeting_digest_requests_and_events_roundtrip() {
     // The on-demand digest re-run request (with and without a one-shot model
     // override) and the read request.

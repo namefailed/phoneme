@@ -27,6 +27,7 @@ Commands:
   ask               Ask a question answered from your own transcripts, with citations (local RAG over the same hybrid retriever as `search`)
   reembed           Clear all embeddings and re-embed the whole library with the current model
   queue             Inspect and manage the transcription queue
+  dictation         Re-grab a recent in-place dictation (the opt-in history)
   refire-hook       Re-fire the post-processing hook on a recording's stored transcript
   delete            Delete a recording
   doctor            Health check

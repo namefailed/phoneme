@@ -246,6 +246,38 @@ pub enum Request {
         /// The saved-search id to remove.
         id: String,
     },
+    // ── Dictation history (re-grab) ──────────────────────────────────────
+    /// Recent in-place dictations (the typed text), newest first, from the opt-in
+    /// re-grab ring buffer. Ok = JSON array of `DictationHistoryEntry`. Mirrors
+    /// [`Self::ListAiActivity`]; empty when `[in_place].keep_history` was never on.
+    /// GUI dictation-history manager, `phoneme dictation history`.
+    ListDictationHistory {
+        /// Max rows to return (clamped server-side to a bounded window).
+        limit: u32,
+    },
+    /// Re-insert a past dictation's stored text at the **current** cursor. `mode`
+    /// is `"type"`/`"paste"`/`None` (None → `[in_place].type_mode`). Injects
+    /// keystrokes/paste wherever the caret is now — the original window is long
+    /// gone, so there is no safe foreground-match check. Ok = `{}`; `not_found`
+    /// for an unknown id. GUI "Re-insert at cursor", `phoneme dictation regrab`.
+    RegrabDictation {
+        /// The dictation-history id to re-grab.
+        id: i64,
+        /// `"type"` / `"paste"`, or `None` to use `[in_place].type_mode`.
+        #[serde(default)]
+        mode: Option<String>,
+    },
+    /// Delete one dictation-history row by id (unknown ids are a no-op). Ok =
+    /// `{"removed":bool}`. Mirrors [`Self::DeleteSavedSearch`]. GUI per-row ✕,
+    /// `phoneme dictation forget`.
+    DeleteDictationHistory {
+        /// The dictation-history id to remove.
+        id: i64,
+    },
+    /// Empty the whole dictation-history ring buffer ("clear all"). Ok =
+    /// `{"removed":n}`. Mirrors [`Self::ClearFailed`]. GUI "Clear all",
+    /// `phoneme dictation clear`.
+    ClearDictationHistory,
     /// Execute a stored saved search by id, server-side (S2): the daemon parses
     /// the saved search's `filter_json` into a `ListFilter` and runs the same
     /// list query as [`Request::ListRecordings`], so a saved search can be run

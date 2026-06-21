@@ -96,6 +96,108 @@ impl Catalog {
         Ok(out)
     }
 
+    /// Record one in-place dictation in the opt-in re-grab ring buffer: the
+    /// `text` that was typed at the cursor, plus the focused `app` exe stem when
+    /// known. Called best-effort by the dictation core after the text has landed
+    /// (only when `[in_place].keep_history` is on), so a past dictation can be
+    /// re-inserted/re-copied later. Every insert prunes the table back to the
+    /// newest `DICTATION_HISTORY_KEEP` rows so it can't grow without bound;
+    /// `created_at` is stored as UTC. `char_count` records the dictation's real
+    /// length even if an extreme outlier `text` is char-capped (mirroring the
+    /// `ai_activity` cap idea).
+    pub async fn insert_dictation_history(&self, text: &str, app: Option<&str>) -> Result<()> {
+        // The real length, recorded before any char-cap so the UI still reports
+        // the dictation's true size for an oversize outlier.
+        let char_count = text.chars().count() as i64;
+        // Cap the stored text on a char boundary (it is UTF-8) so a multi-byte
+        // character is never split, with a marker so an extreme outlier reads as
+        // clipped rather than silently ending mid-word — same approach as
+        // `insert_ai_activity`.
+        let stored = if text.chars().count() <= DICTATION_HISTORY_TEXT_MAX_CHARS {
+            text.to_string()
+        } else {
+            let end = text
+                .char_indices()
+                .nth(DICTATION_HISTORY_TEXT_MAX_CHARS)
+                .map(|(i, _)| i)
+                .unwrap_or(text.len());
+            format!("{}… [truncated]", &text[..end])
+        };
+        sqlx::query(
+            "INSERT INTO dictation_history (text, char_count, app, created_at) \
+             VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+        )
+        .bind(&stored)
+        .bind(char_count)
+        .bind(app)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "DELETE FROM dictation_history WHERE id NOT IN \
+             (SELECT id FROM dictation_history ORDER BY id DESC LIMIT ?)",
+        )
+        .bind(DICTATION_HISTORY_KEEP)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Recent in-place dictations, newest first. `limit` is clamped to
+    /// `[1, DICTATION_HISTORY_KEEP]`. Mirrors [`Self::list_ai_activity`].
+    pub async fn list_dictation_history(&self, limit: i64) -> Result<Vec<DictationHistoryEntry>> {
+        let limit = limit.clamp(1, DICTATION_HISTORY_KEEP);
+        let rows = sqlx::query(
+            "SELECT id, text, char_count, app, created_at \
+             FROM dictation_history ORDER BY id DESC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            out.push(DictationHistoryEntry {
+                id: row.try_get("id")?,
+                text: row.try_get("text")?,
+                char_count: row.try_get("char_count")?,
+                app: row.try_get("app")?,
+                created_at: row.try_get("created_at")?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Fetch one stored dictation's text by id, for re-grab (re-insert/re-copy).
+    /// `None` when no row has that id.
+    pub async fn get_dictation_history(&self, id: i64) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT text FROM dictation_history WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(row) => Ok(Some(row.try_get("text")?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Delete one dictation-history row by id (unknown ids are a no-op). Returns
+    /// whether a row was actually removed. Mirrors [`Self::delete_saved_search`].
+    pub async fn delete_dictation_history(&self, id: i64) -> Result<bool> {
+        let res = sqlx::query("DELETE FROM dictation_history WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    /// Empty the whole dictation-history ring buffer ("clear all"). Returns how
+    /// many rows were removed (mirrors `ClearFailed`'s `{removed:n}`).
+    pub async fn clear_dictation_history(&self) -> Result<u64> {
+        let res = sqlx::query("DELETE FROM dictation_history")
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected())
+    }
+
     /// All saved searches, most-recently-updated first. The `filter_json` is
     /// returned verbatim for the frontend to deserialize.
     pub async fn list_saved_searches(&self) -> Result<Vec<SavedSearch>> {

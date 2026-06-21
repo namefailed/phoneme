@@ -169,6 +169,102 @@ async fn ai_activity_caps_oversized_prompt_and_response() {
 }
 
 #[tokio::test]
+async fn dictation_history_inserts_lists_newest_first_and_gets_by_id() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    // Migration applied: the table exists and starts empty.
+    assert!(db.list_dictation_history(50).await.unwrap().is_empty());
+
+    db.insert_dictation_history("first dictation", Some("code"))
+        .await
+        .unwrap();
+    db.insert_dictation_history("second dictation", None)
+        .await
+        .unwrap();
+    db.insert_dictation_history("third dictation", Some("slack"))
+        .await
+        .unwrap();
+
+    // Newest first (id DESC == insert order DESC); fields round-trip.
+    let all = db.list_dictation_history(50).await.unwrap();
+    assert_eq!(all.len(), 3);
+    assert_eq!(all[0].text, "third dictation");
+    assert_eq!(all[0].app.as_deref(), Some("slack"));
+    assert_eq!(all[0].char_count, "third dictation".chars().count() as i64);
+    assert_eq!(all[1].text, "second dictation");
+    assert_eq!(all[1].app, None, "a None app stores and reads back as NULL");
+    assert_eq!(all[2].text, "first dictation");
+
+    // `limit` caps the result (clamped to >= 1 too).
+    assert_eq!(db.list_dictation_history(1).await.unwrap().len(), 1);
+    assert_eq!(db.list_dictation_history(0).await.unwrap().len(), 1);
+
+    // get-by-id: hit returns the text, miss returns None.
+    let newest_id = all[0].id;
+    assert_eq!(
+        db.get_dictation_history(newest_id).await.unwrap().as_deref(),
+        Some("third dictation")
+    );
+    assert_eq!(db.get_dictation_history(999_999).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn dictation_history_prunes_to_keep_on_insert() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    // Insert more than the keep window; every insert prunes to the newest N.
+    for i in 0..(DICTATION_HISTORY_KEEP + 10) {
+        db.insert_dictation_history(&format!("dictation {i}"), None)
+            .await
+            .unwrap();
+    }
+    let all = db.list_dictation_history(DICTATION_HISTORY_KEEP).await.unwrap();
+    assert_eq!(all.len() as i64, DICTATION_HISTORY_KEEP);
+    // The newest entry is the last inserted; the oldest kept is offset by 10.
+    assert_eq!(
+        all[0].text,
+        format!("dictation {}", DICTATION_HISTORY_KEEP + 10 - 1)
+    );
+    assert_eq!(all[all.len() - 1].text, "dictation 10");
+}
+
+#[tokio::test]
+async fn dictation_history_delete_and_clear_report_counts() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    db.insert_dictation_history("a", None).await.unwrap();
+    db.insert_dictation_history("b", None).await.unwrap();
+    let rows = db.list_dictation_history(50).await.unwrap();
+    let an_id = rows[0].id;
+
+    // delete returns true for a hit, false for an unknown id.
+    assert!(db.delete_dictation_history(an_id).await.unwrap());
+    assert!(!db.delete_dictation_history(an_id).await.unwrap());
+    assert_eq!(db.list_dictation_history(50).await.unwrap().len(), 1);
+
+    // clear returns the number of rows removed, then leaves an empty table.
+    assert_eq!(db.clear_dictation_history().await.unwrap(), 1);
+    assert!(db.list_dictation_history(50).await.unwrap().is_empty());
+    assert_eq!(db.clear_dictation_history().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn dictation_history_caps_oversized_text_but_keeps_real_length() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    // Multi-byte chars prove the char-boundary cut never splits a character.
+    let huge = "é".repeat(DICTATION_HISTORY_TEXT_MAX_CHARS + 500);
+    db.insert_dictation_history(&huge, None).await.unwrap();
+    let row = &db.list_dictation_history(1).await.unwrap()[0];
+    assert!(row.text.ends_with("… [truncated]"), "text not marked");
+    // The stored text is capped at the ceiling (+ marker); char_count reports the
+    // dictation's REAL length, not the truncated one.
+    let kept = row
+        .text
+        .chars()
+        .take(DICTATION_HISTORY_TEXT_MAX_CHARS)
+        .count();
+    assert_eq!(kept, DICTATION_HISTORY_TEXT_MAX_CHARS);
+    assert_eq!(row.char_count, huge.chars().count() as i64);
+}
+
+#[tokio::test]
 async fn list_filters_kind_and_favorites_in_sql_before_pagination() {
     // Kind and favorites must be filtered in SQL, before LIMIT/OFFSET. Doing it
     // client-side after pagination lets a page contain almost none of the

@@ -324,3 +324,49 @@ app_context_denylist = ["keepassxc", "1password", "mybank"]
 > to flavor one AI cleanup prompt — it is never logged, never persisted, and
 > never sent anywhere but to the cleanup model you've configured. Turn
 > `app_context` off (the default) and the title is never touched at all.
+
+## 🕘 Dictation history / re-grab (opt-in)
+
+Ever dictate a sentence and have it land in the *wrong* window — or watch an app
+swallow the paste? Turn on **dictation history** and Phoneme keeps a short,
+bounded record of your recent dictations so you can **re-insert** or **re-copy**
+one without dictating it again.
+
+It's **off by default.** Once on, after each dictation the **text that was typed**
+is saved to a small ring buffer (the newest **50**, oldest dropped automatically).
+Manage it under **Settings → Dictation → Dictation history**, jump there with the
+**`g` then `H`** chord, or use the `phoneme dictation` command:
+
+```bash
+phoneme dictation history          # recent dictations, newest first
+phoneme dictation regrab 12        # re-type entry 12 at the cursor
+phoneme dictation regrab 12 --paste
+phoneme dictation forget 12        # forget one
+phoneme dictation clear            # wipe the whole history
+```
+
+In Settings each row has **Copy** (to the clipboard) and **Re-insert at cursor**.
+
+A few things to know:
+
+- **It re-inserts wherever your cursor is *now*.** The window you originally
+  dictated into is long gone, so re-grab types at the *current* caret. Click into
+  the right field first.
+- **It's the text *as typed*.** With AI cleanup on, what you typed can differ
+  from the recording's eventual library transcript — the history keeps what
+  actually landed.
+- **No audio, ever.** Only the text is kept. Even fully **ephemeral** dictations
+  (with *Keep dictations in the library* off, which otherwise leave nothing
+  behind) are kept here as text — which is the point, but read the privacy note.
+
+> [!IMPORTANT]
+> Dictation history **retains the exact text you dictated** — including
+> ephemeral dictations and anything sensitive you spoke into a field (a password,
+> a private note). It is bounded, text-only, and never logged, but it *is* kept
+> until you clear it. Leave it **off** if you'd rather nothing be retained, and
+> use **Clear all** (or `phoneme dictation clear`) to wipe it at any time.
+
+```toml
+[in_place]
+keep_history = true   # off by default
+```

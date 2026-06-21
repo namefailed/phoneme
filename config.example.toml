@@ -223,6 +223,14 @@ type_first = false
 # true (default) interprets them; false types every phrase literally.
 voice_commands_enabled = true
 
+# Keep a short re-grab history of recent dictations (the typed TEXT — no audio)
+# so a past one can be re-inserted/re-copied (Settings → Dictation, or `phoneme
+# dictation history`). OFF by default: it retains what was typed, INCLUDING
+# ephemeral dictations (save_to_library = false), which otherwise leave nothing
+# behind — a dictated password or note is kept here until you clear it. Bounded
+# to the newest 50; never logged. Wipe it with `phoneme dictation clear`.
+keep_history = false
+
 # `voice_commands` — OPTIONAL phrase -> action map for spoken editing commands.
 # Action is one of: "newline" (a line break), "paragraph" (a blank line), or
 # "scratch" (drop the sentence you just dictated). A command only triggers when

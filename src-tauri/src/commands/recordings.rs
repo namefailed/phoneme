@@ -489,6 +489,37 @@ pub async fn delete_saved_search(bridge: Br<'_>, id: String) -> Result<Value, Co
     forward(&bridge, Request::DeleteSavedSearch { id }).await
 }
 
+/// Recent in-place dictations (the typed text) from the opt-in re-grab ring
+/// buffer, newest first. Empty when `[in_place].keep_history` was never on.
+#[tauri::command]
+pub async fn list_dictation_history(bridge: Br<'_>, limit: u32) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ListDictationHistory { limit }).await
+}
+
+/// Re-insert a past dictation's stored text at the current cursor (`mode` =
+/// `"type"`/`"paste"`/omit for the configured `type_mode`). Errors `not_found`
+/// for an unknown id.
+#[tauri::command]
+pub async fn regrab_dictation(
+    bridge: Br<'_>,
+    id: i64,
+    mode: Option<String>,
+) -> Result<Value, CommandError> {
+    forward(&bridge, Request::RegrabDictation { id, mode }).await
+}
+
+/// Delete one dictation-history row by id (unknown ids are a no-op).
+#[tauri::command]
+pub async fn delete_dictation_history(bridge: Br<'_>, id: i64) -> Result<Value, CommandError> {
+    forward(&bridge, Request::DeleteDictationHistory { id }).await
+}
+
+/// Empty the whole dictation-history ring buffer ("clear all").
+#[tauri::command]
+pub async fn clear_dictation_history(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ClearDictationHistory).await
+}
+
 /// On-demand named-speaker recognition for a recording (#9): the unnamed diarized
 /// speakers whose voiceprints match a known voice.
 #[tauri::command]

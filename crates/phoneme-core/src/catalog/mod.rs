@@ -28,9 +28,9 @@ use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
 use crate::types::{
-    AiActivityEntry, Entity, EntityFacet, ListFilter, MeetingDigest, NamedVoice,
-    PropagationCandidate, Recording, RecordingStatus, SavedSearch, SpeakerName, SpeakerSuggestion,
-    TranscriptSegment, TranscriptWord,
+    AiActivityEntry, DictationHistoryEntry, Entity, EntityFacet, ListFilter, MeetingDigest,
+    NamedVoice, PropagationCandidate, Recording, RecordingStatus, SavedSearch, SpeakerName,
+    SpeakerSuggestion, TranscriptSegment, TranscriptWord,
 };
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -175,6 +175,17 @@ const AI_ACTIVITY_KEEP: i64 = 1_000;
 /// so the 🧠 popout redisplays them verbatim — and only an extreme outlier is
 /// truncated (with a marker) rather than stored in full.
 const AI_ACTIVITY_FIELD_MAX_CHARS: usize = 64 * 1024;
+
+/// How many recent in-place dictations to keep in the re-grab ring buffer.
+/// A short convenience history, not an archive — every insert prunes past this.
+const DICTATION_HISTORY_KEEP: i64 = 50;
+
+/// Per-row char cap on a stored dictation's `text`. Row count is already bounded
+/// by `DICTATION_HISTORY_KEEP`, but a single pathologically long dictation
+/// shouldn't bloat a row; this ceiling sits far above any normal dictation, so
+/// only an extreme outlier is truncated (with a marker). Mirrors
+/// `AI_ACTIVITY_FIELD_MAX_CHARS`.
+const DICTATION_HISTORY_TEXT_MAX_CHARS: usize = 64 * 1024;
 
 /// Turn a user's search box text into a safe FTS5 MATCH expression.
 ///

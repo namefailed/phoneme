@@ -581,7 +581,34 @@ async fn transcribe_polish_type(
         });
     }
 
+    // Opt-in re-grab history: record the text that just landed at the cursor so
+    // a past dictation can be re-inserted/re-copied later. This is the single
+    // chokepoint with the exact typed `polished` for every dictation variant
+    // (fast lane, type-first, streamed reconcile), and it runs AFTER the
+    // latency-critical typing, so it never delays the text. Gated entirely behind
+    // `keep_history` (default behavior is byte-for-byte unchanged), skips empty
+    // text, and is best-effort: a history write must never fail a dictation
+    // (mirrors the segment-persist warn above). With streaming-type on, this sits
+    // after the reconcile branch, so it records the final `polished` exactly once.
+    if should_record_history(cfg.in_place.keep_history, &polished) {
+        if let Err(e) = state
+            .catalog
+            .insert_dictation_history(&polished, focused_app.as_deref())
+            .await
+        {
+            tracing::warn!(id = %id.as_str(), "failed to record dictation history: {e}");
+        }
+    }
+
     Ok((transcription, polished, model_label))
+}
+
+/// Whether the just-typed dictation should be written to the opt-in re-grab
+/// history: only when `keep_history` is on AND there is non-blank text to keep.
+/// Pulled out so the gate is unit-testable without an [`AppState`] — the actual
+/// write (`insert_dictation_history`) is exercised by the catalog tests.
+fn should_record_history(keep_history: bool, polished: &str) -> bool {
+    keep_history && !polished.trim().is_empty()
 }
 
 /// Insert `text` at the system cursor. `mode` `"paste"` goes via the clipboard
@@ -813,6 +840,18 @@ mod tests {
             super::voice_command_directives(&d).as_deref(),
             Some(super::VOICE_COMMAND_DIRECTIVES)
         );
+    }
+
+    #[test]
+    fn dictation_history_write_is_gated_on_keep_history_and_nonempty() {
+        use super::should_record_history;
+        // Off by default → never written, even with real text.
+        assert!(!should_record_history(false, "hello world"));
+        // On + non-blank text → written.
+        assert!(should_record_history(true, "hello world"));
+        // On but empty / whitespace-only → skipped (nothing was typed).
+        assert!(!should_record_history(true, ""));
+        assert!(!should_record_history(true, "   \n\t "));
     }
 
     #[test]

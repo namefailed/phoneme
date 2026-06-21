@@ -61,6 +61,7 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "g then T", label: "Open the Tag Manager" },
       { combo: "g then P", label: "Managers → Profiles" },
       { combo: "g then S", label: "Settings → Search" },
+      { combo: "g then H", label: "Settings → Dictation history" },
       { combo: "Ctrl + ,", label: "Open Settings" },
       { combo: "Ctrl + B", label: "Toggle the sidebar" },
       { combo: "Ctrl + \\ / Ctrl + D", label: "Toggle the detail pane" },
@@ -509,7 +510,7 @@ function closeHelp() {
   });
 }
 
-/// Handle a `g`-prefix chord (gl/gs/gd/gD/gA/gT/gP/gS/g1/g2/g//gb/gg). These are
+/// Handle a `g`-prefix chord (gl/gs/gd/gD/gA/gT/gP/gS/gH/g1/g2/g//gb/gg). These are
 /// the "go to a place" destination chords and belong to the normal (non-vim)
 /// keymap — they all fire regardless of `vim_nav`. The sole exception is `g g`
 /// (jump-to-top), a vim motion (the partner of `G`), which stays gated. A bare
@@ -541,10 +542,14 @@ function handleGChord(e: KeyboardEvent) {
     // g A — toggle the AI-activity popout (the brain/FAB panel).
     if (e.key === "A") { e.preventDefault(); window.dispatchEvent(new CustomEvent("phoneme:toggle-ai-activity")); return; }
     // Capital chords jump to the managers: g T = quick Tag Manager popup,
-    // g P / g S = Settings → Managers deep-linked to Profiles / Saved searches.
+    // g P / g S = Settings → Managers deep-linked to Profiles / Saved searches,
+    // g H = Settings → Dictation (the re-grab history manager).
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
     if (e.key === "P") { e.preventDefault(); navigate("settings", "managers/profiles"); return; }
     if (e.key === "S") { e.preventDefault(); navigate("settings", "search"); return; }
+    // g H = Settings → Dictation tab, where the re-grab history manager lives
+    // (re-insert/re-copy a recent in-place dictation without hunting for it).
+    if (e.key === "H") { e.preventDefault(); navigate("settings", "dictation"); return; }
     // g 1 / g 2 — jump straight to the left (1) / right (2) recording pane in
     // split view (g 1 also just focuses the detail pane outside split). A "go to
     // a pane" DESTINATION chord, so — like g d / g l — it works for everyone, not

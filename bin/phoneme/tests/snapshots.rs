@@ -65,6 +65,7 @@ fn list_command_recognized() {
 fn new_subcommands_are_recognized() {
     for cmd in [
         "queue",
+        "dictation",
         "reembed",
         "refire-hook",
         "suggest-tags",
@@ -113,6 +114,27 @@ fn queue_subcommands_are_recognized() {
         Command::cargo_bin("phoneme")
             .unwrap()
             .args(["queue", sub, "--help"])
+            .assert()
+            .success();
+    }
+}
+
+/// `dictation`'s own subcommands must parse (a missing arm or bad arg spec would
+/// surface as a non-zero `--help` exit here).
+#[test]
+fn dictation_subcommands_are_recognized() {
+    for sub in ["history", "regrab", "forget", "clear"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args(["dictation", sub, "--help"])
+            .assert()
+            .success();
+    }
+    // `regrab` accepts an id plus the mutually-exclusive --paste / --type flags.
+    for flag in ["--paste", "--type"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args(["dictation", "regrab", "1", flag, "--help"])
             .assert()
             .success();
     }

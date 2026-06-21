@@ -902,6 +902,17 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     case "list_saved_searches": return [];
     case "upsert_saved_search": return undefined;
     case "delete_saved_search": return { removed: true };
+    // Dictation re-grab history (opt-in). A couple of sample rows so the Settings
+    // manager renders in the headless preview; regrab is a no-op stub here (real
+    // keystroke/paste injection only happens in the native window).
+    case "list_dictation_history":
+      return [
+        { id: 2, text: "Thanks for the update — I'll review the PR this afternoon.", char_count: 56, app: "slack", created_at: "2026-06-21T15:42:00Z" },
+        { id: 1, text: "let me know if the build still fails after the rebase", char_count: 52, app: "code", created_at: "2026-06-21T15:10:00Z" },
+      ];
+    case "regrab_dictation": return {};
+    case "delete_dictation_history": return { removed: true };
+    case "clear_dictation_history": return { removed: 0 };
     // Named-speaker recognition (#9). Preview-only stubs so the suggestion chip +
     // Speaker Library render; real matching happens against voiceprints in the daemon.
     case "recognize_speakers":

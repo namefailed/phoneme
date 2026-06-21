@@ -309,6 +309,44 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
             Err(e) => err_response(&e),
         },
+        // ── Dictation history (re-grab) ──────────────────────────────────
+        Request::ListDictationHistory { limit } => {
+            match state.catalog.list_dictation_history(limit as i64).await {
+                Ok(rows) => serialize_response(rows),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::DeleteDictationHistory { id } => {
+            match state.catalog.delete_dictation_history(id).await {
+                Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::ClearDictationHistory => match state.catalog.clear_dictation_history().await {
+            Ok(n) => Response::Ok(serde_json::json!({ "removed": n })),
+            Err(e) => err_response(&e),
+        },
+        // Re-insert a past dictation's text at the current cursor. Resolves the
+        // type/paste mode (the request's, else the global `type_mode`) and reuses
+        // the dictation typing primitive verbatim — its `input_injection_disabled`
+        // test guard + clipboard-restore handling apply, so this no-ops under
+        // tests. An unknown id is `not_found`; a typing failure maps the String
+        // error to `Internal`, like other input-injection failures.
+        Request::RegrabDictation { id, mode } => {
+            match state.catalog.get_dictation_history(id).await {
+                Ok(Some(text)) => {
+                    let m = mode
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| state.config.load().in_place.type_mode.clone());
+                    match crate::in_place::type_at_cursor(&text, &m).await {
+                        Ok(()) => Response::Ok(serde_json::json!({})),
+                        Err(e) => err_response(&phoneme_core::Error::Internal(e)),
+                    }
+                }
+                Ok(None) => not_found(format!("dictation {id} not found")),
+                Err(e) => err_response(&e),
+            }
+        }
         // S2: run a stored saved search by id server-side. Same recordings shape
         // as `ListRecordings`: the catalog parses `filter_json` into a `ListFilter`
         // and runs the normal list query.

@@ -68,6 +68,7 @@ trust boundary.*
   model too). An empty map keeps the built-in defaults, so existing configs are
   unchanged; an entry with an unknown action is dropped on load with a warning
   rather than failing the config.
+<<<<<<< HEAD
 - [x] **Per-app tone / register** — dictation can now pick its cleanup **recipe**
   (and so the register the AI rewrites toward — formal for an email client, terse
   for an editor, prose for a doc) by the app focused when you **start** dictating,
@@ -92,6 +93,21 @@ trust boundary.*
   built-in set** — an empty map means no expansion, so existing configs are
   unchanged byte-for-byte; a master `snippets_enabled` switch turns the whole pass
   off without clearing your macros.
+=======
+- [x] **Dictation history / re-grab (opt-in)** — keep a short, bounded record of
+  recent in-place dictations (the **text as typed**, no audio) so a past one can be
+  **re-inserted** or **re-copied** — for when a dictation went into the wrong
+  window or an app ate the paste. Off by default (`[in_place].keep_history`),
+  bounded to the newest 50, and it covers even **ephemeral** dictations (which
+  otherwise leave no row). Managed under **Settings → Dictation → Dictation
+  history** (Copy + Re-insert at cursor + per-row remove + Clear all), reachable
+  with the **`g H`** chord, and scriptable via `phoneme dictation
+  history`/`regrab`/`forget`/`clear`. New `ListDictationHistory` /
+  `RegrabDictation` / `DeleteDictationHistory` / `ClearDictationHistory` IPC
+  requests; re-grab is classified **not retry-safe** so a dropped reply can never
+  type the text twice. Re-insert types at the *current* caret (the original window
+  is gone). Privacy: the typed text is retained until cleared, so it stays opt-in.
+>>>>>>> worktree-wf_6a25c6ea-b81-5
 - [x] **Library-wide find & replace** — `phoneme find-replace --library <FIND>
   <REPLACE>` (and the new `find_replace_library` IPC request) runs the same
   literal, revertible replacement across **every** recording's transcript in one

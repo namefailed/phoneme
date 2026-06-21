@@ -654,6 +654,35 @@ phoneme queue clear-failed
 phoneme queue dismiss-failed 20260519T143500823
 ```
 
+### ⌨️ `phoneme dictation`
+
+Work with the opt-in **dictation re-grab history** — a short, bounded record of
+recent in-place dictations (the **text as typed**, no audio) so a past one can be
+re-inserted or re-copied. Empty unless `[in_place].keep_history` is on (Settings →
+Dictation, or set it in config). The history is bounded to the newest 50.
+
+```bash
+# Recent dictations, newest first (id · time · app · chars · text preview)
+phoneme dictation history
+phoneme dictation history --limit 10
+phoneme dictation history --json
+
+# Re-insert a past dictation's text at the CURRENT cursor. It lands wherever the
+# caret is NOW (the window you dictated into is long gone). Defaults to the
+# configured type_mode; --paste / --type override how it lands. Needs a daemon.
+phoneme dictation regrab 12
+phoneme dictation regrab 12 --paste
+
+# Forget one dictation by id; clear the whole history
+phoneme dictation forget 12
+phoneme dictation clear
+```
+
+> **Privacy:** the history retains the exact text that was typed, **including
+> ephemeral dictations** (`save_to_library = false`) that otherwise leave nothing
+> behind — a dictated password or note is kept until you clear it. It is never
+> logged. Turn it off (or clear it) whenever you don't want it kept.
+
 ### 🗑️ `phoneme delete <ID>`
 
 Delete a recording and its associated audio file.

@@ -114,6 +114,11 @@ active recording has nothing new to attach them to):
 - `delete_recording` (`keep_audio` bool), `import_recording` (`.wav`/`.mp3`/`.m4a`/`.flac`)
 - `list_saved_searches`, `upsert_saved_search`, `delete_saved_search`, and `run_saved_search` (`{ "id" }`) — execute a stored saved search server-side: the daemon parses the saved `filter_json` into a `ListFilter` and runs the same query as `list_recordings`, returning the same recordings array. `not_found` for an unknown id, `invalid_config` when the stored filter won't parse.
 - `list_ai_activity` (`recording_id` optional, `limit`) — the persisted AI-activity log: completed streaming LLM sessions (cleanup/summary and their re-runs) with the exact prompt + response, newest first. Powers the 🧠 popout's history so it survives app restarts. `recording_id` filters to one recording; omit it for the whole library's recent activity. The daemon prunes the table to a bounded recent window.
+- **Dictation re-grab history** (opt-in, off unless `[in_place].keep_history` is on; the daemon prunes to the newest 50 on every insert):
+  - `list_dictation_history` (`{ "limit" }`) — recent in-place dictations (the **text as typed** at the cursor, no audio), newest first. Ok = a JSON array of `{ id, text, char_count, app, created_at }` (`app` = the focused app's exe stem at type time, or `null`). Empty when the feature was never enabled.
+  - `regrab_dictation` (`{ "id", "mode"? }`) — re-insert a past dictation's text at the **current** cursor. `mode` is `"type"`/`"paste"`, or omit it to use `[in_place].type_mode`. Ok = `{}`; `not_found` for an unknown id. **It types wherever the caret is now** (the original window is long gone), so it is **not retry-safe** — a blind re-send after a lost reply would type the text twice into your document.
+  - `delete_dictation_history` (`{ "id" }`) — forget one entry (unknown ids are a no-op). Ok = `{ "removed": bool }`.
+  - `clear_dictation_history` — empty the whole history. Ok = `{ "removed": N }`.
 
 **Transcript & metadata edits:**
 - `update_transcript`, `update_notes`, `update_meeting_name`

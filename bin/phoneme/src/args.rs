@@ -72,6 +72,8 @@ pub enum Command {
     Reembed,
     /// Inspect and manage the transcription queue.
     Queue(QueueArgs),
+    /// Re-grab a recent in-place dictation (the opt-in history).
+    Dictation(DictationArgs),
     /// Re-fire the post-processing hook on a recording's stored transcript.
     RefireHook(RefireHookArgs),
     /// Delete a recording.
@@ -697,6 +699,43 @@ pub enum QueueAction {
         /// The recording id whose failed-quarantine file to remove.
         id: String,
     },
+}
+
+#[derive(Debug, clap::Args)]
+pub struct DictationArgs {
+    #[command(subcommand)]
+    pub action: DictationAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DictationAction {
+    /// List recent in-place dictations (the opt-in re-grab history), newest
+    /// first. Empty unless `[in_place].keep_history` is on.
+    History {
+        /// Max rows to show.
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Re-insert a past dictation's text at the CURRENT cursor (it lands wherever
+    /// the caret is now — the original window is long gone). Defaults to the
+    /// configured `type_mode`; --paste / --type override it.
+    Regrab {
+        /// The dictation-history id (from `dictation history`).
+        id: i64,
+        /// Deliver via clipboard paste (Ctrl+V) instead of simulated keystrokes.
+        #[arg(long, conflicts_with = "type_mode")]
+        paste: bool,
+        /// Deliver via simulated keystrokes (the usual default).
+        #[arg(long = "type")]
+        type_mode: bool,
+    },
+    /// Forget one dictation from the history by id.
+    Forget {
+        /// The dictation-history id to remove.
+        id: i64,
+    },
+    /// Clear the whole dictation history.
+    Clear,
 }
 
 #[derive(Debug, clap::Args)]

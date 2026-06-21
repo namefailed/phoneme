@@ -156,6 +156,8 @@ fn is_retry_safe(req: &Request) -> bool {
         | ListRecordings { .. }
         | GetRecording { .. }
         | ListAiActivity { .. }
+        // Recent dictation history — a pure read of the re-grab ring buffer.
+        | ListDictationHistory { .. }
         | ListSavedSearches
         // Runs a stored saved search server-side: a pure list query, idempotent.
         | RunSavedSearch { .. }
@@ -268,6 +270,17 @@ fn is_retry_safe(req: &Request) -> bool {
         | DismissFailed { .. }
         | UpsertSavedSearch { .. }
         | DeleteSavedSearch { .. }
+        // Dictation-history mutations. Delete/Clear remove rows; a blind re-send
+        // after a lost reply is at worst a no-op, but they are state changes, so
+        // single-attempt like the saved-search delete/clear.
+        | DeleteDictationHistory { .. }
+        | ClearDictationHistory
+        // RegrabDictation injects keystrokes / pastes the stored text at the
+        // CURRENT caret. A blind re-send after a lost reply would type the text a
+        // SECOND time into the user's document — exactly the double-execution
+        // ImportRecording / ExportClip guard against, and worse here because it
+        // lands in whatever the user is typing into now. Never blind-retry.
+        | RegrabDictation { .. }
         | DismissSpeakerSuggestion { .. }
         | RenameNamedVoice { .. }
         | MergeNamedVoices { .. }
@@ -523,5 +536,14 @@ mod tests {
         assert!(!is_retry_safe(&Request::SuggestChapters {
             id: phoneme_core::RecordingId::new(),
         }));
+        // RegrabDictation injects text at the cursor — a blind re-send would type
+        // it twice into the user's document, the single most important
+        // classification for the dictation-history feature.
+        assert!(!is_retry_safe(&Request::RegrabDictation { id: 1, mode: None }));
+        // ListDictationHistory is a pure read — safe to silently re-send.
+        assert!(is_retry_safe(&Request::ListDictationHistory { limit: 50 }));
+        // The history mutations are single-attempt like other deletes/clears.
+        assert!(!is_retry_safe(&Request::DeleteDictationHistory { id: 1 }));
+        assert!(!is_retry_safe(&Request::ClearDictationHistory));
     }
 }

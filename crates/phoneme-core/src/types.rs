@@ -208,6 +208,33 @@ pub struct AiActivityEntry {
     pub created_at: String,
 }
 
+/// One stored in-place dictation — the text that was actually typed/pasted at
+/// the cursor — kept in the opt-in, bounded re-grab ring buffer so a past
+/// dictation can be re-inserted or re-copied. This is the text *as typed* (the
+/// `polished` output of the dictation core), not the raw transcript and not the
+/// eventual library transcript, which with `cleanup = "llm"` can differ. Text
+/// only — no audio path and no recording id — so ephemeral dictations (which
+/// leave no recording row) are covered too. Written only when
+/// `[in_place].keep_history` is on; pruned to the newest N on every insert.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DictationHistoryEntry {
+    /// Auto-increment row id; the stable list key and the re-grab handle.
+    pub id: i64,
+    /// The dictation text as it was typed at the cursor.
+    pub text: String,
+    /// The character count of `text` at insert time (so a clipped/oversize row
+    /// still reports its real length without re-counting the stored text).
+    pub char_count: i64,
+    /// The focused app's lowercased executable stem at type time, when known
+    /// (e.g. `"code"`), purely informational. `None` when it couldn't be
+    /// detected. Potentially sensitive, so it rides the same opt-in and is never
+    /// logged.
+    pub app: Option<String>,
+    /// RFC3339/sqlite-datetime timestamp of when the dictation was recorded,
+    /// like [`AiActivityEntry::created_at`].
+    pub created_at: String,
+}
+
 /// One persisted saved search — a user-named snapshot of the full library
 /// filter, moved out of the webview's `localStorage` into the catalog so it
 /// survives a reinstall and can ride catalog sync later. `filter_json` is opaque

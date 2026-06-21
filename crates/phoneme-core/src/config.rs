@@ -1714,6 +1714,15 @@ pub struct InPlaceConfig {
     /// macros are defined.)
     #[serde(default = "default_true")]
     pub snippets_enabled: bool,
+    /// Keep a short history of recent in-place dictations (the typed text) so a
+    /// past dictation can be re-inserted/re-copied. **Off by default**: it
+    /// retains the text that was typed — including from ephemeral dictations
+    /// (`save_to_library = false`), which otherwise leave nothing behind.
+    /// Bounded to the newest N (the catalog's `DICTATION_HISTORY_KEEP`). Never
+    /// includes audio. The text can be sensitive (a password dictated into a
+    /// field, an ephemeral note), so this stays opt-in.
+    #[serde(default)]
+    pub keep_history: bool,
 }
 
 impl Default for InPlaceConfig {
@@ -1746,6 +1755,9 @@ impl Default for InPlaceConfig {
             // empty — it only matters once macros exist.
             snippets: std::collections::BTreeMap::new(),
             snippets_enabled: true,
+            // Off by default: dictation history retains typed text (incl. from
+            // ephemeral dictations), so it stays opt-in.
+            keep_history: false,
         }
     }
 }
@@ -5379,6 +5391,28 @@ mod tests {
         let serialized = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn in_place_keep_history_defaults_false_and_round_trips() {
+        // A config written before dictation history existed (no keep_history key)
+        // must load with the feature off — the opt-in default.
+        let toml = r#"
+            type_mode = "type"
+        "#;
+        let parsed: InPlaceConfig = toml::from_str(toml).unwrap();
+        assert!(
+            !parsed.keep_history,
+            "keep_history must default false when absent"
+        );
+
+        // When set, it survives a full Config round-trip through TOML.
+        let mut cfg = Config::default();
+        cfg.in_place.keep_history = true;
+        let serialized = toml::to_string(&cfg).unwrap();
+        let reparsed: Config = toml::from_str(&serialized).unwrap();
+        assert!(reparsed.in_place.keep_history);
+        assert_eq!(reparsed, cfg);
     }
 
     #[test]

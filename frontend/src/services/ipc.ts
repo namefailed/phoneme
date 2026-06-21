@@ -763,6 +763,43 @@ export async function deleteSavedSearch(id: string): Promise<boolean> {
   return r.removed;
 }
 
+/** Wire shape of a stored in-place dictation (the opt-in re-grab history). `text`
+ *  is the text *as typed* at the cursor (not the raw transcript); `app` is the
+ *  focused app's exe stem at type time when known. */
+export type DictationHistoryRow = {
+  id: number;
+  text: string;
+  char_count: number;
+  app: string | null;
+  created_at: string;
+};
+
+/** Recent in-place dictations (the typed text), newest first. Empty unless
+ *  `[in_place].keep_history` is on. */
+export async function listDictationHistory(limit = 50): Promise<DictationHistoryRow[]> {
+  return await tauriInvoke<DictationHistoryRow[]>("list_dictation_history", { limit });
+}
+
+/** Re-insert a past dictation's text at the CURRENT cursor (it lands wherever the
+ *  caret is now). `mode` is `"type"`/`"paste"`, or omit for the configured
+ *  `type_mode`. Injects real keystrokes/paste — verify in the native window. */
+export async function regrabDictation(id: number, mode?: "type" | "paste"): Promise<void> {
+  await tauriInvoke("regrab_dictation", { id, mode: mode ?? null });
+}
+
+/** Forget one dictation from the history by id; resolves to whether a row was
+ *  removed. */
+export async function deleteDictationHistory(id: number): Promise<boolean> {
+  const r = await tauriInvoke<{ removed: boolean }>("delete_dictation_history", { id });
+  return r.removed;
+}
+
+/** Clear the whole dictation history; resolves to how many rows were removed. */
+export async function clearDictationHistory(): Promise<number> {
+  const r = await tauriInvoke<{ removed: number }>("clear_dictation_history");
+  return r.removed;
+}
+
 /** Tail the last `maxLines` of a daemon log (`hook.log` / `daemon.log` /
  *  `ollama.log`) for the in-app log viewer. Returns "" when the log doesn't
  *  exist yet. The basename is allowlisted on the backend. */

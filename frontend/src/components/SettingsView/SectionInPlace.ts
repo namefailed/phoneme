@@ -6,7 +6,19 @@ import { mountConnectionField } from "./connectionField";
 import { mountModelField } from "./modelField";
 import { bindFieldEvents, renderField } from "./form";
 import { effectiveLocalWhisperHint, type WhisperPortStatus } from "./SectionWhisper";
-import type { PlaybookRecipe } from "../../services/ipc";
+import {
+  type PlaybookRecipe,
+  listDictationHistory,
+  regrabDictation,
+  deleteDictationHistory,
+  clearDictationHistory,
+  type DictationHistoryRow,
+} from "../../services/ipc";
+import { showToast } from "../../utils/toast";
+
+/** Must match the catalog's `DICTATION_HISTORY_KEEP` — only used for the copy in
+ *  the opt-in toggle's description ("the last N dictations are kept"). */
+const DICTATION_HISTORY_KEEP = 50;
 
 
 /** Friendly label for a downloaded whisper model filename (mirrors the Live
@@ -264,6 +276,9 @@ export class SectionInPlace {
     // map is empty), matching the daemon's snippets_enabled default.
     if (!ip.snippets || typeof ip.snippets !== "object") ip.snippets = {};
     if (typeof ip.snippets_enabled !== "boolean") ip.snippets_enabled = true;
+    // Dictation re-grab history is opt-in and off by default — a config saved
+    // before it existed simply lacks the key, which loads as false.
+    if (typeof ip.keep_history !== "boolean") ip.keep_history = false;
     const sttMode = this.sttMode();
 
     this.container.innerHTML = `
@@ -529,6 +544,47 @@ export class SectionInPlace {
       </div>
 
       <div class="settings-section">
+        <h3>Dictation history</h3>
+
+        <div class="settings-field">
+          <label>Keep a re-grab history</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "in_place.keep_history", label: "", kind: "checkbox" },
+              ip.keep_history ?? false,
+            )}</div>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              <b>Off by default.</b> When on, the last ${escHtml(String(DICTATION_HISTORY_KEEP))} dictations
+              are kept here as <b>text</b> (no audio) so you can re-insert or re-copy one — handy when a
+              dictation went into the wrong window. <b>Privacy:</b> this retains the exact text that was
+              typed, <b>including ephemeral dictations</b> (which otherwise leave nothing behind) — so a
+              password or note you dictated is stored here until you clear it. Use <b>Clear all</b> below
+              to wipe it. The text is never logged.
+            </span>
+          </div>
+        </div>
+        ${
+          ip.keep_history
+            ? `
+        <div class="settings-field">
+          <label>Recent dictations</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Newest first — the text <b>as typed</b> (with <code>llm</code> cleanup this can differ from
+              the library transcript). <b>Re-insert at cursor</b> types it into the focused window right
+              now; <b>Copy</b> puts it on the clipboard.
+            </span>
+            <div id="ip-dictation-history" style="display: flex; flex-direction: column; gap: 6px; width: 100%;">
+              <span style="font-size: 0.7857rem; color: var(--fg-faded);">Loading…</span>
+            </div>
+            <button id="ip-dh-clear" type="button">Clear all</button>
+          </div>
+        </div>`
+            : ""
+        }
+      </div>
+
+      <div class="settings-section">
         <h3>Dictation pipeline</h3>
 
         <div class="settings-field">
@@ -632,6 +688,11 @@ export class SectionInPlace {
     this.container
       .querySelector<HTMLInputElement>('input[data-key="in_place.snippets_enabled"]')
       ?.addEventListener("change", () => this.render());
+    // The keep-history toggle shows/hides the recent-dictations manager; rebuild
+    // so it appears/hides. bindFieldEvents already wrote the new boolean.
+    this.container
+      .querySelector<HTMLInputElement>('input[data-key="in_place.keep_history"]')
+      ?.addEventListener("change", () => this.render());
 
     this.renderAppOverrides();
     this.renderAppRecipes();
@@ -639,6 +700,123 @@ export class SectionInPlace {
     this.renderVoiceCommands();
     this.renderSnippets();
     this.renderSttDetail();
+    void this.renderDictationHistory();
+  }
+
+  /** Fetch and render the recent-dictations list (newest first) with a Copy +
+   *  Re-insert action per row, a per-row ✕, and wire the Clear-all button. Only
+   *  present while `keep_history` is on (the section rebuilds when that flips).
+   *
+   *  NEEDS-NATIVE-VERIFY: Re-insert does real keystroke/paste injection through
+   *  `regrabDictation`; the headless preview + mock can't exercise `type_at_cursor`,
+   *  so the actual typing must be verified in the native window. */
+  private async renderDictationHistory() {
+    const host = this.container.querySelector<HTMLElement>("#ip-dictation-history");
+    if (!host) return;
+
+    let rows: DictationHistoryRow[] = [];
+    try {
+      rows = await listDictationHistory(DICTATION_HISTORY_KEEP);
+    } catch {
+      host.innerHTML = `<span style="font-size: 0.7857rem; color: var(--err);">Couldn't load dictation history (is the daemon running?).</span>`;
+      return;
+    }
+    // The section can rebuild (e.g. the toggle flipped off) while the async fetch
+    // was in flight — bail if our host was detached so we don't write into a
+    // stale fragment.
+    if (!host.isConnected) return;
+
+    if (rows.length === 0) {
+      host.innerHTML = `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No dictations yet — they'll appear here after you dictate with this on.</span>`;
+      return;
+    }
+
+    host.innerHTML = rows
+      .map((r) => {
+        const when = this.formatHistoryTime(r.created_at);
+        const appLabel = r.app ? ` · ${escHtml(r.app)}` : "";
+        return `
+        <div class="ip-dh-row" data-id="${r.id}"
+          style="display: flex; gap: 6px; width: 100%; align-items: flex-start;">
+          <div style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escHtml(r.text)}">${escHtml(r.text)}</span>
+            <span style="font-size: 0.7143rem; color: var(--fg-faded);">${escHtml(when)} · ${r.char_count} chars${appLabel}</span>
+          </div>
+          <button class="ip-dh-copy" type="button" data-id="${r.id}" title="Copy to clipboard">Copy</button>
+          <button class="ip-dh-regrab" type="button" data-id="${r.id}" title="Type this at the current cursor">Re-insert at cursor</button>
+          <button class="ip-dh-remove" type="button" data-id="${r.id}" title="Forget">✕</button>
+        </div>`;
+      })
+      .join("");
+
+    const byId = new Map(rows.map((r) => [r.id, r] as const));
+    const idOf = (btn: HTMLElement): number | null => {
+      const v = Number(btn.getAttribute("data-id"));
+      return Number.isNaN(v) ? null : v;
+    };
+
+    host.querySelectorAll<HTMLButtonElement>(".ip-dh-copy").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = idOf(btn);
+        const row = id == null ? undefined : byId.get(id);
+        if (!row) return;
+        try {
+          await navigator.clipboard.writeText(row.text);
+          showToast("Dictation copied to clipboard", "success");
+        } catch {
+          showToast("Couldn't copy to clipboard", "error");
+        }
+      });
+    });
+
+    host.querySelectorAll<HTMLButtonElement>(".ip-dh-regrab").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = idOf(btn);
+        if (id == null) return;
+        try {
+          await regrabDictation(id);
+          showToast("Re-inserted at the cursor", "success");
+        } catch {
+          showToast("Couldn't re-insert the dictation", "error");
+        }
+      });
+    });
+
+    host.querySelectorAll<HTMLButtonElement>(".ip-dh-remove").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = idOf(btn);
+        if (id == null) return;
+        try {
+          await deleteDictationHistory(id);
+        } catch {
+          showToast("Couldn't remove the dictation", "error");
+          return;
+        }
+        await this.renderDictationHistory();
+      });
+    });
+
+    const clearBtn = this.container.querySelector<HTMLButtonElement>("#ip-dh-clear");
+    if (clearBtn && !clearBtn.dataset.wired) {
+      clearBtn.dataset.wired = "1";
+      clearBtn.addEventListener("click", async () => {
+        try {
+          await clearDictationHistory();
+        } catch {
+          showToast("Couldn't clear the history", "error");
+          return;
+        }
+        await this.renderDictationHistory();
+      });
+    }
+  }
+
+  /** Best-effort friendly time for a stored dictation's UTC `created_at`. Falls
+   *  back to the raw string if it doesn't parse. */
+  private formatHistoryTime(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
   }
 
   /** The recipes a per-app tone row can pick — `config.recipes` (seeded to `[]`
