@@ -61,6 +61,9 @@ pub enum Command {
     Speaker(SpeakerArgs),
     /// Semantic (embedding) search over transcripts.
     Search(SearchArgs),
+    /// Ask a question answered from your own transcripts, with citations
+    /// (local RAG over the same hybrid retriever as `search`).
+    Ask(AskArgs),
     /// Clear all embeddings and re-embed the whole library with the current model.
     Reembed,
     /// Inspect and manage the transcription queue.
@@ -477,6 +480,25 @@ pub struct SearchArgs {
     /// Scope by recording type: `single` (voice notes) or `meeting`. Ignored
     /// with `--like`.
     #[arg(long, value_name = "KIND", value_parser = ["single", "meeting"], conflicts_with = "like")]
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct AskArgs {
+    /// The question to answer from your recordings.
+    pub query: String,
+    /// Max grounding chunks to retrieve (clamped server-side).
+    #[arg(long, default_value_t = 8)]
+    pub top_k: usize,
+    /// Scope the answer to recordings carrying this tag (id or name). Mirrors
+    /// `phoneme search --tag`.
+    #[arg(long, value_name = "ID|NAME")]
+    pub tag: Option<String>,
+    /// Scope to recordings in this status (e.g. `done`, `transcribe_failed`).
+    #[arg(long, value_name = "STATUS")]
+    pub status: Option<String>,
+    /// Scope by recording type: `single` (voice notes) or `meeting`.
+    #[arg(long, value_name = "KIND", value_parser = ["single", "meeting"])]
     pub kind: Option<String>,
 }
 

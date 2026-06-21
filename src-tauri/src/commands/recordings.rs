@@ -42,6 +42,33 @@ pub async fn reembed_all(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::ReembedAll).await
 }
 
+/// Ask-my-archive (local RAG): answer a question from the user's own
+/// transcripts, grounded with citations. The daemon ACKs immediately and
+/// streams the answer over `DaemonEvent::AskActivity` (which rides the existing
+/// `daemon-event` bridge to the webview), tagged with the frontend-minted
+/// `request_id` so the chat panel can filter the shared event stream. `filter`
+/// scopes the answer to a Library subset (same predicate semantics as
+/// `semantic_search`); omit it for the whole library.
+#[tauri::command]
+pub async fn ask(
+    bridge: Br<'_>,
+    request_id: String,
+    query: String,
+    top_k: usize,
+    filter: Option<ListFilter>,
+) -> Result<Value, CommandError> {
+    forward(
+        &bridge,
+        Request::Ask {
+            request_id,
+            query,
+            top_k,
+            filter,
+        },
+    )
+    .await
+}
+
 /// Fetch the details, tags, and transcript for a specific recording by its ID.
 #[tauri::command]
 pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {

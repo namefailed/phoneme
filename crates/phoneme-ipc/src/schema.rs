@@ -48,6 +48,32 @@ pub struct RerunAllOverrides {
     pub title_model: Option<String>,
 }
 
+/// One grounding citation for an [`DaemonEvent::AskActivity`] stream: the source
+/// recording the answer cites, the snippet, and the stable marker `[n]` the
+/// prompt told the model to use. `n` is the 1-based position in the `sources`
+/// list; the UI/CLI maps `[n]` in the answer back to this entry and links to
+/// `recording_id`. The daemon — not the model — owns this marker↔recording
+/// mapping, so an out-of-range `[n]` the model invents is simply rendered as
+/// plain text, never a broken link.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AskSource {
+    /// 1-based citation marker (`[n]`) this source is referenced by.
+    pub n: usize,
+    /// The recording the answer cites (meeting-deduped representative).
+    pub recording_id: RecordingId,
+    /// The recording's `meeting_id`, if it is one track of a meeting.
+    #[serde(default)]
+    pub meeting_id: Option<String>,
+    /// Display label: recording title → meeting name → formatted start time.
+    pub label: String,
+    /// 0-based chunk index, or `-1` for a lexical/legacy snippet.
+    pub chunk_index: i64,
+    /// The cited chunk text (already truncated to the per-source prompt budget).
+    pub snippet: String,
+    /// 0..1 calibrated relevance of this chunk to the question.
+    pub relevance: f32,
+}
+
 /// All operations a client can ask the daemon to perform.
 ///
 /// On the wire a request is one JSON object per line, tagged by `type` in
@@ -1107,6 +1133,38 @@ pub enum Request {
         /// Maximum number of results.
         limit: usize,
     },
+    /// Ask a natural-language question answered from the user's own transcripts
+    /// (local RAG). The daemon embeds the question, retrieves the top grounding
+    /// chunks via the same hybrid (vector + FTS5/RRF) path as `SemanticSearch`,
+    /// builds a citation-instructed prompt, and streams the answer through the
+    /// configured `[llm_post_process]` provider.
+    ///
+    /// Ok `null` immediately (the work runs detached); the answer streams over
+    /// [`DaemonEvent::AskActivity`] tagged with `request_id` — sources first,
+    /// then answer deltas, then a `done` marker. Subscribe to events *before*
+    /// sending this so the early sources event isn't missed.
+    ///
+    /// Up-front (synchronous `Response::Err`) failures: `invalid_config` when
+    /// the embedder isn't loaded or no usable LLM provider is configured.
+    /// Failures *after* the ack (query-embed / retrieval / generation) surface as
+    /// a terminal `AskActivity { done: true, error }`, not as a `Response::Err`.
+    /// Empty retrieval yields a terminal "nothing matched" answer with no LLM
+    /// call (no hallucination). GUI Ask panel, `phoneme ask`.
+    Ask {
+        /// Client-minted correlation id, echoed on every `AskActivity` so a
+        /// subscriber can subscribe-then-send and filter the shared event bus.
+        request_id: String,
+        /// The natural-language question.
+        query: String,
+        /// Max grounding chunks to retrieve (clamped server-side). 0 = server
+        /// default.
+        #[serde(default)]
+        top_k: usize,
+        /// Optional Library scope, same predicate semantics as
+        /// `SemanticSearch::filter`. `None` = whole library.
+        #[serde(default)]
+        filter: Option<ListFilter>,
+    },
     /// Clear every stored embedding and re-embed the whole library with the
     /// currently-configured model. Use after changing the embedding model (a
     /// different model/dimension makes old vectors unsearchable). Ok `null`
@@ -1446,6 +1504,43 @@ pub enum DaemonEvent {
         #[serde(default)]
         done: bool,
     },
+    /// Live Ask-my-archive activity for one question, tagged with the request's
+    /// `request_id` (see [`Request::Ask`]). Lifecycle:
+    /// (1) one event with `sources` populated and `done = false` — the citations
+    ///     the answer is grounded in, emitted before any answer token so the UI
+    ///     renders the source list while the answer streams (an empty `sources`
+    ///     here means nothing matched);
+    /// (2) zero or more `delta` chunks as the answer streams (one full delta for
+    ///     non-streaming providers, many for Ollama), coalesced + capped exactly
+    ///     like [`Self::LlmActivity`];
+    /// (3) a final `done = true` event (`error` set when generation failed). An
+    ///     up-front retrieval/provider failure comes back as the synchronous
+    ///     `Response::Err` to the `Ask` request instead; a failure *after* the
+    ///     ack (query-embed / retrieval / generation) surfaces here as a terminal
+    ///     `done = true` with `error`.
+    ///
+    /// A new event (not overloaded `LlmActivity`) because `LlmActivity` is keyed
+    /// by `RecordingId` + `PipelineStage`, persisted per recording, and consumed
+    /// by the AI-activity popout + queue UI — Ask has no recording, no stage, and
+    /// carries a citation list.
+    AskActivity {
+        /// The Ask request this activity belongs to (echoed verbatim).
+        request_id: String,
+        /// The grounding citations — populated only on the first event.
+        #[serde(default)]
+        sources: Vec<AskSource>,
+        /// The next chunk of streamed answer text (empty on the sources/done
+        /// markers).
+        #[serde(default)]
+        delta: String,
+        /// `true` on the final event of the answer.
+        #[serde(default)]
+        done: bool,
+        /// Set on the terminal event when generation (or a post-ack
+        /// retrieval/embed step) failed; empty on success.
+        #[serde(default)]
+        error: String,
+    },
     /// The post-transcription hook chain started for this recording (the
     /// pipeline's hook step or a `RefireHook`).
     HookStarted {
@@ -1617,4 +1712,92 @@ pub enum DaemonEvent {
         /// The detached tag's id.
         tag_id: i64,
     },
+}
+
+#[cfg(test)]
+mod ask_wire_tests {
+    use super::*;
+
+    #[test]
+    fn request_ask_round_trips_and_tags_snake_case() {
+        let req = Request::Ask {
+            request_id: "req-1".into(),
+            query: "what did we decide about the migration?".into(),
+            top_k: 8,
+            filter: None,
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["type"], "ask");
+        assert_eq!(json["request_id"], "req-1");
+        let back: Request = serde_json::from_value(json).unwrap();
+        assert_eq!(back, req);
+    }
+
+    #[test]
+    fn request_ask_defaults_top_k_and_filter_for_an_older_client() {
+        // A minimal client may omit top_k/filter; they must serde-default.
+        let value = serde_json::json!({ "type": "ask", "request_id": "r", "query": "q" });
+        let req: Request = serde_json::from_value(value).unwrap();
+        match req {
+            Request::Ask {
+                request_id,
+                query,
+                top_k,
+                filter,
+            } => {
+                assert_eq!(request_id, "r");
+                assert_eq!(query, "q");
+                assert_eq!(top_k, 0, "omitted top_k defaults to 0 (server default)");
+                assert!(filter.is_none());
+            }
+            other => panic!("expected Ask, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ask_activity_event_round_trips_with_sources() {
+        let ev = DaemonEvent::AskActivity {
+            request_id: "req-1".into(),
+            sources: vec![AskSource {
+                n: 1,
+                recording_id: RecordingId::new(),
+                meeting_id: None,
+                label: "Standup notes".into(),
+                chunk_index: 2,
+                snippet: "we deferred the migration".into(),
+                relevance: 0.71,
+            }],
+            delta: String::new(),
+            done: false,
+            error: String::new(),
+        };
+        let json = serde_json::to_value(&ev).unwrap();
+        assert_eq!(json["event"], "ask_activity");
+        assert_eq!(json["sources"][0]["n"], 1);
+        let back: DaemonEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(back, ev);
+    }
+
+    #[test]
+    fn ask_activity_terminal_error_round_trips() {
+        let ev = DaemonEvent::AskActivity {
+            request_id: "req-1".into(),
+            sources: vec![],
+            delta: String::new(),
+            done: true,
+            error: "provider unreachable".into(),
+        };
+        let json = serde_json::to_value(&ev).unwrap();
+        let back: DaemonEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(back, ev);
+    }
+
+    #[test]
+    fn unknown_ask_shaped_request_decodes_to_unknown_not_a_stream_error() {
+        // A future Ask field a stale daemon doesn't know must not be stream-fatal;
+        // a genuinely unknown request type lands in ServerRequest::Unknown.
+        let value = serde_json::json!({ "type": "totally_unknown_request", "x": 1 });
+        let decoded: ServerRequest = serde_json::from_value(value).unwrap();
+        assert!(matches!(decoded, ServerRequest::Unknown { .. }));
+    }
 }

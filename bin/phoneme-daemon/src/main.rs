@@ -42,6 +42,7 @@ use anyhow::Result;
 use clap::Parser;
 
 mod app_state;
+mod ask;
 mod event_bus;
 mod first_run;
 mod in_place;

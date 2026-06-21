@@ -3305,6 +3305,311 @@ async fn insert_restored_round_trips_mean_confidence() {
     );
 }
 
+// ── Ask my archive: retrieve_context (local-RAG retrieval + citations) ───────
+//
+// These exercise the new `retrieve_context` helper that grounds an Ask answer:
+// same hybrid retrieval as the search bar, plus best-chunk recovery so a `[n]`
+// citation can point at the exact passage. The ONNX model isn't bundled in
+// tests, so the embedding space is simulated with synthetic vectors (the same
+// technique the hybrid_search tests use), and stored chunk vectors are aligned
+// by ordinal to `chunk_transcript(transcript)` so a citation index is checkable.
+
+/// Build a transcript long enough that `chunk_transcript` splits it into several
+/// chunks, with each chunk carrying a distinctive sentence at a known ordinal so
+/// the recovered citation text is verifiable. Returns the transcript.
+fn multi_chunk_transcript() -> String {
+    // Each "block" is ~40 words; CHUNK_TARGET_WORDS is 80, so two blocks fill a
+    // chunk and the transcript reliably splits into multiple chunks.
+    let filler = "this sentence carries several ordinary words that pad the block out toward the chunk target so the splitter keeps moving forward through the note. ";
+    let mut t = String::new();
+    for marker in ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"] {
+        // A distinctive marker sentence, then filler, so each region of the
+        // transcript is identifiable in the recovered chunk text.
+        t.push_str(&format!("the distinctive {marker} topic begins here. "));
+        t.push_str(filler);
+        t.push_str(filler);
+    }
+    t
+}
+
+#[tokio::test]
+async fn retrieve_context_recovers_the_matching_chunk_and_its_text() {
+    // Citation correctness: store one vector per chunk, make the query identical
+    // to a chosen chunk's vector, and assert retrieve_context recovers that
+    // chunk's index and its exact `chunk_transcript` text.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let transcript = multi_chunk_transcript();
+    let chunks = crate::chunk::chunk_transcript(&transcript);
+    assert!(
+        chunks.len() >= 3,
+        "the fixture must split into several chunks, got {}",
+        chunks.len()
+    );
+
+    let mut rec = embedded_recording(None);
+    rec.transcript = Some(transcript.clone());
+    db.insert(&rec).await.unwrap();
+
+    // One distinct synthetic vector per chunk: the i-th chunk's vector is the
+    // i-th basis-ish direction, so the argmax is unambiguous.
+    let dim = chunks.len();
+    let mut vectors: Vec<Vec<f32>> = Vec::new();
+    for i in 0..dim {
+        let mut v = vec![0.0_f32; dim];
+        v[i] = 1.0;
+        vectors.push(v);
+    }
+    db.upsert_chunk_embeddings(&rec.id, &vectors).await.unwrap();
+
+    // Query identical to chunk index 2 (the obvious match).
+    let target_idx = 2usize;
+    let mut query = vec![0.0_f32; dim];
+    query[target_idx] = 1.0;
+
+    let hits = db
+        .retrieve_context("the distinctive charlie topic", &query, 8, 0.12, None)
+        .await
+        .unwrap();
+    assert!(!hits.is_empty(), "the recording must be retrieved");
+    let top = &hits[0];
+    assert_eq!(top.recording_id.as_str(), rec.id.as_str());
+    assert_eq!(
+        top.chunk_index, target_idx as i64,
+        "the recovered chunk index must be the argmax chunk"
+    );
+    assert_eq!(
+        top.text, chunks[target_idx],
+        "the recovered text must be exactly chunk_transcript(transcript)[idx]"
+    );
+    assert!(top.relevance > 0.5, "an exact chunk match reads as strong");
+    assert!(!top.is_lexical, "a vector winner isn't a lexical-only hit");
+}
+
+#[tokio::test]
+async fn retrieve_context_is_deterministic_and_meeting_deduped() {
+    // Distinct cosines ⇒ deterministic RRF order; two tracks of one meeting
+    // collapse to a single RetrievedChunk.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+    let mut a = embedded_recording(None);
+    a.transcript = Some("the project kickoff covered the budget and the timeline in detail".into());
+    let mut b = embedded_recording(None);
+    b.transcript = Some("notes about the office coffee machine being broken again".into());
+    db.insert(&a).await.unwrap();
+    db.insert(&b).await.unwrap();
+    // a is clearly closer to the query axis than b (distinct cosines), but b's
+    // cosine (0.5) must still clear the calibrated floor for `min_relevance = 0.12`
+    // below — `calibrate_cosine(0.5) ≈ 0.64` — so this exercises two SURVIVING,
+    // deterministically-ordered results. (b's old 0.2 cosine calibrated to ~0.09,
+    // just under the 0.12 floor, so it was dropped and only one result came back.)
+    db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+        .await
+        .unwrap();
+    db.upsert_chunk_embeddings(&b.id, &[vec![0.5, 0.87, 0.0]])
+        .await
+        .unwrap();
+
+    let q = [1.0_f32, 0.0, 0.0];
+    let first = db
+        .retrieve_context("kickoff budget", &q, 8, 0.12, None)
+        .await
+        .unwrap();
+    let second = db
+        .retrieve_context("kickoff budget", &q, 8, 0.12, None)
+        .await
+        .unwrap();
+    assert_eq!(first.len(), 2);
+    assert_eq!(
+        first
+            .iter()
+            .map(|c| c.recording_id.as_str().to_string())
+            .collect::<Vec<_>>(),
+        second
+            .iter()
+            .map(|c| c.recording_id.as_str().to_string())
+            .collect::<Vec<_>>(),
+        "distinct cosines give a stable order across runs"
+    );
+    assert_eq!(
+        first[0].recording_id.as_str(),
+        a.id.as_str(),
+        "closer recording ranks first"
+    );
+
+    // Meeting dedupe: two tracks, one meeting_id → one result.
+    let db2 = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let mut mic = embedded_recording(Some("m1"));
+    mic.transcript = Some("the mic track of the planning meeting".into());
+    let mut sys = embedded_recording(Some("m1"));
+    sys.transcript = Some("the system track of the planning meeting".into());
+    db2.insert(&mic).await.unwrap();
+    db2.insert(&sys).await.unwrap();
+    db2.upsert_chunk_embeddings(&mic.id, &[vec![1.0, 0.0, 0.0]])
+        .await
+        .unwrap();
+    db2.upsert_chunk_embeddings(&sys.id, &[vec![0.9, 0.1, 0.0]])
+        .await
+        .unwrap();
+    let hits = db2
+        .retrieve_context("planning meeting", &q, 8, 0.12, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        hits.len(),
+        1,
+        "a meeting's two tracks collapse to one chunk, got {hits:?}"
+    );
+}
+
+#[tokio::test]
+async fn retrieve_context_clamps_index_when_transcript_shortened() {
+    // Stored vectors for 4 chunks, then the transcript is edited down to ~1
+    // chunk. The argmax may land past the live transcript's chunk count, so the
+    // index must clamp and the text must stay non-empty.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let long = multi_chunk_transcript();
+    let long_chunks = crate::chunk::chunk_transcript(&long);
+    assert!(long_chunks.len() >= 4);
+
+    let mut rec = embedded_recording(None);
+    rec.transcript = Some(long.clone());
+    db.insert(&rec).await.unwrap();
+    // Store one vector per original chunk; the LAST one is the query winner.
+    let dim = long_chunks.len();
+    let mut vectors: Vec<Vec<f32>> = Vec::new();
+    for i in 0..dim {
+        let mut v = vec![0.0_f32; dim];
+        v[i] = 1.0;
+        vectors.push(v);
+    }
+    db.upsert_chunk_embeddings(&rec.id, &vectors).await.unwrap();
+
+    // Edit the transcript down to a single short chunk (the stored vectors now
+    // outnumber the live chunks).
+    db.update_user_transcript(&rec.id, "now it is just a short one-liner.")
+        .await
+        .unwrap();
+
+    // Query the LAST stored chunk's vector — its ordinal is past the new chunk
+    // count, so the index must clamp to the last live chunk.
+    let mut query = vec![0.0_f32; dim];
+    query[dim - 1] = 1.0;
+    let hits = db
+        .retrieve_context("one-liner", &query, 8, 0.12, None)
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    let live_chunks = crate::chunk::chunk_transcript("now it is just a short one-liner.");
+    assert!(
+        hits[0].chunk_index >= 0 && (hits[0].chunk_index as usize) < live_chunks.len().max(1),
+        "the chunk index must clamp into the shortened transcript, got {}",
+        hits[0].chunk_index
+    );
+    assert!(!hits[0].text.trim().is_empty(), "text must never be empty");
+}
+
+#[tokio::test]
+async fn retrieve_context_lexical_only_hit_uses_prefix_and_floor() {
+    // A recording matched only by FTS (its vector is orthogonal to the query and
+    // there's no per-chunk vector worth citing): chunk_index = -1, is_lexical,
+    // a non-empty transcript-prefix snippet, and the lexical relevance floor.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let mut rec = embedded_recording(None);
+    rec.transcript = Some("the Kubernetes rollout runbook is attached to the ticket".into());
+    db.insert(&rec).await.unwrap();
+    // No chunk vectors at all (legacy/lexical-only): nothing to argmax over.
+
+    let hits = db
+        .retrieve_context("Kubernetes", &[1.0, 0.0, 0.0], 8, 0.12, None)
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1, "the exact-term lexical hit must surface");
+    let top = &hits[0];
+    assert_eq!(top.recording_id.as_str(), rec.id.as_str());
+    assert_eq!(top.chunk_index, -1, "no per-chunk vector ⇒ index -1");
+    assert!(top.is_lexical, "an FTS-only hit is flagged lexical");
+    assert!(
+        !top.text.trim().is_empty(),
+        "the snippet must be a non-empty prefix"
+    );
+    assert!(
+        top.text.starts_with("the Kubernetes rollout"),
+        "the snippet is the transcript prefix, got {:?}",
+        top.text
+    );
+    assert!(
+        (top.relevance - 0.30).abs() < 1e-6,
+        "a lexical-only hit is floored to 0.30, got {}",
+        top.relevance
+    );
+}
+
+#[tokio::test]
+async fn retrieve_context_drops_weak_semantic_and_scopes_by_filter() {
+    // Floor: a semantic-only hit below min_relevance is dropped. Filter: a scope
+    // restricts results to in-scope keys (parity with the hybrid_search S3 test).
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+    // In-scope, strong match. `Catalog::insert` only writes the columns a fresh
+    // recording starts with — `favorite` is filled later via `set_favorite`, never
+    // by `insert` — so the flag must be set through that setter after insert (just
+    // setting `r.favorite` on the struct passed to `insert` is silently dropped).
+    let mut keep = embedded_recording(None);
+    keep.transcript = Some("the migration plan for the data warehouse rollout".into());
+    let mut weak = embedded_recording(None);
+    weak.transcript = Some("totally unrelated grocery list for the weekend".into());
+    db.insert(&keep).await.unwrap();
+    db.insert(&weak).await.unwrap();
+    db.set_favorite(&keep.id, true).await.unwrap(); // we'll scope by favorite
+    db.set_favorite(&weak.id, true).await.unwrap();
+    db.upsert_chunk_embeddings(&keep.id, &[vec![1.0, 0.0, 0.0]])
+        .await
+        .unwrap();
+    // `weak` is near-orthogonal: calibrates well below the 0.5 floor we use here.
+    db.upsert_chunk_embeddings(&weak.id, &[vec![0.18, 0.0, 0.98]])
+        .await
+        .unwrap();
+
+    // High floor (0.5) drops the weak semantic-only hit.
+    let q = [1.0_f32, 0.0, 0.0];
+    let hits = db
+        .retrieve_context("migration plan", &q, 8, 0.5, None)
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1, "the weak semantic-only hit is floored out");
+    assert_eq!(hits[0].recording_id.as_str(), keep.id.as_str());
+
+    // A non-favorite, in-axis recording exists but is out of scope.
+    let mut out_of_scope = embedded_recording(None);
+    out_of_scope.transcript = Some("another migration plan, but not favorited".into());
+    out_of_scope.favorite = false;
+    db.insert(&out_of_scope).await.unwrap();
+    db.upsert_chunk_embeddings(&out_of_scope.id, &[vec![1.0, 0.0, 0.0]])
+        .await
+        .unwrap();
+
+    let scope = ListFilter {
+        favorite: Some(true),
+        ..Default::default()
+    };
+    let scoped = db
+        .retrieve_context("migration plan", &q, 8, 0.12, Some(&scope))
+        .await
+        .unwrap();
+    assert!(
+        scoped
+            .iter()
+            .all(|c| c.recording_id.as_str() != out_of_scope.id.as_str()),
+        "an out-of-scope recording must be excluded by the filter"
+    );
+    assert!(
+        scoped
+            .iter()
+            .any(|c| c.recording_id.as_str() == keep.id.as_str()),
+        "the in-scope strong match survives the filter"
+    );
+}
+
 // ── ANN (approximate nearest-neighbour) index ───────────────────────────────
 //
 // These tests are gated behind the `ann-usearch` feature so the default CI lane

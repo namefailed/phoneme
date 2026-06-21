@@ -95,7 +95,32 @@ export type DaemonEvent =
   | { event: "tag_detached"; tag_id: number }
   | { event: "tag_suggestions_updated"; id: string }
   | { event: "all_tag_suggestions_cleared"; cleared: number }
+  // Ask-my-archive (local RAG): the answer stream for one question, tagged with
+  // the request's `request_id`. First a `sources`-populated event (the
+  // citations, before any token), then `delta` chunks, then a terminal
+  // `done: true` (with `error` set on failure). See ipc.ts `AskActivitySource`.
+  | {
+      event: "ask_activity";
+      request_id: string;
+      sources: AskActivitySource[];
+      delta: string;
+      done: boolean;
+      error: string;
+    }
   | { event: "preview_source_changed"; track: string };
+
+/** One Ask-my-archive citation, mirroring the daemon's `AskSource`. `n` is the
+ *  1-based `[n]` marker the answer text references; the chat panel maps `[n]` to
+ *  `sources[n-1]` and links to `recording_id`. */
+export type AskActivitySource = {
+  n: number;
+  recording_id: string;
+  meeting_id?: string | null;
+  label: string;
+  chunk_index: number;
+  snippet: string;
+  relevance: number;
+};
 
 /** Callback receiving every daemon event; switch on `event.event`. */
 export type EventHandler = (event: DaemonEvent) => void;

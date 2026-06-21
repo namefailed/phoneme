@@ -52,6 +52,13 @@ const SHUTDOWN_REPLY_GRACE: std::time::Duration = std::time::Duration::from_mill
 /// what's too weak to show.
 const SEMANTIC_MIN_RELEVANCE: f32 = 0.12;
 
+/// Default number of grounding chunks Ask-my-archive retrieves when the client
+/// sends `top_k = 0`. Small for a tight, citable answer on a modest local model.
+const ASK_DEFAULT_TOP_K: usize = 8;
+/// Hard cap on the client-supplied Ask `top_k`, so a huge value can't blow up the
+/// retrieval / prompt budget.
+const ASK_MAX_TOP_K: usize = 24;
+
 pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
     loop {
         // Read one request. An unrecognized-but-well-formed request (a client
@@ -481,6 +488,68 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }
                 Err(e) => err_response(&e),
             }
+        }
+        Request::Ask {
+            request_id,
+            query,
+            top_k,
+            filter,
+        } => {
+            // 1. Embedder gate (same shape as SemanticSearch): Ask must embed the
+            //    question, so the model has to be loaded.
+            let embedder = state.embedder.read().await.as_ref().cloned();
+            let Some(embedder) = embedder else {
+                return Response::Err(IpcError {
+                    kind: IpcErrorKind::InvalidConfig,
+                    message: "Ask needs semantic search enabled and the embedding model loaded"
+                        .into(),
+                });
+            };
+
+            // 2. LLM provider gate. Reuse the cleanup connection's provider, but
+            //    FORCE-ENABLE the config before the probe: `cleanup_entry_config`
+            //    can fall back to a `[llm_post_process]` whose `enabled` is false
+            //    when the cleanup STEP is toggled off, and `provider()` returns
+            //    None when `!enabled` — which would wrongly report "no provider"
+            //    even with a perfectly good provider configured. Ask only borrows
+            //    the provider/model/endpoint/key; its own grounded prompt is built
+            //    in `ask.rs`, so the resolved prompt here is discarded.
+            let cfg = state.config.load();
+            let (mut llm_cfg, _cleanup_prompt) = crate::pipeline::cleanup_entry_config(&cfg);
+            llm_cfg.enabled = true; // probe the provider, not the cleanup on/off gate
+            if state.llm.provider(&llm_cfg).is_none() {
+                return Response::Err(IpcError {
+                    kind: IpcErrorKind::InvalidConfig,
+                    message:
+                        "no LLM provider configured for Ask (set an [llm_post_process] provider)"
+                            .into(),
+                });
+            }
+
+            let top_k = if top_k == 0 {
+                ASK_DEFAULT_TOP_K
+            } else {
+                top_k.min(ASK_MAX_TOP_K)
+            };
+
+            // ACK immediately; the work runs detached and streams over
+            // `DaemonEvent::AskActivity`. A failure after this ack (query-embed,
+            // retrieval, generation) surfaces as a terminal AskActivity error,
+            // never a swallow (see `ask::run_ask`).
+            let task_state = state.clone();
+            tokio::spawn(async move {
+                crate::ask::run_ask(
+                    &task_state,
+                    embedder,
+                    llm_cfg,
+                    request_id,
+                    query,
+                    top_k,
+                    filter,
+                )
+                .await;
+            });
+            ok_null()
         }
         Request::ReembedAll => {
             let cfg = state.config.load();

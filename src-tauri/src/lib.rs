@@ -482,6 +482,7 @@ pub fn run() {
             commands::list_recordings,
             commands::semantic_search,
             similar::more_like_this,
+            commands::ask,
             commands::reembed_all,
             commands::get_recording,
             commands::list_ai_activity,

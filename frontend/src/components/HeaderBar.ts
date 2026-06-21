@@ -699,6 +699,10 @@ export class HeaderBarElement extends LitElement {
           <button class="icon-btn ${f.semantic ? 'active' : ''}"
             title="Toggle Semantic Search (finds meaning, not exact words)"
             @click=${this.toggleSemantic}>🔮</button>
+          <button class="icon-btn"
+            aria-label="Ask my archive"
+            title="Ask my archive — answer a question from your recordings, with citations"
+            @click=${() => window.dispatchEvent(new CustomEvent("phoneme:open-ask"))}>💬</button>
           ${f.like_id
             ? html`<div class="filter-pill hb-like-pill" style="flex:1; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;"
                 title="Showing recordings similar to “${f.like_label || f.like_id}” — ranked by meaning, from its stored index">

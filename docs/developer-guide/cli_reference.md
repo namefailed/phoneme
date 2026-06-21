@@ -503,6 +503,40 @@ phoneme search --like 20260519T143500823
 phoneme search --like 20260519T143500823 --limit 5
 ```
 
+### 💬 `phoneme ask "<QUESTION>"`
+
+Ask a natural-language question answered **only** from your own transcripts —
+local RAG with citations. The daemon embeds the question, retrieves the top
+grounding chunks via the **same** hybrid (vector + FTS5/RRF) retriever as
+`phoneme search`, builds a citation-instructed prompt, and streams the answer
+through the configured `[llm_post_process]` provider. So it needs **both**
+semantic search enabled (the embedding model loaded) **and** an LLM provider
+configured; either missing exits `6` (invalid config). Nothing is persisted.
+
+Output: the numbered **Sources** first (`[n] label (relevance%)`), then the
+answer streamed to stdout — its inline `[n]` markers map back to those sources.
+If nothing in your recordings matches, it says so and never invents an answer.
+
+```bash
+phoneme ask "what did we decide about the database migration?"
+phoneme ask "summarize the open questions from my 1:1s" --top-k 12
+
+# Scope the answer like the Library: --tag (id or name), --status, --kind
+# (single|meeting). Combinable; an unscoped ask searches the whole library.
+phoneme ask "what are my action items?" --tag work --kind meeting
+```
+
+- `--top-k <N>` — max grounding chunks to retrieve (default `8`, clamped
+  server-side).
+- `--json` — collect the whole stream into `{ "answer": "...", "sources": [...] }`
+  instead of printing it live, where each source carries
+  `{ n, recording_id, label, chunk_index, snippet, relevance }` so `[n]` resolves
+  to `sources[n-1].recording_id`.
+
+A provider failure mid-answer (e.g. the model truncated, or the endpoint went
+away) prints to stderr and exits non-zero; the partial answer printed so far is
+left intact.
+
 ### 🧬 `phoneme reembed`
 
 Clear every stored embedding and re-embed the whole library with the

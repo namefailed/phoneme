@@ -22,6 +22,7 @@ Commands:
   clip           Export a time range of a recording's audio to a new WAV
   speaker        Rename or clear a recording's diarized speaker labels
   search         Semantic (embedding) search over transcripts
+  ask            Ask a question answered from your own transcripts, with citations (local RAG over the same hybrid retriever as `search`)
   reembed        Clear all embeddings and re-embed the whole library with the current model
   queue          Inspect and manage the transcription queue
   refire-hook    Re-fire the post-processing hook on a recording's stored transcript

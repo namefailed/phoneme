@@ -271,6 +271,11 @@ fn is_retry_safe(req: &Request) -> bool {
         | MergeTags { .. }
         // Re-embed kicks off a background job.
         | ReembedAll
+        // Ask ACKs immediately, then spawns a detached retrieve+LLM stream
+        // (DaemonEvent::AskActivity). A blind re-send after a lost ack would
+        // start a *second* generation, so single-attempt — the bridge mints a
+        // fresh request_id per call anyway, so a retry is a brand-new Ask.
+        | Ask { .. }
         // Subscription handshake — the bridge never sends this (events open
         // their own connection), and it returns no Response anyway.
         | SubscribeEvents => false,

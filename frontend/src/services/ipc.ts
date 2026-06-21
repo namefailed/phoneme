@@ -393,6 +393,26 @@ export async function reembedAll(): Promise<void> {
 }
 
 /**
+ * Ask-my-archive (local RAG): answer `query` from the user's own transcripts,
+ * grounded with citations. The daemon ACKs at once and streams the answer over
+ * `ask_activity` daemon events tagged with `requestId` (sources first, then
+ * `delta` chunks, then a terminal `done`). The caller mints `requestId`
+ * (`crypto.randomUUID()`) BEFORE subscribing so it can filter the shared event
+ * stream with no race. `topK` caps the grounding chunks (clamped server-side);
+ * `filter` scopes the answer to a Library subset (same shape as
+ * `semanticSearch`), or omit for the whole library. The promise resolves on the
+ * ACK — the answer arrives on the event stream, not here.
+ */
+export async function ask(
+  requestId: string,
+  query: string,
+  topK = 8,
+  filter: ListFilter | null = null,
+): Promise<void> {
+  await tauriInvoke("ask", { requestId, query, topK, filter });
+}
+
+/**
  * Fetch all recordings belonging to a single meeting session (the two tracks
  * sharing a `meeting_id`), ordered by track then start time.
  */

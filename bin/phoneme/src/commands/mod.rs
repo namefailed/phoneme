@@ -4,6 +4,7 @@
 //! `crate::output`, and returns a `std::process::ExitCode` from
 //! `crate::exit`'s table.
 
+pub mod ask;
 pub mod cleanup;
 pub mod clip;
 pub mod completions;

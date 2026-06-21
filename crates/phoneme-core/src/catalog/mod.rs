@@ -290,6 +290,33 @@ pub struct TranscriptVersion {
     pub text: String,
 }
 
+/// One retrieved evidence chunk for Ask-my-archive: enough to ground a prompt
+/// and to map an answer citation back to its source recording + chunk.
+///
+/// Produced by [`Catalog::retrieve_context`], which rides the same hybrid
+/// (vector + FTS5 + RRF) retrieval the search bar uses but recovers the single
+/// best-matching chunk per result so a citation can point at the exact passage.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RetrievedChunk {
+    /// The representative recording this evidence came from (meeting-deduped).
+    pub recording_id: RecordingId,
+    /// The recording's `meeting_id`, if it is one track of a meeting.
+    pub meeting_id: Option<String>,
+    /// 0-based chunk index from [`crate::chunk::chunk_transcript`], or `-1` for a
+    /// lexical-only / legacy-only hit that has no per-chunk vector to argmax over.
+    pub chunk_index: i64,
+    /// The chunk's transcript text, re-derived from the live transcript via
+    /// `chunk_transcript` (or a transcript prefix for a lexical/legacy hit).
+    /// Never empty — a citation with no snippet can't ground anything.
+    pub text: String,
+    /// Calibrated relevance of the best-matching chunk to the query, in 0..1
+    /// ([`crate::fusion::calibrate_cosine`] of the best cosine).
+    pub relevance: f32,
+    /// `true` when this is a lexical (FTS5) / legacy hit surfaced without a usable
+    /// per-chunk vector — drives the snippet fallback and the relevance floor.
+    pub is_lexical: bool,
+}
+
 /// Table holding a recording's segment timeline for a timing variant (TL-CONSISTENCY):
 /// `"cleaned"` → the post-cleanup re-aligned `transcript_segments_clean`, anything
 /// else → the raw machine-truth `transcript_segments`. The returned name is a fixed

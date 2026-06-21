@@ -819,6 +819,238 @@ impl Catalog {
         Ok(results)
     }
 
+    /// Retrieve the top grounding chunks for an Ask-my-archive question (local
+    /// RAG), each carrying enough to ground a prompt and to map an answer
+    /// citation back to its source recording + chunk.
+    ///
+    /// This rides the exact same hybrid retrieval [`Self::hybrid_search`] uses —
+    /// `vector_ranking` + `lexical_ranking` fused with the identical RRF call and
+    /// weights, the same meeting-stable dedupe keys, the same `LEXICAL_ONLY` floor
+    /// — so an answer is grounded on the same evidence the search bar would
+    /// surface, with one addition: it recovers the single best-matching chunk per
+    /// surviving result (which `hybrid_search` discards) so a `[n]` citation can
+    /// point at the exact passage.
+    ///
+    /// Deliberate divergence from `hybrid_search`: tag-name folding
+    /// (`tag_ranking`) is **omitted**. Ask is a meaning-question, and grounding an
+    /// answer on a recording that merely carries a tag whose *name* contains a
+    /// query word is noise. The consequence is intended: for a tag-name query
+    /// Ask's candidate set is a strict subset of the search bar's.
+    ///
+    /// Chunk recovery, per surviving result: re-read its stored chunk vectors
+    /// (`SELECT vector FROM embedding_chunks … ORDER BY chunk_index`, the same
+    /// query `more_like_this` uses), score each against `query_vec`, take the
+    /// argmax row's ordinal as the chunk index, and re-derive that chunk's text
+    /// from the live transcript via the pure [`crate::chunk::chunk_transcript`].
+    /// Edge cases the `text` invariant (never empty) forces:
+    /// - transcript edited shorter than the stored vectors → clamp the index to
+    ///   the last chunk; if still empty, fall back to a transcript prefix;
+    /// - a lexical-only / legacy-only hit (no `embedding_chunks` rows to argmax
+    ///   over) → `chunk_index = -1`, `is_lexical = true`, snippet is a transcript
+    ///   prefix;
+    /// - no transcript at all (audio-only / retention-reclaimed) → drop the
+    ///   result; it can't ground anything.
+    ///
+    /// `filter` scopes the candidate set with the *same* `allowed_keys`
+    /// restriction as `hybrid_search` (a meeting passes when either track is in
+    /// scope), applied after ranking and before the `top_k` cut. `relevance` is
+    /// the calibrated best-chunk cosine, identical to the search bar's chip value.
+    pub async fn retrieve_context(
+        &self,
+        query: &str,
+        query_vec: &[f32],
+        top_k: usize,
+        min_relevance: f32,
+        filter: Option<&ListFilter>,
+    ) -> Result<Vec<RetrievedChunk>> {
+        // Same in-scope candidate set as hybrid_search's S3 path: predicate fields
+        // only, mapped to meeting-stable dedupe keys so a meeting passes when
+        // either track matches.
+        let allowed_keys: Option<std::collections::HashSet<String>> = match filter {
+            Some(f) => {
+                let scoped = ListFilter {
+                    search: None,
+                    limit: None,
+                    offset: None,
+                    sort_desc: None,
+                    ..f.clone()
+                };
+                let rows = self.list(&scoped).await?;
+                Some(
+                    rows.into_iter()
+                        .map(|r| r.meeting_id.unwrap_or_else(|| r.id.as_str().to_string()))
+                        .collect(),
+                )
+            }
+            None => None,
+        };
+
+        // Reproduce the fusion hybrid_search trusts (minus tag_ranking — see the
+        // doc comment). vec_rank is `(key, rec_id, best_cosine)`; lex_rank is
+        // `(key, rec_id)`.
+        let vec_rank = self.vector_ranking(query_vec).await?;
+        let lex_rank = self.lexical_ranking(query).await?;
+
+        // Per-key maps, identical to hybrid_search.
+        let cosine_by_key: std::collections::HashMap<String, f32> = vec_rank
+            .iter()
+            .map(|(key, _id, c)| (key.clone(), *c))
+            .collect();
+        let mut rec_id_by_key: std::collections::HashMap<String, RecordingId> =
+            std::collections::HashMap::new();
+        for (key, id, _c) in &vec_rank {
+            rec_id_by_key
+                .entry(key.clone())
+                .or_insert_with(|| id.clone());
+        }
+        for (key, id) in &lex_rank {
+            rec_id_by_key
+                .entry(key.clone())
+                .or_insert_with(|| id.clone());
+        }
+        let lexical_keys: std::collections::HashSet<String> =
+            lex_rank.iter().map(|(key, _id)| key.clone()).collect();
+
+        // Fuse on the dedupe key with the identical call + weights as the search
+        // bar, so relevance and ordering match.
+        let vec_keys: Vec<String> = vec_rank.iter().map(|(key, _, _)| key.clone()).collect();
+        let lex_keys: Vec<String> = lex_rank.iter().map(|(key, _)| key.clone()).collect();
+        let fused = crate::fusion::reciprocal_rank_fusion(
+            &[&vec_keys[..], &lex_keys[..]],
+            Some(&[1.0, 0.85]),
+        );
+
+        // Same floor as hybrid_search: a lexical hit is kept regardless of cosine
+        // and floored to this; a semantic-only hit must clear `min_relevance`.
+        const LEXICAL_ONLY_RELEVANCE: f32 = 0.30;
+
+        let mut out: Vec<RetrievedChunk> = Vec::new();
+        for (key, _fused_score) in fused {
+            if out.len() >= top_k {
+                break;
+            }
+            if let Some(allowed) = &allowed_keys {
+                if !allowed.contains(&key) {
+                    continue;
+                }
+            }
+            let Some(rec_id) = rec_id_by_key.get(&key).cloned() else {
+                continue;
+            };
+            // Whether this key was surfaced by the lexical (FTS5) retriever. This
+            // gates the relevance floor — a lexical hit is kept regardless of its
+            // (possibly weak) cosine, exactly as `hybrid_search` does — but it is
+            // NOT what the emitted `is_lexical` flag reports: that is decided below
+            // by whether a per-chunk vector was actually recovered for the citation
+            // (a recording can match BOTH retrievers, and when it has a real chunk
+            // to cite it is a vector hit, not a lexical-only one).
+            let matched_lexically = lexical_keys.contains(&key);
+            let relevance = match cosine_by_key.get(&key) {
+                Some(c) => crate::fusion::calibrate_cosine(*c),
+                None => 0.0,
+            };
+            let display = if matched_lexically {
+                relevance.max(LEXICAL_ONLY_RELEVANCE)
+            } else {
+                relevance
+            };
+            if !matched_lexically && display < min_relevance {
+                continue;
+            }
+
+            // Recover the recording's live transcript; an audio-only /
+            // retention-reclaimed row can't ground anything, so it is dropped.
+            let Some(recording) = self.get(&rec_id).await? else {
+                continue;
+            };
+            let Some(transcript) = recording
+                .transcript
+                .as_deref()
+                .filter(|t| !t.trim().is_empty())
+            else {
+                continue;
+            };
+            let meeting_id = recording.meeting_id.clone();
+            let chunks = crate::chunk::chunk_transcript(transcript);
+
+            // Argmax the recording's stored chunk vectors against the query to
+            // find which chunk matched (citation granularity). A lexical-only /
+            // legacy-only hit has no chunk vectors to argmax over.
+            let chunk_rows = sqlx::query(
+                "SELECT vector FROM embedding_chunks WHERE recording_id = ? ORDER BY chunk_index",
+            )
+            .bind(rec_id.as_str())
+            .fetch_all(&self.pool)
+            .await?;
+
+            let mut best_chunk: Option<usize> = None;
+            let mut best_score = f32::NEG_INFINITY;
+            for (ordinal, row) in chunk_rows.iter().enumerate() {
+                let bytes: Vec<u8> = row.try_get("vector")?;
+                if !bytes.len().is_multiple_of(4) {
+                    continue; // corrupt blob — same guard as the scan paths
+                }
+                let vec: Vec<f32> = bytes
+                    .chunks_exact(4)
+                    .map(|c| {
+                        f32::from_le_bytes(
+                            c.try_into()
+                                .expect("chunks_exact(4) yields exactly 4 bytes"),
+                        )
+                    })
+                    .collect();
+                if vec.len() != query_vec.len() {
+                    continue; // dimension mismatch — skip, same as the scan paths
+                }
+                let score = crate::embed::Embedder::cosine_similarity(query_vec, &vec);
+                if score > best_score {
+                    best_score = score;
+                    best_chunk = Some(ordinal);
+                }
+            }
+
+            // Derive the snippet + index. `text` must never be empty.
+            let (chunk_index, text) = match best_chunk {
+                // A per-chunk vector won the argmax: cite that chunk, clamping the
+                // index to the live transcript's chunk count (a transcript edited
+                // shorter than the stored vectors), and falling back to a prefix
+                // if the clamped chunk is somehow empty.
+                Some(ordinal) if !chunks.is_empty() => {
+                    let idx = ordinal.min(chunks.len() - 1);
+                    let chunk_text = chunks[idx].trim();
+                    if chunk_text.is_empty() {
+                        (-1, transcript_prefix(transcript))
+                    } else {
+                        (idx as i64, chunk_text.to_string())
+                    }
+                }
+                // No usable per-chunk vector (lexical-only / legacy-only, or every
+                // blob was corrupt/dim-mismatched): cite a transcript prefix.
+                _ => (-1, transcript_prefix(transcript)),
+            };
+
+            // The emitted flag tracks the citation, not the retriever set: a
+            // recovered per-chunk vector (`chunk_index >= 0`) is a vector hit even
+            // when the recording also matched lexically; only a hit with no usable
+            // per-chunk vector (`chunk_index == -1`) is reported lexical-only. This
+            // matches the `RetrievedChunk::is_lexical` contract (it drives the
+            // snippet fallback + the lexical floor, both of which apply only when
+            // there was no chunk to cite).
+            let is_lexical = chunk_index < 0;
+
+            out.push(RetrievedChunk {
+                recording_id: rec_id,
+                meeting_id,
+                chunk_index,
+                text,
+                relevance: display,
+                is_lexical,
+            });
+        }
+
+        Ok(out)
+    }
+
     /// "More like this": rank the library by semantic similarity to a stored
     /// recording, reusing its already-stored vectors — no fresh embedding, so
     /// it costs one corpus scan and works even when the embedding model isn't
@@ -1417,6 +1649,26 @@ impl Catalog {
             index_vectors: index_count.unwrap_or(0),
             sqlite_vectors: sqlite_count as usize,
         }
+    }
+}
+
+/// A char-boundary-safe leading slice of a transcript, used as the snippet for a
+/// lexical-only / legacy-only Ask hit that has no per-chunk vector to argmax over
+/// (and as the clamp fallback when an edited transcript yields an empty chunk).
+/// `text` on a [`RetrievedChunk`] must never be empty, so this always returns a
+/// non-empty string for a non-empty transcript. Capped generously here; the
+/// daemon re-truncates to its own per-source prompt budget.
+fn transcript_prefix(transcript: &str) -> String {
+    const ASK_PREFIX_CHARS: usize = 1200;
+    let trimmed = transcript.trim();
+    let mut end = ASK_PREFIX_CHARS.min(trimmed.len());
+    while end > 0 && !trimmed.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end < trimmed.len() {
+        format!("{}…", &trimmed[..end])
+    } else {
+        trimmed.to_string()
     }
 }
 

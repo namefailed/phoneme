@@ -75,6 +75,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
         Command::Clip(args) => commands::clip::run(args, cfg, cli.json).await,
         Command::Speaker(args) => commands::speaker::run(args, cfg, cli.json).await,
         Command::Search(args) => commands::search::run(args, cfg, cli.json).await,
+        Command::Ask(args) => commands::ask::run(args, cfg, cli.json).await,
         Command::Reembed => commands::reembed::run(cfg, cli.json).await,
         Command::Queue(args) => commands::queue::run(args, cfg, cli.json).await,
         Command::RefireHook(args) => commands::refire_hook::run(args, cfg, cli.json).await,

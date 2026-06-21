@@ -181,6 +181,19 @@ same `[{ "recording": …, "score": … }]` array (calibrated 0..1 scores);
 source recording has no embeddings. `reembed_all` clears and rebuilds every
 stored embedding with the current model (use after changing the embedding model).
 
+`ask` (`request_id`, `query`, optional `top_k`, optional `filter`) — **Ask my
+archive** (local RAG): answers `query` grounded **only** in the user's
+transcripts, with citations. It rides the *same* hybrid retriever as
+`semantic_search` (so `filter` scopes it identically), then streams an LLM answer
+through the configured `[llm_post_process]` provider. The client mints
+`request_id` and **subscribes first** (on a second connection — see Event
+Streaming), because the request acknowledges immediately with `null` and the work
+streams asynchronously over `ask_activity` events tagged with that `request_id`.
+A synchronous `err` (`invalid_config`) means no embedder is loaded or no LLM
+provider is configured; a failure *after* the ack (embed / retrieval /
+generation) instead arrives as a terminal `ask_activity` with `error` set. Empty
+retrieval returns a terminal "nothing matched" answer **without** calling the LLM.
+
 **Diagnostics:** `run_doctor` (runs all health checks; the GUI Doctor view).
 
 **Daemon control:** `daemon_status`, `reload_config`, `shutdown`, `hook_test`,
@@ -226,6 +239,17 @@ field naming the variant, plus that variant's fields alongside it.
 {"event": "queue_depth_changed", "pending": 1, "processing": 0, "failed": 0}
 {"event": "transcription_done", "id": "20260519T143500823", "transcript": "Hello, this is a live preview."}
 {"event": "summary_updated", "id": "20260519T143500823"}
+```
+
+**Ask my archive stream** (`ask_activity`, after sending `ask` with a
+`request_id`): the daemon ships the citation `sources` first (before any token),
+then `delta` chunks of the answer, then a terminal `done`. Filter by
+`request_id`; an answer's inline `[n]` markers map to `sources[n-1]`.
+
+```json
+{"event": "ask_activity", "request_id": "ask-1", "sources": [{"n": 1, "recording_id": "20260519T143500823", "meeting_id": null, "label": "Standup notes", "chunk_index": 2, "snippet": "we deferred the migration…", "relevance": 0.71}], "delta": "", "done": false, "error": ""}
+{"event": "ask_activity", "request_id": "ask-1", "sources": [], "delta": "The migration was deferred [1].", "done": false, "error": ""}
+{"event": "ask_activity", "request_id": "ask-1", "sources": [], "delta": "", "done": true, "error": ""}
 ```
 
 The full event catalog — recording lifecycle, `pipeline_stage_changed`,

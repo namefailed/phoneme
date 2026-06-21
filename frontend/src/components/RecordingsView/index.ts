@@ -47,6 +47,7 @@ import { setHeaderHidden, isHeaderHidden } from "../../services/headerBar";
 import { seedCursorGlow } from "../../services/cursorAnimation";
 import "./Sidebar";
 import "./ThinkingPopout";
+import "./AskPanel";
 import "./styles.css";
 
 // Per-device UI layout prefs persisted in localStorage, not config.toml — these
@@ -294,6 +295,7 @@ export class RecordingsView {
            (a grid item with its own stacking context) can't paint over it. -->
       <div id="rv-bulk-bar" style="display:none;"></div>
       <ph-thinking-popout id="rv-thinking"></ph-thinking-popout>
+      <ph-ask-panel id="rv-ask"></ph-ask-panel>
     `;
 
     const listRoot = this.container.querySelector<HTMLElement>("#rv-list-inner")!;

@@ -78,7 +78,7 @@ pub use codec::JsonLineCodec;
 pub use error::{IpcTransportError, TransportResult};
 pub use named_pipe::{pipe_path, NamedPipeConnection, NamedPipeListener, NamedPipeTransport};
 pub use schema::{
-    DaemonEvent, IpcError, IpcErrorKind, PipelineStage, Request, RerunAllOverrides, Response,
-    ServerRequest,
+    AskSource, DaemonEvent, IpcError, IpcErrorKind, PipelineStage, Request, RerunAllOverrides,
+    Response, ServerRequest,
 };
 pub use transport::Transport;

@@ -53,10 +53,13 @@ use std::sync::Arc;
 
 /// Coalesce streamed deltas until this many chars accumulate, then flush one
 /// LlmActivity event — keeps the event bus from being flooded token-by-token.
-const DELTA_FLUSH_CHARS: usize = 48;
+/// `pub(crate)` so Ask-my-archive's streaming loop ([`crate::ask`]) shares the
+/// exact same coalescing threshold instead of copying the number.
+pub(crate) const DELTA_FLUSH_CHARS: usize = 48;
 /// Cap on total response chars forwarded to the UI per stage (the full result
 /// is still returned and stored; only the live "thinking" view is bounded).
-const MAX_STREAMED_CHARS: usize = 16 * 1024;
+/// `pub(crate)` for the same reuse as [`DELTA_FLUSH_CHARS`].
+pub(crate) const MAX_STREAMED_CHARS: usize = 16 * 1024;
 
 /// Longest we wait for the bundled whisper-server to come back up after a
 /// one-job model-override swap before transcribing anyway. A model load can take

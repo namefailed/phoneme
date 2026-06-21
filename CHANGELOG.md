@@ -11,6 +11,18 @@ trust boundary.*
 
 ### Transcripts
 
+- [x] **Ask my archive (local RAG)** — ask a plain-language question and get an
+  answer drawn **only** from your own recordings, with a citation for every
+  claim. The daemon embeds the question, retrieves the best-matching transcript
+  chunks through the *same* hybrid (vector + FTS5/RRF) retriever the search bar
+  uses, and streams the answer through your configured `[llm_post_process]`
+  provider — no new model, no new index, nothing leaves your machine beyond the
+  LLM call you already use for cleanup. Each `[n]` marker in the answer links to
+  the recording it came from. New `phoneme ask "…"` CLI (with `--top-k`,
+  `--tag/--status/--kind` scoping, and `--json`), a 💬 chat panel in the app, and
+  an `ask` IPC request that streams over a new `ask_activity` event. When nothing
+  matches it says so instead of guessing; needs semantic search enabled and an
+  LLM provider configured.
 - [x] **Confidence-driven re-do** — Phoneme now aggregates the per-word ASR
   confidence it already captures into one **mean confidence** per recording
   (computed when transcription completes — no model re-run — and stored in the new
