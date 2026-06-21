@@ -94,25 +94,6 @@ const RAIL: { id: string; label: string }[] = [
   { id: "system", label: "⚙️ System" },
 ];
 
-/** Legacy deep-link ids → current ids, so openers that predate the re-taxonomy
- *  (header jump-menu, g-chords, the Re-run "enable cleanup" link, saved links)
- *  keep resolving. `ai` was a brief rename of Post-Processing; the bare
- *  `managers`/`tags`/… ids now point at the corresponding rail entry. */
-const LEGACY_TAB_ALIASES: Record<string, string> = {
-  ai: "postprocessing",
-  managers: "managers/tags",
-  tags: "managers/tags",
-  profiles: "managers/profiles",
-  // Recall + Saved searches were merged into one "Search" tab; old deep-links
-  // (g-chords, saved links, the brief separate ids) keep resolving there.
-  saved: "search",
-  "managers/saved": "search",
-  recall: "search",
-};
-function resolveTab(rawTab: string): string {
-  return LEGACY_TAB_ALIASES[rawTab] ?? rawTab;
-}
-
 /**
  * The Settings view (the "settings" route): a tab rail + one mounted section
  * per tab, a fuzzy settings search (with per-field intent keywords from
@@ -130,8 +111,9 @@ function resolveTab(rawTab: string): string {
  *
  * Unsaved-edits guard: `confirmClose()` (themed dialog) compares the JSON
  * snapshot taken at load. Every leave path App controls funnels through it.
- * Deep links: `activeTab` may arrive from openers ("post_processing",
- * "managers/profiles", …) via the `phoneme:navigate` event's section field.
+ * Deep links: `activeTab` may arrive from openers ("postprocessing",
+ * "managers/profiles", …) via the `phoneme:navigate` event's section field;
+ * every opener passes a canonical rail id (see RAIL).
  * Mounted by App via the `SettingsView` wrapper; the header bar is hidden
  * while this view is up.
  */
@@ -367,7 +349,7 @@ export class SettingsViewElement extends LitElement {
       // Config tab OR a manager id ("managers/hooks") — both are registry-driven
       // now (managers are their own rail entries, no sub-tab strip). Mount, in
       // order, each section whose `tab` matches. One source of truth with search.
-      const tab = resolveTab(this.activeTab);
+      const tab = this.activeTab;
       for (const s of this.sectionRegistry()) {
         if (s.tab === tab) s.mount(createSubHost());
       }
@@ -675,9 +657,9 @@ export class SettingsViewElement extends LitElement {
     }
 
     const isSearching = this.searchQuery.trim().length > 0;
-    // The active tab is a config id, a manager id ("managers/hooks"), or a
-    // legacy id ("ai"/"tags") — resolve it to the current id for highlighting.
-    const tab = resolveTab(this.activeTab);
+    // The active tab is a config id or a manager id ("managers/hooks"); used to
+    // mark the matching rail entry active.
+    const tab = this.activeTab;
 
     return html`
       <div class="settings-layout">
