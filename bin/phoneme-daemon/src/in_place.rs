@@ -303,8 +303,19 @@ async fn transcribe_polish_type(
     // cloud backend it swaps the request model id. The guard restores the
     // configured model when this function returns, so it is held across the
     // transcription.
-    let (overridden_stt, _model_guard) = crate::pipeline::apply_model_override(
+    //
+    // (#221) The override must be published to the slot the supervisor of the
+    // server dictation actually dials reads — otherwise a dictation routed
+    // through the preview or its own dedicated server would silently swap the
+    // *main* server (which it never talks to) and transcribe on the unchanged
+    // model. `in_place_override_role` mirrors the resolve()/`in_place_provider_config`
+    // arm selection, and `apply_model_override_for_role` publishes to that slot
+    // and waits on that server's spawn generation. Main role keeps the historic
+    // behavior byte-for-byte.
+    let role = crate::app_state::in_place_override_role(&cfg);
+    let (overridden_stt, _model_guard) = crate::pipeline::apply_model_override_for_role(
         state,
+        role,
         cfg.in_place_provider_config(),
         model_override,
     )

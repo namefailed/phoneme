@@ -488,7 +488,16 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
             }
         };
 
-        if pv.model_path.is_empty() || !std::path::Path::new(&pv.model_path).exists() {
+        // Spawn with the EFFECTIVE preview model: a one-job override (an in-place
+        // dictation routed through the preview server, published by
+        // `transcribe_polish_type` to `preview_model_override`) wins over the
+        // configured `[preview_whisper]` model, mirroring the main supervisor's
+        // `whisper_model_override` handling. Read here (not merged into the global
+        // config) so other jobs keep seeing the configured preview model.
+        let spawned_override = state.preview_model_override.get();
+        let model_to_run = effective_model_path(&pv.model_path, spawned_override.as_deref());
+
+        if model_to_run.is_empty() || !std::path::Path::new(&model_to_run).exists() {
             state.whisper_ports.set_preview(None);
             tracing::info!("preview model_path empty or missing, waiting for download...");
             tokio::select! {
@@ -513,7 +522,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         let mut command = Command::new(&server_path);
         command
             .arg("-m")
-            .arg(&pv.model_path)
+            .arg(&model_to_run)
             .arg("--port")
             .arg(port.to_string())
             .arg("--host")
@@ -570,6 +579,34 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         // Watch the (unexpanded) preview fields for changes.
         let watch = raw.preview_whisper.clone();
 
+        // Restart iff the configured preview spec changed OR the one-job preview
+        // model override differs from the effective model this child was spawned
+        // with. Comparing the effective model (config + override) — the same shape
+        // the main supervisor uses — is what makes an in-place override routed
+        // through the preview server produce exactly one restart-to-override and
+        // one restore when the override is cleared.
+        let spec_changed = |child_model: &str| -> bool {
+            let cur = state.config.load();
+            let config_changed = match (cur.preview_whisper.as_ref(), watch.as_ref()) {
+                (Some(c), Some(w)) => {
+                    c.model_path != w.model_path
+                        || c.bundled_server_port != w.bundled_server_port
+                        || c.mode != w.mode
+                }
+                _ => true,
+            };
+            // The override layers over the (expanded) configured preview model,
+            // mirroring the spawn above.
+            let configured = cur
+                .preview_whisper
+                .as_ref()
+                .map(|p| p.model_path.clone())
+                .unwrap_or_default();
+            let current_override = state.preview_model_override.get();
+            let current_model = effective_model_path(&configured, current_override.as_deref());
+            config_changed || current_model != child_model
+        };
+
         let mut exited = false;
         loop {
             tokio::select! {
@@ -593,17 +630,20 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
                     backoff = RESTART_BACKOFF_INITIAL;
                     break;
                 }
+                // React promptly to a set/clear of the one-job preview model
+                // override so the override job doesn't wait out the 1s poll for
+                // its model — parallels the main supervisor's override arm.
+                _ = state.preview_model_override.changed.notified() => {
+                    if spec_changed(&model_to_run) {
+                        tracing::info!("preview whisper-server model override changed; restarting");
+                        let _ = kill_gracefully(&mut child).await;
+                        backoff = RESTART_BACKOFF_INITIAL;
+                        break;
+                    }
+                }
                 _ = check_interval.tick() => {
                     let cur = state.config.load();
-                    let spec_changed = match (cur.preview_whisper.as_ref(), watch.as_ref()) {
-                        (Some(c), Some(w)) => {
-                            c.model_path != w.model_path
-                                || c.bundled_server_port != w.bundled_server_port
-                                || c.mode != w.mode
-                        }
-                        _ => true,
-                    };
-                    if spec_changed || !cur.preview_needs_own_server() {
+                    if spec_changed(&model_to_run) || !cur.preview_needs_own_server() {
                         tracing::info!("preview whisper-server config changed; restarting");
                         let _ = kill_gracefully(&mut child).await;
                         backoff = RESTART_BACKOFF_INITIAL;
@@ -876,7 +916,16 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
             }
         };
 
-        if stt.model_path.is_empty() || !std::path::Path::new(&stt.model_path).exists() {
+        // Spawn with the EFFECTIVE dictation model: a one-job override (an
+        // in-place dictation routed through its own server, published by
+        // `transcribe_polish_type` to `dictation_model_override`) wins over the
+        // configured `[in_place].stt` model, mirroring the main supervisor's
+        // `whisper_model_override` handling. Read here (not merged into the global
+        // config) so other jobs keep seeing the configured dictation model.
+        let spawned_override = state.dictation_model_override.get();
+        let model_to_run = effective_model_path(&stt.model_path, spawned_override.as_deref());
+
+        if model_to_run.is_empty() || !std::path::Path::new(&model_to_run).exists() {
             state.whisper_ports.set_dictation(None);
             tracing::info!("dictation model_path empty or missing, waiting for download...");
             tokio::select! {
@@ -900,7 +949,7 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
         let mut command = Command::new(&server_path);
         command
             .arg("-m")
-            .arg(&stt.model_path)
+            .arg(&model_to_run)
             .arg("--port")
             .arg(port.to_string())
             .arg("--host")
@@ -955,6 +1004,39 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
         // Watch the (unexpanded) in_place.stt fields for changes.
         let watch = raw.in_place.stt.clone();
 
+        // Restart iff the configured dictation spec changed OR the one-job
+        // dictation model override differs from the effective model this child was
+        // spawned with. Comparing the effective model (config + override) — the
+        // same shape the main supervisor uses — is what makes an in-place override
+        // routed through the dictation server produce exactly one
+        // restart-to-override and one restore when the override is cleared.
+        let spec_changed = |child_model: &str| -> bool {
+            let cur = state.config.load();
+            // Compare by direct field read (not PartialEq) so a pure
+            // use_own_bundled_server / model / port / mode change is caught, and
+            // self-stop when the opt-in flips off.
+            let config_changed = match (cur.in_place.stt.as_ref(), watch.as_ref()) {
+                (Some(c), Some(w)) => {
+                    c.model_path != w.model_path
+                        || c.bundled_server_port != w.bundled_server_port
+                        || c.mode != w.mode
+                        || c.use_own_bundled_server != w.use_own_bundled_server
+                }
+                _ => true,
+            };
+            // The override layers over the (expanded) configured dictation model,
+            // mirroring the spawn above.
+            let configured = cur
+                .in_place
+                .stt
+                .as_ref()
+                .map(|s| s.model_path.clone())
+                .unwrap_or_default();
+            let current_override = state.dictation_model_override.get();
+            let current_model = effective_model_path(&configured, current_override.as_deref());
+            config_changed || current_model != child_model
+        };
+
         let mut exited = false;
         loop {
             tokio::select! {
@@ -978,21 +1060,20 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
                     backoff = RESTART_BACKOFF_INITIAL;
                     break;
                 }
+                // React promptly to a set/clear of the one-job dictation model
+                // override so the override job doesn't wait out the 1s poll for
+                // its model — parallels the main supervisor's override arm.
+                _ = state.dictation_model_override.changed.notified() => {
+                    if spec_changed(&model_to_run) {
+                        tracing::info!("dictation whisper-server model override changed; restarting");
+                        let _ = kill_gracefully(&mut child).await;
+                        backoff = RESTART_BACKOFF_INITIAL;
+                        break;
+                    }
+                }
                 _ = check_interval.tick() => {
                     let cur = state.config.load();
-                    // Compare by direct field read (not PartialEq) so a pure
-                    // use_own_bundled_server / model / port / mode change is
-                    // caught, and self-stop when the opt-in flips off.
-                    let spec_changed = match (cur.in_place.stt.as_ref(), watch.as_ref()) {
-                        (Some(c), Some(w)) => {
-                            c.model_path != w.model_path
-                                || c.bundled_server_port != w.bundled_server_port
-                                || c.mode != w.mode
-                                || c.use_own_bundled_server != w.use_own_bundled_server
-                        }
-                        _ => true,
-                    };
-                    if spec_changed || !cur.in_place_needs_own_server() {
+                    if spec_changed(&model_to_run) || !cur.in_place_needs_own_server() {
                         tracing::info!("dictation whisper-server config changed; restarting");
                         let _ = kill_gracefully(&mut child).await;
                         backoff = RESTART_BACKOFF_INITIAL;

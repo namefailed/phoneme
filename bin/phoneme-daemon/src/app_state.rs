@@ -27,6 +27,7 @@ use crate::event_bus::EventBus;
 use crate::recorder::DaemonRecorder;
 use crate::shutdown::ShutdownCoordinator;
 use arc_swap::ArcSwap;
+use phoneme_core::config::WhisperServerRole;
 use phoneme_core::{
     webhook::WebhookClient, Catalog, Config, InboxQueue, LlmPostProcessor, Transcriber,
 };
@@ -150,6 +151,23 @@ pub struct AppState {
     /// serialized restart-to-override / restore cycle under `whisper_sem` so
     /// nothing else touches the server mid-swap.
     pub whisper_model_override: Arc<WhisperModelOverride>,
+    /// One-job model override for the dedicated live-preview server, the
+    /// preview-role sibling of [`Self::whisper_model_override`]. Read by
+    /// [`crate::whisper_supervisor::run_preview`] only (never `run_preview2` —
+    /// the 2nd meeting-track server never carries an in-place dictation) as its
+    /// authoritative model, and published to by `transcribe_polish_type` when an
+    /// in-place dictation is routed through the preview server (so a per-binding
+    /// model override actually loads on that server instead of being silently
+    /// dropped on the main slot the preview supervisor never reads). `None` (the
+    /// default) runs the configured `preview_whisper.model_path`.
+    pub preview_model_override: Arc<WhisperModelOverride>,
+    /// One-job model override for the dedicated in-place dictation server, the
+    /// dictation-role sibling of [`Self::whisper_model_override`]. Read by
+    /// [`crate::whisper_supervisor::run_dictation`] as its authoritative model,
+    /// and published to by `transcribe_polish_type` when the dictation routes
+    /// through its own server. `None` (the default) runs the configured
+    /// `in_place.stt.model_path`.
+    pub dictation_model_override: Arc<WhisperModelOverride>,
     /// Per-recording requested whisper model overrides, keyed by recording id.
     /// The `RetranscribeRecording` handler records the request here at enqueue
     /// time; the pipeline removes and applies it when that job actually runs
@@ -307,6 +325,13 @@ pub struct WhisperEffectivePorts {
     /// old server (still answering in the gap before the supervisor restarts) can't
     /// satisfy the wait.
     main_generation: AtomicU64,
+    /// The preview server's spawn generation — the preview-role sibling of
+    /// [`Self::main_generation`], so an in-place override routed through the
+    /// preview server gets the same stale-server guard the main path has.
+    preview_generation: AtomicU64,
+    /// The dictation server's spawn generation — the dictation-role sibling of
+    /// [`Self::main_generation`].
+    dictation_generation: AtomicU64,
 }
 
 impl WhisperEffectivePorts {
@@ -347,6 +372,18 @@ impl WhisperEffectivePorts {
     /// Publish (`Some`) or clear (`None`) the preview server's live port.
     pub fn set_preview(&self, port: Option<u16>) {
         self.preview.store(port.unwrap_or(0), Ordering::Relaxed);
+        // A fresh port means a (re)spawn — bump the generation so a model-override
+        // waiter routed through the preview server can tell it apart from the one
+        // it replaced, mirroring `set_main`.
+        if port.is_some() {
+            self.preview_generation.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    /// The preview server's spawn generation, bumped on every (re)publish of its
+    /// live port. The preview-role sibling of [`Self::main_generation`].
+    pub fn preview_generation(&self) -> u64 {
+        self.preview_generation.load(Ordering::Acquire)
     }
 
     /// The second live-preview server's live port, when it is running.
@@ -373,6 +410,18 @@ impl WhisperEffectivePorts {
     /// Publish (`Some`) or clear (`None`) the dictation server's live port.
     pub fn set_dictation(&self, port: Option<u16>) {
         self.dictation.store(port.unwrap_or(0), Ordering::Relaxed);
+        // A fresh port means a (re)spawn — bump the generation so an in-place
+        // model-override waiter can tell it apart from the one it replaced,
+        // mirroring `set_main`.
+        if port.is_some() {
+            self.dictation_generation.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    /// The dictation server's spawn generation, bumped on every (re)publish of its
+    /// live port. The dictation-role sibling of [`Self::main_generation`].
+    pub fn dictation_generation(&self) -> u64 {
+        self.dictation_generation.load(Ordering::Acquire)
     }
 
     /// The port consumers should dial for `provider`: the matching server's
@@ -388,13 +437,24 @@ impl WhisperEffectivePorts {
     /// `[in_place].stt` that reuses the main or preview port keeps falling
     /// through to those arms (and a port matching none is returned unchanged),
     /// preserving the reuse contract.
+    ///
+    /// The dictation arm also stands down when its preferred port equals the
+    /// preview server's configured/materialized port (#222): a dedicated
+    /// dictation server pinned to exactly `main + 1` would otherwise collide with
+    /// the auto-default preview server (which also materializes on `main + 1`) and
+    /// silently capture the preview's requests. Falling through to the preview arm
+    /// keeps a `main + 1` request on the preview server, where the supervisors'
+    /// port probe has already steered the two onto distinct live ports.
     pub fn resolve(&self, cfg: &Config, provider: &phoneme_core::config::WhisperConfig) -> u16 {
         let preferred = provider.bundled_server_port;
         // The dedicated dictation server is checked first, but only when it's
         // actually running and its port is distinct, so it never shadows the
-        // main/preview reuse case (an in_place.stt pointing at 5809/5810).
+        // main/preview reuse case (an in_place.stt pointing at 5809/5810). The
+        // preview-port guard keeps a `main + 1` dictation server from shadowing
+        // the (possibly auto-materialized) preview server on the same port.
         if cfg.in_place_needs_own_server()
             && preferred != cfg.whisper.bundled_server_port
+            && preferred != cfg.preview_provider_config().bundled_server_port
             && cfg
                 .in_place
                 .stt
@@ -452,6 +512,50 @@ impl WhisperEffectivePorts {
         }
         out
     }
+}
+
+/// Which bundled whisper-server an in-place dictation transcription actually
+/// dials, so a one-job model override is published to the slot that server's
+/// supervisor reads. Mirrors the arm selection in [`WhisperEffectivePorts::resolve`]
+/// for [`Config::in_place_provider_config`]:
+/// - [`WhisperServerRole::InPlace`] when a dedicated dictation server is running
+///   and the stt port is distinct from both the main and preview ports;
+/// - [`WhisperServerRole::Preview`] when dictation reuses the preview server
+///   (the auto-default preview, or an stt pinned to the preview port);
+/// - [`WhisperServerRole::Main`] otherwise (reuses the main server, or points at
+///   an unmanaged port — the existing best-effort fallback).
+///
+/// Pure so it can be unit-tested without an [`AppState`]. Preview2 never appears:
+/// the 2nd preview server is meeting-only and dictation never routes to it.
+pub fn in_place_override_role(cfg: &Config) -> WhisperServerRole {
+    // Mirror `in_place_provider_config()`: an explicit `[in_place].stt` wins,
+    // else the preview provider when streaming preview is on, else main.
+    if let Some(stt) = &cfg.in_place.stt {
+        let port = stt.bundled_server_port;
+        // Dedicated dictation server — same guard the resolve() dictation arm
+        // uses (#222): distinct from both main and the preview's configured port.
+        if cfg.in_place_needs_own_server()
+            && port != cfg.whisper.bundled_server_port
+            && port != cfg.preview_provider_config().bundled_server_port
+        {
+            return WhisperServerRole::InPlace;
+        }
+        // Reuses a server by port: preview when it matches the preview's port,
+        // else main (the main port, or an unmanaged port that no server backs).
+        if port != cfg.whisper.bundled_server_port
+            && cfg
+                .preview_whisper
+                .as_ref()
+                .is_some_and(|p| p.bundled_server_port == port)
+        {
+            return WhisperServerRole::Preview;
+        }
+        return WhisperServerRole::Main;
+    }
+    if cfg.recording.streaming_preview && cfg.preview_whisper.is_some() {
+        return WhisperServerRole::Preview;
+    }
+    WhisperServerRole::Main
 }
 
 /// The per-recording one-time Re-run overrides held in
@@ -556,6 +660,8 @@ impl AppState {
             preview2_sem: Arc::new(tokio::sync::Semaphore::new(1)),
             processing: Arc::new(std::sync::Mutex::new(None)),
             whisper_model_override: Arc::new(WhisperModelOverride::default()),
+            preview_model_override: Arc::new(WhisperModelOverride::default()),
+            dictation_model_override: Arc::new(WhisperModelOverride::default()),
             pending_overrides: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pending_all_overrides: Arc::new(
                 std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -574,8 +680,8 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::WhisperEffectivePorts;
-    use phoneme_core::config::{Config, TranscriptionBackend, WhisperMode};
+    use super::{in_place_override_role, WhisperEffectivePorts};
+    use phoneme_core::config::{Config, TranscriptionBackend, WhisperMode, WhisperServerRole};
 
     /// A config with the main server on 5809 and a dedicated local preview
     /// server on 5810 — the documented two-server layout.
@@ -730,5 +836,87 @@ mod tests {
         // 5811 matches neither main nor preview, and the dictation arm is
         // gated off → returns the configured port, never the dictation live one.
         assert_eq!(ports.resolve(&cfg, stt), 5811);
+    }
+
+    // ---- in_place_override_role (#221) -------------------------------------
+    //
+    // Which slot a one-job in-place model override is published to must follow
+    // exactly which server `in_place_provider_config()` dials, so the override
+    // restarts the right server and the readiness wait checks the right
+    // generation. These cover every arm.
+
+    #[test]
+    fn override_role_no_stt_preview_off_is_main() {
+        // No `[in_place].stt` and streaming preview off → dictation reuses the
+        // main server, so the override targets the main slot.
+        let mut cfg = two_server_config();
+        cfg.recording.streaming_preview = false;
+        cfg.in_place.stt = None;
+        assert_eq!(in_place_override_role(&cfg), WhisperServerRole::Main);
+    }
+
+    #[test]
+    fn override_role_no_stt_preview_on_is_preview() {
+        // No `[in_place].stt`, streaming preview on with a dedicated preview
+        // server → dictation reuses the preview server, so the override targets
+        // the preview slot (`run_preview` reads it).
+        let mut cfg = two_server_config();
+        cfg.recording.streaming_preview = true;
+        cfg.in_place.stt = None;
+        assert!(cfg.preview_whisper.is_some());
+        assert_eq!(in_place_override_role(&cfg), WhisperServerRole::Preview);
+    }
+
+    #[test]
+    fn override_role_dedicated_dictation_port_is_in_place() {
+        // `[in_place].stt` opted into its own server on a port distinct from
+        // both main (5809) and preview (5810) → the dedicated dictation server,
+        // so the override targets the dictation slot (`run_dictation` reads it).
+        let cfg = three_server_config(); // stt on 5811, use_own_bundled_server
+        assert!(cfg.in_place_needs_own_server());
+        assert_eq!(in_place_override_role(&cfg), WhisperServerRole::InPlace);
+    }
+
+    #[test]
+    fn override_role_stt_pinned_to_main_port_is_main() {
+        // `[in_place].stt` pinned to the main server's port (5809) → it reuses
+        // the main server (even with the opt-in set, the resolve()/role guard
+        // refuses to shadow main), so the override targets the main slot.
+        let mut cfg = three_server_config();
+        cfg.in_place.stt.as_mut().unwrap().bundled_server_port = 5809;
+        assert_eq!(in_place_override_role(&cfg), WhisperServerRole::Main);
+    }
+
+    #[test]
+    fn override_role_stt_pinned_to_preview_port_is_preview() {
+        // `[in_place].stt` pinned to the preview server's port (5810) → it reuses
+        // the preview server, so the override targets the preview slot.
+        let mut cfg = three_server_config();
+        cfg.in_place.stt.as_mut().unwrap().bundled_server_port = 5810;
+        assert_eq!(in_place_override_role(&cfg), WhisperServerRole::Preview);
+    }
+
+    #[test]
+    fn override_role_stt_at_main_plus_one_equals_preview_is_preview() {
+        // #222: the auto-default preview materializes on main + 1 (5810). An
+        // `[in_place].stt` pinned to exactly main + 1 collides with that preview
+        // server, so the override must target the PREVIEW slot, never spin up a
+        // distinct dictation server on the same port. We simulate the
+        // materialized auto-preview by setting `preview_whisper` to main + 1.
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.bundled_server_port = 5809;
+        // Materialized auto-default preview on main + 1 = 5810.
+        let mut pv = cfg.whisper.clone();
+        pv.bundled_server_port = 5810;
+        cfg.preview_whisper = Some(pv);
+        cfg.recording.streaming_preview = true;
+        // stt opts into its own server but lands on 5810 (= the preview port).
+        let mut stt = cfg.whisper.clone();
+        stt.bundled_server_port = 5810;
+        stt.use_own_bundled_server = true;
+        cfg.in_place.stt = Some(stt);
+        assert_eq!(in_place_override_role(&cfg), WhisperServerRole::Preview);
     }
 }

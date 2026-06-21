@@ -41,6 +41,7 @@
 use crate::app_state::{AppState, WhisperModelOverride};
 use phoneme_core::config::{
     Config, InPlaceConfig, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
+    WhisperServerRole,
 };
 use phoneme_core::error::Result;
 use phoneme_core::transcription::DiarizationTrack;
@@ -109,21 +110,61 @@ pub(crate) async fn apply_model_override(
     configured: &WhisperConfig,
     requested: Option<String>,
 ) -> (WhisperConfig, WhisperOverrideGuard) {
+    // The main (final-transcription) server is the only server a re-transcribe /
+    // queued pipeline override ever targets, so it keeps the historic behavior:
+    // publish to `whisper_model_override`, wait on `main_generation`.
+    apply_model_override_for_role(state, WhisperServerRole::Main, configured, requested).await
+}
+
+/// Role-aware sibling of [`apply_model_override`]: publish the one-job override to
+/// the slot the chosen server's supervisor actually reads, and wait on that
+/// server's spawn generation, so an in-place dictation routed through the preview
+/// or dictation server loads its requested model on the *right* server instead of
+/// silently swapping the main one. `role` selects the (override slot, generation)
+/// pair; everything else (the blank-skip, the cloud branch, the per-job
+/// `model_path` pin for labels, the readiness wait, the restore guard) is
+/// identical to the main-role path. Preview2 never appears here — the 2nd
+/// meeting-track server never carries a dictation (see
+/// [`crate::app_state::in_place_override_role`]).
+pub(crate) async fn apply_model_override_for_role(
+    state: &AppState,
+    role: WhisperServerRole,
+    configured: &WhisperConfig,
+    requested: Option<String>,
+) -> (WhisperConfig, WhisperOverrideGuard) {
     let model = match requested {
         Some(m) if !m.trim().is_empty() => m.trim().to_string(),
         _ => return (configured.clone(), WhisperOverrideGuard { inner: None }),
     };
 
+    // The override slot the chosen server's supervisor reads, and that server's
+    // spawn-generation getter — picked once so the publish, the readiness gate,
+    // and the restore guard all target the same server.
+    let override_slot: &Arc<WhisperModelOverride> = match role {
+        WhisperServerRole::Preview => &state.preview_model_override,
+        WhisperServerRole::InPlace => &state.dictation_model_override,
+        // Main is the default; Preview2 never routes a dictation override (it's
+        // meeting-only), so fall back to the main slot rather than no-op.
+        _ => &state.whisper_model_override,
+    };
+    let generation = move |state: &AppState| -> u64 {
+        match role {
+            WhisperServerRole::Preview => state.whisper_ports.preview_generation(),
+            WhisperServerRole::InPlace => state.whisper_ports.dictation_generation(),
+            _ => state.whisper_ports.main_generation(),
+        }
+    };
+
     let mut whisper_cfg = configured.clone();
     match configured.provider {
         TranscriptionBackend::Local => {
-            tracing::info!(model = %model, "re-transcribe: applying one-job whisper model override");
+            tracing::info!(model = %model, role = %role.label(), "re-transcribe: applying one-job whisper model override");
             // Capture the supervisor's spawn generation BEFORE requesting the swap,
             // so the readiness wait below can tell the freshly-respawned server
             // (loading our model) apart from the old one it replaces.
-            let override_gen = state.whisper_ports.main_generation();
+            let override_gen = generation(state);
             // Publish the override; the supervisor swaps the server's model.
-            state.whisper_model_override.set(Some(model.clone()));
+            override_slot.set(Some(model.clone()));
             // Pin the per-job model_path so the activity label and the stored
             // model reflect the override (the local provider talks to the server
             // over HTTP and ignores model_path itself).
@@ -149,7 +190,7 @@ pub(crate) async fn apply_model_override(
                             .apply(&cfg, &poll_cfg)
                             .server_base_url()
                     },
-                    move || fresh_state.whisper_ports.main_generation() != override_gen,
+                    move || generation(&fresh_state) != override_gen,
                     WHISPER_READY_TIMEOUT,
                 )
                 .await;
@@ -157,7 +198,7 @@ pub(crate) async fn apply_model_override(
             (
                 whisper_cfg,
                 WhisperOverrideGuard {
-                    inner: Some(state.whisper_model_override.clone()),
+                    inner: Some(override_slot.clone()),
                 },
             )
         }

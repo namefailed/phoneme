@@ -31,6 +31,15 @@ trust boundary.*
 
 ### Reliability & foundation
 
+- [x] **Per-binding dictation/preview model overrides actually load** — a custom
+  hotkey's one-job whisper model override used to be written only to the main
+  server's override slot, which the dedicated live-preview and dictation servers
+  never read, so the override was silently dropped whenever in-place dictation ran
+  on its own (or the preview) bundled server. Each bundled server now has its own
+  override slot, and in-place dictation publishes to the slot of the server it
+  actually dials (and waits for that server to respawn on the new model). Also
+  closed a related gap where an auto-materialized preview server and a dictation
+  server pinned to `main + 1` could collide on the same port.
 - [x] **IPC wire protocol version + handshake** — the daemon↔client NDJSON wire
   now carries an explicit `PROTOCOL_VERSION`, and a new `Handshake` request lets a
   client check it on connect. A `phoneme` CLI built against a breaking wire
