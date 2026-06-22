@@ -572,10 +572,10 @@ mark.search-hit {
    a play preview, the numeric start/end fields, and Export. Built to grow into
    the app's general audio-edit surface. */
 .clip-dialog {
-  width: min(640px, 94vw);
+  width: min(940px, 94vw);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .clip-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .clip-subtitle { font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.4; }
@@ -586,18 +586,19 @@ mark.search-hit {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 14px 16px;
 }
 .clip-wf { width: 100%; }
-/* The region layer overlays the waveform's top 80px (above the timeline row).
-   It's click-through so wavesurfer still gets click-to-seek — only the handles
-   re-enable pointer events. */
+/* The region layer overlays the waveform's top 180px (above the timeline row),
+   matching WaveformPlayer(180) in ClipExport. Its inset matches .clip-wf-wrap's
+   padding so it aligns with the canvas. It's click-through so wavesurfer still
+   gets click-to-seek — only the handles re-enable pointer events. */
 .clip-region-layer {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  top: 10px;
-  height: 80px;
+  left: 16px;
+  right: 16px;
+  top: 14px;
+  height: 180px;
   pointer-events: none;
 }
 .clip-region-mask {
@@ -634,7 +635,7 @@ mark.search-hit {
   top: 50%;
   left: 50%;
   width: 2px;
-  height: 22px;
+  height: 44px;
   transform: translate(-50%, -50%);
   background: var(--accent-fg, #fff);
   border-radius: 1px;

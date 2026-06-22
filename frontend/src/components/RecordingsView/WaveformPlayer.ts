@@ -22,6 +22,9 @@ export class WaveformPlayerElement extends LitElement {
   protected createRenderRoot() { return this; }
 
   @property({ type: String }) audioPath = "";
+  /** Waveform pixel height. The detail pane uses the default; the clip modal
+   *  sets a taller one so a long recording stays legible. Read at mount time. */
+  waveHeight = 80;
 
   @query('#container') container!: HTMLElement;
 
@@ -60,7 +63,7 @@ export class WaveformPlayerElement extends LitElement {
       cursorWidth: 2,
       barWidth: 2,
       barGap: 1,
-      height: 80,
+      height: this.waveHeight,
       normalize: true,
       url: convertFileSrc(this.audioPath),
       plugins: [
@@ -150,8 +153,9 @@ export class WaveformPlayer {
   // element and a single event fires all of them — hence remove-before-add.
   private onPlayStateChange: ((e: Event) => void) | null = null;
   private onTimeUpdate: ((e: Event) => void) | null = null;
-  constructor() {
+  constructor(waveHeight = 80) {
     this.element = document.createElement('ph-waveform-player') as WaveformPlayerElement;
+    this.element.waveHeight = waveHeight;
   }
 
   setOnPlayStateChange(cb: (playing: boolean) => void) {

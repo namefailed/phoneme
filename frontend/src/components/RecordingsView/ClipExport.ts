@@ -138,7 +138,7 @@ export class ClipExportElement extends LitElement {
     if (this.open && !this.wfMounted && this.audioPath) {
       const host = this.querySelector<HTMLElement>("#clip-wf");
       if (host) {
-        this.player = new WaveformPlayer();
+        this.player = new WaveformPlayer(180);
         this.player.setOnTimeUpdate((t) => {
           this.playhead = t;
           this.paintPlayhead();
