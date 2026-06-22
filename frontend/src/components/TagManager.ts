@@ -19,7 +19,14 @@ export class TagManagerElement extends LitElement {
   protected createRenderRoot() { return this; }
 
   private keyHandler = (e: KeyboardEvent) => {
-    if (e.key === "Escape") this.close();
+    if (e.key !== "Escape") return;
+    // Layered Escape: if the user is mid inline-edit/merge or typing in the
+    // search box, let SectionTags' own Escape (cancel the rename) or just the
+    // focused control keep it — don't tear down the whole modal. A second
+    // Escape, once focus is back out of those rows, closes the modal.
+    const active = document.activeElement as HTMLElement | null;
+    if (active?.closest(".tag-mgr-row.editing, .tag-mgr-row.merging, .tag-mgr-search")) return;
+    this.close();
   };
 
   connectedCallback() {

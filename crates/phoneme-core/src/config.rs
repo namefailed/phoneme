@@ -5389,10 +5389,10 @@ mod tests {
     }
 
     #[test]
-    fn pre_roll_ms_absent_in_legacy_toml_defaults_to_1500() {
+    fn pre_roll_ms_absent_in_legacy_toml_defaults_to_0() {
         // A config written before pre_roll_ms existed must still load and
-        // default to 1500 (enabled), so existing users keep the historical
-        // record-only-while-active behavior.
+        // default to 0 (disabled), so existing users keep the historical
+        // record-only-while-active behavior (mic opened only while recording).
         let dir = TempDir::new().unwrap();
         let cfg = Config::default();
         let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();

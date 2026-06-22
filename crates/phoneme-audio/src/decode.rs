@@ -158,6 +158,22 @@ fn decode_to_f32(input: &Path) -> Result<(Vec<f32>, u32, usize)> {
                 if sample_rate == 0 {
                     sample_rate = decoded.spec().rate;
                     channels = decoded.spec().channels.count();
+                } else if decoded.spec().rate != sample_rate
+                    || decoded.spec().channels.count() != channels
+                {
+                    // The rate/channel count is latched on the first buffer and
+                    // assumed for the whole stream (downmix + duration cap rely on
+                    // it). A chained/format-switching stream would misalign the
+                    // interleaving and silently corrupt audio, so bail instead.
+                    return Err(Error::Internal(format!(
+                        "audio format changes mid-stream in {} (started {} Hz / {} ch, \
+                         saw {} Hz / {} ch)",
+                        input.display(),
+                        sample_rate,
+                        channels,
+                        decoded.spec().rate,
+                        decoded.spec().channels.count()
+                    )));
                 }
                 append_samples(&decoded, &mut out);
                 // Enforce the duration cap with a running counter so a long or

@@ -47,6 +47,12 @@ pub const CHUNK_OVERLAP_SENTENCES: usize = 1;
 /// (hours of dictation) would otherwise produce hundreds of embeddings; capping
 /// keeps the per-recording embedding cost and the brute-force search bounded.
 /// Reached only by very long recordings; typical voice notes produce 1–5 chunks.
+///
+/// The cap bounds *count*, never coverage: a transcript that wouldn't fit in
+/// this many [`CHUNK_TARGET_WORDS`]-sized chunks is chunked coarser (bigger
+/// chunks) so every sentence still lands in some chunk. Dropping the tail would
+/// silently make the back half of a long meeting unsearchable — the exact
+/// failure this module exists to fix (see the module docs).
 pub const MAX_CHUNKS_PER_RECORDING: usize = 64;
 
 /// Split `text` into sentence-like units.
@@ -99,7 +105,9 @@ fn word_count(s: &str) -> usize {
 ///   spanning a boundary is wholly contained in at least one chunk.
 /// - Short transcripts yield exactly one chunk (the whole text), so behavior for
 ///   one-liners is unchanged from the old whole-transcript embedding.
-/// - At most [`MAX_CHUNKS_PER_RECORDING`] chunks are returned.
+/// - At most [`MAX_CHUNKS_PER_RECORDING`] chunks are returned, and a transcript
+///   too long to fit that many [`CHUNK_TARGET_WORDS`]-sized chunks is chunked
+///   coarser so every sentence is still covered (the cap never drops the tail).
 ///
 /// An empty / whitespace-only transcript yields no chunks.
 pub fn chunk_transcript(text: &str) -> Vec<String> {
@@ -114,6 +122,16 @@ pub fn chunk_transcript(text: &str) -> Vec<String> {
         return vec![sentences.join(" ")];
     }
 
+    // Effective per-chunk size. Normally [`CHUNK_TARGET_WORDS`], but for a
+    // transcript so long it wouldn't fit in the cap, grow the target so all of
+    // it fits in [`MAX_CHUNKS_PER_RECORDING`] (coarser chunks beat a dropped,
+    // unsearchable tail). The /2 leaves headroom for the overlap sentence and
+    // sentence-boundary slop, so we land comfortably under the cap rather than
+    // grazing it. Only hours-long recordings ever clear this floor.
+    let total_words = word_count(text);
+    let target = CHUNK_TARGET_WORDS
+        .max(total_words.div_ceil(MAX_CHUNKS_PER_RECORDING / 2));
+
     let mut chunks = Vec::new();
     let mut i = 0;
     while i < sentences.len() {
@@ -126,7 +144,7 @@ pub fn chunk_transcript(text: &str) -> Vec<String> {
         // than being dropped).
         while j < sentences.len() {
             let w = word_count(&sentences[j]);
-            if !chunk_sentences.is_empty() && words + w > CHUNK_TARGET_WORDS {
+            if !chunk_sentences.is_empty() && words + w > target {
                 break;
             }
             chunk_sentences.push(&sentences[j]);
@@ -135,6 +153,10 @@ pub fn chunk_transcript(text: &str) -> Vec<String> {
         }
 
         chunks.push(chunk_sentences.join(" "));
+        // Safety net. The adaptive `target` above is sized so the whole
+        // transcript fits well under the cap, so this should never trip for
+        // real input; it only guards against a pathological run of one-word
+        // sentences that forces minimal forward progress.
         if chunks.len() >= MAX_CHUNKS_PER_RECORDING {
             break;
         }
@@ -263,6 +285,28 @@ mod tests {
             chunks.len() <= MAX_CHUNKS_PER_RECORDING,
             "chunk count must be capped at {MAX_CHUNKS_PER_RECORDING}, got {}",
             chunks.len()
+        );
+    }
+
+    #[test]
+    fn cap_coarsens_instead_of_dropping_the_tail() {
+        // A transcript far longer than the cap could hold at the normal target
+        // must still cover its last sentence in some chunk — the cap bounds the
+        // chunk count by chunking coarser, never by discarding the tail (which
+        // would make the back half of a long meeting unsearchable).
+        let body = vec!["Short distinct sentence here now."; 5000].join(" ");
+        let last = "This very last sentence must remain searchable.";
+        let transcript = format!("{body} {last}");
+
+        let chunks = chunk_transcript(&transcript);
+        assert!(
+            chunks.len() <= MAX_CHUNKS_PER_RECORDING,
+            "still capped, got {}",
+            chunks.len()
+        );
+        assert!(
+            chunks.iter().any(|c| c.contains(last)),
+            "the tail sentence must appear in some chunk, not be dropped"
         );
     }
 }

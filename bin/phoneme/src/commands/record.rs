@@ -149,8 +149,16 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         }
     }
 
-    // Wait for this recording's TranscriptionDone or *Failed.
-    let timeout = std::time::Duration::from_secs(cfg.whisper.timeout_secs + 60);
+    // Wait for this recording's TranscriptionDone or *Failed. In Duration mode
+    // the daemon records for `secs` before it even starts transcribing, so add
+    // the known capture length to the budget — otherwise a long `--duration`
+    // false-times-out while the daemon is recording normally.
+    let capture_secs = match mode {
+        RecordMode::Duration { secs } => secs as u64,
+        _ => 0,
+    };
+    let timeout =
+        std::time::Duration::from_secs(cfg.whisper.timeout_secs + 60 + capture_secs);
     let start = std::time::Instant::now();
 
     // `rec_id` is `None` only if the daemon's RecordStart response carried no
@@ -159,7 +167,20 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         |id: &phoneme_core::RecordingId| rec_id.as_deref().is_none_or(|r| r == id.to_string());
 
     while start.elapsed() < timeout {
-        match tokio::time::timeout(std::time::Duration::from_millis(500), events.next()).await {
+        // Poll the event stream in 500ms slices, but also watch for Ctrl+C the
+        // whole time. Hold mode handled its interrupt above; Oneshot/Duration
+        // block here instead, and without this arm an interrupt would tear the
+        // CLI down while the daemon kept recording — the same leak the Hold path
+        // avoids. On Ctrl+C we discard the in-progress take and exit.
+        let next = tokio::select! {
+            r = tokio::time::timeout(std::time::Duration::from_millis(500), events.next()) => r,
+            _ = tokio::signal::ctrl_c() => {
+                let _ = control.send_silent(Request::RecordCancel).await;
+                eprintln!("interrupted — discarded the in-progress recording");
+                return ExitCode::from(exit::GENERIC_FAIL);
+            }
+        };
+        match next {
             Ok(Some(Ok(DaemonEvent::TranscriptionDone { id, transcript }))) => {
                 if !is_ours(&id) {
                     continue;

@@ -265,10 +265,33 @@ async fn main() -> Result<()> {
         }
     });
 
-    let retention_state = state.clone();
-    let retention_shutdown = state.shutdown.signal.clone_receiver();
-    tokio::spawn(async move {
-        retention::run(retention_state, retention_shutdown).await;
+    // Retention loop — enforces the `[retention]` auto-delete policy, so this is
+    // privacy-relevant: if it dies, recordings the user expected pruned live on
+    // forever. Unlike the whisper supervisors it isn't in the crash-detect select
+    // (a retention hiccup must not take the whole daemon down), but a plain
+    // detached spawn would let a panic kill the loop silently for the rest of the
+    // process. So wrap it: respawn on panic, exit cleanly on a normal return
+    // (`retention::run` returns only on shutdown). The handle is kept so shutdown
+    // awaits it, like the preview/dictation supervisors above.
+    let retention_supervisor_state = state.clone();
+    let retention_supervisor_handle = tokio::spawn(async move {
+        loop {
+            let run_state = retention_supervisor_state.clone();
+            let run_shutdown = retention_supervisor_state.shutdown.signal.clone_receiver();
+            match tokio::spawn(async move {
+                retention::run(run_state, run_shutdown).await;
+            })
+            .await
+            {
+                // Normal return: `retention::run` only exits on shutdown, so stop.
+                Ok(()) => return,
+                // Panic (already logged by the panic hook) — respawn so the
+                // auto-delete policy keeps running.
+                Err(e) => {
+                    tracing::error!(error = %e, "retention loop panicked; restarting");
+                }
+            }
+        }
     });
 
     tracing::info!(
@@ -332,6 +355,9 @@ async fn main() -> Result<()> {
     // And the dictation supervisor — its optional third server (if the user
     // opted in) must be killed before exit too.
     let _ = dictation_supervisor_handle.await;
+    // And the retention supervisor — its inner loop returns on shutdown; awaiting
+    // it keeps the loop from being abandoned mid-tick as the process winds down.
+    let _ = retention_supervisor_handle.await;
     // Persist the optional ANN index so incremental adds since the last build
     // survive a restart (a warm-start then reloads the sidecar instead of
     // rebuilding). A no-op unless the `ann-usearch` feature is compiled,

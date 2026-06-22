@@ -45,6 +45,18 @@ const MAX_SSE_CLIENTS: usize = 16;
 /// each stream and released when the client disconnects (the stream drops).
 static SSE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(MAX_SSE_CLIENTS);
 
+/// Idle ceiling on a daemon subscription. `forward()` bounds its response read
+/// with a request timeout; the subscription pipe has no equivalent, so a daemon
+/// that accepts the subscribe pipe but never emits an event and never closes
+/// would otherwise park its SSE slot forever (the 15s keep-alive only feeds the
+/// HTTP layer — it never polls the daemon pipe). When no event arrives within
+/// this window the stream ends, dropping the pipe and freeing the slot.
+///
+/// Deliberately generous: a healthy connection is legitimately silent whenever
+/// nothing is recording (the daemon sends no heartbeat), so this only reaps a
+/// genuinely wedged subscription, never a quiet-but-live dashboard.
+const SUBSCRIPTION_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// Serialize one [`DaemonEvent`] into an SSE [`Event`] whose `data:` line is the
 /// event's JSON. Factored out so the round-trip is unit-testable without a live
 /// daemon or HTTP server.
@@ -65,13 +77,23 @@ pub fn event_to_sse(event: &DaemonEvent) -> Event {
 /// dropped pipe) simply end the stream — SSE has no per-item error channel, and
 /// a client is expected to reconnect and re-fetch state, matching the IPC
 /// broadcast contract.
+///
+/// The next-event read is bounded by [`SUBSCRIPTION_IDLE_TIMEOUT`]: a daemon
+/// that accepted the subscribe pipe but goes silent forever ends the stream
+/// instead of pinning its SSE slot, mirroring `forward()`'s bounded read.
 fn into_sse_stream(
     events: futures::stream::BoxStream<'static, phoneme_ipc::TransportResult<DaemonEvent>>,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
-    events
-        .take_while(|item| futures::future::ready(item.is_ok()))
-        .filter_map(|item| futures::future::ready(item.ok()))
-        .map(|event| Ok(event_to_sse(&event)))
+    // `unfold` lets us wrap each next-event read in a timeout (reset per item):
+    // a `None`/`Err` from the daemon, or an idle window with no event, all
+    // terminate the stream — which drops the pipe and frees the slot.
+    futures::stream::unfold(events, |mut events| async move {
+        match tokio::time::timeout(SUBSCRIPTION_IDLE_TIMEOUT, events.next()).await {
+            Ok(Some(Ok(event))) => Some((Ok(event_to_sse(&event)), events)),
+            // End-of-stream, a daemon-side error, or a silent idle window: stop.
+            Ok(Some(Err(_))) | Ok(None) | Err(_) => None,
+        }
+    })
 }
 
 /// `GET /api/events` handler.
@@ -177,6 +199,22 @@ mod tests {
             "the cap rejection (not a daemon-unreachable 503) must surface, got: {text}"
         );
         drop(held); // free the slots for any other test
+    }
+
+    /// A daemon subscription that accepts the pipe but never emits and never
+    /// closes must not pin its SSE slot forever: the idle bound ends the stream.
+    /// `start_paused` auto-advances tokio's clock past
+    /// [`SUBSCRIPTION_IDLE_TIMEOUT`] while the inner stream stays pending, so the
+    /// test resolves instantly instead of waiting the real 300s.
+    #[tokio::test(start_paused = true)]
+    async fn silent_subscription_times_out_and_ends() {
+        // A stream that is forever pending — models a wedged daemon pipe.
+        let pending = futures::stream::pending::<phoneme_ipc::TransportResult<DaemonEvent>>();
+        let mut stream = Box::pin(into_sse_stream(pending.boxed()));
+        assert!(
+            stream.next().await.is_none(),
+            "a silent subscription must end (freeing its slot), not hang forever"
+        );
     }
 
     /// A serializable event with payload fields keeps every field in the SSE

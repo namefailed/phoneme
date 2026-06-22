@@ -65,7 +65,10 @@ pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
     // The `kind` filter is now applied in SQL by the daemon (before LIMIT /
     // OFFSET) so pagination works correctly — filtering client-side after
     // pagination caused pages to be mostly empty for the non-default kind.
-    let filter = build_filter(args, tag_id);
+    let filter = match build_filter(args, tag_id) {
+        Ok(f) => f,
+        Err(code) => return code,
+    };
     let value = match client.send(Request::ListRecordings { filter }).await {
         Ok(v) => v,
         Err(code) => return code,
@@ -157,7 +160,7 @@ async fn resolve_tag(client: &mut Client, tag: Option<&str>) -> Result<Option<i6
     }
 }
 
-fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
+fn build_filter(args: ListArgs, tag_id: Option<i64>) -> Result<ListFilter, ExitCode> {
     let status = args.status.as_deref().and_then(|s| match s {
         "recording" => Some(RecordingStatus::Recording),
         "paused" => Some(RecordingStatus::Paused),
@@ -193,15 +196,31 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
                 chrono::Local.from_local_datetime(&naive).single()
             })
     };
-    let since = args.since.and_then(parse_date);
-    let until = args.until.and_then(parse_date);
+    // A *present* but unparseable date is a usage error, not "no filter": silently
+    // dropping it would widen the query to the whole library — the same footgun
+    // --status / --kind are clap-validated against (see args.rs). The flags carry
+    // no clap value_parser (the format is too lax for a fixed set), so guard here.
+    let parse_flag = |name: &str, v: Option<String>| -> Result<Option<_>, ExitCode> {
+        match v {
+            None => Ok(None),
+            Some(s) => match parse_date(s.clone()) {
+                Some(d) => Ok(Some(d)),
+                None => {
+                    eprintln!("error: could not parse {name} '{s}' (expected e.g. 2026-05-19)");
+                    Err(ExitCode::from(exit::USAGE_ERROR))
+                }
+            },
+        }
+    };
+    let since = parse_flag("--since", args.since)?;
+    let until = parse_flag("--until", args.until)?;
     // `kind` is applied in SQL (before LIMIT/OFFSET) so pagination stays correct.
     let kind = args.kind.as_deref().and_then(|k| match k {
         "single" => Some(ListKind::Single),
         "meeting" => Some(ListKind::Meeting),
         _ => None, // "all" or unrecognised → no filter
     });
-    ListFilter {
+    Ok(ListFilter {
         limit: args.limit,
         offset: args.offset,
         since,
@@ -219,5 +238,5 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
         entity_kind: None,          // no CLI flag for this yet
         low_confidence_below: None, // no CLI flag for this yet
         task_state: None,           // no CLI flag for this yet (see `phoneme tasks`)
-    }
+    })
 }

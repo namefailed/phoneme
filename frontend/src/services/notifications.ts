@@ -147,16 +147,18 @@ function onEvent(event: DaemonEvent) {
       stepFailedToast("Period digest", String(e.error ?? ""), stepsEnabled);
       return;
     case "tag_suggestions_updated": {
-      if (!stepsEnabled) return;
       // Only toast when the suggestion count GROWS — dismissing, approving, or
       // clearing also fire this event but should never re-announce suggestions.
+      // Always fetch and update the high-water mark, even when step toasts are
+      // off, so re-enabling them later can't fire a false toast on a dismiss
+      // (the count would otherwise still read its stale start-of-session 0).
       const id = e.id as string;
       void getRecording(id)
         .then((rec) => {
           const n = rec?.tag_suggestions?.length ?? 0;
           const prev = lastSuggestionCount.get(id) ?? 0;
           lastSuggestionCount.set(id, n);
-          if (n > prev) showToast("New tag suggestions to review", "info");
+          if (n > prev && stepsEnabled) showToast("New tag suggestions to review", "info");
         })
         .catch(() => { /* recording vanished — nothing to announce */ });
       return;

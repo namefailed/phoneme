@@ -884,11 +884,11 @@ export class SectionInPlace {
         : phrases
             .map(
               (phrase) => `
-        <div class="ip-vc-row" data-phrase="${escHtml(phrase)}"
+        <div class="ip-vc-row" data-phrase="${escapeAttr(phrase)}"
           style="display: flex; gap: 6px; width: 100%; align-items: center;">
           <span style="flex: 1 1 auto; min-width: 0; font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis;">${escHtml(phrase)}</span>
-          <select class="ip-vc-action" data-phrase="${escHtml(phrase)}">${optionFor(map[phrase])}</select>
-          <button class="ip-vc-remove" type="button" data-phrase="${escHtml(phrase)}" title="Remove">✕</button>
+          <select class="ip-vc-action" data-phrase="${escapeAttr(phrase)}">${optionFor(map[phrase])}</select>
+          <button class="ip-vc-remove" type="button" data-phrase="${escapeAttr(phrase)}" title="Remove">✕</button>
         </div>`,
             )
             .join("");

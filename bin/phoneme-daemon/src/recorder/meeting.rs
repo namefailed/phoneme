@@ -142,22 +142,26 @@ impl DaemonRecorder {
         }
 
         let cfg = state.config.load();
+        // Resolve the input device once. The mic source uses it; the system
+        // source ignores it (see below), so a second resolve would be dead work
+        // whose `?` could needlessly abort the meeting on a transient hiccup.
         let device = resolve_input_device(&cfg.recording.input_device)?;
 
         // Open both capture sources up front. If either fails we abort before
         // mutating any state, so a failed meeting leaves the daemon idle.
         // `open_kind(.., SystemAudio)` ignores the passed device and opens the
         // default output device in WASAPI loopback mode.
-        let mic_source =
-            CpalSource::open_kind_with_grace(device, CaptureSource::Microphone, STOP_TAIL_GRACE)
-                .map_err(|e| Error::Internal(format!("meeting: open microphone: {e}")))?;
-        let system_device = resolve_input_device(&cfg.recording.input_device)?;
-        let system_source = CpalSource::open_kind_with_grace(
-            system_device,
-            CaptureSource::SystemAudio,
+        let mic_source = CpalSource::open_kind_with_grace(
+            device.clone(),
+            CaptureSource::Microphone,
             STOP_TAIL_GRACE,
         )
-        .map_err(|e| Error::Internal(format!("meeting: open system audio (loopback): {e}")))?;
+        .map_err(|e| Error::Internal(format!("meeting: open microphone: {e}")))?;
+        let system_source =
+            CpalSource::open_kind_with_grace(device, CaptureSource::SystemAudio, STOP_TAIL_GRACE)
+                .map_err(|e| {
+                    Error::Internal(format!("meeting: open system audio (loopback): {e}"))
+                })?;
 
         let sources: Vec<(MeetingTrack, Box<dyn Source>)> = vec![
             (MeetingTrack::Mic, Box::new(mic_source)),
@@ -484,6 +488,9 @@ impl DaemonRecorder {
             track_late_by_ms: i64,
             first_content_from_wall_ms: Option<i64>,
             raw_samples: Vec<i16>,
+            // Captured raw-sample count, kept for the post-align diagnostic log
+            // after `raw_samples` has been drained into the align inputs.
+            raw_len: usize,
         }
 
         let mut stopped: Vec<StoppedTrack> = Vec::new();
@@ -508,6 +515,7 @@ impl DaemonRecorder {
                         track,
                         track_late_by_ms,
                         first_content_from_wall_ms,
+                        raw_len: raw_samples.len(),
                         raw_samples,
                     });
                 }
@@ -524,10 +532,16 @@ impl DaemonRecorder {
             }
         }
 
+        // Move each track's raw buffer into the align input rather than cloning
+        // it: `stopped` is consumed right below, so the originals would otherwise
+        // sit resident alongside their clones through the whole align step — a
+        // 60-min 16 kHz mono i16 track is ~115 MB, so a 2-track meeting would
+        // briefly double ~230 MB to ~460 MB against the ~2 GB-free target. The
+        // captured length is preserved in `raw_len` for the diagnostic log below.
         let align_inputs: Vec<TrackAlignInput> = stopped
-            .iter()
+            .iter_mut()
             .map(|t| TrackAlignInput {
-                samples: t.raw_samples.clone(),
+                samples: std::mem::take(&mut t.raw_samples),
                 track_late_by_ms: t.track_late_by_ms,
                 first_content_from_wall_ms: t.first_content_from_wall_ms,
                 // The mic is continuous (dense); only the system/loopback track
@@ -547,7 +561,7 @@ impl DaemonRecorder {
             tracing::info!(
                 id = %meta.id,
                 track = meta.track.as_str(),
-                raw_samples = meta.raw_samples.len(),
+                raw_samples = meta.raw_len,
                 expected_raw_samples = expected_raw,
                 aligned_samples = aligned_track.samples.len(),
                 track_late_by_ms = meta.track_late_by_ms,

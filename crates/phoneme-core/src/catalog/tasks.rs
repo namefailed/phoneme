@@ -85,10 +85,18 @@ impl Catalog {
                 .unwrap_or(false);
             let done = t.done || preserved;
             // Re-inserted rows are 'llm' and take their extraction order; manual
-            // rows (kept above) keep their own sort_order.
+            // rows (kept above) keep their own sort_order. On a text collision
+            // (a duplicate extraction, or a surviving manual task with the same
+            // text) upsert rather than silently dropping the row: the extracted
+            // values win and the row becomes 'llm', so the just-computed
+            // carried-over `done` is never discarded. A plain INSERT (no OR
+            // IGNORE) means a genuine constraint/FK error surfaces instead.
             sqlx::query(
-                "INSERT OR IGNORE INTO tasks (recording_id, text, due_hint, done, source, sort_order) \
-                 VALUES (?, ?, ?, ?, 'llm', ?)",
+                "INSERT INTO tasks (recording_id, text, due_hint, done, source, sort_order) \
+                 VALUES (?, ?, ?, ?, 'llm', ?) \
+                 ON CONFLICT(recording_id, text) DO UPDATE SET \
+                 due_hint = excluded.due_hint, done = excluded.done, \
+                 source = 'llm', sort_order = excluded.sort_order",
             )
             .bind(id.as_str())
             .bind(&t.text)

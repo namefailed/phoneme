@@ -475,22 +475,28 @@ impl Catalog {
         if both < 2 {
             return Ok(false);
         }
+        // Re-point + delete in one transaction so a crash can't leave `into`
+        // owning `from`'s captures with `from` still present (mirrors
+        // forget_named_voice). recompute runs after commit — it opens its own
+        // connection and only ever reads back the now-committed links.
+        let mut tx = self.pool.begin().await?;
         sqlx::query("UPDATE speaker_voiceprints SET named_voice_id = ? WHERE named_voice_id = ?")
             .bind(into_id)
             .bind(from_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         // Drop any undo-log rows keyed by the absorbed voice. The FK on
         // forgotten_voiceprint_links already cascades these on the hard delete
         // below; the explicit DELETE is redundant but makes the intent obvious.
         sqlx::query("DELETE FROM forgotten_voiceprint_links WHERE named_voice_id = ?")
             .bind(from_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM named_voiceprints WHERE id = ?")
             .bind(from_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         self.recompute_named_centroid(into_id).await?;
         Ok(true)
     }
@@ -599,6 +605,12 @@ impl Catalog {
     /// speakers are never candidates — only `named_voice_id IS NULL` rows are
     /// scanned — so propagation can only add a name, never overwrite one. Results
     /// are ordered by score, highest first.
+    ///
+    /// Cost is O(unnamed-captures x cohort): every unnamed capture's centroid is
+    /// JSON-parsed and scored against the live library here on the calling task.
+    /// Bounded by the count of un-enrolled captures (not corpus growth) and only
+    /// runs on explicit user-triggered propagation, so it's left inline; if the
+    /// unnamed cohort ever grows large this is the place to page or offload.
     ///
     /// Returns empty when the voice is unknown, forgotten, or has no centroid yet.
     pub async fn propagation_candidates(

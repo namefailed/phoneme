@@ -483,10 +483,16 @@ export class SectionInterface {
       /* private mode — ignore */
     }
     // Column layout lives in config.toml — reset to defaults and persist.
-    this.config.interface.visible_columns = [...DEFAULT_VISIBLE_COLUMNS];
-    delete this.config.interface.column_widths;
+    // Re-fetch a fresh config off disk first: this.config is the live object the
+    // rest of Settings mutates as you edit, so writing it here would silently
+    // commit any other unsaved changes from the open session along with the reset.
     try {
-      await invoke("write_config", { config: this.config });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fresh: any = await invoke("read_config");
+      if (!fresh.interface) fresh.interface = {};
+      fresh.interface.visible_columns = [...DEFAULT_VISIBLE_COLUMNS];
+      delete fresh.interface.column_widths;
+      await invoke("write_config", { config: fresh });
     } catch {
       /* non-fatal — localStorage prefs are already cleared */
     }

@@ -99,15 +99,20 @@ fn speaker_for_segment(speakers: &[SpeakerSpan], start: f64, end: f64) -> Option
     if speakers.is_empty() {
         return None;
     }
-    let best = speakers
-        .iter()
-        .max_by(|a, b| {
-            overlap(a, start, end)
-                .partial_cmp(&overlap(b, start, end))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .expect("non-empty checked above");
-    if overlap(best, start, end) > 0.0 {
+    // Strict `>` keeps the first-appearing (start-sorted) span on equal-overlap
+    // ties, matching dominant_column's first-speaker tie-break so the word- and
+    // segment-level `[Speaker N]` numbering agree (see assign_words). `max_by`
+    // would instead return the LAST maximal span, breaking ties the other way.
+    let mut best: Option<(&SpeakerSpan, f64)> = None;
+    for span in speakers {
+        let ov = overlap(span, start, end);
+        match best {
+            Some((_, bov)) if ov <= bov => {}
+            _ => best = Some((span, ov)),
+        }
+    }
+    let (best, best_ov) = best.expect("non-empty checked above");
+    if best_ov > 0.0 {
         return Some(&best.label);
     }
     // No overlap: the line falls in a gap — attribute to the nearest turn by
@@ -837,9 +842,39 @@ pub struct DiarizerCache<H> {
 
 struct CacheSlot<H> {
     handle: Option<Arc<H>>,
-    /// The `[diarization]` config snapshot the cached handle was built under.
-    /// Meaningless while `handle` is `None`.
-    cfg: DiarizationConfig,
+    /// The load-affecting config the cached handle was built under (see
+    /// [`PipelineKey`]). Meaningless while `handle` is `None`.
+    key: PipelineKey,
+}
+
+/// The subset of `[diarization]` config that actually changes the loaded ONNX
+/// pipeline — `provider` (so switching off `local` still releases the model RAM)
+/// plus exactly what [`QueuedDiarizer::load`] consumes. The cache is keyed on
+/// this, not the whole `DiarizationConfig`: post-clustering knobs
+/// (recognize_speakers, voiceprint thresholds, expected_speakers, solo_one_speaker,
+/// …) are applied per-run and must NOT drop and reload the ~500 MB models, which
+/// on a low-RAM box is an avoidable spike just to toggle a Settings switch.
+#[derive(Debug, Clone, PartialEq)]
+struct PipelineKey {
+    provider: crate::config::DiarizationBackend,
+    models_dir: String,
+    reconstruct_method: String,
+    reconstruct_method_epsilon: f64,
+    merge_gap_secs: f64,
+    speaker_keep_threshold: f64,
+}
+
+impl PipelineKey {
+    fn from_config(cfg: &DiarizationConfig) -> Self {
+        Self {
+            provider: cfg.provider,
+            models_dir: cfg.models_dir.clone(),
+            reconstruct_method: cfg.reconstruct_method.clone(),
+            reconstruct_method_epsilon: cfg.reconstruct_method_epsilon,
+            merge_gap_secs: cfg.merge_gap_secs,
+            speaker_keep_threshold: cfg.speaker_keep_threshold,
+        }
+    }
 }
 
 /// The concrete cache the daemon holds (via `Transcriber`): speakrs pipelines
@@ -852,7 +887,7 @@ impl<H> DiarizerCache<H> {
         Self {
             slot: Mutex::new(CacheSlot {
                 handle: None,
-                cfg: DiarizationConfig::default(),
+                key: PipelineKey::from_config(&DiarizationConfig::default()),
             }),
         }
     }
@@ -870,14 +905,15 @@ impl<H> DiarizerCache<H> {
     /// The load runs while the slot lock is held — that's the entire double-load
     /// guard: a second caller racing the first blocks on the lock, then takes the
     /// cache-hit branch instead of loading again. A cached handle built under a
-    /// different `[diarization]` config is dropped and rebuilt here, so config
-    /// staleness is impossible at the point of use.
+    /// different load-affecting config (see [`PipelineKey`]) is dropped and rebuilt
+    /// here, so model staleness is impossible at the point of use.
     pub fn get_or_load<F>(&self, cfg: &DiarizationConfig, load: F) -> Result<Arc<H>>
     where
         F: FnOnce() -> Result<H>,
     {
+        let key = PipelineKey::from_config(cfg);
         let mut slot = self.lock();
-        if slot.handle.is_some() && slot.cfg != *cfg {
+        if slot.handle.is_some() && slot.key != key {
             tracing::info!(
                 reason = "[diarization] config changed",
                 "dropping cached local diarization pipeline"
@@ -892,7 +928,7 @@ impl<H> DiarizerCache<H> {
         // type-level policy note.
         let handle = Arc::new(load()?);
         slot.handle = Some(handle.clone());
-        slot.cfg = cfg.clone();
+        slot.key = key;
         Ok(handle)
     }
 
@@ -909,13 +945,14 @@ impl<H> DiarizerCache<H> {
     }
 
     /// Drop the cached handle only if it was built under a different
-    /// `[diarization]` config than `cfg`; returns whether it was dropped. Called
-    /// from the daemon's config-apply points so a backend switch or model-path
-    /// change takes effect — and switching away from `local` releases the model
-    /// RAM — without waiting for the next run.
+    /// load-affecting config than `cfg` (see [`PipelineKey`]); returns whether it
+    /// was dropped. Called from the daemon's config-apply points so a model-path or
+    /// tuning change takes effect without waiting for the next run. Post-clustering
+    /// knobs are applied per-run, so toggling them never drops the loaded models.
     pub fn invalidate_if_stale(&self, cfg: &DiarizationConfig) -> bool {
+        let key = PipelineKey::from_config(cfg);
         let mut slot = self.lock();
-        if slot.handle.is_some() && slot.cfg != *cfg {
+        if slot.handle.is_some() && slot.key != key {
             slot.handle = None;
             drop(slot);
             tracing::info!(
@@ -1084,13 +1121,11 @@ impl LocalDiarizer {
 /// ([`assign_words`]) sums over to pick each word's speaker. Column `k`
 /// corresponds to label `SPEAKER_{k:02}`.
 ///
-/// `embeddings`, `hard_clusters`, and `segmentations` are surfaced from the
-/// speakrs result for the persistent named-speaker voiceprint feature:
-/// per-cluster embedding centroids are aggregated from `embeddings` (chunks ×
-/// speakers × dim) over the `(chunk, speaker)` cells whose `hard_clusters` id
-/// matches and that are active in `segmentations`. The word-level path doesn't
-/// read them; they're carried here so the return type doesn't get rewritten again
-/// when more of that feature lands.
+/// `embeddings` and `hard_clusters` drive the named-speaker voiceprint feature:
+/// per-cluster centroids are aggregated from `embeddings` (chunks × speakers ×
+/// dim) over the `(chunk, speaker)` cells whose `hard_clusters` id matches (see
+/// `cluster_centroids`), feeding both the over-split merge and the captured
+/// voiceprints. The word-level path doesn't read them.
 #[derive(Debug, Clone)]
 pub struct LocalDiarization {
     /// Cleaned, assignment-ready speaker turns (the segment-level path and the
@@ -1100,15 +1135,15 @@ pub struct LocalDiarization {
     /// per `FRAME_STEP_SECONDS`. Word-level attribution sums over this; column
     /// `k` maps to label `SPEAKER_{k:02}`.
     pub discrete_diarization: Array2<f32>,
-    /// Per-chunk speaker embeddings, shape `(chunks, speakers, dim)`. Surfaced
-    /// for the deferred named-speaker-voiceprint feature; unused today.
+    /// Per-chunk speaker embeddings, shape `(chunks, speakers, dim)`. Read by
+    /// `cluster_centroids` for the over-split merge and the captured voiceprints.
     pub embeddings: Array3<f32>,
     /// Per-chunk-speaker cluster ids, shape `(chunks, speakers)` (`-1` =
-    /// unassigned). Surfaced for the deferred voiceprint feature; unused today.
+    /// unassigned). Read alongside `embeddings` for centroid aggregation.
     pub hard_clusters: Array2<i32>,
     /// Decoded powerset segmentations, shape `(chunks, frames, speakers)`.
-    /// Tells which `(chunk, speaker)` cells are active when aggregating
-    /// centroids. Surfaced for the deferred voiceprint feature; unused today.
+    /// Surfaced from the speakrs result but not yet read by anything here. See
+    /// the note on the line that populates it in `run_local_diarization`.
     pub segmentations: Array3<f32>,
 }
 
@@ -1549,6 +1584,9 @@ pub fn run_local_diarization(
         discrete_diarization: result.discrete_diarization.0,
         embeddings: result.embeddings.0,
         hard_clusters: result.hard_clusters.0,
+        // Nothing reads `segmentations` yet — it's a full (chunks×frames×speakers)
+        // tensor carried on every result. Drop the field + this move once it's
+        // confirmed dead (also update the test constructors in transcription.rs).
         segmentations: result.segmentations.0,
     })
 }
@@ -2664,21 +2702,41 @@ mod tests {
     #[test]
     fn changed_config_reloads_at_point_of_use() {
         // The use-time config check is the correctness backbone: even if every
-        // daemon invalidation hook were missed, a run under a new
-        // `[diarization]` config must never reuse a pipeline built under the
-        // old one.
+        // daemon invalidation hook were missed, a run under a new load-affecting
+        // config must never reuse a pipeline built under the old one. We vary
+        // `models_dir` — the path the pipeline actually loads from — not the
+        // legacy/unused `local_model_path` (which no longer keys the cache).
+        let with_dir = |dir: &str| DiarizationConfig {
+            provider: DiarizationBackend::Local,
+            models_dir: dir.to_string(),
+            ..DiarizationConfig::default()
+        };
         let cache: DiarizerCache<&str> = DiarizerCache::new();
-        let old = cache
-            .get_or_load(&diar_cfg(DiarizationBackend::Local, ""), || Ok("old"))
-            .unwrap();
+        let old = cache.get_or_load(&with_dir(""), || Ok("old")).unwrap();
         let new = cache
-            .get_or_load(
-                &diar_cfg(DiarizationBackend::Local, "C:/models/x.onnx"),
-                || Ok("new"),
-            )
+            .get_or_load(&with_dir("C:/models/bundle"), || Ok("new"))
             .unwrap();
         assert!(!Arc::ptr_eq(&old, &new), "stale pipeline must be dropped");
         assert_eq!(*new, "new");
+    }
+
+    #[test]
+    fn post_clustering_knobs_do_not_reload_pipeline() {
+        // The cache keys only on load-affecting config: toggling a post-clustering
+        // knob (here recognize_speakers) must keep the warm ~500 MB pipeline,
+        // never drop and reload it just to flip a Settings switch.
+        let cache: DiarizerCache<&str> = DiarizerCache::new();
+        let base = diar_cfg(DiarizationBackend::Local, "");
+        let warm = cache.get_or_load(&base, || Ok("pipeline")).unwrap();
+
+        let mut toggled = base.clone();
+        toggled.recognize_speakers = !toggled.recognize_speakers;
+        assert!(
+            !cache.invalidate_if_stale(&toggled),
+            "a post-clustering knob must not invalidate the loaded models"
+        );
+        let same = cache.get_or_load(&toggled, || Ok("reloaded")).unwrap();
+        assert!(Arc::ptr_eq(&warm, &same), "pipeline must stay warm");
     }
 
     #[test]

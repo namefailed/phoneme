@@ -460,22 +460,27 @@ impl Catalog {
             return Ok(FindReplaceLibraryOutcome::default());
         }
 
-        // Every recording, unfiltered. We only need the ids; `find_replace_transcript`
-        // re-reads each row's current transcript itself (and applies its own
-        // no-transcript / zero-match guards), so this stays correct even if the
-        // list snapshot is slightly stale.
-        let recordings = self.list(&ListFilter::default()).await?;
+        // Every recording, unfiltered. We only need the ids, so fetch just the id
+        // column rather than `list()`, which would fully hydrate tags/entities/
+        // tasks/speaker-names for the whole corpus — all discarded here.
+        // `find_replace_transcript` re-reads each row's current transcript itself
+        // (and applies its own no-transcript / zero-match guards), so this stays
+        // correct even if the id snapshot is slightly stale.
+        let ids: Vec<String> = sqlx::query_scalar("SELECT id FROM recordings")
+            .fetch_all(&self.pool)
+            .await?;
 
         let mut outcome = FindReplaceLibraryOutcome::default();
-        for rec in recordings {
+        for id in ids {
+            let id = RecordingId::from_string(id);
             match self
-                .find_replace_transcript(&rec.id, find, replace, case_sensitive)
+                .find_replace_transcript(&id, find, replace, case_sensitive)
                 .await
             {
                 Ok(per) if per.replaced > 0 => {
                     outcome.recordings_changed += 1;
                     outcome.total_replacements += per.replaced;
-                    outcome.changed.push((rec.id, per.transcript));
+                    outcome.changed.push((id, per.transcript));
                 }
                 // Zero-match: nothing was written; skip it entirely (no event,
                 // no churn).
@@ -488,9 +493,9 @@ impl Catalog {
                 // the whole sweep — but it's counted as a failure so the caller can
                 // surface it rather than silently reporting a smaller success count.
                 Err(e) => {
-                    tracing::warn!(id = %rec.id, error = %e, "library find-replace: a recording failed to update");
+                    tracing::warn!(id = %id, error = %e, "library find-replace: a recording failed to update");
                     outcome.failed += 1;
-                    outcome.failed_ids.push(rec.id);
+                    outcome.failed_ids.push(id);
                 }
             }
         }

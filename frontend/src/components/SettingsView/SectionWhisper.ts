@@ -506,37 +506,51 @@ export class SectionWhisper {
 
     // Live token counter for the custom-vocabulary box, counted with Whisper's
     // own BPE so the limit matches reality (dense jargon tokenizes much denser
-    // than a character count would suggest). Hard-capped at VOCAB_MAX_TOKENS: any
-    // edit or paste over the limit is trimmed back to the first 224 tokens.
+    // than a character count would suggest). The count goes red over
+    // VOCAB_MAX_TOKENS but the text is left alone while typing — trimming `.value`
+    // on every keystroke jumps the caret to the end and lops the tail when you
+    // edit the START of an at-limit prompt. The hard token cap is applied on blur
+    // instead (see below); the char backstop still runs live so a pathological
+    // paste can't hand the tokenizer a megabyte.
     const vocabInput = container.querySelector<HTMLTextAreaElement>("#vocab-input");
     const vocabCount = container.querySelector<HTMLElement>("#vocab-count");
     let vocabTok: VocabTokenizer | null = null;
     const updateVocabCount = () => {
       if (!vocabInput || !vocabCount) return;
-      // Coarse char backstop runs even before the tokenizer loads.
+      // Coarse char backstop runs even before the tokenizer loads. Caps a paste,
+      // not normal typing (maxlength=8000 already blocks that), so the rare
+      // caret jump here is acceptable.
       if (vocabInput.value.length > VOCAB_CHAR_BACKSTOP) {
         vocabInput.value = vocabInput.value.slice(0, VOCAB_CHAR_BACKSTOP);
         this.config.whisper.initial_prompt = vocabInput.value;
       }
       if (!vocabTok) {
-        // Tokenizer still loading — show a neutral placeholder, no token cap yet.
+        // Tokenizer still loading — show a neutral placeholder, no token count yet.
         vocabCount.textContent = "… tokens";
         vocabCount.style.color = "var(--fg-faded)";
         return;
       }
-      let tokens = vocabTok.encode(vocabInput.value);
-      if (tokens.length > VOCAB_MAX_TOKENS) {
-        // Hard cap: keep the first 224 tokens, decode back to text.
-        vocabInput.value = vocabTok.decode(tokens.slice(0, VOCAB_MAX_TOKENS));
-        this.config.whisper.initial_prompt = vocabInput.value;
-        tokens = vocabTok.encode(vocabInput.value);
-      }
-      const n = tokens.length;
-      vocabCount.textContent = `${n} / ${VOCAB_MAX_TOKENS} tokens`;
+      const n = vocabTok.encode(vocabInput.value).length;
+      vocabCount.textContent =
+        n > VOCAB_MAX_TOKENS
+          ? `${n} / ${VOCAB_MAX_TOKENS} tokens — trimmed on save`
+          : `${n} / ${VOCAB_MAX_TOKENS} tokens`;
       vocabCount.style.color =
         n >= VOCAB_MAX_TOKENS ? "var(--err)" : n > VOCAB_MAX_TOKENS - 25 ? "var(--warn)" : "var(--fg-faded)";
     };
+    // Hard token cap, applied once on blur so it never fights the caret mid-edit:
+    // keep the first VOCAB_MAX_TOKENS tokens, decode back to text, and re-sync the
+    // bound config (dispatch input so form.ts's [data-key] handler writes it too).
+    const trimVocabToTokenCap = () => {
+      if (!vocabInput || !vocabTok) return;
+      const tokens = vocabTok.encode(vocabInput.value);
+      if (tokens.length <= VOCAB_MAX_TOKENS) return;
+      vocabInput.value = vocabTok.decode(tokens.slice(0, VOCAB_MAX_TOKENS));
+      this.config.whisper.initial_prompt = vocabInput.value;
+      vocabInput.dispatchEvent(new Event("input", { bubbles: true }));
+    };
     vocabInput?.addEventListener("input", updateVocabCount);
+    vocabInput?.addEventListener("blur", () => { trimVocabToTokenCap(); updateVocabCount(); });
     updateVocabCount();
     void loadVocabTokenizer().then((m) => { vocabTok = m; updateVocabCount(); });
 

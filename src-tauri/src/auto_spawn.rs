@@ -90,20 +90,22 @@ async fn daemon_version_matches(t: &mut NamedPipeTransport) -> bool {
 /// version probe above already concluded.
 async fn daemon_is_busy(t: &mut NamedPipeTransport) -> bool {
     // Capture in flight? `RecordStatus` predates the version handshake, so any
-    // daemon old enough to mismatch still answers it.
-    match tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::RecordStatus)).await {
-        Ok(Ok(Response::Ok(v))) => {
-            let recording = v
-                .get("recording")
-                .and_then(|x| x.as_bool())
-                .unwrap_or(false);
-            let meeting = v.get("meeting").and_then(|x| x.as_bool()).unwrap_or(false);
-            if recording || meeting {
-                return true;
-            }
+    // daemon old enough to mismatch still answers it. An unanswerable probe
+    // (error/timeout/too-old daemon) is NOT provably idle — fall through to the
+    // queue probe rather than concluding idle on this one alone. A daemon
+    // mid-transcription whose RecordStatus transiently errors must not be judged
+    // idle and bounced — that loses the in-flight item.
+    if let Ok(Ok(Response::Ok(v))) =
+        tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::RecordStatus)).await
+    {
+        let recording = v
+            .get("recording")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let meeting = v.get("meeting").and_then(|x| x.as_bool()).unwrap_or(false);
+        if recording || meeting {
+            return true;
         }
-        // Unanswerable → not provably busy; fall through to the queue probe.
-        _ => return false,
     }
     // Transcription in flight? `processing` counts the inbox item the pipeline
     // is working on right now (pending items survive a restart on disk; the

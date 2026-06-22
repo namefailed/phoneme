@@ -3993,8 +3993,25 @@ pub async fn run(
     // variant (the raw words realigned to the cleaned text) so Timeline/Synced can
     // match the panel instead of showing the raw ASR. The raw timing just stored
     // above is untouched; this writes only the *_clean tables.
+    //
+    // When the transcript equals the raw (cleanup opted out, or it fell back to
+    // raw), clear any prior run's cleaned tables so those views fall back to the
+    // raw layer just rewritten above, instead of matching stale timing against
+    // now-raw text. Mirrors the edit/find-replace paths' clear_cleaned_timing
+    // (TL-CONSISTENCY). Best-effort: a failure costs only the cleaned views.
     if transcript != raw_transcript {
         reflow_cleaned_timing(state, &id, &transcript).await;
+    } else {
+        if let Err(e) = state.catalog.replace_words_variant(&id, "cleaned", &[]).await {
+            tracing::warn!(id = %id.as_str(), error = %e, "failed to clear cleaned words");
+        }
+        if let Err(e) = state
+            .catalog
+            .replace_segments_variant(&id, "cleaned", &[])
+            .await
+        {
+            tracing::warn!(id = %id.as_str(), error = %e, "failed to clear cleaned segments");
+        }
     }
 
     // Persist each speaker's centroid voiceprint (local diarization only; empty on

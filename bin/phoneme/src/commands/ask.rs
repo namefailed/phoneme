@@ -78,15 +78,21 @@ pub async fn run(args: AskArgs, cfg: &Config, json: bool) -> ExitCode {
     let mut answer = String::new();
     let stdout = std::io::stdout();
 
-    // A generous overall ceiling so a wedged provider can't hang the CLI
-    // forever. The streaming loop resets nothing; it's a wall-clock cap.
-    let timeout = std::time::Duration::from_secs(cfg.llm_post_process.timeout_secs.max(60) + 120);
+    // Idle cap: a slow-but-progressing local LLM (a few tokens/sec on a weak
+    // box) must not be killed mid-answer, so we only give up when nothing has
+    // arrived for this long — `last_activity` resets on every delta/sources
+    // event. Matches the daemon's own idle-based streaming timeout.
+    let idle_timeout = std::time::Duration::from_secs(cfg.llm_post_process.timeout_secs.max(60) + 120);
+    // A far looser absolute ceiling still guards against a provider that dribbles
+    // a byte forever without ever finishing.
+    let hard_cap = std::time::Duration::from_secs(3600);
     let start = std::time::Instant::now();
+    let mut last_activity = start;
 
     // The loop breaks with `(exit code, succeeded)`; `succeeded` drives the
     // trailing newline (ExitCode isn't PartialEq, so it can't be compared after).
     let (exit_code, succeeded): (ExitCode, bool) = loop {
-        if start.elapsed() >= timeout {
+        if last_activity.elapsed() >= idle_timeout || start.elapsed() >= hard_cap {
             eprintln!("timed out waiting for the answer");
             break (ExitCode::from(exit::GENERIC_FAIL), false);
         }
@@ -104,12 +110,14 @@ pub async fn run(args: AskArgs, cfg: &Config, json: bool) -> ExitCode {
                 // The first non-empty event carries the citation sources. Print
                 // them once, before any answer text, in plain mode.
                 if !ev_sources.is_empty() && sources.is_empty() {
+                    last_activity = std::time::Instant::now();
                     sources = ev_sources;
                     if !json {
                         print_sources(&sources);
                     }
                 }
                 if !delta.is_empty() {
+                    last_activity = std::time::Instant::now();
                     if json {
                         answer.push_str(&delta);
                     } else {

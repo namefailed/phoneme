@@ -159,7 +159,7 @@ export class HeaderBarElement extends LitElement {
     // immediately (no reload).
     window.addEventListener("config:saved", this.onConfigSavedOverlay);
 
-    this.unsubEvent = await listen<any>("daemon-event", async (e) => {
+    const un = await listen<any>("daemon-event", async (e) => {
       const p = e.payload;
       const eventName = p.event;
 
@@ -230,6 +230,11 @@ export class HeaderBarElement extends LitElement {
         void this.loadTags();
       }
     });
+    // If we were torn down while listen() was still resolving, unsubEvent was
+    // still null when disconnectedCallback ran — drop this now-orphaned listener
+    // instead of pinning it to a detached instance forever.
+    if (!this.isConnected) { un(); return; }
+    this.unsubEvent = un;
   }
 
   /** Banner "Fix now": run the first failing check's one-click remediation

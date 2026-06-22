@@ -185,20 +185,24 @@ export class DoctorViewElement extends LitElement {
    * re-check once at the end.
    */
   private async dispatchFix(action: string): Promise<void> {
-    const shell = await import("@tauri-apps/plugin-shell");
     switch (action) {
       case "start_daemon": {
         await invoke("start_daemon");
         break;
       }
       case "open_config": {
+        // Route through the daemon (allowlisted to the config dir) rather than
+        // shell.open — keeps it on the same vetted path as the modal.
         const path = await invoke<string>("config_path");
-        await shell.open(path).catch(() => {});
+        await invoke("open_file", { path }).catch(() => {});
         break;
       }
       case "open_audio_dir": {
+        // open_file opens the folder (reveal_file only /select's it in its
+        // parent) and expands %VAR%/~ daemon-side, dodging the old
+        // path-not-permitted bug on env-var audio dirs.
         const cfg = await invoke<{ recording: { audio_dir: string } }>("read_config");
-        await invoke("reveal_file", { path: cfg.recording.audio_dir }).catch(() => {});
+        await invoke("open_file", { path: cfg.recording.audio_dir }).catch(() => {});
         break;
       }
       case "open_hooks_folder": {

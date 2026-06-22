@@ -290,22 +290,27 @@ export class SettingsViewElement extends LitElement {
   }
 
   private async handleSave() {
+    // Normalize on a clone, not the live config: if write_config throws we leave
+    // this.config (and the unsaved-changes baseline) exactly as the user had it,
+    // rather than a half-migrated object that reports a phantom diff. The clone is
+    // committed back to this.config (via the config:saved listener) only on success.
+    const toSave = structuredClone(this.config);
     try {
-      if (this.config.hook) {
-        if (this.config.hook.command !== undefined) {
-          if (!Array.isArray(this.config.hook.commands)) {
-            this.config.hook.commands = [this.config.hook.command];
+      if (toSave.hook) {
+        if (toSave.hook.command !== undefined) {
+          if (!Array.isArray(toSave.hook.commands)) {
+            toSave.hook.commands = [toSave.hook.command];
           }
-          delete this.config.hook.command;
+          delete toSave.hook.command;
         }
-        if (Array.isArray(this.config.hook.commands)) {
-          this.config.hook.commands = this.config.hook.commands
+        if (Array.isArray(toSave.hook.commands)) {
+          toSave.hook.commands = toSave.hook.commands
             .map((c: unknown) => String(c ?? ""))
             .filter((c: string) => c.trim() !== "");
         }
       }
-      await invoke("write_config", { config: this.config });
-      window.dispatchEvent(new CustomEvent("config:saved", { detail: this.config }));
+      await invoke("write_config", { config: toSave });
+      window.dispatchEvent(new CustomEvent("config:saved", { detail: toSave }));
       showToast("Settings saved", "success");
       this.onClose();
     } catch (e) {

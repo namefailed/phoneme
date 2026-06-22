@@ -42,6 +42,18 @@ pub struct HookRunner {
     timeout: Duration,
 }
 
+/// Cap on the `PHONEME_TRANSCRIPT` env var, in bytes: 16 KiB. Windows fails
+/// `CreateProcess` if a single env var exceeds ~32,767 UTF-16 code units, so a
+/// long meeting transcript handed straight to `.env()` would fail the spawn —
+/// and the whole hook with it. The full transcript is always on stdin, so this
+/// env copy is a convenience that can safely be truncated. The byte cap stays
+/// well under the limit even after UTF-16 expansion of multi-byte text.
+const MAX_TRANSCRIPT_ENV_BYTES: usize = 16 * 1024;
+
+/// What a truncated `PHONEME_TRANSCRIPT` is suffixed with, so a script reading
+/// the env var can tell it was cut and reach for the full text on stdin.
+const TRANSCRIPT_ENV_TRUNCATED_MARKER: &str = "… <truncated, full transcript on stdin>";
+
 impl HookRunner {
     /// A runner for `command` (a shell-style command line) bounded by `timeout`.
     pub fn new(command: String, timeout: Duration) -> Self {
@@ -52,9 +64,12 @@ impl HookRunner {
     ///
     /// The payload is also exposed via the `PHONEME_ID`, `PHONEME_AUDIO_PATH`,
     /// and `PHONEME_TRANSCRIPT` environment variables for scripts that prefer
-    /// them. Returns [`Error::HookFailed`] on a non-zero exit (carrying the
-    /// stderr tail) and [`Error::HookTimeout`] if the process runs past the
-    /// configured timeout (the process is killed first).
+    /// them. `PHONEME_TRANSCRIPT` is capped at [`MAX_TRANSCRIPT_ENV_BYTES`] with
+    /// a truncation marker — Windows rejects a single env var over ~32 KiB and
+    /// would fail the spawn outright; the full, untruncated transcript is always
+    /// on stdin (the JSON payload). Returns [`Error::HookFailed`] on a non-zero
+    /// exit (carrying the stderr tail) and [`Error::HookTimeout`] if the process
+    /// runs past the configured timeout (the process is killed first).
     pub async fn run(&self, payload: &HookPayload) -> Result<HookResult> {
         let json = serde_json::to_vec(payload)?;
         let (program, args) = split_command(&self.command);
@@ -63,7 +78,10 @@ impl HookRunner {
         cmd.args(&args)
             .env("PHONEME_ID", payload.id.as_str())
             .env("PHONEME_AUDIO_PATH", &payload.audio_path)
-            .env("PHONEME_TRANSCRIPT", &payload.transcript)
+            .env(
+                "PHONEME_TRANSCRIPT",
+                truncate_transcript_env(&payload.transcript),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -189,6 +207,24 @@ fn split_command(s: &str) -> (String, Vec<String>) {
     let program = iter.next().unwrap_or_default();
     let args: Vec<String> = iter.collect();
     (program, args)
+}
+
+/// Clamp a transcript for the `PHONEME_TRANSCRIPT` env var. Returns it unchanged
+/// when it fits in [`MAX_TRANSCRIPT_ENV_BYTES`]; otherwise cuts the leading bytes
+/// at a char boundary and appends [`TRANSCRIPT_ENV_TRUNCATED_MARKER`]. Never
+/// truncates the stdin payload — only this convenience copy — so the spawn can't
+/// fail on Windows' single-env-var size limit.
+fn truncate_transcript_env(transcript: &str) -> String {
+    if transcript.len() <= MAX_TRANSCRIPT_ENV_BYTES {
+        return transcript.to_string();
+    }
+    let mut end = MAX_TRANSCRIPT_ENV_BYTES;
+    while !transcript.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = transcript[..end].to_string();
+    out.push_str(TRANSCRIPT_ENV_TRUNCATED_MARKER);
+    out
 }
 
 fn tail_chars(s: &str, max_bytes: usize) -> String {
@@ -317,6 +353,49 @@ mod tests {
             "hook deadlocked instead of streaming the pipes: {:?}",
             started.elapsed()
         );
+    }
+
+    /// A short transcript passes through `PHONEME_TRANSCRIPT` byte-for-byte; a
+    /// long one is cut at the cap and marked, so it can never blow Windows'
+    /// single-env-var size limit and fail the spawn.
+    #[test]
+    fn truncate_transcript_env_caps_long_transcripts() {
+        let short = "hello world";
+        assert_eq!(truncate_transcript_env(short), short);
+
+        let long = "x".repeat(MAX_TRANSCRIPT_ENV_BYTES * 4);
+        let out = truncate_transcript_env(&long);
+        assert!(out.ends_with(TRANSCRIPT_ENV_TRUNCATED_MARKER), "marker: {out}");
+        assert!(
+            out.len() <= MAX_TRANSCRIPT_ENV_BYTES + TRANSCRIPT_ENV_TRUNCATED_MARKER.len(),
+            "cap not enforced: {} bytes",
+            out.len()
+        );
+
+        // Multi-byte text must cut on a char boundary, never panic.
+        let unicode = "€".repeat(MAX_TRANSCRIPT_ENV_BYTES); // 3 bytes each
+        let out = truncate_transcript_env(&unicode);
+        assert!(out.ends_with(TRANSCRIPT_ENV_TRUNCATED_MARKER));
+    }
+
+    /// A multi-hundred-KiB transcript must not fail the spawn. The same text is
+    /// also set as the `PHONEME_TRANSCRIPT` env var; on Windows an untruncated
+    /// copy would exceed the ~32 KiB single-var limit and make `CreateProcess`
+    /// fail, taking the whole hook down with an `Io` error. The truncated env
+    /// copy keeps the spawn alive; the full transcript still rides on stdin.
+    #[tokio::test]
+    async fn run_spawns_with_huge_transcript() {
+        #[cfg(windows)]
+        let command = "cmd /c exit 0".to_string();
+        #[cfg(not(windows))]
+        let command = "sh -c 'cat >/dev/null; exit 0'".to_string();
+
+        let runner = HookRunner::new(command, Duration::from_secs(30));
+        let mut payload = sample_payload();
+        payload.transcript = "x".repeat(512 * 1024); // 512 KiB, far past the env limit
+
+        let result = runner.run(&payload).await;
+        assert!(result.is_ok(), "spawn must survive a huge transcript: {result:?}");
     }
 
     /// Build a minimal payload for the subprocess tests.

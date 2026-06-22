@@ -254,6 +254,13 @@ impl Catalog {
         // re-process the row. `false` (the default) deletes row and audio together.
         let audio_only = cfg.delete_audio;
 
+        // Both phases run in one transaction so a mid-sweep crash leaves the
+        // catalog untouched rather than half-applied (audit M1) — mirroring
+        // [`Self::merge_tags`]. The cache/centroid fix-ups and the on-disk WAV
+        // deletes (done by the caller from the returned paths) only happen after
+        // the commit succeeds, so they can never get ahead of a rolled-back sweep.
+        let mut tx = self.pool.begin().await?;
+
         // Age-based cleanup — everything older than max_age_days.
         if let Some(max_age) = cfg.max_age_days {
             let cutoff =
@@ -267,7 +274,7 @@ impl Catalog {
                 RecordingStatus::terminal_sql_list()
             ))
             .bind(&cutoff_str)
-            .fetch_all(&self.pool)
+            .fetch_all(&mut *tx)
             .await?;
             for row in rows {
                 let id: String = row.try_get("id")?;
@@ -278,7 +285,7 @@ impl Catalog {
                          WHERE id = ?",
                     )
                     .bind(&id)
-                    .execute(&self.pool)
+                    .execute(&mut *tx)
                     .await?;
                 } else {
                     // Capture the named voices losing a sample before the cascade
@@ -288,12 +295,12 @@ impl Catalog {
                          WHERE recording_id = ? AND named_voice_id IS NOT NULL",
                     )
                     .bind(&id)
-                    .fetch_all(&self.pool)
+                    .fetch_all(&mut *tx)
                     .await?;
                     affected_voices.extend(voices);
                     sqlx::query("DELETE FROM recordings WHERE id = ?")
                         .bind(&id)
-                        .execute(&self.pool)
+                        .execute(&mut *tx)
                         .await?;
                     hard_deleted = true;
                 }
@@ -315,7 +322,7 @@ impl Catalog {
                 RecordingStatus::terminal_sql_list()
             ))
             .bind(max_count as i64)
-            .fetch_all(&self.pool)
+            .fetch_all(&mut *tx)
             .await?;
             for row in rows {
                 let id: String = row.try_get("id")?;
@@ -329,7 +336,7 @@ impl Catalog {
                          WHERE id = ?",
                     )
                     .bind(&id)
-                    .execute(&self.pool)
+                    .execute(&mut *tx)
                     .await?;
                 } else {
                     // Capture the named voices losing a sample before the cascade
@@ -339,18 +346,23 @@ impl Catalog {
                          WHERE recording_id = ? AND named_voice_id IS NOT NULL",
                     )
                     .bind(&id)
-                    .fetch_all(&self.pool)
+                    .fetch_all(&mut *tx)
                     .await?;
                     affected_voices.extend(voices);
                     sqlx::query("DELETE FROM recordings WHERE id = ?")
                         .bind(&id)
-                        .execute(&self.pool)
+                        .execute(&mut *tx)
                         .await?;
                     hard_deleted = true;
                 }
                 deleted_paths.push(audio_path);
             }
         }
+
+        // Commit before any out-of-band fix-up: the cache and centroids must
+        // reflect the rows that actually got deleted, and the caller deletes the
+        // WAVs from `deleted_paths` only after we return.
+        tx.commit().await?;
 
         // A hard delete cascade-drops the recordings' embeddings; drop the warm
         // snapshot so deleted vectors stop surfacing in semantic search. (The

@@ -428,6 +428,13 @@ impl DaemonRecorder {
                 // Config changes during recording will take effect on the next recording.
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
+                        // Transcription is done — the permit only ever guards the
+                        // transcribe call (so the preview yields to the final). Drop
+                        // it now, before the stitch and the streaming-type keystroke
+                        // injection below, so live typing (a `spawn_blocking` enigo
+                        // await on the primary loop's shared `whisper_sem`) never
+                        // holds the permit the dictation fast-lane final needs.
+                        drop(_preview_permit);
                         let text = text.trim();
                         if !text.is_empty() {
                             // Always stitch, so words already shown are never

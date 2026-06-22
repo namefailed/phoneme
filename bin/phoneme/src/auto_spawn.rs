@@ -59,6 +59,19 @@ async fn wait_for_pipe_gone(pipe_name: &str) -> bool {
     false
 }
 
+/// Re-query the daemon still holding the pipe and return the pid it reports.
+/// Used to confirm a stale pid before force-killing it: the pid we captured
+/// before `Shutdown` could have been recycled by the OS onto an unrelated
+/// process during the 12 s wait, and only the daemon actually bound to the
+/// pipe will answer `DaemonStatus`. Returns `None` if nobody answers in time.
+async fn pid_still_holding_pipe(pipe_name: &str) -> Option<u32> {
+    let mut t = NamedPipeTransport::connect(pipe_name).await.ok()?;
+    match tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::DaemonStatus)).await {
+        Ok(Ok(Response::Ok(v))) => v.get("pid").and_then(|x| x.as_u64()).map(|n| n as u32),
+        _ => None,
+    }
+}
+
 /// Force-kill a process by PID on the current platform. Best-effort: logs
 /// but does not error if the process no longer exists or kill is denied.
 fn force_kill_pid(pid: u32) {
@@ -120,9 +133,21 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
         // silently fails or the CLI ends up dialing the old stale process.
         if !pipe_gone {
             if let Some(pid) = stale_pid {
-                force_kill_pid(pid);
-                // Give the OS a moment to clean up after the kill before probing.
-                tokio::time::sleep(Duration::from_millis(200)).await;
+                // The pid we captured before Shutdown could have been recycled
+                // onto an unrelated process during the 12 s wait. Re-query the
+                // daemon still bound to the pipe and only kill if it confirms
+                // the same pid — so a recycled pid can never be force-killed.
+                if pid_still_holding_pipe(&cfg.daemon.pipe_name).await == Some(pid) {
+                    force_kill_pid(pid);
+                    // Give the OS a moment to clean up after the kill before probing.
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                } else {
+                    tracing::warn!(
+                        pid,
+                        "stale daemon still holds the pipe but no longer confirms this PID; \
+                         skipping force-kill to avoid hitting a recycled PID"
+                    );
+                }
             } else {
                 tracing::warn!(
                     "stale daemon did not exit within 12 s and its PID is unknown; spawn may race"
