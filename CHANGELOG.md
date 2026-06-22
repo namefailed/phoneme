@@ -52,6 +52,26 @@ trust boundary.*
   `phoneme suggest-tasks <ID>` / `phoneme tasks [--open] [done|undone …]` CLI.
   `due_hint` is the model's deadline phrase stored verbatim — Phoneme does **not**
   parse it to a date or schedule a reminder.
+- [x] **Task management — edit, not just check** — the per-recording ✅ Tasks
+  section becomes a real list manager: **add** a task by hand, **edit** its text
+  inline (double-click or ✎), **delete** it (✕), **reorder** by drag, and **hide
+  done** with one toggle. Hand-added / edited tasks are `source='manual'` and
+  survive a re-extraction (a new `source` + `sort_order` column on `tasks`); the
+  AI only ever replaces its own `'llm'` rows. A new **📋 All tasks** modal (the
+  sidebar Tasks section's **View all…** row) is the cross-recording "everything I
+  have to do" list — every task in one place, checkable in line, filterable, with
+  a click-through pill to each task's recording. Backed by `AddTask` / `UpdateTask`
+  / `DeleteTask` / `ReorderTasks` IPC over the existing `ListAllTasks` read.
+- [x] **Entity management + library-wide merge** — extracted entities become
+  editable, not just viewable. In the detail pane's 🔎 Entities section you can
+  **+ Add** an entity (pick its kind), fix one inline (double-click), or delete it
+  (✕ on hover). A new **Entity manager** modal (the section's **Manage** button)
+  curates the whole library at once: **rename** a value everywhere, or tick two or
+  more variants of one kind and **merge** them into a single canonical value
+  (e.g. "ACME" / "acme corp" → "Acme Corp"). Like tasks, hand-curated entities are
+  `source='manual'` (new column) and survive re-extraction. Backed by `AddEntity`
+  / `UpdateEntity` / `DeleteEntity` / `MergeEntities` IPC and an `entities_merged`
+  event.
 
 ### Transcripts
 

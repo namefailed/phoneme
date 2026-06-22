@@ -16,9 +16,20 @@ Open any recording and look for the **✅ Tasks** section under the tags:
   **verbatim** — Phoneme does not turn it into a calendar date or a reminder.
 - The **✅ Extract** button runs the task-extraction step on this recording right
   now (even if your pipeline doesn't run it automatically). Re-running **replaces**
-  the list with a fresh extraction — but **any task you already checked off stays
-  checked** as long as its text comes back the same. A flaky run that finds
+  the AI's list with a fresh extraction — but **any task you already checked off
+  stays checked** as long as its text comes back the same. A flaky run that finds
   nothing leaves your existing list untouched.
+
+It's a list you edit, not just a result you read:
+
+- **+ Add** a task by hand (the input row at the bottom of the section).
+- **Edit** a task's text inline — double-click it, or use the ✎ button.
+- **Delete** a task with the ✕ button.
+- **Reorder** open tasks by dragging the ⠿ grip.
+- **Hide done** with the toggle when you only want what's left.
+
+Anything you **add or edit by hand is yours** — it's marked *manual* and **survives
+a re-extraction**, where the AI only ever replaces its own suggestions.
 
 ## Browsing tasks across the library (sidebar)
 
@@ -29,6 +40,11 @@ The left sidebar has a **Tasks** section with two filter rows:
 
 Each shows a count. Click a row to filter the library to those recordings; click
 it again to clear.
+
+Below them, **📋 View all…** opens the **All tasks** modal — the flat,
+cross-recording "everything I have to do" list. Every task in one place: tick it
+off in line, filter by text, toggle **Open only**, and click a task's recording
+pill to jump straight to it.
 
 ## Turning it on
 
@@ -67,7 +83,9 @@ phoneme tasks undone 20260519T143500823 3
 - **`due_hint` is a phrase, not a date.** Phoneme stores the model's wording and
   shows it; it does **not** schedule reminders or sync to a todo app (that's on
   the roadmap).
-- **Re-wording loses the checkbox.** Tasks are matched by their text, so if a
-  re-extraction rephrases a task you'd completed, it reappears unchecked — the
-  same text-matching limitation entities have.
+- **Done-state follows the text.** A completed AI task stays checked across a
+  re-extraction as long as the wording comes back the same (minor punctuation /
+  spacing differences are ignored). A substantial rephrase is treated as a new
+  task and reappears unchecked — to make a task permanent, add or edit it by hand
+  so it's *manual* and exempt from re-extraction entirely.
 - Deleting a recording deletes its tasks with it.
