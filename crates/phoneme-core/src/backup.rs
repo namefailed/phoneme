@@ -282,6 +282,15 @@ pub async fn restore_from_zip(
             catalog.set_entities(&rec.id, &rec.entities).await?;
         }
 
+        // Restore the recording's tasks (the `tasks` child table the DTO carries),
+        // INCLUDING each task's completed flag — `set_tasks` carries `done` from
+        // the DTO (a freshly inserted row has no prior tasks to merge against). The
+        // export already serializes `tasks` on every Recording (list/get populate
+        // it); without this the restore silently dropped them, unlike entities.
+        if !rec.tasks.is_empty() {
+            catalog.set_tasks(&rec.id, &rec.tasks).await?;
+        }
+
         report.imported += 1;
     }
 
@@ -472,6 +481,28 @@ mod tests {
         src.insert_restored(&r2).await.unwrap();
         let work = src.add_tag("Work", Some("#4caf50")).await.unwrap();
         src.attach_tag(&r1.id, work.id).await.unwrap();
+        // Seed structured tasks on r1, one COMPLETED, so the round-trip proves the
+        // tasks child table — and the user's `done` flag — survive a backup (the
+        // restore path that entities had but tasks was missing).
+        src.set_tasks(
+            &r1.id,
+            &[
+                crate::Task {
+                    id: 0,
+                    text: "Ship the release".into(),
+                    due_hint: Some("Friday".into()),
+                    done: true,
+                },
+                crate::Task {
+                    id: 0,
+                    text: "Write the changelog".into(),
+                    due_hint: None,
+                    done: false,
+                },
+            ],
+        )
+        .await
+        .unwrap();
         let a1 = write_audio(&src_audio, &r1, b"RIFF-one-audio");
         let a2 = write_audio(&src_audio, &r2, b"RIFF-two-audio");
         assert!(a1.exists() && a2.exists());
@@ -549,6 +580,22 @@ mod tests {
         assert_eq!(g1.tags.len(), 1);
         assert_eq!(g1.tags[0].name, "Work");
         assert_eq!(g1.tags[0].color.as_deref(), Some("#4caf50"));
+
+        // The tasks came back — including the completed flag and due hint.
+        assert_eq!(g1.tasks.len(), 2, "both tasks must survive the round-trip");
+        let ship = g1
+            .tasks
+            .iter()
+            .find(|t| t.text == "Ship the release")
+            .expect("completed task restored");
+        assert!(ship.done, "a completed task must survive export/import");
+        assert_eq!(ship.due_hint.as_deref(), Some("Friday"));
+        assert!(
+            g1.tasks
+                .iter()
+                .any(|t| t.text == "Write the changelog" && !t.done),
+            "an open task stays open"
+        );
 
         // r2's audio also landed (different day folder, no collision).
         let restored_a2 = dst_audio

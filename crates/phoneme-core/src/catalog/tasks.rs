@@ -12,6 +12,29 @@
 use super::*;
 use std::collections::HashMap;
 
+/// Fold task text to a match key for carrying `done` across re-extraction: lower
+/// case, every run of non-alphanumerics (spaces, punctuation) collapsed to one
+/// space, trimmed. So "Email Bob.", "email  bob", and "EMAIL BOB!" all key the
+/// same — a minor reword keeps its checkbox. A full reword (different words)
+/// still won't match, which is unavoidable without stable per-task ids.
+fn normalize_task_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_space = true; // skip leading separators
+    for c in s.chars() {
+        if c.is_alphanumeric() {
+            out.extend(c.to_lowercase());
+            prev_space = false;
+        } else if !prev_space {
+            out.push(' ');
+            prev_space = true;
+        }
+    }
+    if out.ends_with(' ') {
+        out.pop();
+    }
+    out
+}
+
 impl Catalog {
     /// Replace a recording's stored tasks, **preserving any `done` flag the user
     /// set** on a task whose text survives the re-extraction.
@@ -21,10 +44,10 @@ impl Catalog {
     /// step — or a re-transcribe that runs the `tasks` recipe step — must NOT
     /// silently un-check every task the user already completed. So in one
     /// transaction this reads the existing `(text, done)` map, deletes all rows,
-    /// then inserts each new task with `done = old_done_for_same_text OR
-    /// task.done`. The `(recording_id, text)` UNIQUE is the merge key (the same
-    /// text-keyed limitation entities have — a reworded task reappears unchecked).
-    /// An empty slice clears them.
+    /// then inserts each new task carrying the prior `done` — matched on exact
+    /// text first, then on a normalized key ([`normalize_task_text`]) so a minor
+    /// reword (case / spacing / punctuation) keeps its tick. The
+    /// `(recording_id, text)` UNIQUE is the storage key. An empty slice clears them.
     pub async fn set_tasks(&self, id: &RecordingId, tasks: &[Task]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         // Snapshot the prior done-state, keyed by exact text, so a surviving task
@@ -34,9 +57,16 @@ impl Catalog {
             .fetch_all(&mut *tx)
             .await?;
         let mut prior_done: HashMap<String, bool> = HashMap::new();
+        // Normalized-key map for catching minor rewordings; OR-accumulated so if
+        // ANY prior task with that normalized text was done, the reworded one
+        // inherits the tick.
+        let mut prior_done_norm: HashMap<String, bool> = HashMap::new();
         for row in prior_rows {
             let text: String = row.try_get("text")?;
             let done: bool = row.try_get("done")?;
+            *prior_done_norm
+                .entry(normalize_task_text(&text))
+                .or_insert(false) |= done;
             prior_done.insert(text, done);
         }
         sqlx::query("DELETE FROM tasks WHERE recording_id = ?")
@@ -44,7 +74,13 @@ impl Catalog {
             .execute(&mut *tx)
             .await?;
         for t in tasks {
-            let done = t.done || prior_done.get(&t.text).copied().unwrap_or(false);
+            // Exact match first, then the normalized fallback for minor rewords.
+            let preserved = prior_done
+                .get(&t.text)
+                .copied()
+                .or_else(|| prior_done_norm.get(&normalize_task_text(&t.text)).copied())
+                .unwrap_or(false);
+            let done = t.done || preserved;
             sqlx::query(
                 "INSERT OR IGNORE INTO tasks (recording_id, text, due_hint, done) VALUES (?, ?, ?, ?)",
             )

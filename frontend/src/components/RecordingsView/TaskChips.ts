@@ -95,8 +95,14 @@ export class TaskChipsElement extends LitElement {
     }
   }
 
-  /** Toggle one task's done flag. Optimistic — flips locally, then persists; on
-   *  failure it reloads to snap back to the daemon's truth and toasts. */
+  /** Toggle one task's done flag. Optimistic — flips locally for instant feel,
+   *  then RECONCILES against the daemon's persisted state on BOTH paths so the
+   *  checkbox can never keep showing a state that didn't actually save:
+   *   - success → reload (verifies the write took; a 0-row toggle is already a
+   *     `not_found` error from the daemon, so it lands in the catch);
+   *   - failure → toast + reload (snap back to the truth).
+   *  A successful toggle also emits `tasks_updated`; reloading here makes the
+   *  result verifiable even if that event is ever missed. */
   private async toggleDone(task: Task) {
     if (this.toggling.has(task.id)) return;
     const next = !task.done;
@@ -105,7 +111,7 @@ export class TaskChipsElement extends LitElement {
     this.tasks = this.tasks.map((t) => (t.id === task.id ? { ...t, done: next } : t));
     try {
       await setTaskDone(this.recordingId, task.id, next);
-      // The tasks_updated event re-fetches with the daemon's open-first ordering.
+      await this.load(); // confirm against the daemon's persisted truth
     } catch (e) {
       showToast(`Could not update task: ${errText(e)}`, "error");
       await this.load(); // revert to server truth

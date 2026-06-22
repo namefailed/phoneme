@@ -2088,6 +2088,98 @@ async fn speaker_names_cascade_deleted_with_recording() {
 }
 
 #[tokio::test]
+async fn task_done_state_survives_a_daemon_restart() {
+    // File-backed so dropping the pool and reopening the same DB genuinely
+    // simulates a daemon restart (an in-memory DB would vanish on drop).
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("catalog.db");
+    let r = embedded_recording(None);
+    {
+        let db = Catalog::open(&db_path).await.unwrap();
+        db.insert(&r).await.unwrap();
+        db.set_tasks(
+            &r.id,
+            &[Task {
+                id: 0,
+                text: "Email Bob".into(),
+                due_hint: None,
+                done: false,
+            }],
+        )
+        .await
+        .unwrap();
+        let task_id = db.list_tasks(&r.id).await.unwrap()[0].id;
+        let affected = db.set_task_done(&r.id, task_id, true).await.unwrap();
+        assert_eq!(affected, 1, "the toggle must match exactly one row");
+        // `db` drops here → pool closed, simulating shutdown.
+    }
+    // Reopen the same file: the completed flag must still be set.
+    let db = Catalog::open(&db_path).await.unwrap();
+    let tasks = db.list_tasks(&r.id).await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert!(
+        tasks[0].done,
+        "a completed task must survive a daemon restart"
+    );
+}
+
+#[tokio::test]
+async fn re_extraction_preserves_done_across_a_minor_reword() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = embedded_recording(None);
+    db.insert(&r).await.unwrap();
+    db.set_tasks(
+        &r.id,
+        &[Task {
+            id: 0,
+            text: "Email Bob".into(),
+            due_hint: None,
+            done: false,
+        }],
+    )
+    .await
+    .unwrap();
+    let id = db.list_tasks(&r.id).await.unwrap()[0].id;
+    db.set_task_done(&r.id, id, true).await.unwrap();
+
+    // Re-extraction rewords it (case + trailing punctuation + spacing); the tick carries.
+    db.set_tasks(
+        &r.id,
+        &[Task {
+            id: 0,
+            text: "  email   bob.".into(),
+            due_hint: None,
+            done: false,
+        }],
+    )
+    .await
+    .unwrap();
+    let after = db.list_tasks(&r.id).await.unwrap();
+    assert_eq!(after.len(), 1);
+    assert!(
+        after[0].done,
+        "a minor reword must keep the user's completed tick"
+    );
+
+    // A genuinely different task does NOT inherit the tick.
+    db.set_tasks(
+        &r.id,
+        &[Task {
+            id: 0,
+            text: "Call Alice".into(),
+            due_hint: None,
+            done: false,
+        }],
+    )
+    .await
+    .unwrap();
+    assert!(
+        !db.list_tasks(&r.id).await.unwrap()[0].done,
+        "an unrelated task must start unchecked"
+    );
+}
+
+#[tokio::test]
 async fn retention_audio_only_keeps_rows_and_is_idempotent() {
     // delete_audio = true: the WAV path is returned for deletion and blanked on
     // the row, but the row itself (transcript, metadata) survives, and a second

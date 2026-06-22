@@ -1923,8 +1923,14 @@ pub(crate) async fn extract_entities_with(
                 // path uses. The model column is written only below, *after* this
                 // guard, so it never advances past the entities actually stored:
                 // recording it here would name a model that produced nothing while
-                // the displayed entities came from an earlier run.
+                // the displayed entities came from an earlier run. Still emit
+                // EntitiesUpdated so an on-demand Extract resolves rather than
+                // looking like it silently did nothing — "ran, found nothing" is
+                // now distinguishable from a crash (which fires EntitiesFailed).
                 tracing::info!(id = %id.as_str(), "entity extraction produced nothing");
+                state
+                    .events
+                    .emit(DaemonEvent::EntitiesUpdated { id: id.clone() });
                 return None;
             }
             // Record which model ran the extractor (the detail provenance line
@@ -2505,8 +2511,15 @@ pub(crate) async fn extract_tasks_with(
                 // Keep the prior tasks (and their model) on an empty parse — the
                 // same keep-prior-on-empty behavior the entity path uses, so a
                 // flaky model run never erases the user's task list. The model
-                // column is written only below, after this guard.
+                // column is written only below, after this guard. Still emit
+                // TasksUpdated so an on-demand Extract resolves (the detail view
+                // refreshes / the button's pending state clears) instead of
+                // looking like it silently did nothing — "ran, found nothing" is
+                // now distinguishable from a crash (which fires TasksFailed).
                 tracing::info!(id = %id.as_str(), "task extraction produced nothing");
+                state
+                    .events
+                    .emit(DaemonEvent::TasksUpdated { id: id.clone() });
                 return None;
             }
             match state.catalog.set_tasks(id, &tasks).await {
