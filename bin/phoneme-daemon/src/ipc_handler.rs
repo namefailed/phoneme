@@ -1019,23 +1019,17 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         // model, prompt) so editing it in the Playbook changes what
                         // an on-demand re-run does. Fall back to the built-in
                         // default entity prompt when no such entry exists.
-                        match crate::pipeline::entry_config_for_target(&cfg, "entities") {
-                            Some((llm_cfg, prompt)) => {
-                                crate::pipeline::extract_entities_with(
-                                    state,
-                                    &id,
-                                    &transcript,
-                                    llm_cfg,
-                                    &prompt,
-                                )
-                                .await;
-                            }
-                            None => {
-                                crate::pipeline::extract_entities(state, &cfg, &id, &transcript)
-                                    .await;
-                            }
+                        let probe = match crate::pipeline::entry_config_for_target(&cfg, "entities")
+                        {
+                            Some((c, _)) => c,
+                            None => crate::pipeline::entities_llm_config(&cfg),
+                        };
+                        if state.llm.provider(&probe).is_none() {
+                            no_provider_response(&probe.provider)
+                        } else {
+                            crate::pipeline::extract_entities(state, &cfg, &id, &transcript).await;
+                            ok_null()
                         }
-                        ok_null()
                     }
                 }
                 Ok(None) => not_found(format!("no recording {}", id.as_str())),
@@ -1061,23 +1055,19 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         // Read the migrated `chapters` enrichment entry so editing it
                         // in the Playbook changes what an on-demand re-run does; fall
                         // back to the built-in default chapter prompt when absent.
-                        match crate::pipeline::entry_config_for_target(&cfg, "chapters") {
-                            Some((llm_cfg, prompt)) => {
-                                crate::pipeline::extract_chapters_with(
-                                    state,
-                                    &id,
-                                    &transcript,
-                                    llm_cfg,
-                                    &prompt,
-                                )
-                                .await;
-                            }
-                            None => {
-                                crate::pipeline::extract_chapters(state, &cfg, &id, &transcript)
-                                    .await;
-                            }
+                        // (A provider that's set but a recording with no segments is a
+                        // clean no-op inside the step, not an error here.)
+                        let probe = match crate::pipeline::entry_config_for_target(&cfg, "chapters")
+                        {
+                            Some((c, _)) => c,
+                            None => crate::pipeline::chapters_llm_config(&cfg),
+                        };
+                        if state.llm.provider(&probe).is_none() {
+                            no_provider_response(&probe.provider)
+                        } else {
+                            crate::pipeline::extract_chapters(state, &cfg, &id, &transcript).await;
+                            ok_null()
                         }
-                        ok_null()
                     }
                 }
                 Ok(None) => not_found(format!("no recording {}", id.as_str())),
@@ -1101,22 +1091,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         // model, prompt) so editing it in the Playbook changes what
                         // an on-demand re-run does. Fall back to the built-in
                         // default task prompt when no such entry exists.
-                        match crate::pipeline::entry_config_for_target(&cfg, "tasks") {
-                            Some((llm_cfg, prompt)) => {
-                                crate::pipeline::extract_tasks_with(
-                                    state,
-                                    &id,
-                                    &transcript,
-                                    llm_cfg,
-                                    &prompt,
-                                )
-                                .await;
-                            }
-                            None => {
-                                crate::pipeline::extract_tasks(state, &cfg, &id, &transcript).await;
-                            }
+                        let probe = match crate::pipeline::entry_config_for_target(&cfg, "tasks") {
+                            Some((c, _)) => c,
+                            None => crate::pipeline::tasks_llm_config(&cfg),
+                        };
+                        if state.llm.provider(&probe).is_none() {
+                            no_provider_response(&probe.provider)
+                        } else {
+                            crate::pipeline::extract_tasks(state, &cfg, &id, &transcript).await;
+                            ok_null()
                         }
-                        ok_null()
                     }
                 }
                 Ok(None) => not_found(format!("no recording {}", id.as_str())),
@@ -3620,6 +3604,20 @@ fn not_found(message: String) -> Response {
 /// The bare `Ok(null)` acknowledgement most mutating requests answer with.
 fn ok_null() -> Response {
     Response::Ok(serde_json::Value::Null)
+}
+
+/// On-demand enrichment (Extract entities/tasks/chapters) hit with no usable LLM
+/// provider. Unlike the auto pipeline — which silently skips so a missing model
+/// never fails a recording — an explicit Extract click must tell the user why
+/// nothing happened, so the frontend can toast this instead of looking dead.
+fn no_provider_response(provider: &str) -> Response {
+    Response::Err(IpcError {
+        kind: IpcErrorKind::InvalidConfig,
+        message: format!(
+            "No usable AI provider configured (provider \"{provider}\"). Set one under \
+             Settings → Post-Processing (or this step's Playbook entry) to use Extract."
+        ),
+    })
 }
 
 fn serialize_response<T: serde::Serialize>(val: T) -> Response {
