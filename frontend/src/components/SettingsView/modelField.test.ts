@@ -102,6 +102,11 @@ describe("mountModelField", () => {
     const { host } = mountField();
     await tick();
 
+    // Privacy: no provider fetch on mount — it's deferred to the select's focus.
+    expect(fetchLlmModels).not.toHaveBeenCalled();
+    host.querySelector<HTMLSelectElement>("select.mf-select")!.dispatchEvent(new Event("focus"));
+    await tick();
+
     expect(fetchLlmModels).toHaveBeenCalledWith("ollama", "", "");
     const groups = [...host.querySelectorAll("optgroup")];
     expect(groups.map((g) => g.getAttribute("label"))).toEqual(["Suggested", "From provider"]);

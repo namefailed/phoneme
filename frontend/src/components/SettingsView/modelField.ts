@@ -100,6 +100,10 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
   let loading = false;
   let error: string | null = null;
   let freeText = false;
+  // Privacy: don't fetch the provider's model list (a network call carrying the
+  // user's API key) until the user actually engages this field. Settings search
+  // and ModelPicker mount many fields at once; mounting must never phone home.
+  let fetchedOnce = false;
 
   // Cap the control width to match the .cf connection blocks (580px) that sit
   // directly above each model field, so model pickers line up with their
@@ -195,6 +199,12 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
       ${status ? `<div style="margin-top:4px;">${status}</div>` : ""}`;
 
     const select = host.querySelector<HTMLSelectElement>(".mf-select")!;
+    // First interaction with the dropdown kicks the deferred model fetch, once.
+    select.addEventListener("focus", () => {
+      if (fetchedOnce || opts.mode !== "llm") return;
+      fetchedOnce = true;
+      void refresh(false);
+    });
     select.addEventListener("change", () => {
       if (select.value === SENTINEL_OTHER) {
         freeText = true;
@@ -206,7 +216,7 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
     host.querySelector<HTMLButtonElement>(".mf-refresh")?.addEventListener("click", () => void refresh());
   };
 
-  const refresh = async () => {
+  const refresh = async (showLoading = true) => {
     if (opts.mode !== "llm") {
       render();
       return;
@@ -219,7 +229,9 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
     }
     loading = true;
     error = null;
-    render();
+    // Skip the leading re-render when kicked from focus, so opening the dropdown
+    // the first time isn't disrupted by the element being rebuilt mid-interaction.
+    if (showLoading) render();
     try {
       models = await fetchLlmModels(provider, opts.getApiUrl(), opts.getApiKey());
     } catch (e) {
@@ -232,6 +244,7 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
   };
 
   render();
-  // Kick a background fetch so the list is ready when the user opens it.
-  if (opts.mode === "llm") void refresh();
+  // No fetch on mount (see fetchedOnce): the list loads on the select's first
+  // focus, so merely mounting the field — settings search indexing every section,
+  // or ModelPicker opening every tab — never makes a network call.
 }
