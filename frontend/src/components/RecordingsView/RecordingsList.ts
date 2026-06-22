@@ -2,6 +2,7 @@ import { errText } from "../../utils/error";
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { listRecordings, semanticSearch, moreLikeThis, updateMeetingName, setFavorite, setPinned, type Recording } from "../../services/ipc";
+import { showFavorites, showPinned, DISPLAY_PREFS_EVENT } from "./columnPrefs";
 import { showToast } from "../../utils/toast";
 import { Store } from "../../state/store";
 import { filterStore, toWireFilter, type RecordingKind, type UiFilter } from "../../state/filter";
@@ -220,6 +221,9 @@ export class RecordingsListElement extends LitElement {
   private onConfigSaved = (e: Event) => {
     this.config = (e as CustomEvent).detail ?? null;
   };
+  /** Favorites/Pinned column visibility changed in Settings — re-render so the
+   *  star/pin column appears or disappears live. */
+  private onDisplayPrefs = () => this.requestUpdate();
 
   connectedCallback() {
     super.connectedCallback();
@@ -233,6 +237,7 @@ export class RecordingsListElement extends LitElement {
     });
 
     window.addEventListener("config:saved", this.onConfigSaved);
+    window.addEventListener(DISPLAY_PREFS_EVENT, this.onDisplayPrefs);
     if (!this.config) {
       invoke("read_config").then((cfg) => {
         this.config = cfg;
@@ -252,6 +257,7 @@ export class RecordingsListElement extends LitElement {
     if (this.unsubStore) this.unsubStore();
     if (this.unsubFilter) this.unsubFilter();
     window.removeEventListener("config:saved", this.onConfigSaved);
+    window.removeEventListener(DISPLAY_PREFS_EVENT, this.onDisplayPrefs);
   }
 
   /**
@@ -845,11 +851,21 @@ export class RecordingsListElement extends LitElement {
       "source",
       "transcript",
     ];
-    // The star/favorite and pin columns are always present (quick affordances,
-    // not data columns you reorder), so inject them at the front when the saved
-    // column config doesn't already include them. Pin sits leftmost, then star.
-    if (!visibleCols.includes("favorite")) visibleCols = ["favorite", ...visibleCols];
-    if (!visibleCols.includes("pinned")) visibleCols = ["pinned", ...visibleCols];
+    // The star/favorite and pin columns are quick affordances (not reorderable
+    // data columns), injected at the front — pin leftmost, then star. Each is
+    // gated by its per-device display pref (Settings → Interface): turning the
+    // feature off drops the column here AND its Library sidebar section. When on,
+    // inject it if absent; when off, strip it from a stale config too.
+    if (showFavorites()) {
+      if (!visibleCols.includes("favorite")) visibleCols = ["favorite", ...visibleCols];
+    } else {
+      visibleCols = visibleCols.filter((c) => c !== "favorite");
+    }
+    if (showPinned()) {
+      if (!visibleCols.includes("pinned")) visibleCols = ["pinned", ...visibleCols];
+    } else {
+      visibleCols = visibleCols.filter((c) => c !== "pinned");
+    }
     // The transcript snippet is always the last column: its read-more horizontal
     // scroll depends on it and any other position misbehaves (Settings pins it
     // last too; this is the defensive guarantee). If a stale config has it

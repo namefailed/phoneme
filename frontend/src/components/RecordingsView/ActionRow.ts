@@ -157,6 +157,17 @@ export class ActionRowElement extends LitElement {
     }
   }
 
+  /** Clip — toggle the clip-range panel that lives in the sibling
+   *  `<ph-clip-export>` (mounted just below this row). The button lives here so
+   *  it sits in the same strip as Play/Speed/Re-run/Export/Delete; the panel
+   *  itself stays in its own component. Keyed by recordingId so split mode only
+   *  toggles the matching pane's panel. */
+  private toggleClip = () => {
+    window.dispatchEvent(
+      new CustomEvent("phoneme:toggle-clip", { detail: { recordingId: this.recordingId } }),
+    );
+  };
+
   /** Delete this recording — defers to RecordingsView's shared delete flow (the
    *  same `phoneme:request-delete` the title bar used before this button moved
    *  back here) so it gets the confirm + undo path. */
@@ -290,6 +301,7 @@ export class ActionRowElement extends LitElement {
               </div>`
             : null}
         </span>
+        <button class="action-clip" title="Clip a time range of this recording's audio to a WAV file" @click=${this.toggleClip}>✂ Clip…</button>
         <button class="danger" title="Delete this recording" @click=${this.handleDelete}>🗑 Delete</button>
       </div>
     `;

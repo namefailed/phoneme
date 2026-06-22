@@ -20,6 +20,11 @@ trust boundary.*
   `pinned` on the list filter), `phoneme edit <ID> --pin/--unpin`, and matching
   REST (`POST /api/recordings/{id}/pinned`) and MCP (`set_pinned`) surfaces. Pins
   survive restarts and travel with library exports.
+- [x] **Show/hide the Favorites & Pinned quick-action columns** — Settings →
+  Interface → Library layout gains two toggles that hide the ⭐ Favorites and 📌
+  Pinned columns **and** their Library sidebar sections together, in one switch
+  (per-device, stored in `localStorage`, default on). The list and sidebar redraw
+  live the moment you flip them — no reload, no daemon round-trip.
 - [x] **Browse by entity (cross-recording entity facet)** — the extracted
   entities that were only ever per-recording chips are now a **library-wide
   browse + filter**, exactly mirroring the tag facet. A new **Entities** sidebar
@@ -982,6 +987,13 @@ trust boundary.*
   viewer now lives next to the daemon log level instead of in the Integrations tab;
   Integrations keeps a one-click "View logs in System →" cross-link for hook
   debugging.
+- [x] **Detail-pane enrichment polish** — the per-recording **Entities** and
+  **Tasks** sections are now collapsible (a chevron header with a per-section
+  remembered open/closed state and a count), use kind-coloured chips (people /
+  organizations / topics / terms), and sit **below the transcript — between it and
+  the notes box** with proper top-and-bottom spacing, instead of being wedged above
+  the transcript. The **✂ Clip…** control moved into the main action row beside Play
+  / Speed / Re-run / Export / Delete rather than floating on its own line above them.
 
 ### Integration
 
@@ -1117,6 +1129,13 @@ trust boundary.*
 
 ### Reliability & polish
 
+- [x] **Extract tells you when no AI provider is configured** — clicking **Extract**
+  for entities, tasks, or chapters with no usable LLM provider (every step set to
+  `provider = "none"`, or a local model that isn't reachable) now returns a clear
+  error — "set one under Settings → Post-Processing" — instead of silently doing
+  nothing and looking broken. The automatic pipeline still skips the step quietly,
+  so a missing model never fails a recording; only the explicit on-demand button
+  surfaces it.
 - [x] **Transcript editor scrolling & focus** — the mouse wheel over the
   transcript editor now scrolls the detail pane when the editor itself has nothing
   more to scroll (CodeMirror used to trap the wheel and freeze the page), and

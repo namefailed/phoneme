@@ -4,6 +4,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { getRecording, suggestTasks, setTaskDone, type Task } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { showToast } from "../../utils/toast";
+import { enrichHead, loadCollapsed, saveCollapsed } from "./enrichSection";
 
 /**
  * The detail pane's tasks surface: the recording's extracted action items
@@ -33,7 +34,14 @@ export class TaskChipsElement extends LitElement {
   @state() private extracting = false;
   /** Row ids with a toggle in flight, so the checkbox can't double-fire. */
   @state() private toggling = new Set<number>();
+  /** Section collapsed (remembered across reloads + recording switches). */
+  @state() private collapsed = loadCollapsed("tasks");
   private unsubEvents: (() => void) | null = null;
+
+  private toggleCollapsed = () => {
+    this.collapsed = !this.collapsed;
+    saveCollapsed("tasks", this.collapsed);
+  };
 
   connectedCallback() {
     super.connectedCallback();
@@ -109,34 +117,38 @@ export class TaskChipsElement extends LitElement {
   }
 
   render() {
+    const total = this.tasks.length;
+    const openCount = this.tasks.filter((t) => !t.done).length;
     return html`
-      <div class="tasks">
-        <div class="tags-row tags-controls">
-          <span class="tasks-label" title="Action items the AI pulled from this transcript — check them off as you go"
-            style="font-size: 0.7857rem; color: var(--fg-muted);">✅ Tasks</span>
-          <button class="tag-manage task-extract"
+      <div class="detail-enrich tasks ${this.collapsed ? "is-collapsed" : ""}">
+        ${enrichHead({
+          label: "✅ Tasks",
+          collapsed: this.collapsed,
+          onToggle: this.toggleCollapsed,
+          count: total ? html`<span title="${openCount} open of ${total}">${openCount}/${total}</span>` : undefined,
+          action: html`<button class="tag-manage task-extract"
             title="Ask the AI to pull concrete action items / to-dos from this recording. Re-running replaces the list but keeps any task you already checked off."
-            ?disabled=${this.extracting} @click=${() => void this.runExtract()}>${this.extracting ? "✅ Extracting…" : "✅ Extract"}</button>
-        </div>
-        ${this.tasks.length
-          ? html`<ul class="tasks-list" style="list-style:none; margin:6px 0 0; padding:0; display:flex; flex-direction:column; gap:4px;">
-              ${this.tasks.map(
-                (t) => html`
-                  <li class="task-row" style="display:flex; align-items:baseline; gap:8px;">
-                    <input type="checkbox" class="task-check" .checked=${t.done}
-                      ?disabled=${this.toggling.has(t.id)}
-                      title=${t.done ? "Mark as not done" : "Mark as done"}
-                      @change=${() => void this.toggleDone(t)} />
-                    <span class="task-text" style=${t.done
-                      ? "text-decoration:line-through; color:var(--fg-faded);"
-                      : ""}>${t.text}${t.due_hint
-                        ? html`<span class="task-due" style="margin-left:6px; font-size:0.7857rem; color:var(--fg-muted);">(${t.due_hint})</span>`
+            ?disabled=${this.extracting} @click=${() => void this.runExtract()}>${this.extracting ? "✅ Extracting…" : "✅ Extract"}</button>`,
+        })}
+        ${this.collapsed
+          ? ""
+          : total
+            ? html`<ul class="enrich-body tasks-list">
+                ${this.tasks.map(
+                  (t) => html`
+                    <li class="task-row ${t.done ? "done" : ""}">
+                      <input type="checkbox" class="task-check" .checked=${t.done}
+                        ?disabled=${this.toggling.has(t.id)}
+                        title=${t.done ? "Mark as not done" : "Mark as done"}
+                        @change=${() => void this.toggleDone(t)} />
+                      <span class="task-text">${t.text}${t.due_hint
+                        ? html`<span class="task-due">${t.due_hint}</span>`
                         : ""}</span>
-                  </li>
-                `,
-              )}
-            </ul>`
-          : html`<div class="tasks-empty" style="font-size: 0.7857rem; color: var(--fg-muted); margin-top:4px;">No tasks yet — Extract to pull action items and to-dos from the transcript.</div>`}
+                    </li>
+                  `,
+                )}
+              </ul>`
+            : html`<div class="enrich-body enrich-empty">No tasks yet — Extract to pull action items and to-dos from the transcript.</div>`}
       </div>
     `;
   }

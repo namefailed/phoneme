@@ -4,6 +4,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { getRecording, suggestEntities, type Entity } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { showToast } from "../../utils/toast";
+import { enrichHead, loadCollapsed, saveCollapsed } from "./enrichSection";
 
 /** The entity classes, in display order, with their group label + icon. An
  *  unknown kind from the model is stored as `topic` by the daemon, so this list
@@ -39,7 +40,14 @@ export class EntityChipsElement extends LitElement {
   @state() private entities: Entity[] = [];
   /** True while an on-demand 🔎 Extract run is in flight. */
   @state() private extracting = false;
+  /** Section collapsed (remembered across reloads + recording switches). */
+  @state() private collapsed = loadCollapsed("entities");
   private unsubEvents: (() => void) | null = null;
+
+  private toggleCollapsed = () => {
+    this.collapsed = !this.collapsed;
+    saveCollapsed("entities", this.collapsed);
+  };
 
   connectedCallback() {
     super.connectedCallback();
@@ -94,45 +102,37 @@ export class EntityChipsElement extends LitElement {
   }
 
   render() {
-    // Group the flat list by kind, in KIND_META order; an unexpected kind falls
-    // into its own trailing group rather than being dropped.
-    const byKind = new Map<string, string[]>();
-    for (const e of this.entities) {
-      const list = byKind.get(e.kind) ?? [];
-      list.push(e.value);
-      byKind.set(e.kind, list);
-    }
-    const orderedKinds = [
-      ...KIND_META.map((m) => m.kind).filter((k) => byKind.has(k)),
-      ...[...byKind.keys()].filter((k) => !KIND_META.some((m) => m.kind === k)),
-    ];
+    // Flow the chips ordered by kind (KIND_META order) so same-kind entities sit
+    // together and share a colour; an unexpected kind sorts to the end. Each chip
+    // carries its kind for the icon + per-kind colour.
+    const kindRank = (k: string) => {
+      const i = KIND_META.findIndex((m) => m.kind === k);
+      return i === -1 ? KIND_META.length : i;
+    };
+    const ordered = [...this.entities].sort((a, b) => kindRank(a.kind) - kindRank(b.kind));
+    const total = this.entities.length;
 
     return html`
-      <div class="entities">
-        <div class="tags-row tags-controls">
-          <span class="entities-label" title="Structured entities the AI extracted from this transcript (read-only)"
-            style="font-size: 0.7857rem; color: var(--fg-muted);">🔎 Entities</span>
-          <button class="tag-manage entity-extract"
+      <div class="detail-enrich entities ${this.collapsed ? "is-collapsed" : ""}">
+        ${enrichHead({
+          label: "🔎 Entities",
+          collapsed: this.collapsed,
+          onToggle: this.toggleCollapsed,
+          count: total ? String(total) : undefined,
+          action: html`<button class="tag-manage entity-extract"
             title="Ask the AI to extract structured entities (people, orgs, topics, terms) from this recording. Re-running replaces the current set."
-            ?disabled=${this.extracting} @click=${() => void this.runExtract()}>${this.extracting ? "🔎 Extracting…" : "🔎 Extract"}</button>
-        </div>
-        ${orderedKinds.length
-          ? html`<div class="entities-groups">
-              ${orderedKinds.map((kind) => {
-                const meta = KIND_META.find((m) => m.kind === kind);
-                const values = byKind.get(kind) ?? [];
-                return html`
-                  <div class="entity-group" style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:6px;">
-                    <span class="entity-group-label" title=${meta?.label ?? kind}
-                      style="font-size: 0.7857rem; color: var(--fg-muted); margin-right:2px;">${meta?.icon ?? "•"} ${meta?.label ?? kind}:</span>
-                    ${values.map(
-                      (v) => html`<span class="tag-chip tag-chip--entity" data-entity-kind=${kind}>${v}</span>`,
-                    )}
-                  </div>
-                `;
-              })}
-            </div>`
-          : html`<div class="entities-empty" style="font-size: 0.7857rem; color: var(--fg-muted); margin-top:4px;">No entities yet — Extract to pull people, orgs, topics, and terms from the transcript.</div>`}
+            ?disabled=${this.extracting} @click=${() => void this.runExtract()}>${this.extracting ? "🔎 Extracting…" : "🔎 Extract"}</button>`,
+        })}
+        ${this.collapsed
+          ? ""
+          : total
+            ? html`<div class="enrich-body entity-chips-flow">
+                ${ordered.map((e) => {
+                  const meta = KIND_META.find((m) => m.kind === e.kind);
+                  return html`<span class="tag-chip tag-chip--entity" data-entity-kind=${e.kind} title=${meta?.label ?? e.kind}><span class="ent-ico">${meta?.icon ?? "•"}</span>${e.value}</span>`;
+                })}
+              </div>`
+            : html`<div class="enrich-body enrich-empty">No entities yet — Extract to pull people, orgs, topics, and terms from the transcript.</div>`}
       </div>
     `;
   }

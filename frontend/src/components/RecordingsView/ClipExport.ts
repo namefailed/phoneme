@@ -48,6 +48,25 @@ export class ClipExportElement extends LitElement {
     return this.durationMs > 0 ? this.durationMs / 1000 : 0;
   }
 
+  /** The "✂ Clip…" trigger now lives in the action row (so it sits in the same
+   *  strip as Play/Speed/Re-run/Export/Delete); it dispatches `phoneme:toggle-clip`
+   *  which we answer here. Keyed by recordingId so split mode only toggles the
+   *  matching pane's panel. */
+  private toggleHandler = (e: Event) => {
+    if ((e as CustomEvent).detail?.recordingId !== this.recordingId) return;
+    this.toggle();
+  };
+
+  connectedCallback() {
+    super.connectedCallback();
+    window.addEventListener("phoneme:toggle-clip", this.toggleHandler);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener("phoneme:toggle-clip", this.toggleHandler);
+  }
+
   private toggle() {
     this.open = !this.open;
     if (this.open && this.endSec === "" && this.durationMs > 0) {
@@ -115,18 +134,17 @@ export class ClipExportElement extends LitElement {
   }
 
   render() {
+    // The toggle lives in the action row now — render nothing until it's opened,
+    // so a closed clip control takes no space below the action strip.
+    if (!this.open) return html``;
     const max = this.durationSec > 0 ? formatSeconds(this.durationSec) : undefined;
     return html`
-      <div class="clip-export ${this.open ? "clip-export--open" : ""}">
-        <button
-          class="clip-toggle"
-          aria-expanded=${this.open}
-          title="Export a time range of this recording's audio to a WAV file"
-          @click=${this.toggle}
-        >✂ Clip${this.open ? "" : "…"}</button>
-        ${this.open
-          ? html`
-              <div class="clip-fields">
+      <div class="clip-export clip-export--open">
+        <div class="clip-export-head">
+          <span class="clip-export-title">✂ Clip audio</span>
+          <button class="clip-close" title="Close the clip panel" aria-label="Close" @click=${this.toggle}>✕</button>
+        </div>
+        <div class="clip-fields">
                 <label class="clip-field">
                   <span class="clip-field-label">Start (s)</span>
                   <input
@@ -166,9 +184,7 @@ export class ClipExportElement extends LitElement {
                   @click=${this.doExport}
                 >${this.busy ? "Exporting…" : "Export clip"}</button>
               </div>
-              ${this.hint ? html`<div class="clip-hint" role="alert">${this.hint}</div>` : null}
-            `
-          : null}
+        ${this.hint ? html`<div class="clip-hint" role="alert">${this.hint}</div>` : null}
       </div>
     `;
   }

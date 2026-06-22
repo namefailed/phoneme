@@ -539,6 +539,157 @@ mark.search-hit {
   font-size: 0.7857rem;
   color: var(--err);
 }
+/* The clip panel now opens below the action row (its "✂ Clip…" trigger lives in
+   the action strip); give the panel a light titled header with a close button. */
+.clip-export-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.clip-export-title {
+  font-size: 0.7857rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg-muted);
+}
+.clip-close {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 0.9286rem;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  transition: all var(--ui-motion-fast) ease-out;
+}
+.clip-close:hover { color: var(--accent); background: var(--bg-elevated); }
+
+/* ── Detail-pane enrichment sections (Entities · Tasks) ─────────────────────
+   The AI-extracted entity chips and the checkable task list. They share the
+   action row's 18px gutter and the app's chip/button language so they read as
+   one family with the Tags row above them; a hairline rule separates each. */
+.detail-enrich {
+  padding: 12px 18px 14px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+.enrich-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* The chevron + title + count cluster IS the collapse toggle (mirrors the
+   sidebar section headers); the Extract action sits outside it on the right. */
+.enrich-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  margin: 0;
+  cursor: pointer;
+  color: var(--fg-muted);
+  transition: color var(--ui-motion-fast) ease-out;
+}
+.enrich-toggle:hover { color: var(--accent); }
+.enrich-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-faded);
+  transition: transform var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
+}
+.enrich-chevron.open { transform: rotate(90deg); color: var(--accent); }
+.enrich-toggle:hover .enrich-chevron { color: var(--accent); }
+.enrich-label {
+  font-size: 0.7857rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.enrich-count {
+  font-weight: 600;
+  font-size: 0.7143rem;
+  color: var(--fg-faded);
+  background: var(--bg-elevated);
+  border-radius: 9px;
+  padding: 1px 8px;
+}
+.enrich-body { margin-top: 9px; }
+.enrich-empty {
+  font-size: 0.7857rem;
+  color: var(--fg-muted);
+  line-height: 1.4;
+}
+/* Entities: chips flow like tags (sorted by kind so same-kind sit together),
+   each carrying its kind icon and a per-kind colour drawn from the semantic
+   tokens — People/Orgs/Topics/Terms are scannable at a glance, theme-proof. */
+.entity-chips-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* Both classes so this beats the later, equal-specificity `.tag-chip` base rule
+   (color: inherit / the default tag tint) — chips carry `tag-chip tag-chip--entity`. */
+.tag-chip.tag-chip--entity {
+  background: var(--chip-bg, color-mix(in srgb, var(--accent) 14%, transparent));
+  color: var(--chip-fg, var(--accent));
+  border: 1px solid var(--chip-bd, color-mix(in srgb, var(--accent) 30%, transparent));
+  font-weight: 500;
+  padding: 2px 9px;
+}
+.tag-chip--entity .ent-ico { font-size: 0.85em; opacity: 0.95; }
+.tag-chip--entity[data-entity-kind="person"] { --chip-bg: color-mix(in srgb, var(--info) 15%, transparent); --chip-fg: var(--info); --chip-bd: color-mix(in srgb, var(--info) 32%, transparent); }
+.tag-chip--entity[data-entity-kind="org"]    { --chip-bg: color-mix(in srgb, var(--ok) 15%, transparent); --chip-fg: var(--ok); --chip-bd: color-mix(in srgb, var(--ok) 32%, transparent); }
+.tag-chip--entity[data-entity-kind="topic"]  { --chip-bg: color-mix(in srgb, var(--peach) 16%, transparent); --chip-fg: var(--peach); --chip-bd: color-mix(in srgb, var(--peach) 32%, transparent); }
+.tag-chip--entity[data-entity-kind="term"]   { --chip-bg: color-mix(in srgb, var(--accent) 15%, transparent); --chip-fg: var(--accent); --chip-bd: color-mix(in srgb, var(--accent) 32%, transparent); }
+/* Tasks: a clean checkable list — accent checkbox, readable rows, done dims +
+   strikes; rows get a hairline hover like the tag-dropdown items. */
+.tasks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 5px 8px;
+  margin: 0 -8px;
+  border-radius: 6px;
+  transition: background var(--ui-motion-fast) ease-out;
+}
+.task-row:hover { background: var(--bg-surface); }
+.task-check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.task-text {
+  font-size: 0.8571rem;
+  color: var(--fg-default);
+  line-height: 1.45;
+}
+.task-row.done .task-text {
+  text-decoration: line-through;
+  color: var(--fg-faded);
+}
+.task-due {
+  margin-left: 7px;
+  font-size: 0.7857rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
 
 /* Transcript view-toggle row: Speakers + Summary anchor left, Compare /
    Original / Unedited anchor right. Each group wraps internally if the pane is

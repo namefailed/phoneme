@@ -1,5 +1,6 @@
 import { renderField, bindFieldEvents } from "./form";
 import { invoke } from "@tauri-apps/api/core";
+import { showFavorites, showPinned, setShowFavorites, setShowPinned } from "../RecordingsView/columnPrefs";
 
 /** Default visible columns, used by the reset action. */
 const DEFAULT_VISIBLE_COLUMNS = ["day", "time", "duration", "status", "source", "transcript"];
@@ -389,6 +390,23 @@ export class SectionInterface {
         <h3>Library layout</h3>
 
         <div class="settings-field" style="align-items: flex-start;">
+          <label style="margin-top: 8px;">Quick-action columns</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
+            <label class="col-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+              <input type="checkbox" id="show-favorites" class="toggle-switch" ${showFavorites() ? "checked" : ""} />
+              <span>⭐ Favorites</span>
+            </label>
+            <label class="col-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+              <input type="checkbox" id="show-pinned" class="toggle-switch" ${showPinned() ? "checked" : ""} />
+              <span>📌 Pinned</span>
+            </label>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
+              Turn these off to hide the ⭐ Favorite / 📌 Pin column <b>and</b> its matching Library sidebar section. Applies instantly (per device).
+            </span>
+          </div>
+        </div>
+
+        <div class="settings-field" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Visible Columns</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">
             <div id="col-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
@@ -410,6 +428,15 @@ export class SectionInterface {
       </div>
     `;
     bindFieldEvents(this.container, config);
+
+    // The two quick-action column toggles persist per-device immediately (they
+    // don't ride the config Save flow) and fire `phoneme:display-prefs-changed`
+    // so the list + sidebar update live — off hides both the column and the
+    // Library section.
+    const favCb = this.container.querySelector<HTMLInputElement>("#show-favorites");
+    favCb?.addEventListener("change", () => setShowFavorites(favCb.checked));
+    const pinCb = this.container.querySelector<HTMLInputElement>("#show-pinned");
+    pinCb?.addEventListener("change", () => setShowPinned(pinCb.checked));
 
     this.container
       .querySelector<HTMLSelectElement>("#anim-speed")

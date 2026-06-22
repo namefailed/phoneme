@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { listTags, tagUsageCounts, kindCounts, listAllEntities, listAllTasks, type Tag, type KindCounts, type EntityFacet, type TaskWithRecording } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { filterStore, applyEntityFilter, applyTaskFilter, type UiFilter, type RecordingKind, type TagState } from "../../state/filter";
+import { showFavorites, showPinned, DISPLAY_PREFS_EVENT } from "./columnPrefs";
 import "./QueuePanel";
 
 /** The entity classes, in display order, with their sidebar group label + icon.
@@ -78,6 +79,9 @@ export class SidebarElement extends LitElement {
   /** Favorites toggle from the list has no daemon event (it's an optimistic
    *  client update), so the list pings us directly to refresh the badge. */
   private onCountsStale = () => void this.loadKindCounts();
+  // Re-render when the Favorites/Pinned display toggles flip in Settings, so the
+  // Library section rows appear/disappear live without a reload.
+  private onDisplayPrefs = () => this.requestUpdate();
 
   async connectedCallback() {
     super.connectedCallback();
@@ -89,6 +93,7 @@ export class SidebarElement extends LitElement {
     void this.loadEntities();
     void this.loadTasks();
     window.addEventListener("phoneme:counts-stale", this.onCountsStale);
+    window.addEventListener(DISPLAY_PREFS_EVENT, this.onDisplayPrefs);
     await this.subscribeToEvents();
   }
 
@@ -97,6 +102,7 @@ export class SidebarElement extends LitElement {
     if (this.unsubFilter) this.unsubFilter();
     if (this.unsubEvents) this.unsubEvents();
     window.removeEventListener("phoneme:counts-stale", this.onCountsStale);
+    window.removeEventListener(DISPLAY_PREFS_EVENT, this.onDisplayPrefs);
   }
 
   /** Load the per-kind recording counts for the Library badges. Failures leave
@@ -356,8 +362,8 @@ export class SidebarElement extends LitElement {
           ${this.libraryOpen ? html`
             <div class="sidebar-list">
               ${this.renderKindItem("all", "📚", "All Recordings")}
-              ${this.renderKindItem("pinned", "📌", "Pinned")}
-              ${this.renderKindItem("favorite", "⭐", "Favorites")}
+              ${showPinned() ? this.renderKindItem("pinned", "📌", "Pinned") : ""}
+              ${showFavorites() ? this.renderKindItem("favorite", "⭐", "Favorites") : ""}
               ${this.renderKindItem("single", "🎙️", "Voice Notes")}
               ${this.renderKindItem("meeting", "👥", "Meetings")}
               ${this.renderKindItem("in_place", "⌨️", "In-Place")}
