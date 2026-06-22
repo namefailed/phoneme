@@ -61,7 +61,9 @@ trust boundary.*
   sidebar Tasks section's **View all…** row) is the cross-recording "everything I
   have to do" list — every task in one place, checkable in line, filterable, with
   a click-through pill to each task's recording. Backed by `AddTask` / `UpdateTask`
-  / `DeleteTask` / `ReorderTasks` IPC over the existing `ListAllTasks` read.
+  / `DeleteTask` / `ReorderTasks` IPC over the existing `ListAllTasks` read, with
+  matching `phoneme tasks add | edit | delete | reorder` CLI (full GUI ↔ CLI ↔ IPC
+  parity — `edit` preserves the due hint unless you pass `--due` / `--clear-due`).
 - [x] **Entity management + library-wide merge** — extracted entities become
   editable, not just viewable. In the detail pane's 🔎 Entities section you can
   **+ Add** an entity (pick its kind), fix one inline (double-click), or delete it
@@ -71,7 +73,8 @@ trust boundary.*
   (e.g. "ACME" / "acme corp" → "Acme Corp"). Like tasks, hand-curated entities are
   `source='manual'` (new column) and survive re-extraction. Backed by `AddEntity`
   / `UpdateEntity` / `DeleteEntity` / `MergeEntities` IPC and an `entities_merged`
-  event.
+  event, with matching `phoneme entities add | edit | delete | merge` CLI (full
+  GUI ↔ CLI ↔ IPC parity).
 
 ### Transcripts
 

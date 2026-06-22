@@ -787,9 +787,66 @@ pub enum DictationAction {
 #[derive(Debug, clap::Args)]
 pub struct EntitiesArgs {
     /// Show only entities of this kind (person / org / topic / term). Omit to
-    /// list every kind, grouped.
+    /// list every kind, grouped. Ignored when a sub-action is given.
     #[arg(long, value_name = "KIND", value_parser = ["person", "org", "topic", "term"])]
     pub kind: Option<String>,
+    #[command(subcommand)]
+    pub action: Option<EntitiesAction>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum EntitiesAction {
+    /// Add an entity to a recording by hand. Hand-added entities are kept across
+    /// re-extraction (the AI only ever replaces its own).
+    Add {
+        /// The recording to add the entity to.
+        id: String,
+        /// The entity class.
+        #[arg(value_parser = ["person", "org", "topic", "term"])]
+        kind: String,
+        /// The entity value (e.g. a name).
+        value: String,
+    },
+    /// Edit one entity on a recording, keyed by its current kind + value. Change
+    /// its value (`--to-value`) and/or its kind (`--to-kind`); marks it manual.
+    Edit {
+        /// The recording the entity belongs to.
+        id: String,
+        /// The current kind.
+        #[arg(value_parser = ["person", "org", "topic", "term"])]
+        kind: String,
+        /// The current value.
+        value: String,
+        /// The new kind (omit to keep the current kind).
+        #[arg(long, value_name = "KIND", value_parser = ["person", "org", "topic", "term"])]
+        to_kind: Option<String>,
+        /// The new value (omit to keep the current value).
+        #[arg(long, value_name = "VALUE")]
+        to_value: Option<String>,
+    },
+    /// Delete one entity from a recording, keyed by its kind + value.
+    Delete {
+        /// The recording the entity belongs to.
+        id: String,
+        /// The entity kind.
+        #[arg(value_parser = ["person", "org", "topic", "term"])]
+        kind: String,
+        /// The entity value.
+        value: String,
+    },
+    /// Library-wide merge: fold one or more variant values of a kind into a
+    /// single canonical value, across every recording (e.g. "ACME", "acme corp"
+    /// → "Acme Corp"). The merged value is kept across re-extraction.
+    Merge {
+        /// The entity class the merge applies within.
+        #[arg(value_parser = ["person", "org", "topic", "term"])]
+        kind: String,
+        /// The canonical value the variants become.
+        to_value: String,
+        /// The variant value(s) to fold into the canonical value.
+        #[arg(required = true, num_args = 1..)]
+        from_values: Vec<String>,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -818,6 +875,49 @@ pub enum TasksAction {
         id: String,
         /// The task row id to mark not done.
         task_id: i64,
+    },
+    /// Add a task to a recording by hand. Hand-added tasks are kept across
+    /// re-extraction (the AI only ever replaces its own).
+    Add {
+        /// The recording to add the task to.
+        id: String,
+        /// The action-item text.
+        text: String,
+        /// Optional free-text due hint (e.g. "by Friday").
+        #[arg(long, value_name = "HINT")]
+        due: Option<String>,
+    },
+    /// Edit one task's text (and optionally its due hint). The due hint is kept
+    /// unless you pass `--due` to change it or `--clear-due` to remove it.
+    Edit {
+        /// The recording the task belongs to.
+        id: String,
+        /// The task row id to edit.
+        task_id: i64,
+        /// The new text.
+        text: String,
+        /// Replace the due hint with this phrase.
+        #[arg(long, value_name = "HINT", conflicts_with = "clear_due")]
+        due: Option<String>,
+        /// Remove the due hint.
+        #[arg(long)]
+        clear_due: bool,
+    },
+    /// Delete one task from a recording.
+    Delete {
+        /// The recording the task belongs to.
+        id: String,
+        /// The task row id to delete.
+        task_id: i64,
+    },
+    /// Set the task order for a recording: list the task ids in the order you
+    /// want them (each id's position becomes its sort order).
+    Reorder {
+        /// The recording whose tasks are being reordered.
+        id: String,
+        /// The task row ids, in the desired order.
+        #[arg(required = true, num_args = 1..)]
+        task_ids: Vec<i64>,
     },
 }
 

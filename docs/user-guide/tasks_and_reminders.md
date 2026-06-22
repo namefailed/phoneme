@@ -76,7 +76,23 @@ phoneme tasks --open
 # Mark task #3 of a recording done (or undone) — the id is shown in the list
 phoneme tasks done 20260519T143500823 3
 phoneme tasks undone 20260519T143500823 3
+
+# Add a task by hand (kept across re-extraction); --due is optional
+phoneme tasks add 20260519T143500823 "Send the roadmap" --due "by Friday"
+
+# Edit a task's text (the due hint is kept unless you change it)
+phoneme tasks edit 20260519T143500823 3 "Send the v2 roadmap"
+phoneme tasks edit 20260519T143500823 3 "Send it" --due "Monday"   # change due
+phoneme tasks edit 20260519T143500823 3 "Send it" --clear-due      # drop due
+
+# Delete a task, or set the task order (ids in the order you want)
+phoneme tasks delete 20260519T143500823 3
+phoneme tasks reorder 20260519T143500823 5 2 4 1
 ```
+
+Every task action mirrors the GUI exactly — the CLI, the detail-pane list, and
+the daemon all go through the same IPC, so a task you add from the terminal shows
+up in the app live, and vice-versa.
 
 ## Notes & limits
 

@@ -894,6 +894,25 @@ phoneme entities --kind person
 phoneme entities --json
 ```
 
+The mutating sub-actions mirror the GUI's per-recording chips and the Entity
+manager (same IPC; changes show up live in the app). Hand-curated entities are
+`source='manual'` and survive re-extraction.
+
+```bash
+# Add an entity to a recording by hand (kind ∈ person/org/topic/term)
+phoneme entities add 20260519T143500823 person "Ada Lovelace"
+
+# Edit one entity, keyed by its current kind + value; change either field
+phoneme entities edit 20260519T143500823 org "acme" --to-value "Acme Corp"
+phoneme entities edit 20260519T143500823 topic "ml" --to-kind term --to-value "ML"
+
+# Delete one entity from a recording
+phoneme entities delete 20260519T143500823 topic "roadmap"
+
+# Library-wide merge: fold variant values of a kind into one canonical value
+phoneme entities merge org "Acme Corp" "acme" "ACME" "acme corp"
+```
+
 ### ✅ `phoneme tasks`
 
 List the cross-recording **task list** — every action item the LLM
@@ -917,6 +936,23 @@ phoneme tasks --json
 # Mark task #3 of a recording done (or undone)
 phoneme tasks done 20260519T143500823 3
 phoneme tasks undone 20260519T143500823 3
+```
+
+The mutating sub-actions mirror the GUI task manager (same IPC). Hand-added /
+edited tasks are `source='manual'` and survive re-extraction.
+
+```bash
+# Add a task by hand; --due is an optional free-text hint
+phoneme tasks add 20260519T143500823 "Send the roadmap" --due "by Friday"
+
+# Edit a task's text; the due hint is preserved unless changed/cleared
+phoneme tasks edit 20260519T143500823 3 "Send the v2 roadmap"
+phoneme tasks edit 20260519T143500823 3 "Send it" --due "Monday"
+phoneme tasks edit 20260519T143500823 3 "Send it" --clear-due
+
+# Delete a task, or set the task order (ids in the order you want)
+phoneme tasks delete 20260519T143500823 3
+phoneme tasks reorder 20260519T143500823 5 2 4 1
 ```
 
 ### 🎭 `phoneme profile`
