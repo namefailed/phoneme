@@ -4,6 +4,7 @@ import { listTags, tagUsageCounts, kindCounts, listAllEntities, listAllTasks, ty
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { filterStore, applyEntityFilter, applyTaskFilter, type UiFilter, type RecordingKind, type TagState } from "../../state/filter";
 import { showFavorites, showPinned, DISPLAY_PREFS_EVENT } from "./columnPrefs";
+import { loadSidebarOrder, saveSidebarOrder, type SidebarSection } from "./sidebarOrder";
 import "./QueuePanel";
 
 /** The entity classes, in display order, with their sidebar group label + icon.
@@ -57,8 +58,55 @@ export class SidebarElement extends LitElement {
   @state() private tagsOpen = localStorage.getItem("phoneme.sidebar.tagsOpen") !== "false";
   @state() private entitiesOpen = localStorage.getItem("phoneme.sidebar.entitiesOpen") !== "false";
   @state() private tasksOpen = localStorage.getItem("phoneme.sidebar.tasksOpen") !== "false";
+  /** Per-device order of the movable sections (Tags / Tasks / Entities); Library
+   *  is pinned first and not part of this. Persisted via {@link saveSidebarOrder}. */
+  @state() private sectionOrder: SidebarSection[] = loadSidebarOrder();
+  /** The section currently being dragged, and the one the pointer is over —
+   *  drive the drag-to-reorder of the movable sections. */
+  private dragSection: SidebarSection | null = null;
+  @state() private dragOverSection: SidebarSection | null = null;
   private unsubFilter: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
+
+  private onSectionDragStart(key: SidebarSection, e: DragEvent) {
+    this.dragSection = key;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      // Firefox/WebView2 require some payload for a drag to start.
+      e.dataTransfer.setData("text/plain", key);
+    }
+  }
+
+  private onSectionDragOver(key: SidebarSection, e: DragEvent) {
+    if (!this.dragSection || this.dragSection === key) return;
+    e.preventDefault(); // allow the drop
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    if (this.dragOverSection !== key) this.dragOverSection = key;
+  }
+
+  private onSectionDrop(key: SidebarSection, e: DragEvent) {
+    e.preventDefault();
+    const from = this.dragSection;
+    this.dragSection = null;
+    this.dragOverSection = null;
+    if (!from || from === key) return;
+    const fromIdx = this.sectionOrder.indexOf(from);
+    const toIdx = this.sectionOrder.indexOf(key);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const order = this.sectionOrder.filter((s) => s !== from);
+    // Dragging downward drops AFTER the target; upward drops BEFORE it — the
+    // standard list-reorder feel, and it reaches every position.
+    let insertAt = order.indexOf(key);
+    if (fromIdx < toIdx) insertAt += 1;
+    order.splice(insertAt, 0, from);
+    this.sectionOrder = order;
+    saveSidebarOrder(order);
+  }
+
+  private onSectionDragEnd() {
+    this.dragSection = null;
+    this.dragOverSection = null;
+  }
 
   private toggleSection(which: "library" | "tags" | "entities" | "tasks") {
     if (which === "library") {
@@ -376,65 +424,90 @@ export class SidebarElement extends LitElement {
             </div>
           ` : ""}
 
-          <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);"
-            @click=${() => this.toggleSection("tags")} title="Collapse / expand">
-            <span class="sidebar-chevron ${this.tagsOpen ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>Tags
-          </div>
-          ${this.tagsOpen ? html`
-            <div class="sidebar-list">
-              <div class="sidebar-item ${f.tagState === 'untagged' ? 'active' : ''}" @click=${() => this.setTagState('untagged')}>
-                <span class="sidebar-icon" style="color: var(--fg-faded);">#</span>
-                <span class="sidebar-label">Untagged</span>
-                <span class="sidebar-dot sidebar-dot-none" title="Recordings with no tags"></span>
-                ${this.kindTotals
-                  ? html`<span class="sidebar-count" title="${this.kindTotals.untagged} recording${this.kindTotals.untagged === 1 ? "" : "s"} with no tags">${this.kindTotals.untagged}</span>`
-                  : ""}
-              </div>
-              <div class="sidebar-item ${f.tagState === 'tagged' ? 'active' : ''}" @click=${() => this.setTagState('tagged')}>
-                <span class="sidebar-icon" style="color: var(--accent);">#</span>
-                <span class="sidebar-label">Tagged</span>
-                <span class="sidebar-dot sidebar-dot-rainbow" title="Recordings with at least one tag"></span>
-                ${this.kindTotals
-                  ? html`<span class="sidebar-count" title="${this.kindTotals.tagged} recording${this.kindTotals.tagged === 1 ? "" : "s"} with at least one tag">${this.kindTotals.tagged}</span>`
-                  : ""}
-              </div>
-              ${this.tags.length === 0 ? html`
-                <div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No tags yet. Add tags from a recording's detail view.</div>
-              ` : this.tags.map(t => html`
-                <div class="sidebar-item ${f.tag_id === t.id ? 'active' : ''}" @click=${() => this.setTagFilter(t.id)}>
-                  <span class="sidebar-icon" style="color: var(--accent);">#</span>
-                  <span class="sidebar-label">${t.name}</span>
-                  <span class="sidebar-dot" style="background: ${t.color || 'var(--accent)'}"></span>
-                  <span class="sidebar-count" title="${this.counts[String(t.id)] ?? 0} recordings with this tag">${this.counts[String(t.id)] ?? 0}</span>
-                </div>
-              `)}
-            </div>
-          ` : ""}
-
-          <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);"
-            @click=${() => this.toggleSection("entities")} title="Collapse / expand">
-            <span class="sidebar-chevron ${this.entitiesOpen ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>Entities
-          </div>
-          ${this.entitiesOpen ? html`
-            <div class="sidebar-list">
-              ${this.entities.length === 0 ? html`
-                <div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No entities yet. Extract them from a recording's detail view.</div>
-              ` : this.renderEntityGroups(f)}
-            </div>
-          ` : ""}
-
-          <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);"
-            @click=${() => this.toggleSection("tasks")} title="Collapse / expand">
-            <span class="sidebar-chevron ${this.tasksOpen ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>Tasks
-          </div>
-          ${this.tasksOpen ? html`
-            <div class="sidebar-list">
-              ${this.renderTaskRows(f)}
-            </div>
-          ` : ""}
+          ${this.sectionOrder.map((key) => this.renderMovableSection(key))}
         </div>
 
         <ph-queue-panel></ph-queue-panel>
+      </div>
+    `;
+  }
+
+  /** A movable sidebar section (Tags / Tasks / Entities): a draggable header
+   *  plus its body when open. Library is rendered separately and can't move; the
+   *  order of these three is `this.sectionOrder` (persisted per device). */
+  private renderMovableSection(key: SidebarSection) {
+    const open = key === "tags" ? this.tagsOpen : key === "tasks" ? this.tasksOpen : this.entitiesOpen;
+    const label = key === "tags" ? "Tags" : key === "tasks" ? "Tasks" : "Entities";
+    const body = !open
+      ? ""
+      : key === "tags"
+        ? this.renderTagsBody()
+        : key === "tasks"
+          ? html`<div class="sidebar-list">${this.renderTaskRows(this.filterState)}</div>`
+          : this.renderEntitiesBody();
+    const headerClass =
+      "sidebar-header sidebar-header--movable" +
+      (this.dragOverSection === key ? " sidebar-header--drag-over" : "") +
+      (this.dragSection === key ? " sidebar-header--dragging" : "");
+    return html`
+      <div class="${headerClass}" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);"
+        draggable="true"
+        @click=${() => this.toggleSection(key)}
+        @dragstart=${(e: DragEvent) => this.onSectionDragStart(key, e)}
+        @dragover=${(e: DragEvent) => this.onSectionDragOver(key, e)}
+        @drop=${(e: DragEvent) => this.onSectionDrop(key, e)}
+        @dragend=${() => this.onSectionDragEnd()}
+        title="Drag to reorder · click to collapse">
+        <span class="sidebar-chevron ${open ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>${label}
+        <span class="sidebar-drag-grip" aria-hidden="true" title="Drag to reorder">⠿</span>
+      </div>
+      ${body}
+    `;
+  }
+
+  /** The Tags section body: Untagged / Tagged filters, then one row per tag. */
+  private renderTagsBody() {
+    const f = this.filterState;
+    return html`
+      <div class="sidebar-list">
+        <div class="sidebar-item ${f.tagState === 'untagged' ? 'active' : ''}" @click=${() => this.setTagState('untagged')}>
+          <span class="sidebar-icon" style="color: var(--fg-faded);">#</span>
+          <span class="sidebar-label">Untagged</span>
+          <span class="sidebar-dot sidebar-dot-none" title="Recordings with no tags"></span>
+          ${this.kindTotals
+            ? html`<span class="sidebar-count" title="${this.kindTotals.untagged} recording${this.kindTotals.untagged === 1 ? "" : "s"} with no tags">${this.kindTotals.untagged}</span>`
+            : ""}
+        </div>
+        <div class="sidebar-item ${f.tagState === 'tagged' ? 'active' : ''}" @click=${() => this.setTagState('tagged')}>
+          <span class="sidebar-icon" style="color: var(--accent);">#</span>
+          <span class="sidebar-label">Tagged</span>
+          <span class="sidebar-dot sidebar-dot-rainbow" title="Recordings with at least one tag"></span>
+          ${this.kindTotals
+            ? html`<span class="sidebar-count" title="${this.kindTotals.tagged} recording${this.kindTotals.tagged === 1 ? "" : "s"} with at least one tag">${this.kindTotals.tagged}</span>`
+            : ""}
+        </div>
+        ${this.tags.length === 0 ? html`
+          <div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No tags yet. Add tags from a recording's detail view.</div>
+        ` : this.tags.map(t => html`
+          <div class="sidebar-item ${f.tag_id === t.id ? 'active' : ''}" @click=${() => this.setTagFilter(t.id)}>
+            <span class="sidebar-icon" style="color: var(--accent);">#</span>
+            <span class="sidebar-label">${t.name}</span>
+            <span class="sidebar-dot" style="background: ${t.color || 'var(--accent)'}"></span>
+            <span class="sidebar-count" title="${this.counts[String(t.id)] ?? 0} recordings with this tag">${this.counts[String(t.id)] ?? 0}</span>
+          </div>
+        `)}
+      </div>
+    `;
+  }
+
+  /** The Entities section body: cross-recording entity facet grouped by kind. */
+  private renderEntitiesBody() {
+    const f = this.filterState;
+    return html`
+      <div class="sidebar-list">
+        ${this.entities.length === 0 ? html`
+          <div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No entities yet. Extract them from a recording's detail view.</div>
+        ` : this.renderEntityGroups(f)}
       </div>
     `;
   }
