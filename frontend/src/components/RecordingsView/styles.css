@@ -929,6 +929,85 @@ mark.search-hit {
   padding: 3px 6px;
   max-width: 180px;
 }
+
+/* ── Global "All tasks" modal ───────────────────────────────────────────────── */
+.modal-dialog.open-tasks-dialog {
+  width: min(620px, 93vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.open-tasks-header { align-items: flex-start; margin-bottom: 0; }
+.open-tasks-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.open-tasks-subtitle { font-size: 0.7857rem; color: var(--fg-faded); }
+.open-tasks-controls { display: flex; gap: 10px; align-items: center; }
+.open-tasks-search {
+  flex: 1;
+  font: inherit;
+  font-size: 0.8571rem;
+  color: var(--fg-default);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+.open-tasks-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.open-tasks-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8214rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.open-tasks-toggle input { accent-color: var(--accent); cursor: pointer; }
+.open-tasks-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 120px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+.open-tasks-body::-webkit-scrollbar { width: 8px; }
+.open-tasks-body::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 4px; }
+.open-tasks-empty { padding: 28px; text-align: center; color: var(--fg-muted); font-size: 0.9286rem; }
+.open-task-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent);
+}
+.open-task-row:hover { background: var(--bg-surface); }
+.open-task-row.is-done .open-task-text { text-decoration: line-through; color: var(--fg-faded); }
+.open-task-check { flex-shrink: 0; accent-color: var(--accent); cursor: pointer; width: 16px; height: 16px; }
+.open-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.open-task-text { font-size: 0.8929rem; color: var(--fg-default); line-height: 1.35; }
+.open-task-due { font-size: 0.7857rem; color: var(--accent); }
+.open-task-src {
+  flex-shrink: 0;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  transition: color var(--ui-motion-fast) ease-out, border-color var(--ui-motion-fast) ease-out;
+}
+.open-task-src:hover { color: var(--accent); border-color: var(--accent); }
 /* Tasks: a clean checkable list — accent checkbox, readable rows, done dims +
    strikes; rows get a hairline hover like the tag-dropdown items. */
 .tasks-list {

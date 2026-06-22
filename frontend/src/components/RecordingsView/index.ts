@@ -49,6 +49,7 @@ import "./Sidebar";
 import "./ThinkingPopout";
 import "./AskPanel";
 import "./EntityManager";
+import "./OpenTasksView";
 import "./styles.css";
 
 // Per-device UI layout prefs persisted in localStorage, not config.toml — these
@@ -298,6 +299,7 @@ export class RecordingsView {
       <ph-thinking-popout id="rv-thinking"></ph-thinking-popout>
       <ph-ask-panel id="rv-ask"></ph-ask-panel>
       <ph-entity-manager id="rv-entity-mgr"></ph-entity-manager>
+      <ph-open-tasks id="rv-open-tasks"></ph-open-tasks>
     `;
 
     const listRoot = this.container.querySelector<HTMLElement>("#rv-list-inner")!;

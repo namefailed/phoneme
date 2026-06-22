@@ -395,6 +395,11 @@ export class SidebarElement extends LitElement {
         <span class="sidebar-label">All tasks</span>
         <span class="sidebar-count" title="${total} task${total === 1 ? "" : "s"} across the library">${total}</span>
       </div>
+      <div class="sidebar-item" @click=${() => window.dispatchEvent(new CustomEvent("phoneme:open-tasks"))}
+        title="Open the full task list — every task across your library, checkable, with click-through to its recording">
+        <span class="sidebar-icon">📋</span>
+        <span class="sidebar-label">View all…</span>
+      </div>
     `;
   }
 
