@@ -43,11 +43,13 @@ impl Catalog {
     /// entities are read-only), tasks carry user state: re-running the extraction
     /// step — or a re-transcribe that runs the `tasks` recipe step — must NOT
     /// silently un-check every task the user already completed. So in one
-    /// transaction this reads the existing `(text, done)` map, deletes all rows,
+    /// transaction this reads the existing `(text, done)` map, deletes only the
+    /// LLM-extracted rows (user-added `source='manual'` tasks survive a re-run),
     /// then inserts each new task carrying the prior `done` — matched on exact
     /// text first, then on a normalized key ([`normalize_task_text`]) so a minor
     /// reword (case / spacing / punctuation) keeps its tick. The
-    /// `(recording_id, text)` UNIQUE is the storage key. An empty slice clears them.
+    /// `(recording_id, text)` UNIQUE is the storage key. An empty slice clears the
+    /// extracted tasks (manual ones stay).
     pub async fn set_tasks(&self, id: &RecordingId, tasks: &[Task]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         // Snapshot the prior done-state, keyed by exact text, so a surviving task
@@ -69,11 +71,12 @@ impl Catalog {
                 .or_insert(false) |= done;
             prior_done.insert(text, done);
         }
-        sqlx::query("DELETE FROM tasks WHERE recording_id = ?")
+        // Only the extracted rows are replaced; user-added ('manual') tasks stay.
+        sqlx::query("DELETE FROM tasks WHERE recording_id = ? AND source = 'llm'")
             .bind(id.as_str())
             .execute(&mut *tx)
             .await?;
-        for t in tasks {
+        for (i, t) in tasks.iter().enumerate() {
             // Exact match first, then the normalized fallback for minor rewords.
             let preserved = prior_done
                 .get(&t.text)
@@ -81,13 +84,17 @@ impl Catalog {
                 .or_else(|| prior_done_norm.get(&normalize_task_text(&t.text)).copied())
                 .unwrap_or(false);
             let done = t.done || preserved;
+            // Re-inserted rows are 'llm' and take their extraction order; manual
+            // rows (kept above) keep their own sort_order.
             sqlx::query(
-                "INSERT OR IGNORE INTO tasks (recording_id, text, due_hint, done) VALUES (?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO tasks (recording_id, text, due_hint, done, source, sort_order) \
+                 VALUES (?, ?, ?, ?, 'llm', ?)",
             )
             .bind(id.as_str())
             .bind(&t.text)
             .bind(t.due_hint.as_deref())
             .bind(done)
+            .bind(i as i64)
             .execute(&mut *tx)
             .await?;
         }
@@ -111,13 +118,13 @@ impl Catalog {
         Ok(())
     }
 
-    /// The tasks extracted for one recording, open (not-done) first, then by row
-    /// id (extraction order). Used to fill [`Recording::tasks`] (the N+1 child
+    /// The tasks for one recording, open (not-done) first, then by the user's
+    /// `sort_order`, then row id. Used to fill [`Recording::tasks`] (the N+1 child
     /// query, like [`Catalog::list_entities`]). Returns the row `id` so a single
-    /// task can be toggled done unambiguously.
+    /// task can be toggled / edited / deleted unambiguously.
     pub async fn list_tasks(&self, id: &RecordingId) -> Result<Vec<Task>> {
         let rows = sqlx::query(
-            "SELECT id, text, due_hint, done FROM tasks WHERE recording_id = ? ORDER BY done, id",
+            "SELECT id, text, due_hint, done FROM tasks WHERE recording_id = ? ORDER BY done, sort_order, id",
         )
         .bind(id.as_str())
         .fetch_all(&self.pool)
@@ -174,7 +181,7 @@ impl Catalog {
         if only_open {
             sql.push_str(" WHERE t.done = 0");
         }
-        sql.push_str(" ORDER BY t.done, r.started_at DESC, t.id");
+        sql.push_str(" ORDER BY t.done, r.started_at DESC, t.sort_order, t.id");
         let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
         rows.into_iter()
             .map(|r| {
@@ -188,5 +195,86 @@ impl Catalog {
                 })
             })
             .collect()
+    }
+
+    /// Add a user-created ('manual') task to a recording. Manual tasks survive
+    /// re-extraction — [`Catalog::set_tasks`] only replaces the 'llm' rows.
+    /// Appended after the current tasks (`sort_order = max + 1`). Returns the new id.
+    pub async fn add_task(
+        &self,
+        recording_id: &RecordingId,
+        text: &str,
+        due_hint: Option<&str>,
+    ) -> Result<i64> {
+        let next: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks WHERE recording_id = ?",
+        )
+        .bind(recording_id.as_str())
+        .fetch_one(&self.pool)
+        .await?;
+        let res = sqlx::query(
+            "INSERT INTO tasks (recording_id, text, due_hint, done, source, sort_order) \
+             VALUES (?, ?, ?, 0, 'manual', ?)",
+        )
+        .bind(recording_id.as_str())
+        .bind(text)
+        .bind(due_hint)
+        .bind(next)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.last_insert_rowid())
+    }
+
+    /// Edit one task's text (and optional due hint), scoped to its recording like
+    /// [`Catalog::set_task_done`]. Returns the affected row count (0 = not found).
+    pub async fn update_task(
+        &self,
+        recording_id: &RecordingId,
+        task_id: i64,
+        text: &str,
+        due_hint: Option<&str>,
+    ) -> Result<u64> {
+        let res = sqlx::query(
+            "UPDATE tasks SET text = ?, due_hint = ? WHERE id = ? AND recording_id = ?",
+        )
+        .bind(text)
+        .bind(due_hint)
+        .bind(task_id)
+        .bind(recording_id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
+
+    /// Delete one task, scoped to its recording. Returns the affected row count
+    /// (0 = not found). Works for both 'llm' and 'manual' tasks.
+    pub async fn delete_task(&self, recording_id: &RecordingId, task_id: i64) -> Result<u64> {
+        let res = sqlx::query("DELETE FROM tasks WHERE id = ? AND recording_id = ?")
+            .bind(task_id)
+            .bind(recording_id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected())
+    }
+
+    /// Set the user's task order for a recording: each id in `ordered_ids` gets a
+    /// `sort_order` equal to its position. Ids not in this recording are skipped
+    /// (the UPDATE is scoped). One transaction, so the reorder is atomic.
+    pub async fn reorder_tasks(
+        &self,
+        recording_id: &RecordingId,
+        ordered_ids: &[i64],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for (pos, task_id) in ordered_ids.iter().enumerate() {
+            sqlx::query("UPDATE tasks SET sort_order = ? WHERE id = ? AND recording_id = ?")
+                .bind(pos as i64)
+                .bind(task_id)
+                .bind(recording_id.as_str())
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 }

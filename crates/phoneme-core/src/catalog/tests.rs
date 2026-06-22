@@ -2180,6 +2180,143 @@ async fn re_extraction_preserves_done_across_a_minor_reword() {
 }
 
 #[tokio::test]
+async fn add_task_appends_a_manual_task_that_survives_reextraction() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = embedded_recording(None);
+    db.insert(&r).await.unwrap();
+    // An LLM extraction, then a hand-added task.
+    db.set_tasks(
+        &r.id,
+        &[Task {
+            id: 0,
+            text: "Ship it".into(),
+            due_hint: None,
+            done: false,
+        }],
+    )
+    .await
+    .unwrap();
+    let manual_id = db
+        .add_task(&r.id, "Call the client", Some("today"))
+        .await
+        .unwrap();
+    assert!(manual_id > 0);
+
+    // Re-extraction returns a different LLM set; the manual task must remain while
+    // the old extracted task is replaced.
+    db.set_tasks(
+        &r.id,
+        &[Task {
+            id: 0,
+            text: "Ship it v2".into(),
+            due_hint: None,
+            done: false,
+        }],
+    )
+    .await
+    .unwrap();
+    let texts: Vec<String> = db
+        .list_tasks(&r.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.text)
+        .collect();
+    assert!(
+        texts.iter().any(|t| t == "Call the client"),
+        "the manual task must survive re-extraction"
+    );
+    assert!(
+        texts.iter().any(|t| t == "Ship it v2"),
+        "the new extracted task is present"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "Ship it"),
+        "the old extracted task was replaced"
+    );
+}
+
+#[tokio::test]
+async fn update_and_delete_task_are_scoped_to_their_recording() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let a = embedded_recording(None);
+    let b = embedded_recording(None);
+    db.insert(&a).await.unwrap();
+    db.insert(&b).await.unwrap();
+    let id = db.add_task(&a.id, "draft", None).await.unwrap();
+
+    // Wrong recording → no row touched.
+    assert_eq!(
+        db.update_task(&b.id, id, "hijacked", None).await.unwrap(),
+        0
+    );
+    assert_eq!(db.delete_task(&b.id, id).await.unwrap(), 0);
+
+    // Right recording → edit then delete.
+    assert_eq!(
+        db.update_task(&a.id, id, "final draft", Some("Mon"))
+            .await
+            .unwrap(),
+        1
+    );
+    let t = db.list_tasks(&a.id).await.unwrap().remove(0);
+    assert_eq!(t.text, "final draft");
+    assert_eq!(t.due_hint.as_deref(), Some("Mon"));
+    assert_eq!(db.delete_task(&a.id, id).await.unwrap(), 1);
+    assert!(db.list_tasks(&a.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reorder_tasks_sets_the_user_order() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = embedded_recording(None);
+    db.insert(&r).await.unwrap();
+    db.set_tasks(
+        &r.id,
+        &[
+            Task {
+                id: 0,
+                text: "one".into(),
+                due_hint: None,
+                done: false,
+            },
+            Task {
+                id: 0,
+                text: "two".into(),
+                due_hint: None,
+                done: false,
+            },
+            Task {
+                id: 0,
+                text: "three".into(),
+                due_hint: None,
+                done: false,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    let ids: Vec<i64> = db
+        .list_tasks(&r.id)
+        .await
+        .unwrap()
+        .iter()
+        .map(|t| t.id)
+        .collect();
+    // Reverse the order, then read it back.
+    let reversed: Vec<i64> = ids.iter().rev().copied().collect();
+    db.reorder_tasks(&r.id, &reversed).await.unwrap();
+    let after: Vec<String> = db
+        .list_tasks(&r.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.text)
+        .collect();
+    assert_eq!(after, vec!["three", "two", "one"]);
+}
+
+#[tokio::test]
 async fn retention_audio_only_keeps_rows_and_is_idempotent() {
     // delete_audio = true: the WAV path is returned for deletion and blanked on
     // the row, but the row itself (transcript, metadata) survives, and a second
