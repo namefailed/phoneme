@@ -262,6 +262,12 @@ fn is_retry_safe(req: &Request) -> bool {
         // Toggling a task's done flag is a mutation; classify it single-attempt
         // like the other Set* mutations (it sits with that boundary).
         | SetTaskDone { .. }
+        // Task CRUD — mutations like SetTaskDone; single-attempt so a blind
+        // re-send after a lost reply can't add/edit/delete/reorder twice.
+        | AddTask { .. }
+        | UpdateTask { .. }
+        | DeleteTask { .. }
+        | ReorderTasks { .. }
         | ApproveTagSuggestion { .. }
         | DismissTagSuggestion { .. }
         | ClearAllTagSuggestions

@@ -1153,6 +1153,58 @@ pub async fn set_task_done(
     forward(&bridge, Request::SetTaskDone { id, task_id, done }).await
 }
 
+/// Add a user-created task to a recording. Emits `TasksUpdated`.
+#[tauri::command]
+pub async fn add_task(
+    bridge: Br<'_>,
+    id: String,
+    text: String,
+    due_hint: Option<String>,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::AddTask { id, text, due_hint }).await
+}
+
+/// Edit one task's text (and optional due hint). `not_found` when unknown.
+#[tauri::command]
+pub async fn update_task(
+    bridge: Br<'_>,
+    id: String,
+    task_id: i64,
+    text: String,
+    due_hint: Option<String>,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::UpdateTask {
+            id,
+            task_id,
+            text,
+            due_hint,
+        },
+    )
+    .await
+}
+
+/// Delete one task. `not_found` when unknown.
+#[tauri::command]
+pub async fn delete_task(bridge: Br<'_>, id: String, task_id: i64) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::DeleteTask { id, task_id }).await
+}
+
+/// Set the user's task order for a recording (drag-reorder). Emits `TasksUpdated`.
+#[tauri::command]
+pub async fn reorder_tasks(
+    bridge: Br<'_>,
+    id: String,
+    task_ids: Vec<i64>,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::ReorderTasks { id, task_ids }).await
+}
+
 /// Approve one suggested tag (create if needed + attach + drop the suggestion).
 #[tauri::command]
 pub async fn approve_tag_suggestion(

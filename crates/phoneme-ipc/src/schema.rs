@@ -868,6 +868,48 @@ pub enum Request {
         /// The new done state.
         done: bool,
     },
+    /// Add a user-created task to a recording. Manual tasks survive re-extraction
+    /// (only LLM rows are replaced). Ok `null`; emits [`DaemonEvent::TasksUpdated`].
+    /// GUI "+ add task", `phoneme tasks add <id> <text>`.
+    AddTask {
+        /// The recording to add the task to.
+        id: RecordingId,
+        /// The action-item text.
+        text: String,
+        /// Optional free-text due hint (e.g. "by Friday").
+        due_hint: Option<String>,
+    },
+    /// Edit one task's text (and optional due hint), scoped to its recording. Ok
+    /// `null`; emits [`DaemonEvent::TasksUpdated`]. `not_found` when `task_id` is
+    /// unknown. GUI inline edit, `phoneme tasks edit <id> <task_id> <text>`.
+    UpdateTask {
+        /// The recording the task belongs to.
+        id: RecordingId,
+        /// The task row id to edit.
+        task_id: i64,
+        /// The new text.
+        text: String,
+        /// The new due hint (None clears it).
+        due_hint: Option<String>,
+    },
+    /// Delete one task, scoped to its recording. Ok `null`; emits
+    /// [`DaemonEvent::TasksUpdated`]. `not_found` when `task_id` is unknown.
+    /// GUI task ✕, `phoneme tasks delete <id> <task_id>`.
+    DeleteTask {
+        /// The recording the task belongs to.
+        id: RecordingId,
+        /// The task row id to delete.
+        task_id: i64,
+    },
+    /// Set the user's task order for a recording (each id's position becomes its
+    /// `sort_order`). Ok `null`; emits [`DaemonEvent::TasksUpdated`]. Ids not in
+    /// the recording are ignored. GUI drag-reorder.
+    ReorderTasks {
+        /// The recording whose tasks are being reordered.
+        id: RecordingId,
+        /// The task row ids in the desired order.
+        task_ids: Vec<i64>,
+    },
     /// Approve one suggested tag: create the tag if needed, attach it, and
     /// remove the name from the recording's suggestion list. Ok = the tag
     /// object `{"id":n,"name":…,"color":…}`; emits

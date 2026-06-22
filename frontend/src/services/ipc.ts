@@ -1085,6 +1085,31 @@ export async function setTaskDone(id: string, taskId: number, done: boolean): Pr
   await tauriInvoke("set_task_done", { id, taskId, done });
 }
 
+/** Add a user-created task to a recording. Manual tasks survive re-extraction. */
+export async function addTask(id: string, text: string, dueHint?: string | null): Promise<void> {
+  await tauriInvoke("add_task", { id, text, dueHint: dueHint ?? null });
+}
+
+/** Edit one task's text (and optional free-text due hint). */
+export async function updateTask(
+  id: string,
+  taskId: number,
+  text: string,
+  dueHint?: string | null,
+): Promise<void> {
+  await tauriInvoke("update_task", { id, taskId, text, dueHint: dueHint ?? null });
+}
+
+/** Delete one task from a recording. */
+export async function deleteTask(id: string, taskId: number): Promise<void> {
+  await tauriInvoke("delete_task", { id, taskId });
+}
+
+/** Set the user's task order for a recording (drag-reorder). */
+export async function reorderTasks(id: string, taskIds: number[]): Promise<void> {
+  await tauriInvoke("reorder_tasks", { id, taskIds });
+}
+
 /** Approve one suggested tag: creates the tag if needed, attaches it, and
  *  removes it from the suggestion list. Returns the (created) tag. */
 export async function approveTagSuggestion(id: string, name: string): Promise<Tag> {

@@ -1126,6 +1126,61 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        Request::AddTask { id, text, due_hint } => {
+            // Add a user ('manual') task; it survives later re-extraction.
+            match state
+                .catalog
+                .add_task(&id, &text, due_hint.as_deref())
+                .await
+            {
+                Ok(_) => {
+                    state.events.emit(DaemonEvent::TasksUpdated { id });
+                    ok_null()
+                }
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::UpdateTask {
+            id,
+            task_id,
+            text,
+            due_hint,
+        } => {
+            // Edit one task's text/due, scoped to its recording.
+            match state
+                .catalog
+                .update_task(&id, task_id, &text, due_hint.as_deref())
+                .await
+            {
+                Ok(0) => not_found(format!("no task {task_id}")),
+                Ok(_) => {
+                    state.events.emit(DaemonEvent::TasksUpdated { id });
+                    ok_null()
+                }
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::DeleteTask { id, task_id } => {
+            match state.catalog.delete_task(&id, task_id).await {
+                Ok(0) => not_found(format!("no task {task_id}")),
+                Ok(_) => {
+                    state.events.emit(DaemonEvent::TasksUpdated { id });
+                    ok_null()
+                }
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::ReorderTasks { id, task_ids } => {
+            // Position-by-id rewrite of sort_order; ids outside the recording are
+            // ignored by the scoped UPDATE.
+            match state.catalog.reorder_tasks(&id, &task_ids).await {
+                Ok(()) => {
+                    state.events.emit(DaemonEvent::TasksUpdated { id });
+                    ok_null()
+                }
+                Err(e) => err_response(&e),
+            }
+        }
         Request::ApproveTagSuggestion { id, name } => {
             // Create-or-fetch the tag, attach it, then drop the suggestion.
             match state.catalog.add_tag(&name, None).await {
