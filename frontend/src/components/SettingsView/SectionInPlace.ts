@@ -383,7 +383,7 @@ export class SectionInPlace {
                 <option value="paste">Paste</option>
                 <option value="off">Off</option>
               </select>
-              <button id="ip-app-add-btn" type="button">Add</button>
+              <button id="ip-app-add-btn" class="inline-button" type="button">Add</button>
             </div>
           </div>
         </div>
@@ -405,7 +405,7 @@ export class SectionInPlace {
               <input id="ip-app-recipe-add-name" type="text" placeholder="App executable (e.g. Outlook.exe)"
                 style="flex: 1 1 auto; min-width: 0;" />
               <select id="ip-app-recipe-add-recipe">${this.recipeOptions("")}</select>
-              <button id="ip-app-recipe-add-btn" type="button">Add</button>
+              <button id="ip-app-recipe-add-btn" class="inline-button" type="button">Add</button>
             </div>
           </div>
         </div>
@@ -441,7 +441,7 @@ export class SectionInPlace {
             <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
               <input id="ip-deny-add-name" type="text" placeholder="App executable (e.g. 1Password.exe)"
                 style="flex: 1 1 auto; min-width: 0;" />
-              <button id="ip-deny-add-btn" type="button">Add</button>
+              <button id="ip-deny-add-btn" class="inline-button" type="button">Add</button>
             </div>
           </div>
         </div>`
@@ -490,7 +490,7 @@ export class SectionInPlace {
                 <option value="paragraph">Blank line</option>
                 <option value="scratch">Scratch (drop last sentence)</option>
               </select>
-              <button id="ip-vc-add-btn" type="button">Add</button>
+              <button id="ip-vc-add-btn" class="inline-button" type="button">Add</button>
             </div>
           </div>
         </div>`
@@ -535,7 +535,7 @@ export class SectionInPlace {
                 style="flex: 1 1 auto; min-width: 0;" />
               <input id="ip-sn-add-expansion" type="text" placeholder="Expansion (e.g. you@example.com)"
                 style="flex: 2 1 auto; min-width: 0;" />
-              <button id="ip-sn-add-btn" type="button">Add</button>
+              <button id="ip-sn-add-btn" class="inline-button" type="button">Add</button>
             </div>
           </div>
         </div>`
