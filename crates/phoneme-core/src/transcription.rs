@@ -303,6 +303,7 @@ impl Transcriber {
                 whisper.api_key.expose_secret().trim().to_string(),
                 model_or(&whisper.model, "scribe_v1"),
                 timeout,
+                diarization.provider == crate::config::DiarizationBackend::Elevenlabs,
             )),
             // Any OpenAI-compatible endpoint the user points at via `api_url`
             // (key and model both optional; many self-hosted servers need
@@ -1662,6 +1663,40 @@ impl TranscriptionProvider for AssemblyAiProvider {
 /// ElevenLabs isn't OpenAI-compatible: it authenticates with an `xi-api-key`
 /// header (no scheme prefix) and takes the audio plus a `model_id` field as
 /// multipart form data. The transcript comes back as `{ "text": ... }`.
+/// One ElevenLabs Scribe response: the full text, the detected language, and the
+/// per-token timeline (`words`). Each token is a `word`, `spacing`, or
+/// `audio_event`; `speaker_id` is present when `diarize=true`.
+#[derive(Debug, Deserialize)]
+struct ElevenLabsResponse {
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    language_code: Option<String>,
+    #[serde(default)]
+    words: Vec<ElevenLabsWord>,
+}
+
+/// One token in a Scribe response: a `word` / `spacing` / `audio_event` with its
+/// time span and (when diarizing) its `speaker_id`.
+#[derive(Debug, Deserialize)]
+struct ElevenLabsWord {
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    start: Option<f64>,
+    #[serde(default)]
+    end: Option<f64>,
+    /// `word` | `spacing` | `audio_event`. Absent ⇒ treat as a word.
+    #[serde(rename = "type", default)]
+    word_type: Option<String>,
+    /// Present only with `diarize=true`, e.g. `"speaker_0"`.
+    #[serde(default)]
+    speaker_id: Option<String>,
+}
+
+/// Provider for ElevenLabs Scribe speech-to-text (`xi-api-key` auth, multipart
+/// upload). Returns a per-word timeline + detected language; with `diarize` it
+/// also tags each word with a `speaker_id` for `[Speaker N]` turns.
 #[derive(Clone)]
 pub struct ElevenLabsProvider {
     http: reqwest::Client,
@@ -1670,6 +1705,9 @@ pub struct ElevenLabsProvider {
     /// The Scribe model id (e.g. `scribe_v1`).
     model: String,
     timeout: Duration,
+    /// Request per-word `speaker_id` and build `[Speaker N]` turns. Set when the
+    /// user's diarization backend is ElevenLabs (mirrors Deepgram/AssemblyAI).
+    diarize: bool,
 }
 
 // Manual `Debug` so the API key is never rendered verbatim into logs.
@@ -1681,6 +1719,7 @@ impl std::fmt::Debug for ElevenLabsProvider {
             .field("api_key", &crate::config::redact_key(&self.api_key))
             .field("model", &self.model)
             .field("timeout", &self.timeout)
+            .field("diarize", &self.diarize)
             .finish()
     }
 }
@@ -1693,6 +1732,7 @@ impl ElevenLabsProvider {
         api_key: impl Into<String>,
         model: impl Into<String>,
         timeout: Duration,
+        diarize: bool,
     ) -> Self {
         Self {
             http,
@@ -1700,6 +1740,7 @@ impl ElevenLabsProvider {
             api_key: api_key.into(),
             model: model.into(),
             timeout,
+            diarize,
         }
     }
 }
@@ -1707,6 +1748,20 @@ impl ElevenLabsProvider {
 #[async_trait]
 impl TranscriptionProvider for ElevenLabsProvider {
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
+        Ok(self
+            .transcribe_with_segments(audio_path, language, DiarizationTrack::Diarize)
+            .await?
+            .text)
+    }
+
+    async fn transcribe_with_segments(
+        &self,
+        audio_path: &Path,
+        language: Option<&str>,
+        // Cloud diarization is intrinsic to Scribe's API; the track hint
+        // (Meeting Mode) is a local-pass concept, so it is ignored here.
+        _track: DiarizationTrack,
+    ) -> Result<Transcription> {
         let bytes = fs::read(audio_path).await?;
         let part = multipart::Part::bytes(bytes)
             .file_name(
@@ -1720,7 +1775,14 @@ impl TranscriptionProvider for ElevenLabsProvider {
             .map_err(|e| Error::Internal(format!("multipart mime: {e}")))?;
         let mut form = multipart::Form::new()
             .part("file", part)
-            .text("model_id", self.model.clone());
+            .text("model_id", self.model.clone())
+            // Always ask for the per-word timeline so the Synced view, the
+            // transcript↔waveform word seek, and the segment timeline work the
+            // same as every other provider.
+            .text("timestamps_granularity", "word");
+        if self.diarize {
+            form = form.text("diarize", "true");
+        }
         if let Some(lang) = language {
             // ElevenLabs uses ISO-639 language codes under `language_code`.
             form = form.text("language_code", lang.to_string());
@@ -1754,11 +1816,133 @@ impl TranscriptionProvider for ElevenLabsProvider {
             });
         }
 
-        let parsed: OpenAiResponse = response
+        let parsed: ElevenLabsResponse = response
             .json()
             .await
             .map_err(|e| Error::Internal(format!("decoding ElevenLabs response: {e}")))?;
-        Ok(parsed.text)
+
+        Ok(assemble_elevenlabs(parsed, self.diarize))
+    }
+}
+
+/// Turn a parsed Scribe response into a [`Transcription`]: always the per-word
+/// timeline + detected language, and — when `diarize` and the response carries
+/// ≥2 distinct `speaker_id`s — the `[Speaker N]` text + segment timeline, exactly
+/// like the Deepgram path. Pure (no I/O) so it's unit-tested directly.
+fn assemble_elevenlabs(parsed: ElevenLabsResponse, diarize: bool) -> Transcription {
+    // Detected language (e.g. "en"); empty degrades to None, like the others.
+    let language = parsed.language_code.as_deref().and_then(non_empty);
+
+    // Real words only — skip "spacing" (whitespace) and "audio_event"
+    // (e.g. "(laughter)") tokens; they carry no seekable word.
+    let real: Vec<&ElevenLabsWord> = parsed
+        .words
+        .iter()
+        .filter(|w| w.word_type.as_deref().map(|t| t == "word").unwrap_or(true) && !w.text.is_empty())
+        .collect();
+
+    // Per-word layer, always (independent of diarization), with no speaker.
+    let plain_words: Vec<TranscriptWord> = real
+        .iter()
+        .map(|w| {
+            let start = w.start.map(secs_to_ms);
+            let end = w.end.or(w.start).map(secs_to_ms);
+            TranscriptWord {
+                start_ms: start.unwrap_or(0),
+                end_ms: end.unwrap_or(0),
+                text: w.text.clone(),
+                leading_space: true,
+                speaker: None,
+                confidence: None,
+            }
+        })
+        .collect();
+
+    let plain = |text: String| Transcription {
+        text,
+        segments: Vec::new(),
+        words: plain_words.clone(),
+        fixed_speaker_applied: false,
+        speaker_voiceprints: Vec::new(),
+        language: language.clone(),
+    };
+
+    if !diarize {
+        return plain(parsed.text);
+    }
+
+    // Map each distinct speaker_id to a stable 0-based index by first appearance,
+    // so labels are [Speaker 0], [Speaker 1], … like Deepgram.
+    let mut speaker_order: Vec<&str> = Vec::new();
+    for w in &real {
+        if let Some(id) = w.speaker_id.as_deref() {
+            if !speaker_order.contains(&id) {
+                speaker_order.push(id);
+            }
+        }
+    }
+    if speaker_order.len() <= 1 {
+        // One (or zero) speaker → plain prose, never a spurious [Speaker N].
+        return plain(parsed.text);
+    }
+    let label_of = |id: Option<&str>| -> usize {
+        id.and_then(|i| speaker_order.iter().position(|s| *s == i))
+            .unwrap_or(0)
+    };
+
+    // One pass builds the [Speaker N] text, the segment timeline, and the per-word
+    // layer so the stored `speaker` labels always agree.
+    let mut final_transcript = String::new();
+    let mut current_speaker: Option<usize> = None;
+    let mut segments: Vec<TranscriptSegment> = Vec::new();
+    let mut words: Vec<TranscriptWord> = Vec::with_capacity(real.len());
+
+    for w in &real {
+        let spk = label_of(w.speaker_id.as_deref());
+        let start_ms = w.start.map(secs_to_ms);
+        let end_ms = w.end.map(secs_to_ms);
+        let fallback = words.last().map(|p| p.end_ms).unwrap_or(0);
+        words.push(TranscriptWord {
+            start_ms: start_ms.unwrap_or(fallback),
+            end_ms: end_ms.or(start_ms).unwrap_or(fallback),
+            text: w.text.clone(),
+            leading_space: true,
+            speaker: Some(spk.to_string()),
+            confidence: None,
+        });
+        if current_speaker != Some(spk) {
+            if !final_transcript.is_empty() {
+                final_transcript.push_str("\n\n");
+            }
+            final_transcript.push_str(&format!("[Speaker {}]: ", spk));
+            current_speaker = Some(spk);
+            let fallback_start = segments.last().map(|s| s.end_ms).unwrap_or(0);
+            segments.push(TranscriptSegment {
+                start_ms: start_ms.unwrap_or(fallback_start),
+                end_ms: end_ms.or(start_ms).unwrap_or(fallback_start),
+                text: w.text.clone(),
+                speaker: Some(spk.to_string()),
+            });
+        } else {
+            final_transcript.push(' ');
+            if let Some(seg) = segments.last_mut() {
+                seg.text.push(' ');
+                seg.text.push_str(&w.text);
+                if let Some(end) = end_ms.or(start_ms) {
+                    seg.end_ms = end.max(seg.end_ms);
+                }
+            }
+        }
+        final_transcript.push_str(&w.text);
+    }
+
+    Transcription {
+        text: final_transcript,
+        segments,
+        words,
+        fixed_speaker_applied: false,
+        speaker_voiceprints: Vec::new(),
+        language,
     }
 }
 
@@ -1824,8 +2008,88 @@ mod tests {
             SECRET,
             "scribe_v1",
             Duration::from_secs(30),
+            false,
         );
         assert!(!format!("{p:?}").contains(SECRET));
+    }
+
+    fn el_word(text: &str, start: f64, end: f64, speaker: Option<&str>) -> ElevenLabsWord {
+        ElevenLabsWord {
+            text: text.to_string(),
+            start: Some(start),
+            end: Some(end),
+            word_type: Some("word".to_string()),
+            speaker_id: speaker.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn elevenlabs_assembles_words_and_language_without_diarization() {
+        let parsed = ElevenLabsResponse {
+            text: "hello world".to_string(),
+            language_code: Some("en".to_string()),
+            words: vec![
+                el_word("hello", 0.0, 0.5, None),
+                ElevenLabsWord {
+                    text: " ".to_string(),
+                    start: Some(0.5),
+                    end: Some(0.5),
+                    word_type: Some("spacing".to_string()),
+                    speaker_id: None,
+                },
+                el_word("world", 0.5, 1.0, None),
+            ],
+        };
+        let t = assemble_elevenlabs(parsed, false);
+        // Plain text, no [Speaker N]; language surfaced; spacing token dropped.
+        assert_eq!(t.text, "hello world");
+        assert_eq!(t.language.as_deref(), Some("en"));
+        assert!(t.segments.is_empty());
+        assert_eq!(t.words.len(), 2, "spacing token excluded from the word layer");
+        assert_eq!(t.words[0].text, "hello");
+        assert_eq!(t.words[0].start_ms, 0);
+        assert_eq!(t.words[1].end_ms, 1000);
+        assert!(t.words.iter().all(|w| w.speaker.is_none()));
+    }
+
+    #[test]
+    fn elevenlabs_builds_speaker_turns_when_diarizing() {
+        let parsed = ElevenLabsResponse {
+            text: "ignored top-level text".to_string(),
+            language_code: Some("en".to_string()),
+            words: vec![
+                el_word("hi", 0.0, 0.4, Some("speaker_0")),
+                el_word("there", 0.4, 0.8, Some("speaker_0")),
+                el_word("yes", 1.0, 1.3, Some("speaker_1")),
+            ],
+        };
+        let t = assemble_elevenlabs(parsed, true);
+        // First-appearance 0-based labels; turns split on speaker change.
+        assert_eq!(t.text, "[Speaker 0]: hi there\n\n[Speaker 1]: yes");
+        assert_eq!(t.segments.len(), 2);
+        assert_eq!(t.segments[0].speaker.as_deref(), Some("0"));
+        assert_eq!(t.segments[0].text, "hi there");
+        assert_eq!(t.segments[1].speaker.as_deref(), Some("1"));
+        assert_eq!(t.words.len(), 3);
+        assert_eq!(t.words[2].speaker.as_deref(), Some("1"));
+        assert_eq!(t.language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn elevenlabs_single_speaker_stays_plain_prose() {
+        // diarize on but only one speaker → no spurious [Speaker N].
+        let parsed = ElevenLabsResponse {
+            text: "just me talking".to_string(),
+            language_code: None,
+            words: vec![
+                el_word("just", 0.0, 0.3, Some("speaker_0")),
+                el_word("me", 0.3, 0.5, Some("speaker_0")),
+            ],
+        };
+        let t = assemble_elevenlabs(parsed, true);
+        assert_eq!(t.text, "just me talking");
+        assert!(t.segments.is_empty());
+        assert_eq!(t.words.len(), 2);
     }
 
     fn word(text: &str, start: f32, end: f32, prob: Option<f32>) -> OpenAiWord {

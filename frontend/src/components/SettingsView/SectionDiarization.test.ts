@@ -30,11 +30,14 @@ describe("diarizationMismatch — warns when the combo can't run", () => {
     expect(diarizationMismatch("deepgram", "openai")).toMatch(/Deepgram/);
     expect(diarizationMismatch("assemblyai", "local")).toMatch(/AssemblyAI/);
     expect(diarizationMismatch("assemblyai", "groq")).toMatch(/AssemblyAI/);
+    expect(diarizationMismatch("elevenlabs", "local")).toMatch(/ElevenLabs/);
+    expect(diarizationMismatch("elevenlabs", "openai")).toMatch(/ElevenLabs/);
   });
 
   it("does NOT warn when the cloud diarization provider matches STT", () => {
     expect(diarizationMismatch("deepgram", "deepgram")).toBeNull();
     expect(diarizationMismatch("assemblyai", "assemblyai")).toBeNull();
+    expect(diarizationMismatch("elevenlabs", "elevenlabs")).toBeNull();
   });
 
   it("allows local diarization on any OpenAI-compatible STT", () => {
@@ -51,13 +54,14 @@ describe("diarizationMismatch — warns when the combo can't run", () => {
 });
 
 describe("SectionDiarization — provider dropdown", () => {
-  it("renders all four provider options", () => {
+  it("renders all five provider options", () => {
     const host = mount({ diarization: { provider: "none" } });
     expect(optionValues(host)).toEqual([
       "none",
       "local",
       "deepgram",
       "assemblyai",
+      "elevenlabs",
     ]);
   });
 

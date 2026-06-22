@@ -294,6 +294,8 @@ pub enum DiarizationBackend {
     Deepgram,
     /// Cloud diarization via AssemblyAI API.
     Assemblyai,
+    /// Cloud diarization via ElevenLabs Scribe (per-word `speaker_id`).
+    Elevenlabs,
 }
 
 /// Settings for speaker diarization.
@@ -518,6 +520,7 @@ impl DiarizationConfig {
         match self.provider {
             DiarizationBackend::Deepgram => Some("Deepgram".to_string()),
             DiarizationBackend::Assemblyai => Some("AssemblyAI".to_string()),
+            DiarizationBackend::Elevenlabs => Some("ElevenLabs".to_string()),
             DiarizationBackend::None | DiarizationBackend::Local => None,
         }
     }

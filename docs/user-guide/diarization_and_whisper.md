@@ -79,11 +79,13 @@ Pick the backend in **Settings → Diarization → Speaker Diarization**
 | `local` | Local **speakrs** ONNX segmentation model (offline) |
 | `deepgram` | Cloud diarization via Deepgram |
 | `assemblyai` | Cloud diarization via AssemblyAI |
+| `elevenlabs` | Cloud diarization via ElevenLabs Scribe |
 
 > [!IMPORTANT]
 > **Cloud diarization is part of the cloud provider's own transcription.** It
 > only runs when that *same* provider also does the transcription: Deepgram
-> diarization needs Deepgram transcription, AssemblyAI needs AssemblyAI. Local
+> diarization needs Deepgram transcription, AssemblyAI needs AssemblyAI,
+> ElevenLabs needs ElevenLabs. Local
 > diarization is a separate pass and works with any provider that returns
 > segment timing (Local / OpenAI / Groq / Custom). The Settings panel shows a
 > live warning if your diarization and transcription providers can't work

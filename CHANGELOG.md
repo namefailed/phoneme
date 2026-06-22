@@ -417,10 +417,18 @@ trust boundary.*
   timings are absent.
 - [x] **Speaker-diarization provider picker** — Settings → Transcription now exposes a
   Speaker Diarization section to choose who-spoke-when: off, **Local** (speakrs ONNX),
-  **Deepgram**, or **AssemblyAI** (`SectionDiarization.ts`). Cloud diarization rides the
+  **Deepgram**, **AssemblyAI**, or **ElevenLabs** (`SectionDiarization.ts`). Cloud diarization rides the
   same provider's transcription API, so the section shows a live warning when the chosen
   diarization provider can't run with the configured transcription backend (e.g. Deepgram
   diarization picked while Local transcribes) instead of silently doing nothing.
+- [x] **ElevenLabs Scribe at full parity** — the ElevenLabs transcription provider now
+  returns everything the others do: a **per-word timeline** (powering the Synced view and
+  transcript↔waveform word seek), the **detected language**, and **speaker diarization**
+  (`[Speaker N]` turns from Scribe's per-word `speaker_id`, gated on the new `elevenlabs`
+  diarization backend) — previously it surfaced only flat text. Words + language are
+  unconditional; diarization rides the Scribe call like Deepgram/AssemblyAI. The
+  word→turn assembly is unit-tested. *(We support everyone we can — no provider left a
+  second-class citizen.)*
 - [x] **Named-speaker recognition** — the local diarizer now captures a voiceprint
   (centroid embedding) per speaker; naming a speaker enrolls that voice into a
   cross-recording library, and opening a later recording suggests known voices for

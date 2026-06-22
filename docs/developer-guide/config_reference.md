@@ -161,7 +161,7 @@ followed.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `provider` | `none` | `none` \| `local` \| `deepgram` \| `assemblyai` |
+| `provider` | `none` | `none` \| `local` \| `deepgram` \| `assemblyai` \| `elevenlabs` |
 | `models_dir` | `""` | Folder holding a custom speakrs diarization bundle (segmentation + embedding ONNX) to load **instead of** the pretrained models. Empty = auto-download/use the defaults. Changing it reloads the cached pipeline. |
 | `local_model_path` | `""` | **Deprecated / unused** — superseded by `models_dir`; it was never wired into the load path. Kept so older configs keep parsing. |
 | `solo_one_speaker` | `false` | Treat a single (non-meeting) recording as ONE speaker — skip diarization for it so it never splits into `[Speaker N]` turns. Off by default. For when the local diarizer hears two voices in a one-person note (a big tonal shift, or background audio). Meetings and genuinely multi-speaker files are unaffected. Local diarization path. |

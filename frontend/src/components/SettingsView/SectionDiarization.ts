@@ -39,12 +39,15 @@ export function diarizationMismatch(diar: string, stt: string): string | null {
   if (diar === "assemblyai" && stt !== "assemblyai") {
     return `AssemblyAI diarization only runs when AssemblyAI also does the transcription. Your transcription is "${stt}". Set transcription to AssemblyAI in the Whisper section, or choose Local diarization.`;
   }
+  if (diar === "elevenlabs" && stt !== "elevenlabs") {
+    return `ElevenLabs diarization only runs when ElevenLabs also does the transcription (it's part of Scribe's API). Your transcription is "${stt}". Set transcription to ElevenLabs in the Whisper section, or choose Local diarization.`;
+  }
   return null;
 }
 
 /**
  * Settings → Speaker Diarization (`config.diarization`): the provider choice
- * (off / local speakrs-ONNX / Deepgram / AssemblyAI), the optional local
+ * (off / local speakrs-ONNX / Deepgram / AssemblyAI / ElevenLabs), the optional local
  * model path, and provider-conditional help boxes. Shows a live warning (via
  * {@link diarizationMismatch}) when the chosen provider can't run with the
  * configured transcription backend, so the mismatch is visible at pick time
@@ -77,6 +80,7 @@ export class SectionDiarization {
                 { value: "local", label: "Local (speakrs ONNX)" },
                 { value: "deepgram", label: "Deepgram API" },
                 { value: "assemblyai", label: "AssemblyAI API" },
+                { value: "elevenlabs", label: "ElevenLabs API" },
               ],
             },
             this.config.diarization?.provider ?? "none",
@@ -244,7 +248,9 @@ export class SectionDiarization {
       container.querySelector<HTMLElement>("#diarize-local")!.style.display =
         provider === "local" ? "" : "none";
       container.querySelector<HTMLElement>("#diarize-cloud")!.style.display =
-        (provider === "deepgram" || provider === "assemblyai") ? "" : "none";
+        provider === "deepgram" || provider === "assemblyai" || provider === "elevenlabs"
+          ? ""
+          : "none";
 
       // Warn when this diarization provider can't run with the configured
       // transcription backend (turns the silent mismatch into a visible note).
