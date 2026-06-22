@@ -736,10 +736,22 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }
                 if !keep_audio {
                     // Defense in depth: only ever unlink files that live under our
-                    // own audio directory. The path comes from the catalog (which
-                    // we control), but guarding here means a poisoned or
-                    // hand-edited row can't turn a delete into "rm any file".
-                    if audio_path_is_ours(&r.audio_path, &state.paths.audio_dir) {
+                    // own audio directory, and never a symlink (whose target could
+                    // be anywhere — the lexical guard can't see through it). The
+                    // path comes from the catalog (which we control), but guarding
+                    // here means a poisoned or hand-edited row can't turn a delete
+                    // into "rm any file".
+                    if !audio_path_is_ours(&r.audio_path, &state.paths.audio_dir) {
+                        tracing::warn!(
+                            path = %r.audio_path,
+                            "refusing to delete audio file outside the audio directory"
+                        );
+                    } else if is_symlink(&r.audio_path).await {
+                        tracing::warn!(
+                            path = %r.audio_path,
+                            "refusing to delete audio entry that is a symlink"
+                        );
+                    } else {
                         // Best-effort — the file may already be gone. Log, don't fail.
                         if let Err(e) = tokio::fs::remove_file(&r.audio_path).await {
                             tracing::warn!(
@@ -748,11 +760,6 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                                 "audio file removal failed"
                             );
                         }
-                    } else {
-                        tracing::warn!(
-                            path = %r.audio_path,
-                            "refusing to delete audio file outside the audio directory"
-                        );
                     }
                 }
                 // If this was a meeting track and it was the last one, drop the
@@ -804,12 +811,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         continue;
                     }
                     if !keep_audio {
-                        if audio_path_is_ours(&r.audio_path, &state.paths.audio_dir) {
-                            if let Err(e) = tokio::fs::remove_file(&r.audio_path).await {
-                                tracing::warn!(path = %r.audio_path, error = %e, "session delete: audio removal failed");
-                            }
-                        } else {
+                        if !audio_path_is_ours(&r.audio_path, &state.paths.audio_dir) {
                             tracing::warn!(path = %r.audio_path, "refusing to delete audio file outside the audio directory");
+                        } else if is_symlink(&r.audio_path).await {
+                            tracing::warn!(path = %r.audio_path, "refusing to delete audio entry that is a symlink");
+                        } else if let Err(e) = tokio::fs::remove_file(&r.audio_path).await {
+                            tracing::warn!(path = %r.audio_path, error = %e, "session delete: audio removal failed");
                         }
                     }
                     state
@@ -1642,20 +1649,28 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 };
                 let cfg = state.config.load();
                 let timeout = std::time::Duration::from_secs(cfg.hook.timeout_secs);
-                // The "configured hooks" are the `default` recipe's Hook-step
-                // commands (where `migrate_hooks` moved `[hook].commands`), each
-                // with the Phoneme path tokens expanded — the allowlist semantics
-                // the rest of this arm relies on. Webhook-only Hook steps have no
-                // command and are skipped, since `RefireHook` only re-runs commands.
+                // The "configured hooks" are the Hook-step commands (where
+                // `migrate_hooks` moved `[hook].commands`), each with the Phoneme
+                // path tokens expanded — the allowlist semantics the rest of this
+                // arm relies on. We take the UNION across every recipe, not just
+                // `default`: a recording can be produced by a per-hotkey recipe
+                // override or a "Run with recipe" re-run, and the row doesn't
+                // record which recipe ran, so building the allowlist from `default`
+                // alone would reject a command that legitimately fired on this
+                // recording. Webhook-only Hook steps have no command and are
+                // skipped, since `RefireHook` only re-runs commands.
                 let configured: Vec<String> = {
                     use phoneme_core::config::{expand_cmd, PlaybookKind};
                     let mut cmds = Vec::new();
-                    if let Some(recipe) = cfg.recipes.iter().find(|r| r.id == "default") {
+                    for recipe in &cfg.recipes {
                         for step_id in &recipe.steps {
                             if let Some(e) = cfg.playbook.iter().find(|e| &e.id == step_id) {
                                 let c = e.hook.command.trim();
                                 if e.kind == PlaybookKind::Hook && !c.is_empty() {
-                                    cmds.push(expand_cmd(c));
+                                    let expanded = expand_cmd(c);
+                                    if !cmds.contains(&expanded) {
+                                        cmds.push(expanded);
+                                    }
                                 }
                             }
                         }
@@ -2289,6 +2304,11 @@ fn hook_command_allowed(requested: &str, configured: &[String]) -> bool {
 /// rest to be prefixed by `audio_dir` component-wise. Kept purely lexical so it's
 /// unit-testable without touching the filesystem and never deletes the wrong file
 /// just because canonicalization of an already-removed file failed.
+///
+/// Lexical-only means this does NOT resolve symlinks: a symlink stored under
+/// `audio_dir` passes this check yet would unlink its target. We never write
+/// symlinks into the audio dir, but the delete callers add a `symlink_metadata`
+/// refusal on top of this guard so that residual case can't escape.
 fn audio_path_is_ours(audio_path: &str, audio_dir: &std::path::Path) -> bool {
     use std::path::Component;
     let p = std::path::Path::new(audio_path);
@@ -2296,6 +2316,18 @@ fn audio_path_is_ours(audio_path: &str, audio_dir: &std::path::Path) -> bool {
         return false;
     }
     p.starts_with(audio_dir)
+}
+
+/// `true` if `path` is itself a symlink (vs a regular file or missing). Used to
+/// refuse deleting a symlinked audio entry: the lexical [`audio_path_is_ours`]
+/// guard can't see through a link, so a symlink planted under the audio dir would
+/// otherwise unlink its target. A missing path / stat error reads as "not a
+/// symlink" — the subsequent best-effort remove just no-ops on the missing file.
+async fn is_symlink(path: &str) -> bool {
+    tokio::fs::symlink_metadata(path)
+        .await
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
 }
 
 /// Doctor check for orphaned audio: `.wav` files on disk that have no catalog row.
@@ -3216,14 +3248,19 @@ async fn export_clip(
     // the whole source into memory then atomically replaces `dest`, so dest==src
     // would truncate the original to the slice while the catalog row still points
     // here — irreversible data loss. Compare by resolved location so `./x.wav` vs.
-    // the absolute path (and Windows separator/case differences) all match.
+    // the absolute path (and Windows separator/case differences) all match. When
+    // dest already exists, canonicalize the FILE itself (not just its parent) so a
+    // case- or short-name-spelled alias of the source folds to the same path; only
+    // fall back to parent+join for a dest that doesn't exist yet (where it can't be
+    // the source file anyway).
     let src_resolved = src.canonicalize().unwrap_or_else(|_| src.clone());
-    let dest_resolved = dest
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
-        .or_else(|| std::env::current_dir().ok())
-        .and_then(|dir| dest.file_name().map(|f| dir.join(f)));
+    let dest_resolved = dest.canonicalize().ok().or_else(|| {
+        dest.parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
+            .or_else(|| std::env::current_dir().ok())
+            .and_then(|dir| dest.file_name().map(|f| dir.join(f)))
+    });
     if dest == src || dest_resolved.as_deref() == Some(src_resolved.as_path()) {
         return err_response(&phoneme_core::Error::InvalidConfig(
             "clip output path must differ from the recording's own audio file".into(),

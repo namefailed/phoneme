@@ -244,10 +244,15 @@ impl Catalog {
         .bind(idx)
         .execute(&mut *tx)
         .await?;
-        // Keep the per-word layer in step: words inside the segment's span get the
-        // same new label. Words carry no idx tie to a segment, so the time span is
-        // the join — the diarizer builds both from one attribution, so a word's
-        // span lies within its segment's.
+        // Keep the per-word layer in step: words whose start falls in the segment's
+        // [start, end) window get the same new label. Words carry no idx tie to a
+        // segment, so the half-open time span is the only join. This is exact when
+        // segment spans are disjoint and non-empty (each word's start lands in one
+        // segment) — the local and cloud paths emit that. It deliberately stays
+        // half-open: an inclusive end would steal the next segment's opening word in
+        // a contiguous timeline, and an overlap match would double-stamp a word that
+        // two overlapping/zero-length cloud spans share. A word straddling a hand-off
+        // follows whichever segment its start lands in.
         sqlx::query(
             "UPDATE transcript_words SET speaker = ? \
              WHERE recording_id = ? AND start_ms >= ? AND start_ms < ?",
@@ -475,6 +480,10 @@ impl Catalog {
             .bind(idx)
             .execute(&mut *tx)
             .await?;
+            // Repoint this segment's words by the same half-open start-in-span join
+            // reassign_segment uses (see the note there): exact for the disjoint,
+            // non-empty spans the diarizer emits; the per-idx loop is safe because
+            // those windows don't overlap, so no word is stamped by two idxs.
             sqlx::query(
                 "UPDATE transcript_words SET speaker = ? \
                  WHERE recording_id = ? AND start_ms >= ? AND start_ms < ?",

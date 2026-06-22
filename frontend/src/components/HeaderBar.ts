@@ -6,7 +6,7 @@ import { filterStore, clearMoreLikeThis, clearEntityFilter, type UiFilter } from
 import { listTags, listProfiles, switchProfile, type Tag } from '../services/ipc';
 import { subscribeHealth, refreshHealth, startHealthPolling } from '../state/health';
 import {
-  loadStopMode, saveStopMode, stopModeToRecordMode, resolveRecordStartMode,
+  loadStopMode, saveStopMode, resolveRecordStartMode,
   stopModeTitle, clampDurationSecs, DEFAULT_DURATION_SECS, MIN_DURATION_SECS,
   MAX_DURATION_SECS, type StopMode, type StopModeKind,
 } from '../services/recordStopMode';
@@ -159,7 +159,7 @@ export class HeaderBarElement extends LitElement {
     // immediately (no reload).
     window.addEventListener("config:saved", this.onConfigSavedOverlay);
 
-    const un = await listen<any>("daemon-event", async (e) => {
+    const un = await listen<{ event: string; meeting_id?: number; text?: string; count?: number }>("daemon-event", async (e) => {
       const p = e.payload;
       const eventName = p.event;
 
@@ -209,10 +209,11 @@ export class HeaderBarElement extends LitElement {
             const permission = await requestPermission();
             permissionGranted = permission === "granted";
           }
-          if (permissionGranted) {
-            sendNotification({ 
-              title: "Phoneme Retention Policy", 
-              body: `${p.count} recordings will be permanently deleted in the next 24 hours per your auto-delete settings.`
+          const n = typeof p.count === "number" ? p.count : 0;
+          if (permissionGranted && n > 0) {
+            sendNotification({
+              title: "Phoneme Retention Policy",
+              body: `${n} recordings will be permanently deleted in the next 24 hours per your auto-delete settings.`
             });
           }
         } catch (e) {
@@ -433,23 +434,13 @@ export class HeaderBarElement extends LitElement {
       } else {
         // Stop behavior: an explicit choice from the Record dropdown wins
         // (Toggle / Silence / Fixed length, persisted per device). With none
-        // stored, keep the pre-dropdown default, read at click time so the
-        // latest saved setting always wins without HeaderBar subscribing to
-        // config changes: "oneshot" when the user opted into auto-stop on
-        // silence, else "hold" — a Start/Stop toggle that records until the
-        // user clicks stop, so a quiet mic never cuts it off.
-        const stored = loadStopMode();
-        let mode: string;
-        if (stored) {
-          mode = stopModeToRecordMode(stored);
-        } else {
-          let autoStop = false;
-          try {
-            const cfg = await invoke<any>("read_config");
-            autoStop = !!cfg?.recording?.auto_stop_on_silence;
-          } catch { /* keep the safe toggle (hold) behavior */ }
-          mode = resolveRecordStartMode(null, autoStop);
-        }
+        // stored, the pre-dropdown default applies: "oneshot" when the user
+        // opted into auto-stop on silence, else "hold" — a Start/Stop toggle
+        // that records until the user clicks stop, so a quiet mic never cuts
+        // it off. `autoStopConfig` mirrors `recording.auto_stop_on_silence`
+        // (kept current on mount + every config save), so no extra IPC on the
+        // click path and the button tooltip can't disagree with the action.
+        const mode = resolveRecordStartMode(loadStopMode(), this.autoStopConfig);
         await invoke("record_start", { mode });
       }
     } catch (e) {
@@ -752,9 +743,9 @@ export class HeaderBarElement extends LitElement {
           <option value="cancelled" ?selected=${f.status === "cancelled"}>Cancelled</option>
         </select>
         <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
-          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size: 0.8571rem; padding: 6px 12px;"
+          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); font-size: 0.8571rem; padding: 6px 12px;"
             title="Pause / Resume recording" @click=${this.pauseRecording}>${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
-          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size: 0.8571rem; padding: 6px 12px;" 
+          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); font-size: 0.8571rem; padding: 6px 12px;"
             title="Cancel recording and discard audio" @click=${this.cancelRecording}>✕ Cancel</button>
           <div class="hb-rec-group" style="position:relative; display:flex; align-items:stretch;">
             <button class="record-btn ${isCapturing ? 'recording-active' : ''}" title=${actionTitle} 

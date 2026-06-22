@@ -251,11 +251,15 @@ impl Catalog {
     /// Find a named voice by case-insensitive name, creating an empty one (no
     /// samples yet) if none matches. Returns its id.
     async fn find_or_create_named_voice(&self, name: &str) -> Result<String> {
-        // Atomic find-or-create: the INSERT is a single (serialized) write that
-        // fires only when no case-insensitive match exists, so two enrollments
-        // racing under the same name can't create duplicate library entries
-        // (audit M4). Then read back the existing-or-just-created id.
+        // Atomic find-or-create: the INSERT...WHERE NOT EXISTS and the read-back
+        // run in one transaction so they see a consistent snapshot. SQLite
+        // serializes writers, so two enrollments racing under the same name can't
+        // both pass the NOT EXISTS check — the second blocks until the first
+        // commits, then sees its row and inserts nothing, and the read-back
+        // returns the existing id. There's no UNIQUE on name, so this transaction
+        // is the only thing preventing duplicate library entries (audit M4).
         let id = format!("nv_{}", RecordingId::new().as_str());
+        let mut tx = self.pool.begin().await?;
         // A forgotten (soft-deleted) voice with this name doesn't count as a match:
         // re-using a forgotten name creates a fresh live voice rather than silently
         // reviving a tombstoned one (undo is the explicit revive path).
@@ -268,15 +272,16 @@ impl Catalog {
         .bind(&id)
         .bind(name)
         .bind(name)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
         let resolved: String = sqlx::query_scalar(
             "SELECT id FROM named_voiceprints \
              WHERE name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1",
         )
         .bind(name)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(resolved)
     }
 
@@ -754,8 +759,12 @@ impl Catalog {
                 Ok(None) => {
                     // No voiceprint to enroll — undo the name we just wrote so a target
                     // with no capture isn't half-applied (display-named but unenrolled).
-                    self.set_speaker_name(recording_id, *speaker_label, "")
-                        .await?;
+                    // Best-effort like the Err branch: a failed undo must not return Err
+                    // with the name written but the target missing from `applied`, or the
+                    // caller won't know to refresh it.
+                    let _ = self
+                        .set_speaker_name(recording_id, *speaker_label, "")
+                        .await;
                 }
                 Err(e) => {
                     // Enrollment failed — roll back the name we just wrote, then

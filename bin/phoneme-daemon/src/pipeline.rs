@@ -1933,14 +1933,16 @@ pub(crate) async fn extract_entities_with(
                     .emit(DaemonEvent::EntitiesUpdated { id: id.clone() });
                 return None;
             }
-            // Record which model ran the extractor (the detail provenance line
-            // names it), once per run and only once we have entities to attribute
-            // to it — so the model column never disagrees with the stored set.
-            if let Err(e) = state.catalog.set_entities_model(id, &llm_cfg.model).await {
-                tracing::warn!(error = %e, "failed to persist entities model");
-            }
             match state.catalog.set_entities(id, &entities).await {
                 Ok(()) => {
+                    // Record which model ran the extractor (the detail provenance
+                    // line names it), only once the entities are stored — so the
+                    // model column never advances past the entities actually saved
+                    // (matches the tasks path). A failed store leaves the prior
+                    // entities and their model untouched.
+                    if let Err(e) = state.catalog.set_entities_model(id, &llm_cfg.model).await {
+                        tracing::warn!(error = %e, "failed to persist entities model");
+                    }
                     tracing::info!(id = %id.as_str(), count = entities.len(), "entities saved");
                     state
                         .events
@@ -4112,7 +4114,16 @@ pub async fn run(
     )
     .await;
 
-    let recording = state.catalog.get(&id).await?;
+    // Read the `in_place` flag to decide whether to type the transcript at the
+    // cursor. Best-effort: the transcript is already persisted above, so a
+    // transient catalog read failure here must NOT `?`-abort the run before the
+    // recording reaches Done / the inbox item is finished — a read error just
+    // skips typing (the text is safe in the library). Mirrors the narrow
+    // best-effort read `track_and_meeting` does before transcribing.
+    let recording = state.catalog.get(&id).await.unwrap_or_else(|e| {
+        tracing::warn!(id = %id.as_str(), error = %e, "in-place check: catalog read failed; skipping typing");
+        None
+    });
     if let Some(rec) = recording {
         if pipeline_should_type(&cfg.in_place, rec.in_place, recipe_routed, &transcript) {
             // Resolve how the text lands for the focused app captured at start: a

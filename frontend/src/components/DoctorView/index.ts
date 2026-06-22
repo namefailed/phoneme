@@ -54,13 +54,34 @@ export class DoctorViewElement extends LitElement {
   @state() private rebuild: "idle" | "confirm" | "running" = "idle";
   private rebuildRevert: number | null = null;
 
+  /** Escape leaves the view (matching the modal twin) — but first disarms a
+   *  staged destructive confirm, so a stray Esc can't skip the second click. */
+  private keyHandler = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    if (this.rebuild === "confirm") {
+      if (this.rebuildRevert) {
+        window.clearTimeout(this.rebuildRevert);
+        this.rebuildRevert = null;
+      }
+      this.rebuild = "idle";
+      return;
+    }
+    if (this.reimport === "confirm") {
+      this.reimport = "idle";
+      return;
+    }
+    this.onClose();
+  };
+
   connectedCallback() {
     super.connectedCallback();
+    document.addEventListener("keydown", this.keyHandler);
     void this.runChecks();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    document.removeEventListener("keydown", this.keyHandler);
     if (this.rebuildRevert) {
       window.clearTimeout(this.rebuildRevert);
       this.rebuildRevert = null;
@@ -118,7 +139,7 @@ export class DoctorViewElement extends LitElement {
         this.reimportFound = count;
         this.reimport = "confirm";
       } catch (e) {
-        showToast(`Re-import scan failed: ${e}`, "error");
+        showToast(`Re-import scan failed: ${errText(e)}`, "error");
         this.reimport = "idle";
       }
       return;
@@ -129,7 +150,7 @@ export class DoctorViewElement extends LitElement {
         const { count } = await reimportFromDisk(false);
         showToast(`Re-imported ${count} recording(s) from disk.`, "success");
       } catch (e) {
-        showToast(`Re-import failed: ${e}`, "error");
+        showToast(`Re-import failed: ${errText(e)}`, "error");
       }
       this.reimport = "idle";
       void this.runChecks();
@@ -164,7 +185,7 @@ export class DoctorViewElement extends LitElement {
           "success",
         );
       } catch (e) {
-        showToast(`Rebuild failed: ${e}`, "error");
+        showToast(`Rebuild failed: ${errText(e)}`, "error");
       }
       this.rebuild = "idle";
       void this.runChecks();
@@ -250,7 +271,7 @@ export class DoctorViewElement extends LitElement {
     try {
       await this.dispatchFix(action);
     } catch (e) {
-      console.error("Doctor fix action failed:", action, e);
+      showToast(`Fix failed: ${errText(e)}`, "error");
     } finally {
       this.runningFix = null;
     }
@@ -267,7 +288,7 @@ export class DoctorViewElement extends LitElement {
         await this.dispatchFix(action);
       } catch (e) {
         // Keep sweeping — one stubborn fix shouldn't block the rest.
-        console.error("Doctor fix action failed:", action, e);
+        showToast(`Fix failed: ${errText(e)}`, "error");
       }
     }
     this.runningFix = null;

@@ -393,7 +393,15 @@ impl CpalSource {
 
         // Raw samples (f32, interleaved at device format) → worker.
         let (raw_tx, mut raw_rx) = mpsc::channel::<Vec<f32>>(64);
-        // Pre-allocated buffers to prevent audio thread allocations.
+        // Pre-allocated buffers so the audio callback doesn't allocate. The pool
+        // holds exactly as many buffers as it's seeded with: the callback pulls
+        // one and the worker recycles it, conserving the count. `with_capacity`
+        // is a starting size — the first callback whose block is bigger grows its
+        // buffer once (on the worker's recycle, `clear()` keeps the grown
+        // capacity), so after warmup steady-state callbacks never reallocate. If
+        // a stalled-then-recovered consumer ever leaves more buffers than the
+        // channel holds, the recycle `try_send` drops the surplus rather than
+        // blocking the worker — the intentional safety valve.
         let (pool_tx, pool_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(64);
         for _ in 0..64 {
             let _ = pool_tx.try_send(Vec::with_capacity(4096));
@@ -709,17 +717,49 @@ impl CpalSource {
                 }
             }
 
-            // Flush the final partial chunk (zero-padded to one full chunk) so
-            // the trailing fraction of a second isn't dropped when capture stops.
+            // Flush the trailing fraction of a second left in the accumulator
+            // when capture stops. Without a resampler this is just the leftover
+            // mono samples. With one, `SincFixedIn` is stateful: after the last
+            // full chunk it still holds ~`output_delay()` output frames of
+            // already-accepted audio that only come out when fed more input. So
+            // feed the real (un-padded) partial via `process_partial` — which
+            // zero-pads *internally* without injecting silence into the signal —
+            // then drain the internal delay with `process_partial(None)`, and
+            // trim to the true expected length so the genuine tail survives and
+            // the resampler's latency padding isn't emitted as audible silence.
             if !accumulator.is_empty() {
-                let needed = chunk_frames * device_channels;
-                accumulator.resize(needed, 0.0);
                 let mono = downmix_to_mono_f32(&accumulator, device_channels);
                 let processed = if let Some(r) = resampler.as_mut() {
-                    r.process(&[mono], None)
-                        .ok()
-                        .and_then(|out| out.into_iter().next())
-                        .unwrap_or_default()
+                    let partial_frames = mono.len();
+                    // Output frames the partial input is worth, plus the delay
+                    // tail still trapped inside the resampler.
+                    let want = frames_to_canonical(partial_frames, device_sample_rate, target_rate)
+                        + r.output_delay();
+                    let mut tail = match r.process_partial(Some(&[mono]), None) {
+                        Ok(out) => out.into_iter().next().unwrap_or_default(),
+                        Err(e) => {
+                            tracing::warn!("resample flush failed: {e}");
+                            Vec::new()
+                        }
+                    };
+                    // Drain with zero input until we've recovered the delay tail
+                    // (bounded so a misbehaving resampler can't spin forever).
+                    let mut guard = 0;
+                    while tail.len() < want && guard < 4 {
+                        guard += 1;
+                        match r.process_partial::<&[f32]>(None, None) {
+                            Ok(out) => match out.into_iter().next() {
+                                Some(more) if !more.is_empty() => tail.extend(more),
+                                _ => break,
+                            },
+                            Err(e) => {
+                                tracing::warn!("resample flush drain failed: {e}");
+                                break;
+                            }
+                        }
+                    }
+                    tail.truncate(want);
+                    tail
                 } else {
                     mono
                 };
@@ -931,5 +971,64 @@ mod tests {
             .err()
             .expect("system_audio should error off Windows");
         assert!(format!("{err}").contains("only available on Windows"));
+    }
+
+    #[test]
+    fn resampler_flush_recovers_the_delay_tail() {
+        // Drive a resampler exactly the way the worker does (same params, same
+        // 4096-frame chunking) over a 48 kHz → 16 kHz stream, then flush the
+        // trailing partial via process_partial + drain. The total output must
+        // land within one chunk of ceil(input * ratio): the old single-process
+        // flush truncated ~output_delay() frames of genuine tail off the end of
+        // every resampled recording.
+        use rubato::{
+            Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
+            WindowFunction,
+        };
+        let device_rate = 48_000u32;
+        let target_rate = 16_000u32;
+        let chunk_frames = 4096usize;
+        let params = SincInterpolationParameters {
+            sinc_len: 128,
+            f_cutoff: 0.95,
+            interpolation: SincInterpolationType::Linear,
+            oversampling_factor: 128,
+            window: WindowFunction::BlackmanHarris2,
+        };
+        let ratio = target_rate as f64 / device_rate as f64;
+        let mut r =
+            SincFixedIn::<f32>::new(ratio, 1.0, params, chunk_frames, 1).expect("build resampler");
+
+        // ~2.5 chunks of mono input: two full chunks plus a partial remainder.
+        let total_in = chunk_frames * 2 + 1000;
+        let input: Vec<f32> = (0..total_in).map(|i| (i as f32 * 0.001).sin()).collect();
+
+        let mut out_len = 0usize;
+        let mut idx = 0usize;
+        while idx + chunk_frames <= input.len() {
+            let chunk = &input[idx..idx + chunk_frames];
+            out_len += r.process(&[chunk], None).unwrap()[0].len();
+            idx += chunk_frames;
+        }
+        // Flush the partial remainder, then drain the internal delay.
+        let partial = &input[idx..];
+        out_len += r.process_partial(Some(&[partial]), None).unwrap()[0].len();
+        loop {
+            let drained = r.process_partial::<&[f32]>(None, None).unwrap()[0].len();
+            if drained == 0 {
+                break;
+            }
+            out_len += drained;
+            if out_len >= total_in * target_rate as usize / device_rate as usize {
+                break;
+            }
+        }
+
+        let expected = (total_in as f64 * ratio).ceil() as usize;
+        let diff = out_len.abs_diff(expected);
+        assert!(
+            diff <= chunk_frames,
+            "resampled output {out_len} should be within one chunk of expected {expected} (diff {diff})"
+        );
     }
 }

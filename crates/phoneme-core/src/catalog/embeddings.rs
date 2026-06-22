@@ -408,6 +408,13 @@ impl Catalog {
     /// Semantic search across embedded recordings, returning the top matches as
     /// `(id, cosine_score)` sorted high→low.
     ///
+    /// LEGACY / not the production search. This scans ONLY the `embeddings`
+    /// (whole-recording) corpus, so on a chunk-embedded library — where the
+    /// backfill drains `embeddings` and per-chunk vectors carry the recall — it
+    /// returns near-nothing. The user-facing `SemanticSearch` request routes to
+    /// [`Self::hybrid_search`] (vector + lexical fusion over chunk vectors); the
+    /// only callers left here are tests. Do NOT wire a user-facing search to this.
+    ///
     /// - **Dimension safety:** an embedding whose length doesn't match the query
     ///   vector is skipped — cosine over mismatched dimensions is meaningless and
     ///   would otherwise score on a silently-truncated prefix.
@@ -1284,7 +1291,6 @@ impl Catalog {
     /// and prunes any rows past the new chunk count so a shrunk recording doesn't
     /// leave dangling keys.
     async fn allocate_ann_keys(&self, id: &RecordingId, chunk_count: usize) -> Result<Vec<u64>> {
-        let mut keys = Vec::with_capacity(chunk_count);
         let mut tx = self.pool.begin().await?;
         // Drop rows for chunk indices that no longer exist (recording shrank).
         sqlx::query("DELETE FROM ann_keys WHERE recording_id = ? AND chunk_index >= ?")
@@ -1292,23 +1298,40 @@ impl Catalog {
             .bind(chunk_count as i64)
             .execute(&mut *tx)
             .await?;
-        for idx in 0..chunk_count {
-            // Insert-or-ignore keeps an existing key stable across re-embeds.
-            sqlx::query("INSERT OR IGNORE INTO ann_keys (recording_id, chunk_index) VALUES (?, ?)")
-                .bind(id.as_str())
-                .bind(idx as i64)
-                .execute(&mut *tx)
-                .await?;
-            let key: i64 = sqlx::query_scalar(
-                "SELECT key FROM ann_keys WHERE recording_id = ? AND chunk_index = ?",
-            )
-            .bind(id.as_str())
-            .bind(idx as i64)
-            .fetch_one(&mut *tx)
-            .await?;
-            keys.push(key as u64);
+        if chunk_count == 0 {
+            tx.commit().await?;
+            return Ok(Vec::new());
         }
+        // One multi-row INSERT OR IGNORE instead of a statement per chunk: a chunk
+        // that already has a key keeps it (the UNIQUE upsert), a missing one gets
+        // allocated. This collapses 2*chunk_count round-trips (insert+select each)
+        // into two statements, which matters on a full reindex that calls this per
+        // recording across the whole library.
+        let placeholders = vec!["(?, ?)"; chunk_count].join(", ");
+        let insert = format!(
+            "INSERT OR IGNORE INTO ann_keys (recording_id, chunk_index) VALUES {placeholders}"
+        );
+        let mut q = sqlx::query(&insert);
+        for idx in 0..chunk_count {
+            q = q.bind(id.as_str()).bind(idx as i64);
+        }
+        q.execute(&mut *tx).await?;
+        // Read every key back in one SELECT. After the tail prune + insert above,
+        // exactly chunk_index 0..chunk_count exist for this recording; map each
+        // row's key into its chunk position so the returned Vec is in chunk order.
+        let rows: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT key, chunk_index FROM ann_keys WHERE recording_id = ? ORDER BY chunk_index",
+        )
+        .bind(id.as_str())
+        .fetch_all(&mut *tx)
+        .await?;
         tx.commit().await?;
+        let mut keys = vec![0u64; chunk_count];
+        for (key, chunk_index) in rows {
+            if let Some(slot) = keys.get_mut(chunk_index as usize) {
+                *slot = key as u64;
+            }
+        }
         Ok(keys)
     }
 
@@ -1649,16 +1672,26 @@ impl Catalog {
         count as usize
     }
 
-    /// The embedding dimension implied by the stored chunk vectors (length of the
-    /// first well-formed blob), or `None` when there are no chunks.
+    /// The embedding dimension implied by the stored chunk vectors — the MODAL
+    /// (most common) blob length, not an arbitrary row — or `None` when there are
+    /// no well-formed chunks. A mixed-dimension library (mid model-change, before a
+    /// `clear_all_embeddings` + re-embed) holds blobs of two lengths; picking the
+    /// majority keeps this dim, `ann_indexable_count`, and the actual build in
+    /// agreement, instead of an unordered `LIMIT 1` occasionally returning the
+    /// minority dimension and triggering a rebuild every startup.
     async fn ann_dim_from_sqlite(&self) -> Option<usize> {
-        let bytes: Option<Vec<u8>> =
-            sqlx::query_scalar("SELECT vector FROM embedding_chunks LIMIT 1")
-                .fetch_optional(&self.pool)
-                .await
-                .ok()
-                .flatten();
-        bytes.and_then(|b| (b.len().is_multiple_of(4) && !b.is_empty()).then_some(b.len() / 4))
+        let len: Option<i64> = sqlx::query_scalar(
+            "SELECT LENGTH(vector) FROM embedding_chunks \
+             GROUP BY LENGTH(vector) ORDER BY COUNT(*) DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten();
+        len.and_then(|l| {
+            let l = l as usize;
+            (l.is_multiple_of(4) && l != 0).then_some(l / 4)
+        })
     }
 
     /// Persist the warm index to its sidecar if one is present. The daemon calls

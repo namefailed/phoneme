@@ -147,19 +147,74 @@ export class FirstRunWizardElement extends LitElement {
       : ALL_STEPS;
   }
 
+  /** True when a step has nothing for the user to do, so navigation should pass
+   *  straight through it (in whichever direction we're moving) instead of the
+   *  step's render() scheduling a re-entrant go() as a side effect. */
+  private isEmptyStep(step: WizardStep): boolean {
+    if (step === "configure") {
+      return !this.config._setup_whisper && !this.config._setup_ollama
+        && !this.config.semantic_search?.enabled && !this.config._setup_diarization;
+    }
+    if (step === "connect") {
+      // Only shown when a chosen feature needs a cloud key.
+      return this.config._setup_whisper && this.config._setup_ollama;
+    }
+    return false;
+  }
+
   private go(direction: "next" | "back") {
     const seq = this.steps();
-    const idx = seq.indexOf(this.step);
-    const ni = direction === "next" ? Math.min(idx + 1, seq.length - 1) : Math.max(idx - 1, 0);
+    let ni = seq.indexOf(this.step);
+    const last = seq.length - 1;
+    // Step once, then keep stepping over any no-op step in the same direction so
+    // an empty Configure/Connect is skipped from navigation, not from render.
+    do {
+      ni = direction === "next" ? Math.min(ni + 1, last) : Math.max(ni - 1, 0);
+    } while (ni > 0 && ni < last && this.isEmptyStep(seq[ni]));
     this.step = seq[ni];
     // Run the installs when entering the configure step going FORWARD only — a
     // back-nav onto it must not kick off the downloads again.
     if (direction === "next" && this.step === "configure") {
       this.runConfigureStep();
     }
+    // Seed the live-preview defaults on first FORWARD entry only — never from
+    // render(), so merely viewing the step (or a back-nav) can't silently turn
+    // preview on in the persisted config.
+    if (direction === "next" && this.step === "preview") {
+      this.seedPreviewDefaults();
+    }
   }
 
-  private async skip() {
+  /** First-time live-preview defaults: enable the preview and, if a small model
+   *  is already on disk, drive it from a dedicated local server (the snappiest
+   *  option). Never auto-downloads — the user opts into that by choosing
+   *  "Dedicated local" explicitly. Idempotent via the `_setup_preview` guard. */
+  private seedPreviewDefaults() {
+    if (this.config._setup_preview !== undefined) return;
+    if (!this.config.recording) this.config.recording = {};
+    this.config._setup_preview = true;
+    this.config.recording.streaming_preview = true;
+    const ready =
+      this.downloadedPath("ggml-tiny.en.bin") ??
+      this.downloadedPath("ggml-base.en.bin") ??
+      this.downloadedPath("ggml-small.en.bin");
+    if (ready) {
+      this.config.preview_whisper = {
+        ...this.config.whisper,
+        provider: "local",
+        mode: "bundled_model",
+        model_path: ready,
+        bundled_server_port: this.mainPreviewPort() + 1,
+        api_key: "",
+      };
+    }
+  }
+
+  /** Strip the wizard's scratch keys, persist the draft config, and hand back to
+   *  App. The `_setup_*` / `_*_choice` keys are UI-only and must never reach
+   *  disk. (Real secrets in this masked snapshot are safe: write_config restores
+   *  any still-masked key from the on-disk config.) */
+  private async persistAndComplete() {
     try {
       const cleanConfig = { ...this.config };
       delete cleanConfig._setup_whisper;
@@ -177,23 +232,8 @@ export class FirstRunWizardElement extends LitElement {
     }
   }
 
-  private async finish() {
-    try {
-      const cleanConfig = { ...this.config };
-      delete cleanConfig._setup_whisper;
-      delete cleanConfig._setup_ollama;
-      delete cleanConfig._setup_diarization;
-      delete cleanConfig._whisper_model_choice;
-      delete cleanConfig._ollama_model_choice;
-      delete cleanConfig._setup_native_streaming;
-      delete cleanConfig._setup_preview;
-
-      await invoke("write_config", { config: cleanConfig });
-      this.onComplete();
-    } catch (e) {
-      showToast(`Failed to save setup: ${errText(e)}`, "error");
-    }
-  }
+  private skip = () => this.persistAndComplete();
+  private finish = () => this.persistAndComplete();
 
   private renderProgress() {
     const seq = this.steps();
@@ -464,7 +504,7 @@ export class FirstRunWizardElement extends LitElement {
           </div>
           ${this.config._setup_ollama ? html`
             <div class="wizard-feature-body">
-              <select .value=${this.config._ollama_model_choice} @change=${(e: Event) => { this.config._ollama_model_choice = (e.target as HTMLSelectElement).value; }}
+              <select .value=${this.config._ollama_model_choice} @change=${(e: Event) => { this.config._ollama_model_choice = (e.target as HTMLSelectElement).value; this.requestUpdate(); }}
                 style="width:100%; padding:8px 10px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default);">
                 <option value="llama3.2:3b">Llama 3.2 3B · fastest · 8 GB RAM</option>
                 <option value="llama3.1:8b">Llama 3.1 8B · balanced · 16 GB RAM</option>
@@ -600,6 +640,20 @@ export class FirstRunWizardElement extends LitElement {
     }
   }
 
+  /** Poll wizard_ping_ollama every 2s for up to `tries` attempts (~3 min at 90),
+   *  each catch-guarded so a transient failure never throws out into a
+   *  half-configured state. Shows a live countdown in downloadStatus so the
+   *  screen never looks frozen. Returns true as soon as Ollama answers. */
+  private async waitForOllama(tries: number): Promise<boolean> {
+    for (let i = 0; i < tries; i++) {
+      const remaining = Math.ceil(((tries - i) * 2000) / 1000);
+      this.downloadStatus = `Waiting for Ollama to start… (up to ${remaining}s)`;
+      await new Promise(r => setTimeout(r, 2000));
+      if (await invoke<boolean>("wizard_ping_ollama").catch(() => false)) return true;
+    }
+    return false;
+  }
+
   private async doOllama() {
     this.downloadTitle = "Ollama Setup";
     this.downloadSubtitle = "Checking if Ollama is running...";
@@ -614,17 +668,12 @@ export class FirstRunWizardElement extends LitElement {
       if (deps.ollama) {
         this.downloadSubtitle = "Ollama is installed but not running. Please start Ollama manually!";
         this.progressValue = null;
-        this.downloadStatus = "Waiting for Ollama to start...";
 
         // Poll until Ollama answers — bounded (~3 min) so the wizard can never
         // hang, with each ping catch-guarded so a transient failure doesn't throw
         // out into a half-configured state. On timeout we proceed; the model pull
         // below surfaces a clear error if Ollama still isn't reachable.
-        let ollamaUp = false;
-        for (let i = 0; i < 90 && !ollamaUp; i++) {
-          await new Promise(r => setTimeout(r, 2000));
-          ollamaUp = await invoke<boolean>("wizard_ping_ollama").catch(() => false);
-        }
+        const ollamaUp = await this.waitForOllama(90);
         if (!ollamaUp) this.downloadStatus = "Ollama didn't come up in time — continuing; you can finish in Settings later.";
       } else {
         this.downloadSubtitle = "Downloading Ollama installer...";
@@ -650,16 +699,11 @@ export class FirstRunWizardElement extends LitElement {
 
         this.downloadSubtitle = "Running Ollama installer. Please complete the setup window!";
         this.progressValue = null;
-        this.downloadStatus = "Waiting for Ollama to start...";
 
         await invoke("wizard_run_installer", { path: installerPath });
 
         // Bounded, catch-guarded poll (see above) — never hang the wizard.
-        let ollamaUp = false;
-        for (let i = 0; i < 90 && !ollamaUp; i++) {
-          await new Promise(r => setTimeout(r, 2000));
-          ollamaUp = await invoke<boolean>("wizard_ping_ollama").catch(() => false);
-        }
+        const ollamaUp = await this.waitForOllama(90);
         if (!ollamaUp) this.downloadStatus = "Ollama didn't come up in time — continuing; you can finish in Settings later.";
       }
     }
@@ -742,9 +786,10 @@ export class FirstRunWizardElement extends LitElement {
   }
 
   private renderConfigure() {
-    if (!this.config._setup_whisper && !this.config._setup_ollama && !this.config.semantic_search?.enabled && !this.config._setup_diarization) {
-      setTimeout(() => this.go("next"), 0);
-      return html`<div>Skipping downloads...</div>`;
+    // Nothing to install — go() now skips this step during navigation, so we
+    // never normally render here; show a quiet placeholder without re-navigating.
+    if (this.isEmptyStep("configure")) {
+      return html`<div class="wizard-body"><p class="wizard-subtitle">Nothing to download — everything's already set up.</p></div>`;
     }
     return html`
       <div class="wizard-body">
@@ -800,9 +845,9 @@ export class FirstRunWizardElement extends LitElement {
     const needsStt = !c._setup_whisper;
     const offerCleanup = !c._setup_ollama;
 
-    // Nothing cloud to set up — everything is local. Auto-advance.
+    // Nothing cloud to set up — everything is local. go() skips this step during
+    // navigation now, so this is just a quiet placeholder (no re-navigation).
     if (!needsStt && !offerCleanup) {
-      setTimeout(() => this.go("next"), 0);
       return html`<div class="wizard-body"><p class="wizard-subtitle">All local — no API keys needed.</p></div>`;
     }
 
@@ -1035,29 +1080,8 @@ export class FirstRunWizardElement extends LitElement {
   private renderPreview() {
     if (!this.config.recording) this.config.recording = {};
     if (!this.config.interface) this.config.interface = {};
-    // First time on this step, pick a sensible default: enable the preview and,
-    // if a small model is already on disk, drive it from a dedicated local
-    // server (the recommended, snappiest option). We never auto-download here —
-    // the user opts into that by choosing "Dedicated local" explicitly.
-    if (this.config._setup_preview === undefined) {
-      this.config._setup_preview = true;
-      this.config.recording.streaming_preview = true;
-      const ready =
-        this.downloadedPath("ggml-tiny.en.bin") ??
-        this.downloadedPath("ggml-base.en.bin") ??
-        this.downloadedPath("ggml-small.en.bin");
-      // Set the default source inline (no requestUpdate during render).
-      if (ready) {
-        this.config.preview_whisper = {
-          ...this.config.whisper,
-          provider: "local",
-          mode: "bundled_model",
-          model_path: ready,
-          bundled_server_port: this.mainPreviewPort() + 1,
-          api_key: "",
-        };
-      }
-    }
+    // Defaults are seeded once on forward entry (seedPreviewDefaults via go()),
+    // never here — so viewing this step can't mutate the persisted config.
 
     const enabled = !!this.config.recording?.streaming_preview;
     const overlay = !!this.config.interface?.preview_overlay;
@@ -1523,7 +1547,7 @@ export class FirstRunWizardElement extends LitElement {
     if (!this.config) return html`<div class="wizard-shell">Loading...</div>`;
 
     return html`
-      <div class="wizard-shell">
+      <div class="wizard-shell" role="region" aria-label="Phoneme setup">
         <div class="wizard-header">
           ${this.renderProgress()}
         </div>
