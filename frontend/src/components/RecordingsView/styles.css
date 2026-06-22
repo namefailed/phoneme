@@ -762,6 +762,70 @@ mark.search-hit {
 .tag-chip--entity[data-entity-kind="org"]    { --chip-bg: color-mix(in srgb, var(--ok) 15%, transparent); --chip-fg: var(--ok); --chip-bd: color-mix(in srgb, var(--ok) 32%, transparent); }
 .tag-chip--entity[data-entity-kind="topic"]  { --chip-bg: color-mix(in srgb, var(--peach) 16%, transparent); --chip-fg: var(--peach); --chip-bd: color-mix(in srgb, var(--peach) 32%, transparent); }
 .tag-chip--entity[data-entity-kind="term"]   { --chip-bg: color-mix(in srgb, var(--accent) 15%, transparent); --chip-fg: var(--accent); --chip-bd: color-mix(in srgb, var(--accent) 32%, transparent); }
+/* Per-recording entity editing: a ✕ delete that surfaces on chip hover, the
+   double-click-to-edit value, the inline edit field, and the + Add form. */
+.tag-chip--entity { gap: 5px; }
+.tag-chip--entity .ent-val { cursor: text; }
+.tag-chip--entity .ent-del {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85em;
+  line-height: 1;
+  padding: 0;
+  opacity: 0;
+  transition: opacity var(--ui-motion-fast) ease-out;
+}
+.tag-chip--entity:hover .ent-del { opacity: 0.65; }
+.tag-chip--entity .ent-del:hover { opacity: 1; color: var(--err); }
+.entity-edit-input {
+  font: inherit;
+  font-size: 0.7857rem;
+  color: var(--fg-default);
+  background: var(--bg-surface);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 2px 9px;
+  min-width: 90px;
+}
+.entity-edit-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.entity-add-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+.entity-add-kind {
+  font: inherit;
+  font-size: 0.7857rem;
+  color: var(--fg-default);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.entity-add-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.8571rem;
+  color: var(--fg-default);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+.entity-add-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.enrich-empty-inline { font-size: 0.7857rem; color: var(--fg-faded); }
 /* Tasks: a clean checkable list — accent checkbox, readable rows, done dims +
    strikes; rows get a hairline hover like the tag-dropdown items. */
 .tasks-list {

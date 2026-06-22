@@ -1205,6 +1205,73 @@ pub async fn reorder_tasks(
     forward(&bridge, Request::ReorderTasks { id, task_ids }).await
 }
 
+/// Add a user-curated entity to a recording. Emits `EntitiesUpdated`.
+#[tauri::command]
+pub async fn add_entity(
+    bridge: Br<'_>,
+    id: String,
+    kind: String,
+    value: String,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::AddEntity { id, kind, value }).await
+}
+
+/// Edit one entity in place (fix kind/value), keyed by its current (kind, value).
+#[tauri::command]
+pub async fn update_entity(
+    bridge: Br<'_>,
+    id: String,
+    kind: String,
+    value: String,
+    new_kind: String,
+    new_value: String,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::UpdateEntity {
+            id,
+            kind,
+            value,
+            new_kind,
+            new_value,
+        },
+    )
+    .await
+}
+
+/// Delete one entity from a recording, keyed by (kind, value).
+#[tauri::command]
+pub async fn delete_entity(
+    bridge: Br<'_>,
+    id: String,
+    kind: String,
+    value: String,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::DeleteEntity { id, kind, value }).await
+}
+
+/// Library-wide entity merge: fold `from_values` of `kind` into `to_value`.
+#[tauri::command]
+pub async fn merge_entities(
+    bridge: Br<'_>,
+    kind: String,
+    from_values: Vec<String>,
+    to_value: String,
+) -> Result<Value, CommandError> {
+    forward(
+        &bridge,
+        Request::MergeEntities {
+            kind,
+            from_values,
+            to_value,
+        },
+    )
+    .await
+}
+
 /// Approve one suggested tag (create if needed + attach + drop the suggestion).
 #[tauri::command]
 pub async fn approve_tag_suggestion(

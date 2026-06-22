@@ -1110,6 +1110,36 @@ export async function reorderTasks(id: string, taskIds: number[]): Promise<void>
   await tauriInvoke("reorder_tasks", { id, taskIds });
 }
 
+/** Add a user-curated entity to a recording (survives re-extraction). */
+export async function addEntity(id: string, kind: string, value: string): Promise<void> {
+  await tauriInvoke("add_entity", { id, kind, value });
+}
+
+/** Edit one entity in place (fix its kind/value), keyed by its current pair. */
+export async function updateEntity(
+  id: string,
+  kind: string,
+  value: string,
+  newKind: string,
+  newValue: string,
+): Promise<void> {
+  await tauriInvoke("update_entity", { id, kind, value, newKind, newValue });
+}
+
+/** Delete one entity from a recording, keyed by (kind, value). */
+export async function deleteEntity(id: string, kind: string, value: string): Promise<void> {
+  await tauriInvoke("delete_entity", { id, kind, value });
+}
+
+/** Library-wide merge: fold variant values of a kind into a canonical value. */
+export async function mergeEntities(
+  kind: string,
+  fromValues: string[],
+  toValue: string,
+): Promise<void> {
+  await tauriInvoke("merge_entities", { kind, fromValues, toValue });
+}
+
 /** Approve one suggested tag: creates the tag if needed, attaches it, and
  *  removes it from the suggestion list. Returns the (created) tag. */
 export async function approveTagSuggestion(id: string, name: string): Promise<Tag> {

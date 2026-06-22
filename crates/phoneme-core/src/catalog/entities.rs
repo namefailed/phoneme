@@ -9,20 +9,21 @@
 use super::*;
 
 impl Catalog {
-    /// Replace a recording's stored entities wholesale: delete the existing rows,
-    /// then bulk-insert `entities` (de-duplicated by the table's `(recording_id,
-    /// kind, value)` UNIQUE via `INSERT OR IGNORE`). An empty slice clears them.
-    /// Mirrors [`Catalog::set_tag_suggestions`] — one transaction so a partial
-    /// write can't leave a recording with a mix of old and new entities.
+    /// Replace a recording's LLM-extracted entities: delete the existing `'llm'`
+    /// rows (user-curated `source='manual'` entities survive a re-run), then
+    /// bulk-insert `entities` as `'llm'` (de-duplicated by the table's
+    /// `(recording_id, kind, value)` UNIQUE via `INSERT OR IGNORE`). An empty
+    /// slice clears the extracted entities (manual ones stay). One transaction so
+    /// a partial write can't leave a recording with a mix of old and new.
     pub async fn set_entities(&self, id: &RecordingId, entities: &[Entity]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM entities WHERE recording_id = ?")
+        sqlx::query("DELETE FROM entities WHERE recording_id = ? AND source = 'llm'")
             .bind(id.as_str())
             .execute(&mut *tx)
             .await?;
         for e in entities {
             sqlx::query(
-                "INSERT OR IGNORE INTO entities (recording_id, kind, value) VALUES (?, ?, ?)",
+                "INSERT OR IGNORE INTO entities (recording_id, kind, value, source) VALUES (?, ?, ?, 'llm')",
             )
             .bind(id.as_str())
             .bind(&e.kind)
@@ -32,6 +33,100 @@ impl Catalog {
         }
         tx.commit().await?;
         Ok(())
+    }
+
+    /// Add a user-curated ('manual') entity to a recording; it survives later
+    /// re-extraction. `INSERT OR IGNORE`, so re-adding an existing `(kind, value)`
+    /// is a no-op. Returns the affected row count (0 = already present).
+    pub async fn add_entity(&self, id: &RecordingId, kind: &str, value: &str) -> Result<u64> {
+        let res = sqlx::query(
+            "INSERT OR IGNORE INTO entities (recording_id, kind, value, source) VALUES (?, ?, ?, 'manual')",
+        )
+        .bind(id.as_str())
+        .bind(kind)
+        .bind(value)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
+
+    /// Edit one entity in place (fix a wrong kind/value), scoped to its recording
+    /// and keyed by its current `(kind, value)`. Marks it `'manual'` so the fix
+    /// survives re-extraction. `UPDATE OR IGNORE` so renaming onto an entity the
+    /// recording already has is a no-op rather than a UNIQUE violation. Returns
+    /// the affected row count (0 = not found / would-collide).
+    pub async fn update_entity(
+        &self,
+        id: &RecordingId,
+        kind: &str,
+        value: &str,
+        new_kind: &str,
+        new_value: &str,
+    ) -> Result<u64> {
+        let res = sqlx::query(
+            "UPDATE OR IGNORE entities SET kind = ?, value = ?, source = 'manual' \
+             WHERE recording_id = ? AND kind = ? AND value = ?",
+        )
+        .bind(new_kind)
+        .bind(new_value)
+        .bind(id.as_str())
+        .bind(kind)
+        .bind(value)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
+
+    /// Delete one entity from a recording, keyed by `(kind, value)`. Returns the
+    /// affected row count (0 = not found). Works for both 'llm' and 'manual' rows.
+    pub async fn delete_entity(&self, id: &RecordingId, kind: &str, value: &str) -> Result<u64> {
+        let res =
+            sqlx::query("DELETE FROM entities WHERE recording_id = ? AND kind = ? AND value = ?")
+                .bind(id.as_str())
+                .bind(kind)
+                .bind(value)
+                .execute(&self.pool)
+                .await?;
+        Ok(res.rows_affected())
+    }
+
+    /// Library-wide merge: fold every `from_values` entity of `kind` into
+    /// `to_value` (e.g. "ACME", "acme corp" → "Acme Corp"). Across every recording
+    /// it renames the variant to the canonical value and marks it `'manual'` so the
+    /// merge sticks through re-extraction; a recording that already has both keeps
+    /// one (the `UPDATE OR IGNORE` skips the dup, then the leftover variant row is
+    /// deleted). One transaction. Returns how many rows were renamed.
+    pub async fn merge_entities(
+        &self,
+        kind: &str,
+        from_values: &[String],
+        to_value: &str,
+    ) -> Result<u64> {
+        let mut tx = self.pool.begin().await?;
+        let mut renamed = 0u64;
+        for from in from_values {
+            if from == to_value {
+                continue;
+            }
+            let r = sqlx::query(
+                "UPDATE OR IGNORE entities SET value = ?, source = 'manual' WHERE kind = ? AND value = ?",
+            )
+            .bind(to_value)
+            .bind(kind)
+            .bind(from)
+            .execute(&mut *tx)
+            .await?;
+            renamed += r.rows_affected();
+            // Drop any variant rows the OR IGNORE skipped (recording already had
+            // the canonical value), so the old name disappears everywhere.
+            sqlx::query("DELETE FROM entities WHERE kind = ? AND value = ?")
+                .bind(kind)
+                .bind(from)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(renamed)
     }
 
     /// Record which LLM model the entity-extraction step used for this recording

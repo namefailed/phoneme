@@ -1181,6 +1181,58 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        Request::AddEntity { id, kind, value } => {
+            match state.catalog.add_entity(&id, &kind, &value).await {
+                Ok(_) => {
+                    state.events.emit(DaemonEvent::EntitiesUpdated { id });
+                    ok_null()
+                }
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::UpdateEntity {
+            id,
+            kind,
+            value,
+            new_kind,
+            new_value,
+        } => {
+            match state
+                .catalog
+                .update_entity(&id, &kind, &value, &new_kind, &new_value)
+                .await
+            {
+                Ok(_) => {
+                    state.events.emit(DaemonEvent::EntitiesUpdated { id });
+                    ok_null()
+                }
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::DeleteEntity { id, kind, value } => {
+            match state.catalog.delete_entity(&id, &kind, &value).await {
+                Ok(_) => {
+                    state.events.emit(DaemonEvent::EntitiesUpdated { id });
+                    ok_null()
+                }
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::MergeEntities {
+            kind,
+            from_values,
+            to_value,
+        } => match state
+            .catalog
+            .merge_entities(&kind, &from_values, &to_value)
+            .await
+        {
+            Ok(renamed) => {
+                state.events.emit(DaemonEvent::EntitiesMerged { renamed });
+                ok_null()
+            }
+            Err(e) => err_response(&e),
+        },
         Request::ApproveTagSuggestion { id, name } => {
             // Create-or-fetch the tag, attach it, then drop the suggestion.
             match state.catalog.add_tag(&name, None).await {

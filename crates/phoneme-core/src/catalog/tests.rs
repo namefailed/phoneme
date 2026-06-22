@@ -2317,6 +2317,105 @@ async fn reorder_tasks_sets_the_user_order() {
 }
 
 #[tokio::test]
+async fn add_entity_survives_reextraction_and_delete_is_scoped() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = embedded_recording(None);
+    db.insert(&r).await.unwrap();
+    db.set_entities(
+        &r.id,
+        &[Entity {
+            kind: "person".into(),
+            value: "Ada".into(),
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(db.add_entity(&r.id, "org", "ACME").await.unwrap(), 1);
+
+    // Re-extraction replaces only the LLM rows; the manual entity stays.
+    db.set_entities(
+        &r.id,
+        &[Entity {
+            kind: "person".into(),
+            value: "Grace".into(),
+        }],
+    )
+    .await
+    .unwrap();
+    let vals: Vec<String> = db
+        .list_entities(&r.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|e| e.value)
+        .collect();
+    assert!(
+        vals.iter().any(|v| v == "ACME"),
+        "manual entity survives re-extraction"
+    );
+    assert!(vals.iter().any(|v| v == "Grace"));
+    assert!(!vals.iter().any(|v| v == "Ada"), "old LLM entity replaced");
+
+    // Delete is keyed by (kind, value).
+    assert_eq!(db.delete_entity(&r.id, "org", "ACME").await.unwrap(), 1);
+    assert!(!db
+        .list_entities(&r.id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|e| e.value == "ACME"));
+}
+
+#[tokio::test]
+async fn merge_entities_folds_variants_across_the_library() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let a = embedded_recording(None);
+    let b = embedded_recording(None);
+    db.insert(&a).await.unwrap();
+    db.insert(&b).await.unwrap();
+    db.set_entities(
+        &a.id,
+        &[Entity {
+            kind: "org".into(),
+            value: "ACME".into(),
+        }],
+    )
+    .await
+    .unwrap();
+    db.set_entities(
+        &b.id,
+        &[
+            Entity {
+                kind: "org".into(),
+                value: "acme corp".into(),
+            },
+            Entity {
+                kind: "org".into(),
+                value: "Acme Corp".into(),
+            },
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Fold both variants into the canonical "Acme Corp".
+    db.merge_entities("org", &["ACME".into(), "acme corp".into()], "Acme Corp")
+        .await
+        .unwrap();
+
+    let facet: Vec<_> = db
+        .entity_facets()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|f| f.kind == "org")
+        .collect();
+    assert_eq!(facet.len(), 1, "variants fold into one facet row");
+    assert_eq!(facet[0].value, "Acme Corp");
+    assert_eq!(facet[0].count, 2, "both recordings count once");
+}
+
+#[tokio::test]
 async fn retention_audio_only_keeps_rows_and_is_idempotent() {
     // delete_audio = true: the WAV path is returned for deletion and blanked on
     // the row, but the row itself (transcript, metadata) survives, and a second

@@ -910,6 +910,53 @@ pub enum Request {
         /// The task row ids in the desired order.
         task_ids: Vec<i64>,
     },
+    /// Add a user-curated entity to a recording. Survives re-extraction (only LLM
+    /// rows are replaced). Ok `null`; emits [`DaemonEvent::EntitiesUpdated`]. GUI
+    /// Entity manager add.
+    AddEntity {
+        /// The recording to add the entity to.
+        id: RecordingId,
+        /// The entity class (person / org / topic / term).
+        kind: String,
+        /// The entity value.
+        value: String,
+    },
+    /// Edit one entity in place (fix a wrong kind/value), scoped to its recording
+    /// and keyed by its current `(kind, value)`. Marks it manual so the fix
+    /// survives re-extraction. Ok `null`; emits [`DaemonEvent::EntitiesUpdated`].
+    UpdateEntity {
+        /// The recording the entity belongs to.
+        id: RecordingId,
+        /// The current kind.
+        kind: String,
+        /// The current value.
+        value: String,
+        /// The new kind.
+        new_kind: String,
+        /// The new value.
+        new_value: String,
+    },
+    /// Delete one entity from a recording, keyed by `(kind, value)`. Ok `null`;
+    /// emits [`DaemonEvent::EntitiesUpdated`].
+    DeleteEntity {
+        /// The recording the entity belongs to.
+        id: RecordingId,
+        /// The entity kind.
+        kind: String,
+        /// The entity value.
+        value: String,
+    },
+    /// Library-wide merge: fold every `from_values` entity of `kind` into
+    /// `to_value` across all recordings. Ok `null`; emits
+    /// [`DaemonEvent::EntitiesMerged`]. GUI Entity manager merge.
+    MergeEntities {
+        /// The entity class the merge applies within.
+        kind: String,
+        /// The variant values to fold into `to_value`.
+        from_values: Vec<String>,
+        /// The canonical value the variants become.
+        to_value: String,
+    },
     /// Approve one suggested tag: create the tag if needed, attach it, and
     /// remove the name from the recording's suggestion list. Ok = the tag
     /// object `{"id":n,"name":…,"color":…}`; emits
@@ -1982,6 +2029,14 @@ pub enum DaemonEvent {
     AllTagSuggestionsCleared {
         /// How many suggestions were dropped library-wide.
         cleared: u64,
+    },
+    /// A library-wide entity merge folded variant values into a canonical one
+    /// (the result of `MergeEntities`). Views that browse entities (the sidebar
+    /// facet, the Entity manager, an open recording's chips) refetch. Library-wide
+    /// (no recording id), mirroring [`DaemonEvent::AllTagSuggestionsCleared`].
+    EntitiesMerged {
+        /// How many entity rows were renamed into the canonical value.
+        renamed: u64,
     },
     /// The live preview switched to following this meeting track (`"mic"` /
     /// `"system"`). The overlay's source toggle reflects it.

@@ -268,6 +268,11 @@ fn is_retry_safe(req: &Request) -> bool {
         | UpdateTask { .. }
         | DeleteTask { .. }
         | ReorderTasks { .. }
+        // Entity CRUD + library-wide merge — mutations, single-attempt.
+        | AddEntity { .. }
+        | UpdateEntity { .. }
+        | DeleteEntity { .. }
+        | MergeEntities { .. }
         | ApproveTagSuggestion { .. }
         | DismissTagSuggestion { .. }
         | ClearAllTagSuggestions
