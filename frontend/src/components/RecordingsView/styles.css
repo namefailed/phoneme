@@ -826,6 +826,109 @@ mark.search-hit {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .enrich-empty-inline { font-size: 0.7857rem; color: var(--fg-faded); }
+
+/* ── Entity manager modal (library-wide rename + merge) ─────────────────────── */
+/* Two-class so the width beats the base `.modal-dialog { width: 340px }`. */
+.modal-dialog.ent-mgr-dialog {
+  width: min(580px, 92vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ent-mgr-header { align-items: flex-start; margin-bottom: 0; }
+.ent-mgr-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ent-mgr-subtitle { font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.4; }
+.ent-mgr-search {
+  font: inherit;
+  font-size: 0.8571rem;
+  color: var(--fg-default);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+.ent-mgr-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.ent-mgr-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 100px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+.ent-mgr-body::-webkit-scrollbar { width: 8px; }
+.ent-mgr-body::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 4px; }
+.ent-mgr-empty { padding: 24px; text-align: center; color: var(--fg-muted); font-size: 0.9286rem; }
+.ent-mgr-group { margin-bottom: 10px; }
+.ent-mgr-group-title {
+  font-size: 0.7143rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-faded);
+  margin: 6px 2px 4px;
+}
+.ent-mgr-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px;
+  border-radius: 7px;
+}
+.ent-mgr-row:hover { background: var(--bg-surface); }
+.ent-mgr-check { flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
+.ent-mgr-val { flex: 1; min-width: 0; font-size: 0.8571rem; color: var(--fg-default); cursor: text; }
+.ent-mgr-edit {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.8571rem;
+  color: var(--fg-default);
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.ent-mgr-edit:focus { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.ent-mgr-count {
+  flex-shrink: 0;
+  font-size: 0.7857rem;
+  color: var(--fg-faded);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5em;
+  text-align: right;
+}
+.ent-mgr-rename {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--fg-faded);
+  cursor: pointer;
+  font-size: 0.8571rem;
+  padding: 2px 5px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity var(--ui-motion-fast) ease-out, color var(--ui-motion-fast) ease-out;
+}
+.ent-mgr-row:hover .ent-mgr-rename { opacity: 0.65; }
+.ent-mgr-rename:hover { opacity: 1; color: var(--accent); background: var(--bg-elevated); }
+.ent-mgr-actions { align-items: center; }
+.ent-mgr-mergebar { margin-right: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 0.8214rem; color: var(--fg-muted); }
+.ent-mgr-hint { margin-right: auto; font-size: 0.7857rem; color: var(--fg-faded); }
+.ent-mgr-target {
+  font: inherit;
+  font-size: 0.8214rem;
+  color: var(--fg-default);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 3px 6px;
+  max-width: 180px;
+}
 /* Tasks: a clean checkable list — accent checkbox, readable rows, done dims +
    strikes; rows get a hairline hover like the tag-dropdown items. */
 .tasks-list {

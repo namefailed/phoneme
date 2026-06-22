@@ -48,6 +48,7 @@ import { seedCursorGlow } from "../../services/cursorAnimation";
 import "./Sidebar";
 import "./ThinkingPopout";
 import "./AskPanel";
+import "./EntityManager";
 import "./styles.css";
 
 // Per-device UI layout prefs persisted in localStorage, not config.toml — these
@@ -296,6 +297,7 @@ export class RecordingsView {
       <div id="rv-bulk-bar" style="display:none;"></div>
       <ph-thinking-popout id="rv-thinking"></ph-thinking-popout>
       <ph-ask-panel id="rv-ask"></ph-ask-panel>
+      <ph-entity-manager id="rv-entity-mgr"></ph-entity-manager>
     `;
 
     const listRoot = this.container.querySelector<HTMLElement>("#rv-list-inner")!;
