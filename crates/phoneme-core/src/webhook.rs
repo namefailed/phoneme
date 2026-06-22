@@ -363,9 +363,20 @@ impl WebhookClient {
                         tokio::time::sleep(webhook_backoff(attempt)).await;
                         continue;
                     }
+                    // Bound the captured error body — a misbehaving endpoint can
+                    // return a huge HTML page, which would otherwise propagate
+                    // (and get logged/persisted) in full.
+                    let body = response.text().await.unwrap_or_default();
+                    const MAX_CHARS: usize = 2000;
+                    let stderr_tail = if body.chars().count() > MAX_CHARS {
+                        let head: String = body.chars().take(MAX_CHARS).collect();
+                        format!("{head}… (error body truncated)")
+                    } else {
+                        body
+                    };
                     return Err(Error::HookFailed {
                         code: status.as_u16() as i32,
-                        stderr_tail: response.text().await.unwrap_or_default(),
+                        stderr_tail,
                     });
                 }
                 Err(e) => {

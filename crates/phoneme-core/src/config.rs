@@ -4132,16 +4132,10 @@ impl Default for Config {
                 log_max_files: 5,
                 pipe_name: "phoneme-daemon".into(),
             },
-            llm_post_process: LlmPostProcessConfig {
-                enabled: false,
-                provider: "none".into(),
-                api_key: SecretString::from(String::new()),
-                api_url: "".into(),
-                model: "llama3.2:3b".into(),
-                prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
-                timeout_secs: 30,
-                autostart_ollama: true,
-            },
+            // Single-source the default so Config::default() and the serde
+            // section-absent path agree (they diverged: 30s here vs 300s from the
+            // serde default — 30s is too short for a local LLM on a low-spec box).
+            llm_post_process: default_llm_post_process(),
             summary: SummaryConfig::default(),
             auto_tag: AutoTagConfig::default(),
             title: TitleConfig::default(),

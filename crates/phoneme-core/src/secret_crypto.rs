@@ -36,7 +36,13 @@ pub fn protect(plaintext: &str) -> String {
         if let Some(ciphertext) = dpapi_protect(plaintext.as_bytes()) {
             return format!("{PREFIX}{}", hex_encode(&ciphertext));
         }
-        tracing::warn!("DPAPI encrypt failed; storing API key unencrypted as a fallback");
+        // At error level: this breaks the module's "never stored in the clear"
+        // guarantee. We still return the plaintext rather than drop the key (a
+        // transient DPAPI failure shouldn't silently lose a key the user typed),
+        // but the failure must be visible, not buried in a warning.
+        tracing::error!(
+            "DPAPI encrypt failed; the API key will be written to config.toml UNENCRYPTED as a fallback"
+        );
     }
     plaintext.to_string()
 }
