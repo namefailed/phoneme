@@ -566,6 +566,112 @@ mark.search-hit {
 }
 .clip-close:hover { color: var(--accent); background: var(--bg-elevated); }
 
+/* ── Clip-audio modal ───────────────────────────────────────────────────────
+   The "✂ Clip…" action opens this modal (shared .modal-overlay/.modal-dialog
+   chrome): the recording's waveform with a draggable start/end region over it,
+   a play preview, the numeric start/end fields, and Export. Built to grow into
+   the app's general audio-edit surface. */
+.clip-dialog {
+  width: min(640px, 94vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.clip-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.clip-subtitle { font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.4; }
+
+/* Waveform card + the selection region drawn over it. */
+.clip-wf-wrap {
+  position: relative;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.clip-wf { width: 100%; }
+/* The region layer overlays the waveform's top 80px (above the timeline row).
+   It's click-through so wavesurfer still gets click-to-seek — only the handles
+   re-enable pointer events. */
+.clip-region-layer {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 10px;
+  height: 80px;
+  pointer-events: none;
+}
+.clip-region-mask {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: color-mix(in srgb, var(--bg-deep, #000) 40%, transparent);
+}
+.clip-region-mask--right { right: 0; left: auto; width: auto; }
+.clip-region {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  border-left: 2px solid var(--accent);
+  border-right: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.clip-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  pointer-events: auto;
+  cursor: ew-resize;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  transition: background var(--ui-motion-fast) ease-out;
+}
+/* A short grip line centered in each handle. */
+.clip-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  background: var(--accent-fg, #fff);
+  border-radius: 1px;
+  opacity: 0.85;
+}
+.clip-handle:hover { background: color-mix(in srgb, var(--accent) 80%, transparent); }
+.clip-handle--start { left: -7px; border-radius: 4px 0 0 4px; }
+.clip-handle--end { right: -7px; border-radius: 0 4px 4px 0; }
+.clip-playhead {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--fg-default);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* Toolbar: play the preview + the live selection readout. */
+.clip-toolbar { display: flex; align-items: center; gap: 12px; }
+.clip-play-btn {
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 0.8571rem;
+  font-weight: 500;
+  color: var(--fg-default);
+  cursor: pointer;
+  transition: all var(--ui-motion-fast) ease-out;
+}
+.clip-play-btn:hover { background: var(--bg-surface); border-color: var(--accent); color: var(--accent); }
+.clip-selection { font-size: 0.8214rem; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.clip-sel-len { color: var(--fg-faded); }
+.clip-dialog .clip-fields { gap: 16px; }
+.clip-dialog .clip-hint { margin-top: 0; }
+
 /* ── Detail-pane enrichment sections (Entities · Tasks) ─────────────────────
    The AI-extracted entity chips and the checkable task list. They share the
    action row's 18px gutter and the app's chip/button language so they read as
@@ -3651,85 +3757,159 @@ ph-sidebar .queue-item-main.kbd-cursor {
 
 /* ── Ask my archive (local-RAG chat modal) ─────────────────────────────────── */
 /* Reuses the shared .modal-overlay / .modal-dialog shell (modal.css) for the
-   backdrop + fade-in; these style the Ask-specific body. */
+   backdrop + fade-in; these style the Ask body: a question field on top, then a
+   scrollable results region (citations card + the grounded answer). */
 .ask-dialog {
-  width: min(680px, 92vw);
-  max-height: 82vh;
+  width: min(640px, 92vw);
+  max-height: 84vh;
   display: flex;
   flex-direction: column;
+  gap: 14px;
 }
-.ask-close { margin-left: auto; }
-.ask-input-row { display: flex; gap: 8px; align-items: flex-end; margin: 4px 0 10px; }
+/* Header: icon + stacked title/subtitle, close pinned to the right. */
+.ask-header { align-items: flex-start; margin-bottom: 0; }
+.ask-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ask-subtitle { font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.4; }
+.ask-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--fg-faded);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 6px;
+  transition: color var(--ui-motion-fast) ease-out, background var(--ui-motion-fast) ease-out;
+}
+.ask-close:hover { color: var(--accent); background: var(--bg-surface); }
+
+/* Question field — a distinct input (surface fill + clear border) so it reads as
+   a field rather than blending into the dialog, with the app's focus ring. */
+.ask-form { display: flex; gap: 8px; align-items: stretch; }
 .ask-input {
   flex: 1;
-  resize: vertical;
-  min-height: 44px;
-  max-height: 30vh;
-  padding: 8px 10px;
+  resize: none;
+  min-height: 46px;
+  max-height: 28vh;
+  padding: 10px 12px;
   font: inherit;
+  line-height: 1.45;
   color: var(--fg-default);
-  background: var(--bg-input, var(--bg-elevated));
-  border: var(--popup-border);
-  border-radius: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  transition: border-color var(--ui-motion-fast) ease-out, box-shadow var(--ui-motion-fast) ease-out;
 }
-.ask-input:focus { outline: none; border-color: var(--accent); }
-.ask-send { white-space: nowrap; flex: 0 0 auto; }
+.ask-input::placeholder { color: var(--fg-faded); }
+.ask-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.ask-send { white-space: nowrap; flex: 0 0 auto; align-self: stretch; }
+.ask-send:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* Results region — citations + answer scroll together below the question. */
+.ask-results {
+  flex: 1;
+  min-height: 80px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+.ask-results::-webkit-scrollbar { width: 8px; }
+.ask-results::-webkit-scrollbar-track { background: transparent; }
+.ask-results::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 4px; }
+
 .ask-error {
-  margin: 0 0 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
   color: var(--err, #f38ba8);
   background: color-mix(in srgb, var(--err, #f38ba8) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--err, #f38ba8) 35%, transparent);
   font-size: 0.8571rem;
+  line-height: 1.5;
 }
-.ask-sources { margin-bottom: 12px; }
+.ask-error-icon { flex: 0 0 auto; }
+
+/* Citations — a titled card listing the sources the answer drew on. */
+.ask-sources {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+}
 .ask-sources-head {
-  font-size: 0.7857rem;
+  font-size: 0.7143rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-muted);
-  margin-bottom: 4px;
+  letter-spacing: 0.06em;
+  color: var(--fg-faded);
+  margin-bottom: 6px;
 }
-.ask-sources-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.ask-sources-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .ask-source-link {
   display: flex;
   align-items: baseline;
   gap: 8px;
   width: 100%;
   text-align: left;
-  padding: 4px 8px;
+  padding: 5px 8px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   background: none;
   color: var(--fg-default);
   cursor: pointer;
   font: inherit;
+  transition: background var(--ui-motion-fast) ease-out, border-color var(--ui-motion-fast) ease-out;
 }
 .ask-source-link:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
-.ask-source-n { color: var(--accent); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.ask-source-n { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .ask-source-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ask-source-rel { flex: 0 0 auto; color: var(--fg-faded); font-variant-numeric: tabular-nums; font-size: 0.7857rem; }
-.ask-answer {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 60px;
-  border-top: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
-  padding-top: 10px;
+
+/* The grounded answer, or the idle hint / "searching…" state. */
+.ask-answer { min-height: 0; }
+.ask-answer-text { white-space: pre-wrap; line-height: 1.6; color: var(--fg-default); font-size: 0.9286rem; }
+.ask-hint, .ask-thinking {
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  line-height: 1.5;
 }
-.ask-answer-text { white-space: pre-wrap; line-height: 1.5; color: var(--fg-default); }
-.ask-hint, .ask-thinking { color: var(--fg-muted); font-size: 0.8571rem; display: flex; align-items: center; gap: 8px; }
 /* An inline [n] citation chip rendered from the answer markers. */
 .ask-cite {
-  display: inline;
-  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
   margin: 0 1px;
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
-  font: inherit;
-  font-size: 0.8571em;
+  font-size: 0.7857rem;
+  font-weight: 600;
+  line-height: 1.4;
   cursor: pointer;
   vertical-align: baseline;
+  transition: background var(--ui-motion-fast) ease-out;
 }
-.ask-cite:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.ask-cite:hover { background: color-mix(in srgb, var(--accent) 28%, transparent); }

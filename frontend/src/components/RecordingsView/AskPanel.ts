@@ -183,13 +183,16 @@ export class AskPanelElement extends LitElement {
     return html`
       <div class="modal-overlay" @click=${this.handleOverlayClick}>
         <div class="modal-dialog ask-dialog" role="dialog" aria-modal="true" aria-labelledby="ask-title">
-          <div class="modal-header">
+          <div class="modal-header ask-header">
             <span class="modal-icon" aria-hidden="true">💬</span>
-            <h3 class="modal-title" id="ask-title">Ask my archive</h3>
-            <button class="thinking-close ask-close" @click=${() => this.close()} title="Close (Esc)">✕</button>
+            <div class="ask-head-text">
+              <h3 class="modal-title" id="ask-title">Ask my archive</h3>
+              <span class="ask-subtitle">Answered from your own transcripts, with a citation for every claim.</span>
+            </div>
+            <button class="ask-close" @click=${() => this.close()} title="Close (Esc)" aria-label="Close">✕</button>
           </div>
 
-          <div class="ask-input-row">
+          <div class="ask-form">
             <textarea
               id="ask-input"
               class="ask-input"
@@ -205,39 +208,41 @@ export class AskPanelElement extends LitElement {
             </button>
           </div>
 
-          ${this.error
-            ? html`<p class="ask-error" role="alert">${this.error}</p>`
-            : ""}
+          <div class="ask-results">
+            ${this.error
+              ? html`<div class="ask-error" role="alert"><span class="ask-error-icon" aria-hidden="true">⚠</span><span>${this.error}</span></div>`
+              : ""}
 
-          ${this.sources.length > 0
-            ? html`
-                <div class="ask-sources">
-                  <div class="ask-sources-head">Sources</div>
-                  <ol class="ask-sources-list">
-                    ${this.sources.map(
-                      (s) => html`
-                        <li class="ask-source">
-                          <button class="ask-source-link" @click=${() => this.openSource(s.recording_id)} title=${s.snippet}>
-                            <span class="ask-source-n">[${s.n}]</span>
-                            <span class="ask-source-label">${s.label}</span>
-                            <span class="ask-source-rel">${Math.round(Math.max(0, Math.min(1, s.relevance)) * 100)}%</span>
-                          </button>
-                        </li>
-                      `,
-                    )}
-                  </ol>
-                </div>
-              `
-            : ""}
+            ${this.sources.length > 0
+              ? html`
+                  <div class="ask-sources">
+                    <div class="ask-sources-head">Sources</div>
+                    <ol class="ask-sources-list">
+                      ${this.sources.map(
+                        (s) => html`
+                          <li class="ask-source">
+                            <button class="ask-source-link" @click=${() => this.openSource(s.recording_id)} title=${s.snippet}>
+                              <span class="ask-source-n">[${s.n}]</span>
+                              <span class="ask-source-label">${s.label}</span>
+                              <span class="ask-source-rel">${Math.round(Math.max(0, Math.min(1, s.relevance)) * 100)}%</span>
+                            </button>
+                          </li>
+                        `,
+                      )}
+                    </ol>
+                  </div>
+                `
+              : ""}
 
-          <div class="ask-answer">
-            ${this.answer
-              ? html`<div class="ask-answer-text">${this.renderAnswer()}</div>`
-              : nothingMatched
-                ? ""
-                : this.busy
-                  ? html`<div class="ask-thinking"><span class="thinking-spin" aria-hidden="true"></span> Searching your recordings…</div>`
-                  : html`<div class="ask-hint">Answers are grounded only in your own transcripts, with a citation for every claim.</div>`}
+            <div class="ask-answer">
+              ${this.answer
+                ? html`<div class="ask-answer-text">${this.renderAnswer()}</div>`
+                : nothingMatched
+                  ? html`<div class="ask-hint">No recordings matched that question — try rephrasing or broadening it.</div>`
+                  : this.busy
+                    ? html`<div class="ask-thinking"><span class="thinking-spin" aria-hidden="true"></span> Searching your recordings…</div>`
+                    : html`<div class="ask-hint">Ask a question above and the answer will appear here, grounded in your recordings.</div>`}
+            </div>
           </div>
         </div>
       </div>

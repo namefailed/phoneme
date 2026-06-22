@@ -408,7 +408,7 @@ export class RecordingDetail {
         </div>
         <div id="entities"></div>
         <div id="tasks"></div>
-        <div class="notes-block" style="margin-top: 6px;">
+        <div class="notes-block" style="margin-top: 10px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
           <div id="notes-editor"></div>
         </div>
         <div class="detail-footer">
@@ -446,7 +446,7 @@ export class RecordingDetail {
     // kept current by the time-update handler below.
     const clipRoot = this.container.querySelector<HTMLElement>("#clip-export");
     if (clipRoot) {
-      this.clipExport = new ClipExport(clipRoot, r.id, r.duration_ms);
+      this.clipExport = new ClipExport(clipRoot, r.id, r.duration_ms, r.audio_path);
     }
 
     const tagsRoot = this.container.querySelector<HTMLElement>("#tags");
@@ -657,8 +657,6 @@ export class RecordingDetail {
       this.timeline?.setPlaybackTime(t);
       this.synced?.setPlaybackTime(t);
       this.chapters?.setPlaybackTime(t);
-      // Keep the clip control's "Use playhead" buttons aimed at the live position.
-      this.clipExport?.setPlayhead(t);
     });
     if (this.pendingTimeline) {
       this.pendingTimeline = false;

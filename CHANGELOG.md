@@ -23,7 +23,7 @@ trust boundary.*
 - [x] **Show/hide the Favorites & Pinned quick-action columns** — Settings →
   Interface → Library layout gains two toggles that hide the ⭐ Favorites and 📌
   Pinned columns **and** their Library sidebar sections together, in one switch
-  (per-device, stored in `localStorage`, default on). The list and sidebar redraw
+  (per-device, stored in `localStorage`, default off). The list and sidebar redraw
   live the moment you flip them — no reload, no daemon round-trip.
 - [x] **Browse by entity (cross-recording entity facet)** — the extracted
   entities that were only ever per-recording chips are now a **library-wide
@@ -994,6 +994,18 @@ trust boundary.*
   the notes box** with proper top-and-bottom spacing, instead of being wedged above
   the transcript. The **✂ Clip…** control moved into the main action row beside Play
   / Speed / Re-run / Export / Delete rather than floating on its own line above them.
+- [x] **Clip audio is now a waveform modal** — the **✂ Clip…** action opens a
+  modal showing the recording's **waveform** with a draggable **start/end region**
+  drawn over it: drag the handles, click to seek and ▶ preview, or type exact
+  seconds — the handles, the numeric fields, and the live selection readout all
+  stay in sync. Export writes the selection to a new WAV beside the recording.
+  Replaces the cramped inline clip strip and lays the groundwork for a fuller
+  in-app audio-edit surface.
+- [x] **"Ask my archive" modal redesigned** — the local-RAG question modal now
+  matches the rest of the app: a header with a one-line subtitle, a real question
+  field (surface fill + focus ring instead of one that blended into the dialog),
+  citations grouped in a titled card, a scroll-styled results region, and inline
+  `[n]` citation chips with proper weight. Replaces the unstyled first pass.
 
 ### Integration
 

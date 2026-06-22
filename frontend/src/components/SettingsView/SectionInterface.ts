@@ -389,7 +389,7 @@ export class SectionInterface {
       <div class="settings-section">
         <h3>Library layout</h3>
 
-        <div class="settings-field" style="align-items: flex-start;">
+        <div class="settings-field" style="align-items: flex-start; border-bottom: none; padding-bottom: 0;">
           <label style="margin-top: 8px;">Quick-action columns</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
             <label class="col-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
