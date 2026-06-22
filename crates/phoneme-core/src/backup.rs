@@ -19,12 +19,12 @@
 //! reverts a hand edit made since.
 //!
 //! Restore fidelity is bounded by what the backup captured. The DTO columns, the
-//! tags, the per-recording entities, and the whole-meeting digests round-trip;
-//! machine-truth side tables the export never wrote (`original_transcript` /
-//! `clean_transcript`, transcript segments + words, embeddings, voiceprints,
-//! AI-activity, custom speaker names) do not, so the restored recording is
-//! whatever the backup said it was, and a re-transcribe regenerates the derived
-//! data.
+//! tags, the per-recording entities, the auto-generated chapters, and the
+//! whole-meeting digests round-trip; machine-truth side tables the export never
+//! wrote (`original_transcript` / `clean_transcript`, transcript segments +
+//! words, embeddings, voiceprints, AI-activity, custom speaker names) do not, so
+//! the restored recording is whatever the backup said it was, and a
+//! re-transcribe regenerates the derived data.
 //!
 //! Whole-meeting digests are a side table keyed by `meeting_id` (not a
 //! [`Recording`] DTO column, since a meeting isn't one row), so they ride
@@ -36,7 +36,7 @@ use crate::catalog::Catalog;
 use crate::error::{Error, Result};
 use crate::id::RecordingId;
 use crate::tags::Tag;
-use crate::types::{MeetingDigest, PeriodDigest, Recording};
+use crate::types::{Chapter, MeetingDigest, PeriodDigest, Recording};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -57,6 +57,20 @@ const AUDIO_PREFIX: &str = "audio/";
 /// for a multi-GB allocation (a DoS guard, not a real-recording limit — 2 GiB is
 /// far past any plausible WAV).
 const MAX_RESTORE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// One recording's auto-generated chapters, carried in the manifest's own array.
+///
+/// Chapters are a per-recording child table (keyed by `recording_id`), not a
+/// [`Recording`] DTO column, so they ride alongside the recordings in their own
+/// manifest array rather than on the track — mirroring how the meeting digests
+/// are carried. Replayed via [`Catalog::replace_chapters`] on restore.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordingChapters {
+    /// The recording these chapters belong to.
+    pub recording_id: RecordingId,
+    /// The recording's chapters in chronological order.
+    pub chapters: Vec<Chapter>,
+}
 
 /// The deserialized `catalog.json` envelope.
 ///
@@ -84,6 +98,12 @@ pub struct BackupManifest {
     /// pre-period-digest backup readable (it simply restores none).
     #[serde(default)]
     pub period_digests: Vec<PeriodDigest>,
+    /// The auto-generated chapters, one entry per recording that has any. A
+    /// per-recording side table (not a [`Recording`] column), so it's carried
+    /// here and replayed via [`Catalog::replace_chapters`] on restore.
+    /// `#[serde(default)]` keeps a pre-chapters backup readable (restores none).
+    #[serde(default)]
+    pub chapters: Vec<RecordingChapters>,
 }
 
 /// What a [`restore_from_zip`] did: how many recordings were newly imported and
@@ -120,15 +140,16 @@ fn audio_entry_name(audio_dir: &Path, path: &Path) -> String {
 /// Write a backup zip: the `catalog.json` envelope plus every `.wav` under
 /// `audio_dir`, into a freshly created file at `out`.
 ///
-/// The recordings/tags/meeting digests/period digests are supplied by the caller
-/// (the daemon-driven export fetches them over IPC; the round-trip test reads
-/// them straight from a `Catalog`), so this owns only the archive format — the
-/// one place the layout is defined for both directions.
+/// The recordings/tags/meeting digests/period digests/chapters are supplied by
+/// the caller (the daemon-driven export fetches them over IPC; the round-trip
+/// test reads them straight from a `Catalog`), so this owns only the archive
+/// format — the one place the layout is defined for both directions.
 pub fn write_to_zip(
     recordings: &[Recording],
     tags: &[Tag],
     meeting_digests: &[MeetingDigest],
     period_digests: &[PeriodDigest],
+    chapters: &[RecordingChapters],
     audio_dir: &Path,
     out: &Path,
 ) -> Result<()> {
@@ -138,6 +159,7 @@ pub fn write_to_zip(
         tags: tags.to_vec(),
         meeting_digests: meeting_digests.to_vec(),
         period_digests: period_digests.to_vec(),
+        chapters: chapters.to_vec(),
     };
     let json_bytes = serde_json::to_vec_pretty(&manifest)?;
 
@@ -289,6 +311,18 @@ pub async fn restore_from_zip(
         // it); without this the restore silently dropped them, unlike entities.
         if !rec.tasks.is_empty() {
             catalog.set_tasks(&rec.id, &rec.tasks).await?;
+        }
+
+        // Restore the recording's auto-generated chapters (a per-recording side
+        // table keyed by id, carried in the manifest's own array rather than on
+        // the DTO). `replace_chapters` writes them wholesale onto the freshly
+        // inserted row; skip empties like the entities/tasks restore above.
+        if let Some(rc) = manifest
+            .chapters
+            .iter()
+            .find(|c| c.recording_id == rec.id && !c.chapters.is_empty())
+        {
+            catalog.replace_chapters(&rec.id, &rc.chapters).await?;
         }
 
         report.imported += 1;
@@ -503,6 +537,28 @@ mod tests {
         )
         .await
         .unwrap();
+        // Seed auto-generated chapters on r1 (a per-recording side table keyed by
+        // id, not a DTO column) so the round-trip proves they survive a backup —
+        // the data-loss case this whole change closes.
+        src.replace_chapters(
+            &r1.id,
+            &[
+                crate::Chapter {
+                    start_ms: 0,
+                    end_ms: 60_000,
+                    title: "Intro".into(),
+                    summary: Some("kickoff".into()),
+                },
+                crate::Chapter {
+                    start_ms: 60_000,
+                    end_ms: 120_000,
+                    title: "Deep dive".into(),
+                    summary: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
         let a1 = write_audio(&src_audio, &r1, b"RIFF-one-audio");
         let a2 = write_audio(&src_audio, &r2, b"RIFF-two-audio");
         assert!(a1.exists() && a2.exists());
@@ -536,11 +592,24 @@ mod tests {
         let tags = src.list_all_tags().await.unwrap();
         let digests = src.list_all_meeting_digests().await.unwrap();
         let period_digests = src.list_all_period_digests().await.unwrap();
+        // Gather each recording's chapters the way the export does (per-recording
+        // read), keeping only those that have any.
+        let mut chapters = Vec::new();
+        for rec in &recordings {
+            let cs = src.chapters_for(&rec.id).await.unwrap();
+            if !cs.is_empty() {
+                chapters.push(RecordingChapters {
+                    recording_id: rec.id.clone(),
+                    chapters: cs,
+                });
+            }
+        }
         write_to_zip(
             &recordings,
             &tags,
             &digests,
             &period_digests,
+            &chapters,
             &src_audio,
             &zip_path,
         )
@@ -597,6 +666,24 @@ mod tests {
             "an open task stays open"
         );
 
+        // The auto-generated chapters round-tripped: they rode in the manifest's
+        // own array (no Recording column carries them) and were replayed via
+        // replace_chapters on restore. Read them back through the catalog since
+        // the DTO doesn't surface them.
+        let restored_chapters = dst.chapters_for(&r1.id).await.unwrap();
+        assert_eq!(
+            restored_chapters.len(),
+            2,
+            "both chapters must survive the round-trip"
+        );
+        assert_eq!(restored_chapters[0].title, "Intro");
+        assert_eq!(restored_chapters[0].start_ms, 0);
+        assert_eq!(restored_chapters[0].end_ms, 60_000);
+        assert_eq!(restored_chapters[0].summary.as_deref(), Some("kickoff"));
+        assert_eq!(restored_chapters[1].title, "Deep dive");
+        assert_eq!(restored_chapters[1].start_ms, 60_000);
+        assert_eq!(restored_chapters[1].summary, None);
+
         // r2's audio also landed (different day folder, no collision).
         let restored_a2 = dst_audio
             .join(r2.id.day_folder())
@@ -634,7 +721,7 @@ mod tests {
 
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
-        write_to_zip(&recordings, &[], &[], &[], &src_audio, &zip_path).unwrap();
+        write_to_zip(&recordings, &[], &[], &[], &[], &src_audio, &zip_path).unwrap();
 
         let dst_audio = tmp.path().join("dst");
         let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
@@ -680,7 +767,7 @@ mod tests {
 
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
-        write_to_zip(&recordings, &[], &[], &[], &src_audio, &zip_path).unwrap();
+        write_to_zip(&recordings, &[], &[], &[], &[], &src_audio, &zip_path).unwrap();
 
         let dst_audio = tmp.path().join("dst");
         let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();

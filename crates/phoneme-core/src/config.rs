@@ -38,6 +38,61 @@ pub(crate) fn redact_key(key: &str) -> &'static str {
     }
 }
 
+/// Generate the `set_*` / `*_str` accessor pair for a [`SecretString`] field, so
+/// callers outside this crate can read/replace a secret from a plain `String`
+/// without taking a `secrecy` dependency. Expands to exactly the hand-written
+/// pair it replaces — same signatures, same bodies — for every key-bearing
+/// config struct.
+macro_rules! impl_secret_field {
+    ($ty:ty, $field:ident, $setter:ident, $getter:ident, $what:literal) => {
+        impl $ty {
+            #[doc = concat!("Replace the ", $what, " from a plain string (encapsulates `SecretString`).")]
+            pub fn $setter(&mut self, value: impl Into<String>) {
+                self.$field = SecretString::from(value.into());
+            }
+
+            #[doc = concat!("The ", $what, " as a plain `&str`, so callers outside this crate can")]
+            #[doc = "read it without depending on `secrecy` (e.g. masking config for the WebView)."]
+            pub fn $getter(&self) -> &str {
+                self.$field.expose_secret()
+            }
+        }
+    };
+}
+
+/// Generate a manual `Debug` impl that lists the given fields in order, rendering
+/// any `secret`-marked field through [`redact_key`] so a plaintext key/secret can
+/// never reach the daemon log. Fields are emitted in declaration order; a plain
+/// field prints its value, a `secret` field prints the redaction placeholder.
+macro_rules! impl_redacted_debug {
+    // Entry: bind the receiver and the builder to locals, then thread those
+    // captured tokens through the muncher so each `.field(..)` resolves to this
+    // same `fn fmt` scope (a literal `self` written inside a recursive rule would
+    // lose its binding across re-expansion).
+    ($ty:ident { $($fields:tt)* }) => {
+        impl std::fmt::Debug for $ty {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let this = self;
+                let mut dbg = f.debug_struct(stringify!($ty));
+                impl_redacted_debug!(@chain this, dbg, $($fields)*);
+                dbg.finish()
+            }
+        }
+    };
+    // Muncher: a redacted (secret) field — printed via `redact_key`, never verbatim.
+    (@chain $self:ident, $dbg:ident, secret $field:ident $(, $($rest:tt)*)?) => {
+        $dbg.field(stringify!($field), &redact_key($self.$field.expose_secret()));
+        impl_redacted_debug!(@chain $self, $dbg, $($($rest)*)?);
+    };
+    // Muncher: a plain field — printed by value.
+    (@chain $self:ident, $dbg:ident, $field:ident $(, $($rest:tt)*)?) => {
+        $dbg.field(stringify!($field), &$self.$field);
+        impl_redacted_debug!(@chain $self, $dbg, $($($rest)*)?);
+    };
+    // Muncher: trailing comma / empty tail — done.
+    (@chain $self:ident, $dbg:ident $(,)?) => {};
+}
+
 fn default_secret_string() -> SecretString {
     SecretString::from(String::new())
 }
@@ -311,8 +366,9 @@ pub struct DiarizationConfig {
     pub provider: DiarizationBackend,
     /// Absolute path to the local Pyannote ONNX model file. Legacy/unused — the
     /// local speakrs pipeline loads from the Hugging Face cache; kept so old
-    /// configs still parse. Prefer [`models_dir`](Self::models_dir).
-    #[serde(default)]
+    /// configs still parse, but no longer written into newly-saved ones. Prefer
+    /// [`models_dir`](Self::models_dir).
+    #[serde(default, skip_serializing)]
     pub local_model_path: String,
     /// Optional override for where the local diarization models live. Empty =
     /// the default Hugging Face cache (`%USERPROFILE%/.cache/huggingface/hub`).
@@ -711,20 +767,16 @@ pub struct LlmPostProcessConfig {
     pub autostart_ollama: bool,
 }
 
-impl std::fmt::Debug for LlmPostProcessConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LlmPostProcessConfig")
-            .field("enabled", &self.enabled)
-            .field("provider", &self.provider)
-            .field("api_key", &redact_key(self.api_key.expose_secret()))
-            .field("api_url", &self.api_url)
-            .field("model", &self.model)
-            .field("prompt", &self.prompt)
-            .field("timeout_secs", &self.timeout_secs)
-            .field("autostart_ollama", &self.autostart_ollama)
-            .finish()
-    }
-}
+impl_redacted_debug!(LlmPostProcessConfig {
+    enabled,
+    provider,
+    secret api_key,
+    api_url,
+    model,
+    prompt,
+    timeout_secs,
+    autostart_ollama,
+});
 
 impl PartialEq for LlmPostProcessConfig {
     fn eq(&self, other: &Self) -> bool {
@@ -739,21 +791,15 @@ impl PartialEq for LlmPostProcessConfig {
     }
 }
 
+impl_secret_field!(
+    LlmPostProcessConfig,
+    api_key,
+    set_api_key,
+    api_key_str,
+    "API key"
+);
+
 impl LlmPostProcessConfig {
-    /// Replace the API key. Encapsulates the [`SecretString`] construction so
-    /// callers outside this crate (e.g. the daemon applying a one-time cleanup
-    /// override) can set a key from a plain `String` without taking a direct
-    /// dependency on the `secrecy` crate.
-    pub fn set_api_key(&mut self, key: impl Into<String>) {
-        self.api_key = SecretString::from(key.into());
-    }
-
-    /// The API key as a plain `&str`, so callers outside this crate can read it
-    /// without depending on `secrecy` (e.g. masking config for the WebView).
-    pub fn api_key_str(&self) -> &str {
-        self.api_key.expose_secret()
-    }
-
     /// The effective LLM connection for a pipeline step that inherits the base
     /// `[llm_post_process]` connection but may override any field: a non-blank
     /// `provider` / `api_url` / `api_key` / `model` wins, a blank one inherits
@@ -838,32 +884,17 @@ pub struct SummaryConfig {
     pub prompt: String,
 }
 
-impl SummaryConfig {
-    /// Replace the API key from a plain string (encapsulates `SecretString`).
-    pub fn set_api_key(&mut self, key: impl Into<String>) {
-        self.api_key = SecretString::from(key.into());
-    }
-
-    /// The summary API key as a plain `&str`, so callers outside this crate can
-    /// read it without depending on `secrecy`.
-    pub fn api_key_str(&self) -> &str {
-        self.api_key.expose_secret()
-    }
-}
+impl_secret_field!(SummaryConfig, api_key, set_api_key, api_key_str, "API key");
 
 // Manual `Debug` so the API key is never rendered verbatim into logs.
-impl std::fmt::Debug for SummaryConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SummaryConfig")
-            .field("auto", &self.auto)
-            .field("provider", &self.provider)
-            .field("api_key", &redact_key(self.api_key.expose_secret()))
-            .field("api_url", &self.api_url)
-            .field("model", &self.model)
-            .field("prompt", &self.prompt)
-            .finish()
-    }
-}
+impl_redacted_debug!(SummaryConfig {
+    auto,
+    provider,
+    secret api_key,
+    api_url,
+    model,
+    prompt,
+});
 
 impl PartialEq for SummaryConfig {
     fn eq(&self, other: &Self) -> bool {
@@ -934,34 +965,19 @@ pub struct AutoTagConfig {
     pub auto_accept_existing: bool,
 }
 
-impl AutoTagConfig {
-    /// Replace the API key from a plain string (encapsulates `SecretString`).
-    pub fn set_api_key(&mut self, key: impl Into<String>) {
-        self.api_key = SecretString::from(key.into());
-    }
-
-    /// The auto-tag API key as a plain `&str`, so callers outside this crate
-    /// can read it without depending on `secrecy`.
-    pub fn api_key_str(&self) -> &str {
-        self.api_key.expose_secret()
-    }
-}
+impl_secret_field!(AutoTagConfig, api_key, set_api_key, api_key_str, "API key");
 
 // Manual `Debug` so the API key is never rendered verbatim into logs.
-impl std::fmt::Debug for AutoTagConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AutoTagConfig")
-            .field("auto", &self.auto)
-            .field("provider", &self.provider)
-            .field("api_key", &redact_key(self.api_key.expose_secret()))
-            .field("api_url", &self.api_url)
-            .field("model", &self.model)
-            .field("prompt", &self.prompt)
-            .field("max_tags", &self.max_tags)
-            .field("auto_accept_existing", &self.auto_accept_existing)
-            .finish()
-    }
-}
+impl_redacted_debug!(AutoTagConfig {
+    auto,
+    provider,
+    secret api_key,
+    api_url,
+    model,
+    prompt,
+    max_tags,
+    auto_accept_existing,
+});
 
 impl PartialEq for AutoTagConfig {
     fn eq(&self, other: &Self) -> bool {
@@ -1041,33 +1057,18 @@ pub struct TitleConfig {
     pub prompt: String,
 }
 
-impl TitleConfig {
-    /// Replace the API key from a plain string (encapsulates `SecretString`).
-    pub fn set_api_key(&mut self, key: impl Into<String>) {
-        self.api_key = SecretString::from(key.into());
-    }
-
-    /// The title API key as a plain `&str`, so callers outside this crate can
-    /// read it without depending on `secrecy`.
-    pub fn api_key_str(&self) -> &str {
-        self.api_key.expose_secret()
-    }
-}
+impl_secret_field!(TitleConfig, api_key, set_api_key, api_key_str, "API key");
 
 // Manual `Debug` so the API key is never rendered verbatim into logs.
-impl std::fmt::Debug for TitleConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TitleConfig")
-            .field("enabled", &self.enabled)
-            .field("use_llm", &self.use_llm)
-            .field("provider", &self.provider)
-            .field("api_key", &redact_key(self.api_key.expose_secret()))
-            .field("api_url", &self.api_url)
-            .field("model", &self.model)
-            .field("prompt", &self.prompt)
-            .finish()
-    }
-}
+impl_redacted_debug!(TitleConfig {
+    enabled,
+    use_llm,
+    provider,
+    secret api_key,
+    api_url,
+    model,
+    prompt,
+});
 
 impl PartialEq for TitleConfig {
     fn eq(&self, other: &Self) -> bool {
@@ -1329,26 +1330,22 @@ fn default_low_confidence_threshold() -> f32 {
     0.6
 }
 
-impl std::fmt::Debug for WhisperConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WhisperConfig")
-            .field("mode", &self.mode)
-            .field("external_url", &self.external_url)
-            .field("model_path", &self.model_path)
-            .field("bundled_server_port", &self.bundled_server_port)
-            .field("bundled_server_args", &self.bundled_server_args)
-            .field("timeout_secs", &self.timeout_secs)
-            .field("language", &self.language)
-            .field("initial_prompt", &self.initial_prompt)
-            .field("provider", &self.provider)
-            .field("api_key", &redact_key(self.api_key.expose_secret()))
-            .field("model", &self.model)
-            .field("api_url", &self.api_url)
-            .field("use_own_bundled_server", &self.use_own_bundled_server)
-            .field("low_confidence_threshold", &self.low_confidence_threshold)
-            .finish()
-    }
-}
+impl_redacted_debug!(WhisperConfig {
+    mode,
+    external_url,
+    model_path,
+    bundled_server_port,
+    bundled_server_args,
+    timeout_secs,
+    language,
+    initial_prompt,
+    provider,
+    secret api_key,
+    model,
+    api_url,
+    use_own_bundled_server,
+    low_confidence_threshold,
+});
 
 impl PartialEq for WhisperConfig {
     fn eq(&self, other: &Self) -> bool {
@@ -1369,17 +1366,9 @@ impl PartialEq for WhisperConfig {
     }
 }
 
+impl_secret_field!(WhisperConfig, api_key, set_api_key, api_key_str, "API key");
+
 impl WhisperConfig {
-    /// Replace the API key from a plain string (encapsulates `SecretString`).
-    pub fn set_api_key(&mut self, key: impl Into<String>) {
-        self.api_key = SecretString::from(key.into());
-    }
-
-    /// The API key as a plain `&str` (for masking config for the WebView).
-    pub fn api_key_str(&self) -> &str {
-        self.api_key.expose_secret()
-    }
-
     /// OpenAI-compatible Whisper server base URL (no trailing path).
     pub fn server_base_url(&self) -> String {
         match self.mode {
@@ -2376,18 +2365,14 @@ impl Default for PlaybookLlm {
 // Manual Debug/PartialEq because SecretString deliberately implements neither in
 // a way we want (redact the key; compare the exposed value), mirroring
 // LlmPostProcessConfig.
-impl std::fmt::Debug for PlaybookLlm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PlaybookLlm")
-            .field("provider", &self.provider)
-            .field("model", &self.model)
-            .field("prompt", &self.prompt)
-            .field("api_url", &self.api_url)
-            .field("api_key", &redact_key(self.api_key.expose_secret()))
-            .field("timeout_secs", &self.timeout_secs)
-            .finish()
-    }
-}
+impl_redacted_debug!(PlaybookLlm {
+    provider,
+    model,
+    prompt,
+    api_url,
+    secret api_key,
+    timeout_secs,
+});
 
 impl PartialEq for PlaybookLlm {
     fn eq(&self, other: &Self) -> bool {
@@ -2400,16 +2385,7 @@ impl PartialEq for PlaybookLlm {
     }
 }
 
-impl PlaybookLlm {
-    /// Plain-text view of the API key (for masking/unmasking in the command layer).
-    pub fn api_key_str(&self) -> &str {
-        self.api_key.expose_secret()
-    }
-    /// Replace the API key from a plain `String` without callers depending on `secrecy`.
-    pub fn set_api_key(&mut self, key: impl Into<String>) {
-        self.api_key = SecretString::from(key.into());
-    }
-}
+impl_secret_field!(PlaybookLlm, api_key, set_api_key, api_key_str, "API key");
 
 fn default_playbook_hook_timeout() -> u64 {
     60

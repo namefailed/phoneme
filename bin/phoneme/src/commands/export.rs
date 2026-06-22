@@ -2,10 +2,10 @@
 //!
 //! **Library zip** (`phoneme export <FILE>`): fetches every recording
 //! (`ListRecordings` with the default filter), the tag list (`ListTags`),
-//! and the whole-meeting digests (`ListMeetingDigests`), writes them as
-//! `catalog.json` (versioned envelope), and packs every `.wav` under the
-//! configured audio dir into `audio/` — a portable backup of the whole
-//! library.
+//! the whole-meeting digests (`ListMeetingDigests`), and each recording's
+//! auto-generated chapters (`GetChapters`), writes them as `catalog.json`
+//! (versioned envelope), and packs every `.wav` under the configured audio
+//! dir into `audio/` — a portable backup of the whole library.
 //!
 //! **Captions** (`phoneme export --captions <ID> [--format srt|vtt]
 //! [--out FILE|-]`): fetches the recording's machine segments
@@ -18,9 +18,9 @@
 //! start one rather than fail.
 
 use crate::args::{CaptionFormat, ExportArgs};
-use phoneme_core::backup;
+use phoneme_core::backup::{self, RecordingChapters};
 use phoneme_core::{
-    Config, ListFilter, MeetingDigest, PeriodDigest, Recording, Tag, TranscriptSegment,
+    Chapter, Config, ListFilter, MeetingDigest, PeriodDigest, Recording, Tag, TranscriptSegment,
 };
 use std::fs::File;
 use std::io::Write;
@@ -188,6 +188,38 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
 
+    // Auto-generated chapters are a per-recording side table (keyed by id), so
+    // there's no list request — fetch them one recording at a time over the same
+    // client and keep only the recordings that have any. A failed fetch on one
+    // recording warns and is skipped rather than aborting the whole backup,
+    // matching the best-effort tag/digest handling above.
+    let mut chapters: Vec<RecordingChapters> = Vec::new();
+    for rec in &recordings {
+        let value = match conn
+            .send(phoneme_ipc::Request::GetChapters { id: rec.id.clone() })
+            .await
+        {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!("warning: skipping chapters for {} (fetch failed)", rec.id);
+                continue;
+            }
+        };
+        let recs: Vec<Chapter> = match serde_json::from_value(value) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("warning: skipping chapters for {} ({e})", rec.id);
+                continue;
+            }
+        };
+        if !recs.is_empty() {
+            chapters.push(RecordingChapters {
+                recording_id: rec.id.clone(),
+                chapters: recs,
+            });
+        }
+    }
+
     let expanded = match cfg.expanded() {
         Ok(c) => c,
         Err(e) => {
@@ -202,6 +234,7 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
         &tags,
         &meeting_digests,
         &period_digests,
+        &chapters,
         audio_dir,
         Path::new(zip_path),
     ) {

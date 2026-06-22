@@ -37,6 +37,45 @@ use phoneme_ipc::{
     ServerRequest,
 };
 
+/// Collapse the boilerplate the uniform catalog handler arms all share: await a
+/// fallible catalog (or recorder) call and map it to a `Response`, with the
+/// `Err` arm always going through [`err_response`]. The trailing tag picks how the
+/// `Ok` value becomes the response, matching the four shapes that recur verbatim:
+///
+///   - `=> serialize`         → [`serialize_response`] of the value
+///   - `=> to_value`          → `Response::Ok(serde_json::to_value(v).unwrap_or_default())`
+///   - `=> json "key"`        → `Response::Ok(serde_json::json!({ "key": v }))`
+///   - `=> ok_null`           → `Ok(())` answered with [`ok_null`]
+///
+/// Only the genuinely-uniform arms use this — anything that emits a `DaemonEvent`,
+/// inspects the Ok value, or does extra work stays written out longhand.
+macro_rules! catalog_call {
+    ($call:expr => serialize) => {
+        match $call {
+            Ok(v) => serialize_response(v),
+            Err(e) => err_response(&e),
+        }
+    };
+    ($call:expr => to_value) => {
+        match $call {
+            Ok(v) => Response::Ok(serde_json::to_value(v).unwrap_or_default()),
+            Err(e) => err_response(&e),
+        }
+    };
+    ($call:expr => json $key:literal) => {
+        match $call {
+            Ok(v) => Response::Ok(serde_json::json!({ $key: v })),
+            Err(e) => err_response(&e),
+        }
+    };
+    ($call:expr => ok_null) => {
+        match $call {
+            Ok(()) => ok_null(),
+            Err(e) => err_response(&e),
+        }
+    };
+}
+
 /// How long the `Shutdown` handler waits after returning its Ok response
 /// before actually triggering the shutdown. The response write itself takes
 /// microseconds — this just guarantees the reply is on the pipe before the
@@ -206,22 +245,17 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
-        Request::StartMeeting => match state.recorder.start_meeting(state).await {
-            Ok(meeting_id) => Response::Ok(serde_json::json!({ "meeting_id": meeting_id })),
-            Err(e) => err_response(&e),
-        },
-        Request::StopMeeting => match state.recorder.stop_meeting(state).await {
-            Ok(meeting_id) => Response::Ok(serde_json::json!({ "meeting_id": meeting_id })),
-            Err(e) => err_response(&e),
-        },
+        Request::StartMeeting => {
+            catalog_call!(state.recorder.start_meeting(state).await => json "meeting_id")
+        }
+        Request::StopMeeting => {
+            catalog_call!(state.recorder.stop_meeting(state).await => json "meeting_id")
+        }
         Request::MeetingToggle => {
             // Atomic toggle: the recorder holds a guard across the read+act so a
             // double-tapped hotkey can't race two starts (or two stops). See
             // `DaemonRecorder::toggle_meeting`.
-            match state.recorder.toggle_meeting(state).await {
-                Ok(started) => Response::Ok(serde_json::json!({ "started": started })),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.recorder.toggle_meeting(state).await => json "started")
         }
         Request::RecordStop => match state.recorder.stop(state).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
@@ -269,10 +303,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
             Err(e) => err_response(&e),
         },
-        Request::ListRecordings { filter } => match state.catalog.list(&filter).await {
-            Ok(rows) => serialize_response(rows),
-            Err(e) => err_response(&e),
-        },
+        Request::ListRecordings { filter } => {
+            catalog_call!(state.catalog.list(&filter).await => serialize)
+        }
         Request::GetRecording { id } => match state.catalog.get(&id).await {
             Ok(Some(r)) => serialize_response(r),
             Ok(None) => not_found(format!("recording {id} not found")),
@@ -281,18 +314,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::ListAiActivity {
             recording_id,
             limit,
-        } => match state
-            .catalog
-            .list_ai_activity(recording_id.as_deref(), limit as i64)
-            .await
-        {
-            Ok(rows) => serialize_response(rows),
-            Err(e) => err_response(&e),
-        },
-        Request::ListSavedSearches => match state.catalog.list_saved_searches().await {
-            Ok(rows) => serialize_response(rows),
-            Err(e) => err_response(&e),
-        },
+        } => catalog_call!(
+            state
+                .catalog
+                .list_ai_activity(recording_id.as_deref(), limit as i64)
+                .await => serialize
+        ),
+        Request::ListSavedSearches => {
+            catalog_call!(state.catalog.list_saved_searches().await => serialize)
+        }
         Request::UpsertSavedSearch {
             id,
             name,
@@ -305,27 +335,19 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(()) => Response::Ok(serde_json::json!({})),
             Err(e) => err_response(&e),
         },
-        Request::DeleteSavedSearch { id } => match state.catalog.delete_saved_search(&id).await {
-            Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
-            Err(e) => err_response(&e),
-        },
+        Request::DeleteSavedSearch { id } => {
+            catalog_call!(state.catalog.delete_saved_search(&id).await => json "removed")
+        }
         // ── Dictation history (re-grab) ──────────────────────────────────
         Request::ListDictationHistory { limit } => {
-            match state.catalog.list_dictation_history(limit as i64).await {
-                Ok(rows) => serialize_response(rows),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.list_dictation_history(limit as i64).await => serialize)
         }
         Request::DeleteDictationHistory { id } => {
-            match state.catalog.delete_dictation_history(id).await {
-                Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.delete_dictation_history(id).await => json "removed")
         }
-        Request::ClearDictationHistory => match state.catalog.clear_dictation_history().await {
-            Ok(n) => Response::Ok(serde_json::json!({ "removed": n })),
-            Err(e) => err_response(&e),
-        },
+        Request::ClearDictationHistory => {
+            catalog_call!(state.catalog.clear_dictation_history().await => json "removed")
+        }
         // Re-insert a past dictation's text at the current cursor. Resolves the
         // type/paste mode (the request's, else the global `type_mode`) and reuses
         // the dictation typing primitive verbatim — its `input_injection_disabled`
@@ -352,53 +374,38 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         // and runs the normal list query.
         Request::RunSavedSearch { id } => {
             let threshold = state.config.load().whisper.low_confidence_threshold;
-            match state.catalog.run_saved_search(&id, threshold).await {
-                Ok(rows) => serialize_response(rows),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.run_saved_search(&id, threshold).await => serialize)
         }
         Request::ListMeeting { meeting_id } => {
-            match state.catalog.list_by_meeting(&meeting_id).await {
-                Ok(rows) => serialize_response(rows),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.list_by_meeting(&meeting_id).await => serialize)
         }
         // An unknown/never-digested meeting yields `null` (not `NotFound`): "no
         // digest yet" is a normal state, and the merged view treats null as "show
         // nothing / offer to generate", mirroring how segments/words return empty.
         Request::GetMeetingDigest { meeting_id } => {
-            match state.catalog.meeting_digest(&meeting_id).await {
-                Ok(digest) => serialize_response(digest),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.meeting_digest(&meeting_id).await => serialize)
         }
         // Every stored digest, for the library-backup export to capture (the
         // digests live in a side table the per-recording list never carries).
-        Request::ListMeetingDigests => match state.catalog.list_all_meeting_digests().await {
-            Ok(digests) => serialize_response(digests),
-            Err(e) => err_response(&e),
-        },
+        Request::ListMeetingDigests => {
+            catalog_call!(state.catalog.list_all_meeting_digests().await => serialize)
+        }
         // An unknown/never-generated range yields `null` (not `NotFound`): "no
         // digest yet" is a normal state, mirroring `GetMeetingDigest`.
-        Request::GetPeriodDigest { key } => match state.catalog.period_digest(&key).await {
-            Ok(digest) => serialize_response(digest),
-            Err(e) => err_response(&e),
-        },
+        Request::GetPeriodDigest { key } => {
+            catalog_call!(state.catalog.period_digest(&key).await => serialize)
+        }
         // Every stored period digest (newest range first), for the digest panel's
         // history and the library-backup export.
-        Request::ListPeriodDigests => match state.catalog.list_all_period_digests().await {
-            Ok(digests) => serialize_response(digests),
-            Err(e) => err_response(&e),
-        },
+        Request::ListPeriodDigests => {
+            catalog_call!(state.catalog.list_all_period_digests().await => serialize)
+        }
         // An unknown id yields an empty list, not `NotFound`: "no segments" is a
         // normal state (pre-capture recordings, providers without timing) and
         // callers treat the two identically.
         Request::GetSegments { id, variant } => {
             let v = variant.as_deref().unwrap_or("raw");
-            match state.catalog.segments_for_variant(&id, v).await {
-                Ok(segments) => serialize_response(segments),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.segments_for_variant(&id, v).await => serialize)
         }
         // Like `GetSegments`, an unknown id yields an empty list (not `NotFound`):
         // "no words" is a normal state (pre-capture recordings, providers without
@@ -436,16 +443,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         },
         // Compounding chain (PB-COMPOUND): list / fetch / revert transcript versions.
         Request::ListTranscriptVersions { id } => {
-            match state.catalog.transcript_versions_for(&id).await {
-                Ok(versions) => serialize_response(versions),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.transcript_versions_for(&id).await => serialize)
         }
         Request::GetTranscriptVersion { id, idx } => {
-            match state.catalog.transcript_version(&id, idx).await {
-                Ok(v) => serialize_response(v),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.transcript_version(&id, idx).await => serialize)
         }
         Request::RevertToVersion { id, idx } => {
             match state.catalog.transcript_version(&id, idx).await {
@@ -916,25 +917,17 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::GetOriginalTranscript { id } => {
-            match state.catalog.get_original_transcript(&id).await {
-                Ok(original) => serialize_response(original),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.get_original_transcript(&id).await => serialize)
         }
-        Request::GetCleanTranscript { id } => match state.catalog.get_clean_transcript(&id).await {
-            Ok(clean) => serialize_response(clean),
-            Err(e) => err_response(&e),
-        },
+        Request::GetCleanTranscript { id } => {
+            catalog_call!(state.catalog.get_clean_transcript(&id).await => serialize)
+        }
         Request::SetFavorite { id, favorite } => {
-            match state.catalog.set_favorite(&id, favorite).await {
-                Ok(()) => ok_null(),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.set_favorite(&id, favorite).await => ok_null)
         }
-        Request::SetPinned { id, pinned } => match state.catalog.set_pinned(&id, pinned).await {
-            Ok(()) => ok_null(),
-            Err(e) => err_response(&e),
-        },
+        Request::SetPinned { id, pinned } => {
+            catalog_call!(state.catalog.set_pinned(&id, pinned).await => ok_null)
+        }
         Request::SetRecordingTitle { id, title } => {
             // A blank title means "clear back to auto", same as None. `Some` marks
             // the title user-owned, so the pipeline never overwrites it; `None`
@@ -1110,10 +1103,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         // Like `GetSegments`, an unknown id yields an empty list (not `NotFound`):
         // "no chapters" is a normal state (the recording has no timing to chapter,
         // or the auto-chapter step never ran).
-        Request::GetChapters { id } => match state.catalog.chapters_for(&id).await {
-            Ok(chapters) => serialize_response(chapters),
-            Err(e) => err_response(&e),
-        },
+        Request::GetChapters { id } => {
+            catalog_call!(state.catalog.chapters_for(&id).await => serialize)
+        }
         Request::SetTaskDone { id, task_id, done } => {
             // Toggle one task's done flag, then refresh open views. `not_found`
             // when the task id matches no row (a stale UI / bad id).
@@ -1424,52 +1416,37 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // V2 score normalization: when off (default), use the raw cosine
                 // bar; when on, switch to the z-score bar.
                 let (mode, threshold) = voiceprint_scorer(&cfg.diarization);
-                match state
-                    .catalog
-                    .recognize_speakers_for(id.as_str(), threshold, mode)
-                    .await
-                {
-                    Ok(suggestions) => serialize_response(suggestions),
-                    Err(e) => err_response(&e),
-                }
+                catalog_call!(
+                    state
+                        .catalog
+                        .recognize_speakers_for(id.as_str(), threshold, mode)
+                        .await => serialize
+                )
             } else {
                 serialize_response(Vec::<phoneme_core::types::SpeakerSuggestion>::new())
             }
         }
-        Request::DismissSpeakerSuggestion { id, speaker_label } => {
-            match state
+        Request::DismissSpeakerSuggestion { id, speaker_label } => catalog_call!(
+            state
                 .catalog
                 .dismiss_speaker_suggestion(id.as_str(), speaker_label)
-                .await
-            {
-                Ok(()) => ok_null(),
-                Err(e) => err_response(&e),
-            }
+                .await => ok_null
+        ),
+        Request::ListNamedVoices => {
+            catalog_call!(state.catalog.list_named_voices().await => serialize)
         }
-        Request::ListNamedVoices => match state.catalog.list_named_voices().await {
-            Ok(voices) => serialize_response(voices),
-            Err(e) => err_response(&e),
-        },
         Request::RenameNamedVoice { id, name } => {
-            match state.catalog.rename_named_voice(&id, &name).await {
-                Ok(()) => ok_null(),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.rename_named_voice(&id, &name).await => ok_null)
         }
         Request::MergeNamedVoices { from_id, into_id } => {
-            match state.catalog.merge_named_voices(&from_id, &into_id).await {
-                Ok(merged) => Response::Ok(serde_json::json!({ "merged": merged })),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.merge_named_voices(&from_id, &into_id).await => json "merged")
         }
-        Request::ForgetNamedVoice { id } => match state.catalog.forget_named_voice(&id).await {
-            Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
-            Err(e) => err_response(&e),
-        },
-        Request::UndoForgetNamedVoice { id } => match state.catalog.undo_forget(&id).await {
-            Ok(restored) => Response::Ok(serde_json::json!({ "restored": restored })),
-            Err(e) => err_response(&e),
-        },
+        Request::ForgetNamedVoice { id } => {
+            catalog_call!(state.catalog.forget_named_voice(&id).await => json "removed")
+        }
+        Request::UndoForgetNamedVoice { id } => {
+            catalog_call!(state.catalog.undo_forget(&id).await => json "restored")
+        }
         Request::ImportRecording { path } => import_recording(state, path).await,
         Request::ExportClip {
             id,
@@ -1858,10 +1835,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }))
         }
         Request::SetPreviewSource { track } => {
-            match state.recorder.set_preview_source(state, &track).await {
-                Ok(()) => ok_null(),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.recorder.set_preview_source(state, &track).await => ok_null)
         }
         Request::SkipCurrentStage => {
             // Wakes whichever LLM stage is currently streaming (no-op when none
@@ -2077,14 +2051,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             });
             ok_null()
         }
-        Request::ListTags => match state.catalog.list_tags().await {
-            Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
-            Err(e) => err_response(&e),
-        },
-        Request::ListAllTags => match state.catalog.list_all_tags().await {
-            Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
-            Err(e) => err_response(&e),
-        },
+        Request::ListTags => catalog_call!(state.catalog.list_tags().await => to_value),
+        Request::ListAllTags => catalog_call!(state.catalog.list_all_tags().await => to_value),
         Request::AddTag { name, color } => {
             match state.catalog.add_tag(&name, color.as_deref()).await {
                 Ok(tag) => {
@@ -2130,27 +2098,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
             Err(e) => err_response(&e),
         },
-        Request::TagsFor { recording_id } => match state.catalog.tags_for(&recording_id).await {
-            Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
-            Err(e) => err_response(&e),
-        },
-        Request::TagUsageCounts => match state.catalog.tag_usage_counts().await {
-            Ok(counts) => Response::Ok(serde_json::to_value(counts).unwrap_or_default()),
-            Err(e) => err_response(&e),
-        },
-        Request::KindCounts => match state.catalog.kind_counts().await {
-            Ok(counts) => Response::Ok(serde_json::to_value(counts).unwrap_or_default()),
-            Err(e) => err_response(&e),
-        },
-        Request::ListAllEntities => match state.catalog.entity_facets().await {
-            Ok(facets) => Response::Ok(serde_json::to_value(facets).unwrap_or_default()),
-            Err(e) => err_response(&e),
-        },
+        Request::TagsFor { recording_id } => {
+            catalog_call!(state.catalog.tags_for(&recording_id).await => to_value)
+        }
+        Request::TagUsageCounts => {
+            catalog_call!(state.catalog.tag_usage_counts().await => to_value)
+        }
+        Request::KindCounts => catalog_call!(state.catalog.kind_counts().await => to_value),
+        Request::ListAllEntities => {
+            catalog_call!(state.catalog.entity_facets().await => to_value)
+        }
         Request::ListAllTasks { only_open } => {
-            match state.catalog.list_all_tasks(only_open).await {
-                Ok(tasks) => Response::Ok(serde_json::to_value(tasks).unwrap_or_default()),
-                Err(e) => err_response(&e),
-            }
+            catalog_call!(state.catalog.list_all_tasks(only_open).await => to_value)
         }
         Request::MergeTags { from_id, into_id } => {
             match state.catalog.merge_tags(from_id, into_id).await {
