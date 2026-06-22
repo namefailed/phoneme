@@ -606,12 +606,16 @@ export class FirstRunWizardElement extends LitElement {
         this.progressValue = null;
         this.downloadStatus = "Waiting for Ollama to start...";
 
-        // Poll until ping succeeds
-        while (true) {
+        // Poll until Ollama answers — bounded (~3 min) so the wizard can never
+        // hang, with each ping catch-guarded so a transient failure doesn't throw
+        // out into a half-configured state. On timeout we proceed; the model pull
+        // below surfaces a clear error if Ollama still isn't reachable.
+        let ollamaUp = false;
+        for (let i = 0; i < 90 && !ollamaUp; i++) {
           await new Promise(r => setTimeout(r, 2000));
-          const ok = await invoke<boolean>("wizard_ping_ollama");
-          if (ok) break;
+          ollamaUp = await invoke<boolean>("wizard_ping_ollama").catch(() => false);
         }
+        if (!ollamaUp) this.downloadStatus = "Ollama didn't come up in time — continuing; you can finish in Settings later.";
       } else {
         this.downloadSubtitle = "Downloading Ollama installer...";
         this.progressValue = 0;
@@ -640,12 +644,13 @@ export class FirstRunWizardElement extends LitElement {
 
         await invoke("wizard_run_installer", { path: installerPath });
 
-        // Poll until ping succeeds
-        while (true) {
+        // Bounded, catch-guarded poll (see above) — never hang the wizard.
+        let ollamaUp = false;
+        for (let i = 0; i < 90 && !ollamaUp; i++) {
           await new Promise(r => setTimeout(r, 2000));
-          const ok = await invoke<boolean>("wizard_ping_ollama");
-          if (ok) break;
+          ollamaUp = await invoke<boolean>("wizard_ping_ollama").catch(() => false);
         }
+        if (!ollamaUp) this.downloadStatus = "Ollama didn't come up in time — continuing; you can finish in Settings later.";
       }
     }
 
