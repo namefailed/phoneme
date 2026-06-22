@@ -117,6 +117,7 @@ pub mod profiles;
 pub mod queue;
 pub mod realign;
 pub(crate) mod secret_crypto;
+pub mod secrets;
 pub mod tags;
 pub mod title;
 pub mod transcription;

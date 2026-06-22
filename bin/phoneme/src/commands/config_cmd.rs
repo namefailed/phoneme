@@ -81,8 +81,8 @@ const REDACTED_SECRET: &str = "<redacted>";
 /// or piped log). We mask them in the rendered TOML on every platform so the
 /// dump is safe to share by default; `--show-secrets` opts back into the real
 /// values for the rare case the user deliberately needs them. The on-disk file
-/// is untouched, and `config set` still writes real values. Same field set as
-/// the GUI's `mask_config_secrets`.
+/// is untouched, and `config set` still writes real values. The masked field set
+/// is shared with the GUI via [`phoneme_core::secrets::secret_locations`].
 fn render_config(cfg: &Config, show_secrets: bool) -> Result<String, String> {
     let serialized =
         toml::to_string_pretty(cfg).map_err(|e| format!("failed to serialize config: {e}"))?;
@@ -97,53 +97,60 @@ fn render_config(cfg: &Config, show_secrets: bool) -> Result<String, String> {
 
 /// Mask every secret value in `doc` in place with [`REDACTED_SECRET`], leaving
 /// empty values alone (an unset key is not a secret and the blank reads clearer).
+///
+/// Drives off [`phoneme_core::secrets::secret_locations`] — the same list the GUI
+/// masker consumes — so the two can't drift (the audit found `webhook.custom_headers`
+/// masked in the GUI but printed here in cleartext before this was unified).
 fn redact_secrets_for_display(doc: &mut toml_edit::DocumentMut) {
-    // Top-level provider tables that each carry an `api_key`.
-    for section in [
-        "whisper",
-        "preview_whisper",
-        "llm_post_process",
-        "summary",
-        "auto_tag",
-        "title",
-    ] {
-        if let Some(table) = doc.get_mut(section).and_then(|s| s.as_table_like_mut()) {
-            mask_field(table, "api_key");
-        }
-    }
-    // The dictation STT key lives one level deeper (`in_place.stt.api_key`).
-    if let Some(stt) = doc
-        .get_mut("in_place")
-        .and_then(|s| s.as_table_like_mut())
-        .and_then(|t| t.get_mut("stt"))
-        .and_then(|s| s.as_table_like_mut())
-    {
-        mask_field(stt, "api_key");
-    }
-    // The webhook HMAC signing key.
-    if let Some(webhook) = doc.get_mut("webhook").and_then(|s| s.as_table_like_mut()) {
-        mask_field(webhook, "hmac_secret");
-    }
-    // Each playbook entry carries its own LLM key (`playbook[].llm.api_key`).
-    if let Some(arr) = doc
-        .get_mut("playbook")
-        .and_then(|p| p.as_array_of_tables_mut())
-    {
-        for entry in arr.iter_mut() {
-            if let Some(llm) = entry.get_mut("llm").and_then(|l| l.as_table_like_mut()) {
-                mask_field(llm, "api_key");
+    use phoneme_core::secrets::{secret_locations, SecretLocation};
+    for loc in secret_locations() {
+        match loc {
+            SecretLocation::Field(path) => {
+                if let Some(item) = nav_item_mut(doc.as_table_mut(), path) {
+                    mask_item(item);
+                }
+            }
+            SecretLocation::MapValues(path) => {
+                if let Some(tbl) =
+                    nav_item_mut(doc.as_table_mut(), path).and_then(|i| i.as_table_like_mut())
+                {
+                    for (_, item) in tbl.iter_mut() {
+                        mask_item(item);
+                    }
+                }
+            }
+            SecretLocation::ArrayField { path, field } => {
+                if let Some(arr) = nav_item_mut(doc.as_table_mut(), path)
+                    .and_then(|i| i.as_array_of_tables_mut())
+                {
+                    for entry in arr.iter_mut() {
+                        if let Some(item) = nav_item_mut(entry, field) {
+                            mask_item(item);
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-/// Replace a non-empty string `field` in `table` with the redaction marker.
-fn mask_field(table: &mut dyn toml_edit::TableLike, field: &str) {
-    if let Some(item) = table.get_mut(field) {
-        let is_nonempty_secret = item.as_str().is_some_and(|s| !s.is_empty());
-        if is_nonempty_secret {
-            *item = toml_edit::value(REDACTED_SECRET);
-        }
+/// Recursively navigate dotted `path` from `table`, returning the final item.
+fn nav_item_mut<'a>(
+    table: &'a mut dyn toml_edit::TableLike,
+    path: &[&str],
+) -> Option<&'a mut toml_edit::Item> {
+    let (head, tail) = path.split_first()?;
+    let item = table.get_mut(head)?;
+    if tail.is_empty() {
+        return Some(item);
+    }
+    nav_item_mut(item.as_table_like_mut()?, tail)
+}
+
+/// Replace a non-empty string item with the redaction marker.
+fn mask_item(item: &mut toml_edit::Item) {
+    if item.as_str().is_some_and(|s| !s.is_empty()) {
+        *item = toml_edit::value(REDACTED_SECRET);
     }
 }
 
@@ -241,6 +248,46 @@ fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `phoneme config` redactor must mask EVERY secret location, including
+    /// the webhook custom-header values and playbook keys — a sentinel placed at
+    /// each must not survive the rendered dump. Guards the CLI walker against the
+    /// shared secret_locations() list (the leak that prompted unifying them).
+    #[test]
+    fn redactor_masks_every_secret_location() {
+        let sentinel = "SENTINEL_TOKEN_xyz";
+        let toml_src = format!(
+            r#"
+[whisper]
+api_key = "{sentinel}"
+[preview_whisper]
+api_key = "{sentinel}"
+[llm_post_process]
+api_key = "{sentinel}"
+[summary]
+api_key = "{sentinel}"
+[auto_tag]
+api_key = "{sentinel}"
+[title]
+api_key = "{sentinel}"
+[in_place.stt]
+api_key = "{sentinel}"
+[webhook]
+hmac_secret = "{sentinel}"
+[webhook.custom_headers]
+Authorization = "Bearer {sentinel}"
+"X-Api-Key" = "{sentinel}"
+[[playbook]]
+[playbook.llm]
+api_key = "{sentinel}"
+"#
+        );
+        let mut doc = toml_src.parse::<toml_edit::DocumentMut>().unwrap();
+        redact_secrets_for_display(&mut doc);
+        let out = doc.to_string();
+        assert!(!out.contains(sentinel), "a secret survived redaction:\n{out}");
+        assert!(out.contains(REDACTED_SECRET), "expected redaction marker in output");
+    }
 
     /// Serializes every `PHONEME_CONFIG` mutation. `set_var` is process-global,
     /// so under the parallel test runner two tests pointing the env at their own

@@ -152,60 +152,10 @@ const MASKED_SECRET: &str = "__phoneme_secret_kept__";
 
 /// Replace every non-empty API key in a serialized config with the mask.
 fn mask_config_secrets(v: &mut Value) {
-    for section in [
-        "whisper",
-        "llm_post_process",
-        "summary",
-        "auto_tag",
-        "title",
-        "preview_whisper",
-    ] {
-        if let Some(key) = v.get_mut(section).and_then(|s| s.get_mut("api_key")) {
-            if key.as_str().is_some_and(|k| !k.is_empty()) {
-                *key = Value::String(MASKED_SECRET.to_string());
-            }
-        }
-    }
-    // The dictation STT key lives one level deeper, at `in_place.stt.api_key`.
-    if let Some(key) = v
-        .get_mut("in_place")
-        .and_then(|s| s.get_mut("stt"))
-        .and_then(|s| s.get_mut("api_key"))
-    {
-        if key.as_str().is_some_and(|k| !k.is_empty()) {
-            *key = Value::String(MASKED_SECRET.to_string());
-        }
-    }
-    // The webhook HMAC signing key is a secret too — mask it like the API keys
-    // so the signing secret never crosses into the WebView (`webhook.hmac_secret`).
-    if let Some(key) = v.get_mut("webhook").and_then(|s| s.get_mut("hmac_secret")) {
-        if key.as_str().is_some_and(|k| !k.is_empty()) {
-            *key = Value::String(MASKED_SECRET.to_string());
-        }
-    }
-    // Webhook custom headers routinely carry secrets (an `Authorization: Bearer …`
-    // token, an API key header), so mask each non-empty value the same way.
-    if let Some(obj) = v
-        .get_mut("webhook")
-        .and_then(|s| s.get_mut("custom_headers"))
-        .and_then(|h| h.as_object_mut())
-    {
-        for (_, val) in obj.iter_mut() {
-            if val.as_str().is_some_and(|s| !s.is_empty()) {
-                *val = Value::String(MASKED_SECRET.to_string());
-            }
-        }
-    }
-    // Playbook entries each carry their own LLM key (`playbook[].llm.api_key`).
-    if let Some(arr) = v.get_mut("playbook").and_then(|p| p.as_array_mut()) {
-        for entry in arr {
-            if let Some(key) = entry.get_mut("llm").and_then(|l| l.get_mut("api_key")) {
-                if key.as_str().is_some_and(|k| !k.is_empty()) {
-                    *key = Value::String(MASKED_SECRET.to_string());
-                }
-            }
-        }
-    }
+    // Driven by the single source of truth in phoneme-core so the GUI mask and
+    // the CLI `phoneme config` redactor can't drift (e.g. webhook.custom_headers,
+    // which one used to mask and the other leaked).
+    phoneme_core::secrets::mask_json(v, MASKED_SECRET);
 }
 
 /// Restore any masked key in an incoming config from the current on-disk config,
