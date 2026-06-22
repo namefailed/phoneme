@@ -734,6 +734,33 @@ mark.search-hit {
   border-radius: 9px;
   padding: 1px 8px;
 }
+/* The section header's actions, grouped tight on the right (not sprawled across
+   the row). Compact "ghost" buttons — subtle until hover — so the header reads as
+   a header, like the tags row, instead of a bar of heavy pills. */
+.enrich-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.enrich-actions button {
+  transition: all var(--ui-motion-fast) ease-out;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--fg-faded);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.enrich-actions button:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--bg-elevated);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.enrich-actions button:disabled { opacity: 0.55; cursor: default; }
 .enrich-body { margin-top: 9px; }
 .enrich-empty {
   font-size: 0.7857rem;

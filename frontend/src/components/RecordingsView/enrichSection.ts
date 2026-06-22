@@ -59,7 +59,7 @@ export function enrichHead(opts: {
         <span class="enrich-label">${opts.label}</span>
         ${opts.count != null ? html`<span class="enrich-count">${opts.count}</span>` : ""}
       </button>
-      ${opts.action ?? ""}
+      ${opts.action ? html`<div class="enrich-actions">${opts.action}</div>` : ""}
     </div>
   `;
 }
