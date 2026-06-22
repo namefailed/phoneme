@@ -10,6 +10,7 @@ import {
   rerunSummary,
   setRecordingTitle,
   setPinned,
+  setFavorite,
   setSpeakerName,
   recognizeSpeakers,
   dismissSpeakerSuggestion,
@@ -362,6 +363,7 @@ export class RecordingDetail {
             </div>
           </div>
           <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+            <button class="detail-focus-btn rec-fav-btn ${r.favorite ? "on" : ""}" id="detail-fav" aria-label=${r.favorite ? "Unstar" : "Star"} title=${r.favorite ? "Remove from Favorites" : "Add to Favorites"}>⭐</button>
             <button class="detail-focus-btn rec-pin-btn ${r.pinned ? "on" : ""}" id="detail-pin" aria-label=${r.pinned ? "Unpin" : "Pin to top"} title=${r.pinned ? "Unpin from the top of the library" : "Pin to the top of the library"}>📌</button>
             <button class="detail-focus-btn" id="detail-similar" aria-label="More like this" title="More like this — fill the list with recordings about similar things"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
             <span aria-hidden="true" style="width: 1px; align-self: stretch; margin: 2px 2px; background: var(--border-subtle);"></span>
@@ -817,6 +819,29 @@ export class RecordingDetail {
     const closeBtn = this.container.querySelector<HTMLButtonElement>("#detail-close");
     if (closeBtn) {
       closeBtn.onclick = () => window.dispatchEvent(new CustomEvent("phoneme:close-detail"));
+    }
+
+    // ⭐ Favorite toggle in the title bar — mirrors the pin: optimistic flip,
+    // persist, nudge the sidebar "Favorites" badge + re-query so the star column
+    // and the Favorites filter update; reverts on failure.
+    const favBtn = this.container.querySelector<HTMLButtonElement>("#detail-fav");
+    if (favBtn) {
+      favBtn.onclick = async () => {
+        const next = !r.favorite;
+        r.favorite = next;
+        favBtn.classList.toggle("on", next);
+        favBtn.setAttribute("aria-label", next ? "Unstar" : "Star");
+        favBtn.title = next ? "Remove from Favorites" : "Add to Favorites";
+        try {
+          await setFavorite(r.id, next);
+          window.dispatchEvent(new CustomEvent("phoneme:counts-stale"));
+          this.onRefresh();
+        } catch (e) {
+          r.favorite = !next; // revert on failure
+          favBtn.classList.toggle("on", r.favorite);
+          showToast(`Couldn't ${next ? "favorite" : "unfavorite"}: ${errText(e)}`, "error");
+        }
+      };
     }
 
     // 📌 Pin toggle in the title bar: pin/unpin and re-query the list so the

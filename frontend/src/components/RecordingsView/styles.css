@@ -554,6 +554,7 @@ mark.search-hit {
   color: var(--fg-muted);
 }
 .clip-close {
+  margin-left: auto;
   background: none;
   border: none;
   color: var(--fg-muted);
@@ -581,6 +582,9 @@ mark.search-hit {
   flex-direction: column;
   gap: 16px;
 }
+/* Header aligns to the top so the ✂ icon sits with the title and the ✕ pins to
+   the top-right corner (not vertically centered against the two-line text). */
+.clip-header { align-items: flex-start; margin-bottom: 0; }
 .clip-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .clip-subtitle { font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.4; }
 

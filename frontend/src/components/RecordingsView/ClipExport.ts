@@ -264,7 +264,7 @@ export class ClipExportElement extends LitElement {
     return html`
       <div class="modal-overlay" @click=${(e: MouseEvent) => this.onOverlayClick(e)}>
         <div class="modal-dialog clip-dialog" role="dialog" aria-modal="true" aria-labelledby="clip-title">
-          <div class="modal-header">
+          <div class="modal-header clip-header">
             <span class="modal-icon" aria-hidden="true">✂</span>
             <div class="clip-head-text">
               <h3 class="modal-title" id="clip-title">Clip audio</h3>
