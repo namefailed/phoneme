@@ -150,6 +150,9 @@ export class ClipExportElement extends LitElement {
         this.wfMounted = true;
       }
     }
+    // render() emits .clip-playhead with no inline left, so a reactive re-render
+    // recreates it at 0 — restore the imperative position after every render.
+    this.paintPlayhead();
   }
 
   /** Move the playhead indicator imperatively (avoids a full re-render on every
@@ -241,8 +244,11 @@ export class ClipExportElement extends LitElement {
   }
 
   /** Enter in either field triggers the export (and stops the keystroke from
-   *  reaching the global vim/hotkey layer). */
+   *  reaching the global vim/hotkey layer). Escape is let through (not stopped)
+   *  so it reaches the document keyHandler and closes the modal even when a
+   *  field has focus. */
   private onFieldKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") return;
     e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
@@ -292,7 +298,10 @@ export class ClipExportElement extends LitElement {
                         title="Drag to set the end"
                       ></div>
                     </div>
-                    <div class="clip-playhead" style="left: ${(this.playhead / d) * 100}%"></div>
+                    <!-- left is set imperatively by paintPlayhead() so playback
+                         ticks don't trigger a re-render; no inline style here or
+                         a reactive re-render would snap it back to a stale value. -->
+                    <div class="clip-playhead"></div>
                   </div>
                 `
               : ""}

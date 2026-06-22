@@ -52,10 +52,11 @@ const CATALOG_ENTRY: &str = "catalog.json";
 const AUDIO_PREFIX: &str = "audio/";
 
 /// Hard cap on the decompressed size of a single audio entry we'll read on
-/// restore. The entry's self-reported `size()` is attacker-controllable, so we
-/// reject anything claiming more than this rather than honor a header that asks
-/// for a multi-GB allocation (a DoS guard, not a real-recording limit — 2 GiB is
-/// far past any plausible WAV).
+/// restore. The entry's self-reported `size()` is attacker-controllable (a zip
+/// bomb claims a tiny size while expanding to GiB), so the read itself is bounded
+/// to this — not the advertised header — and a stream that runs past it is
+/// rejected (a DoS guard, not a real-recording limit — 2 GiB is far past any
+/// plausible WAV).
 const MAX_RESTORE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// One recording's auto-generated chapters, carried in the manifest's own array.
@@ -386,11 +387,13 @@ fn restore_audio_for(
     // `by_name` borrows the archive; read the bytes out before touching the
     // filesystem so the borrow ends cleanly.
     let bytes = match archive.by_name(&entry_name) {
-        Ok(mut entry) => {
+        Ok(entry) => {
             // The entry's self-reported size is untrusted (a hand-crafted ZIP can
-            // claim a huge one). Cap it before reading rather than pre-allocating a
-            // buffer to that size, so a malicious header can't trigger a giant
-            // allocation; then read what's actually there with a growing buffer.
+            // claim a tiny one while the deflate stream expands to GiB — a zip
+            // bomb). Use size() only as a fast-path early-out, then bound the
+            // actual read: take MAX_RESTORE_BYTES + 1 and reject if we got past
+            // the cap, so the decompressed bytes — not the advertised header — are
+            // what the limit guards.
             if entry.size() > MAX_RESTORE_BYTES {
                 return Err(Error::Internal(format!(
                     "backup: entry {entry_name} too large ({} bytes > {MAX_RESTORE_BYTES} cap)",
@@ -398,7 +401,12 @@ fn restore_audio_for(
                 )));
             }
             let mut buf = Vec::new();
-            entry.read_to_end(&mut buf)?;
+            entry.take(MAX_RESTORE_BYTES + 1).read_to_end(&mut buf)?;
+            if buf.len() as u64 > MAX_RESTORE_BYTES {
+                return Err(Error::Internal(format!(
+                    "backup: entry {entry_name} decompressed past the {MAX_RESTORE_BYTES} byte cap"
+                )));
+            }
             buf
         }
         // No audio for this id — a row whose audio was reclaimed. Not an error.

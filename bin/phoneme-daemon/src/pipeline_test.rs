@@ -1246,7 +1246,12 @@ async fn llm_title_applies_and_falls_back_to_heuristic_on_error() {
 /// transcript variant, segments, canonicalized tag suggestions, the recorded
 /// hook fields, the webhook body, and the audio file surviving in the
 /// configured audio dir.
+///
+/// The shell hook uses `cmd /c`, so the test is Windows-only; on other runners
+/// `cmd` doesn't exist and the marker assertions can't hold, so we ignore it
+/// there.
 #[tokio::test]
+#[cfg_attr(not(windows), ignore)]
 async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
     // ── The whisper + LLM endpoints (one mock server, routed by content) ──
     let server = MockServer::start().await;
@@ -3568,7 +3573,13 @@ async fn skip_only_fires_for_the_active_processing_item() {
 /// visible) and the webhook POSTed once. If the legacy loops ever stop clearing,
 /// or a second path re-fires the migrated entries, the counts double and this
 /// fails.
+///
+/// The shell hook uses `cmd /c`, so the test is Windows-only; on other runners
+/// `cmd` doesn't exist and the marker would never be written, so we ignore it
+/// there. (The webhook half of the once-only guarantee is covered cross-platform
+/// by `run_hook_steps_honors_trigger_and_required`.)
 #[tokio::test]
+#[cfg_attr(not(windows), ignore)]
 async fn configured_hook_fires_exactly_once_per_transcribe() {
     // Whisper returns a raw transcript; no LLM stages are exercised here (the
     // default recipe's cleanup needs a provider, which isn't configured, so it

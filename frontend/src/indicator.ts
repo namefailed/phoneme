@@ -105,18 +105,34 @@ function hideIndicator() {
 // recordings register no tracks, so they hide on their own stop as before.
 const meetingTracks = new Map<string, string>();
 
+// Recording ids that stopped/cancelled/were deleted SINCE the most recent
+// recording_started began its async config read. recording_started awaits
+// `invoke(read_config)` before showIndicator(), so a stop arriving in that window
+// would otherwise hide the pill, then the resumed start would re-show it for a
+// recording that already ended — left always-on-top until the next recording's
+// own start/stop cycle re-hides it (TOCTOU). The start handler checks this set
+// after the await and bails if ITS recording is in it. Scoped by id so an
+// unrelated track stopping mid-await during a meeting doesn't suppress a still-
+// live track. Mirrors overlay.ts's guard.
+const stoppedDuringStart = new Set<string>();
+
 // ── Daemon event stream ──────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 void listen<any>("daemon-event", async (e) => {
   const p = e.payload;
   switch (p?.event) {
     case "recording_started": {
+      stoppedDuringStart.clear(); // only stops AFTER this start matter
       // Off-switch authoritative at show time: never auto-show when
       // `interface.recording_indicator` is off, even if this window still exists
       // (created earlier, then disabled before its destroy landed).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let cfg: any = null;
       try { cfg = await invoke<any>("read_config"); } catch { /* assume enabled */ }
+      // A stop/cancel/delete for THIS recording arrived while we awaited the
+      // config read — it's already over. Bail instead of showing a pill that
+      // would never receive its own stop event to close.
+      if (stoppedDuringStart.has(p.id)) break;
       if (cfg && !cfg.interface?.recording_indicator) break;
       if (p.meeting_id && typeof p.track === "string") {
         meetingTracks.set(p.id, p.track);
@@ -134,6 +150,7 @@ void listen<any>("daemon-event", async (e) => {
     case "recording_stopped":
     case "recording_cancelled":
     case "recording_deleted":
+      if (typeof p.id === "string") stoppedDuringStart.add(p.id); // see TOCTOU guard
       meetingTracks.delete(p.id);
       // Only hide once every track has stopped (single recordings have no tracks
       // registered, so they hide immediately); a fresh recording_started re-shows.

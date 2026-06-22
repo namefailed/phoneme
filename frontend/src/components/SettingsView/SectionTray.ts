@@ -6,7 +6,8 @@ import { message, confirm } from "@tauri-apps/plugin-dialog";
 /**
  * Settings → System → Startup & tray: app lifecycle around the tray — the
  * "Check for Updates" button (tauri-plugin-updater: check, confirm,
- * download+install, relaunch), the `config.tray` toggles (show window on
+ * download+install; we don't auto-relaunch — the user restarts to finish),
+ * the `config.tray` toggles (show window on
  * startup, minimize-to-tray, autostart with Windows, …), and the two
  * window-lifecycle knobs (`interface.strip_titlebar`,
  * `interface.quit_stops_daemon`). Plain section class on the form.ts binding;
@@ -134,8 +135,12 @@ export class SectionTray {
                   updateBtn.textContent = "Installing...";
                 }
               });
-              
-              await message("Update installed successfully. The application will now restart.", { title: "Update Complete", kind: "info" });
+
+              updateStatus.textContent = `Updated to v${update.version}. Restart Phoneme to finish.`;
+              await message(
+                "Update installed. Restart Phoneme to finish updating.",
+                { title: "Update Complete", kind: "info" },
+              );
             }
           } else {
             updateStatus.textContent = "You are on the latest version.";
@@ -144,10 +149,10 @@ export class SectionTray {
           console.error("Failed to check for updates:", e);
           updateStatus.textContent = `Error: ${errText(e)}`;
         } finally {
+          // We don't auto-relaunch, so always re-enable: the button must never
+          // stick on "Downloading…/Installing…" on the still-running old build.
           updateBtn.disabled = false;
-          if (updateBtn.textContent !== "Installing...") {
-             updateBtn.textContent = "Check for Updates";
-          }
+          updateBtn.textContent = "Check for Updates";
         }
       });
     }

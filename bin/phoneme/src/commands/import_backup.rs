@@ -20,6 +20,7 @@ use crate::commands::daemon_cmd::wait_for_pipe_death;
 use crate::commands::doctor::resolve_data_local_dir;
 use crate::exit;
 use phoneme_core::{backup, Catalog, Config};
+use phoneme_ipc::NamedPipeTransport;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -39,15 +40,33 @@ pub async fn run(args: ImportBackupArgs, cfg: &Config) -> ExitCode {
     // The daemon holds catalog.db open. Stop a running one first (observe-only —
     // no point spawning a daemon just to shut it down) and wait for it to
     // release the file, refusing to touch the DB if it won't exit.
-    if let Ok(mut c) = Client::connect_observe(cfg).await {
-        let _ = c.send(phoneme_ipc::Request::Shutdown).await;
-        if !wait_for_pipe_death(&cfg.daemon.pipe_name, STOP_WAIT).await {
-            eprintln!(
-                "error: the daemon did not exit within {}s — leaving the catalog \
-                 untouched. Stop it first (phoneme daemon stop) and re-run.",
-                STOP_WAIT.as_secs()
-            );
-            return ExitCode::from(exit::GENERIC_FAIL);
+    match Client::connect_observe(cfg).await {
+        Ok(mut c) => {
+            let _ = c.send(phoneme_ipc::Request::Shutdown).await;
+            if !wait_for_pipe_death(&cfg.daemon.pipe_name, STOP_WAIT).await {
+                eprintln!(
+                    "error: the daemon did not exit within {}s — leaving the catalog \
+                     untouched. Stop it first (phoneme daemon stop) and re-run.",
+                    STOP_WAIT.as_secs()
+                );
+                return ExitCode::from(exit::GENERIC_FAIL);
+            }
+        }
+        Err(_) => {
+            // connect_observe failed for one of two reasons: no daemon (safe —
+            // nothing holds the DB) or a live but protocol-incompatible daemon
+            // the handshake rejected (it's still holding catalog.db). Tell them
+            // apart with a plain pipe probe: if the pipe still answers, a daemon
+            // is alive — refuse to open the DB rather than risk corrupting it.
+            if NamedPipeTransport::connect(&cfg.daemon.pipe_name).await.is_ok() {
+                eprintln!(
+                    "error: could not confirm the daemon is stopped (it's running but \
+                     speaks an incompatible protocol). Stop it first (phoneme daemon \
+                     stop) and re-run — leaving the catalog untouched."
+                );
+                return ExitCode::from(exit::GENERIC_FAIL);
+            }
+            // Pipe is dead — no daemon, safe to proceed.
         }
     }
 

@@ -100,6 +100,12 @@ export class TranscriptDiff {
     // falling back to the first available layer so the diff isn't pointless.
     this.left = this.firstAvailable([this.keys[0], ...this.keys]);
     this.right = this.firstAvailable([this.keys[this.keys.length - 1], ...[...this.keys].reverse()]);
+    // When only one layer has content both sides resolve to it; force two
+    // distinct keys so the body names the missing side ("no <layer> version is
+    // available") instead of the unhelpful "Pick two different versions".
+    if (this.left === this.right) {
+      this.right = this.keys.find((k) => k !== this.left) ?? this.right;
+    }
     this.render();
   }
 

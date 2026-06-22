@@ -144,6 +144,13 @@ export class RecordingDetail {
    *  open one. Otherwise it stays visible over the new recording and keeps
    *  intercepting Escape. Set when a modal opens, cleared by its own close(). */
   private activeModalClose: (() => void) | null = null;
+  /** The app-level window listeners installed in the constructor (config:saved
+   *  keeps `use24h`/`lowConfThreshold` current; DISPLAY_PREFS_EVENT re-renders
+   *  when the Favorites/Pinned column toggles flip). Stored so `dispose()` can
+   *  detach them — the detail is recreated on view remount, so an anonymous
+   *  closure here would leak the dead instance (and its transcript) each time. */
+  private configSavedHandler: (e: Event) => void;
+  private displayPrefsHandler: () => void;
 
   constructor(container: HTMLElement, onRefresh: () => void) {
     this.container = container;
@@ -153,17 +160,19 @@ export class RecordingDetail {
       this.use24h = !!c?.interface?.format_24h;
       this.lowConfThreshold = lowConfidenceThreshold(c);
     }).catch(() => { /* keep defaults */ });
-    window.addEventListener("config:saved", (e) => {
+    this.configSavedHandler = (e: Event) => {
       const c = (e as CustomEvent).detail;
       this.use24h = !!c?.interface?.format_24h;
       this.lowConfThreshold = lowConfidenceThreshold(c);
-    });
+    };
+    window.addEventListener("config:saved", this.configSavedHandler);
     // The Library-layout toggles that hide the ⭐ Favorites / 📌 Pinned columns +
     // sidebar sections also hide the matching detail-header buttons. Re-render the
     // open recording when they flip so it tracks the list + sidebar live.
-    window.addEventListener(DISPLAY_PREFS_EVENT, () => {
+    this.displayPrefsHandler = () => {
       if (this.recording) this.renderRecording();
-    });
+    };
+    window.addEventListener(DISPLAY_PREFS_EVENT, this.displayPrefsHandler);
     // Feed the summary peek's live stream off the shared daemon event bus. The
     // detail instance is app-lifetime (created per slot, never disposed — only
     // cleared), so one subscription for its whole life is right; store the unsub
@@ -288,6 +297,8 @@ export class RecordingDetail {
       this.llmUnsub();
       this.llmUnsub = null;
     }
+    window.removeEventListener("config:saved", this.configSavedHandler);
+    window.removeEventListener(DISPLAY_PREFS_EVENT, this.displayPrefsHandler);
     this.clear();
   }
 

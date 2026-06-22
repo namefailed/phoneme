@@ -9,6 +9,7 @@ import {
   type DoctorCheckInfo,
 } from "../doctorChecks";
 import { showToast } from "../../utils/toast";
+import { errText } from "../../utils/error";
 import { reimportFromDisk, rebuildCatalog } from "../../services/ipc";
 
 // Import styles
@@ -40,6 +41,9 @@ export class DoctorViewElement extends LitElement {
 
   @state() private checks: DoctorCheckInfo[] | null = null;
   @state() private loading = false;
+  /** Set when both backend probes reject — the daemon row is synthetic and
+   *  always returns, so a real outage only shows up as both invokes failing. */
+  @state() private error: string | null = null;
   @state() private runningFix: string | null = null;
   /** Safe re-import-from-disk flow: idle → checking (dry-run preview) → confirm
    *  → running. Two clicks: the first counts orphaned files, the second runs it. */
@@ -68,14 +72,33 @@ export class DoctorViewElement extends LitElement {
     // disabled via `loading`) so the layout doesn't jump; `checks` stays
     // null only until the very first run lands.
     this.loading = true;
+    this.error = null;
 
-    const [daemonChecks, localChecks, backendChecks] = await Promise.all([
+    const [daemonChecks, local, backend] = await Promise.all([
       this.daemonChecks(),
-      invoke<DoctorCheckInfo[]>("doctor_local_checks").catch(() => []),
-      invoke<DoctorCheckInfo[]>("doctor_backend_checks").catch(() => []),
+      invoke<DoctorCheckInfo[]>("doctor_local_checks").then(
+        (c) => ({ ok: true as const, c }),
+        (e) => ({ ok: false as const, e }),
+      ),
+      invoke<DoctorCheckInfo[]>("doctor_backend_checks").then(
+        (c) => ({ ok: true as const, c }),
+        (e) => ({ ok: false as const, e }),
+      ),
     ]);
 
-    this.checks = [...daemonChecks, ...localChecks, ...backendChecks];
+    // Both backend probes down = the daemon's unreachable; the lone synthetic
+    // daemon row isn't worth pretending the rest "passed". Surface the error
+    // like the modal does instead of degrading to a half-populated list.
+    if (!local.ok && !backend.ok) {
+      this.error = errText(local.e);
+      this.checks = [];
+    } else {
+      this.checks = [
+        ...daemonChecks,
+        ...(local.ok ? local.c : []),
+        ...(backend.ok ? backend.c : []),
+      ];
+    }
     this.loading = false;
   }
 
@@ -333,7 +356,9 @@ export class DoctorViewElement extends LitElement {
             <div class="doctor-strip-state" role="status">
               ${this.checks === null
                 ? html`<span class="doctor-strip-note">Running checks…</span>`
-                : failing.length === 0
+                : this.error
+                  ? html`<span class="doctor-strip-note err" style="color: var(--err);">Couldn't reach the daemon.</span>`
+                  : failing.length === 0
                   ? html`<span class="doctor-chip ok">All systems good ✓</span>`
                   : html`
                       ${counts.critical ? html`<span class="doctor-chip critical">${counts.critical} critical</span>` : ""}
@@ -370,7 +395,9 @@ export class DoctorViewElement extends LitElement {
           </div>
           ${this.checks === null
             ? html`<div class="doctor-loading">Running health checks…</div>`
-            : html`
+            : this.error
+              ? html`<div class="doctor-empty err" style="color: var(--err);">${this.error}</div>`
+              : html`
                 ${failing.length ? html`<div class="doctor-list">${failing.map((c) => this.renderFailing(c))}</div>` : ""}
                 ${passing.length ? this.renderPassing(passing) : ""}
               `}

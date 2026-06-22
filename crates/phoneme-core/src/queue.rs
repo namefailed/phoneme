@@ -34,6 +34,14 @@ const ORDER_FILE: &str = ".queue-order";
 /// finishes). No `.json` extension so payload scans ignore it.
 const PAUSE_FILE: &str = ".queue-paused";
 
+/// How many `done/` markers to keep. They only exist so [`InboxQueue::recover_orphans`]
+/// can tell a crash *after* `finish_done`'s atomic rename (drop the stale
+/// processing file) from a genuine mid-run interrupt (re-queue it). That race is
+/// only possible for the most-recently finished items, so a small bounded tail
+/// is plenty — without it `done/` (a full transcript per recording) grows
+/// forever, duplicating the catalog on disk. The catalog is the real record.
+const DONE_KEEP: usize = 50;
+
 /// Which directory of the inbox a payload lives in (one per subdirectory).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InboxState {
@@ -41,7 +49,8 @@ pub enum InboxState {
     Pending,
     /// Being transcribed/post-processed right now (`processing/`, at most one).
     Processing,
-    /// Completed (`done/`).
+    /// Completed (`done/`) — a small bounded tail of crash-recovery markers,
+    /// not an archive.
     Done,
     /// Quarantined after an error or cancellation (`failed/`).
     Failed,
@@ -91,7 +100,10 @@ pub struct FailedPayload {
 ///   (chronological) unless the order manifest overrides it.
 /// - `processing/`: the single payload currently being transcribed or
 ///   post-processed.
-/// - `done/`: completed payloads, kept a while before deletion or archival.
+/// - `done/`: completed payloads, kept only as a small bounded tail (the newest
+///   [`DONE_KEEP`]). They exist solely as crash-recovery markers — see
+///   [`Self::recover_orphans`] — not as an archive; the catalog is the durable
+///   record of every transcript. [`Self::finish_done`] prunes the tail on write.
 /// - `failed/`: payloads that hit an error, alongside their error record.
 ///
 /// Two control files live among the payloads but never count as one:
@@ -281,7 +293,27 @@ impl InboxQueue {
         if fs::try_exists(&processing).await.unwrap_or(false) {
             fs::remove_file(&processing).await?;
         }
+        // Keep only the newest DONE_KEEP markers so this dir can't grow without
+        // bound (one full transcript per recording, forever). Best-effort: a
+        // prune failure must never fail an otherwise-finished recording.
+        self.prune_done().await;
         Ok(())
+    }
+
+    /// Drop all but the newest [`DONE_KEEP`] markers from `done/`. Filenames are
+    /// `{RecordingId}.json` and ids sort chronologically, so the leading entries
+    /// of the sorted scan are the oldest. Best-effort and silent on error.
+    async fn prune_done(&self) {
+        let dir = self.root.join("done");
+        let Ok(files) = read_json_entries_sorted(&dir).await else {
+            return;
+        };
+        if files.len() <= DONE_KEEP {
+            return;
+        }
+        for path in &files[..files.len() - DONE_KEEP] {
+            let _ = fs::remove_file(path).await;
+        }
     }
 
     /// Archive a cancelled item's processing payload to `done/` as-is.
@@ -618,6 +650,26 @@ mod tests {
         assert!(
             !proc.exists(),
             "processing file must not survive finish_done"
+        );
+    }
+
+    #[tokio::test]
+    async fn finish_done_prunes_done_to_a_bounded_tail() {
+        // done/ must not grow without bound — it's only a crash-recovery marker
+        // tail, not an archive. After more than DONE_KEEP finishes, only the
+        // newest DONE_KEEP markers survive.
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        for _ in 0..(DONE_KEEP + 5) {
+            let p = make_payload();
+            inbox.enqueue(&p).await.unwrap();
+            inbox.claim_next().await.unwrap();
+            inbox.finish_done(&p.id, &p).await.unwrap();
+        }
+        assert_eq!(
+            inbox.counts().await.unwrap().done,
+            DONE_KEEP,
+            "done/ must be pruned to the newest DONE_KEEP markers"
         );
     }
 

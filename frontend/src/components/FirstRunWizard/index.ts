@@ -94,6 +94,9 @@ export class FirstRunWizardElement extends LitElement {
   @state() private progressValue: number | null = null;
   @state() private progressMax: number = 100;
   @state() private isDownloading = false;
+  /** Set when a download fails so the Configure step stays put with an inline
+   *  error + Retry instead of advancing into a half-configured app. */
+  @state() private configError: string | null = null;
 
   // Live-preview step state
   @state() private previewDownloading = false;
@@ -486,7 +489,7 @@ export class FirstRunWizardElement extends LitElement {
         <div class="wizard-feature ${this.config.semantic_search?.enabled ? "on" : ""}">
           <div class="wizard-feature-head">
             <span class="wizard-feature-title">🔍 Semantic Search</span>
-            ${sw("semantic-search", this.config.semantic_search?.enabled, (e) => { this.config.semantic_search.enabled = (e.target as HTMLInputElement).checked; this.requestUpdate(); })}
+            ${sw("semantic-search", this.config.semantic_search?.enabled, (e) => { if (!this.config.semantic_search) this.config.semantic_search = {}; this.config.semantic_search.enabled = (e.target as HTMLInputElement).checked; this.requestUpdate(); })}
           </div>
           ${this.config.semantic_search?.enabled
             ? html`<div class="wizard-feature-note">Downloads a ~90 MB embedding model so you can search transcripts by meaning, not just keywords.</div>`
@@ -506,9 +509,10 @@ export class FirstRunWizardElement extends LitElement {
   // --- Configure Mode ---
   private async runConfigureStep() {
     this.isDownloading = true;
+    this.configError = null;
     this.downloadTitle = "Preparing...";
     this.downloadSubtitle = "Please wait.";
-    
+
     try {
       if (this.config._setup_whisper) {
         await this.doWhisper();
@@ -523,12 +527,18 @@ export class FirstRunWizardElement extends LitElement {
         await this.doSemanticSearch();
       }
     } catch (e) {
+      // Stay on the Configure step so the user can Retry or Continue anyway —
+      // auto-advancing here would leave a half-configured app (e.g. no whisper
+      // model) with no recovery affordance.
       console.error(e);
-      showToast(`Error during setup: ${errText(e)}`, "error");
-    } finally {
       this.isDownloading = false;
-      this.go("next");
+      this.configError = errText(e);
+      showToast(`Error during setup: ${this.configError}`, "error");
+      return;
     }
+    // Success only — advance to the mic step.
+    this.isDownloading = false;
+    this.go("next");
   }
 
   private async doWhisper() {
@@ -742,19 +752,28 @@ export class FirstRunWizardElement extends LitElement {
         <p class="wizard-subtitle" id="download-subtitle">${this.downloadSubtitle}</p>
         <div class="wizard-progress-block">
           <progress id="progress" style="width: 100%; height: 24px;"
-                    .max=${this.progressMax} 
+                    .max=${this.progressMax}
                     .value=${this.progressValue ?? undefined}>
           </progress>
           <div id="status" style="font-size: 0.9286rem; color: var(--fg-muted); margin-top: 8px; font-family: monospace;">
             ${this.downloadStatus}
           </div>
         </div>
+        ${this.configError ? html`
+          <div class="wizard-feature-note warn" style="margin-top: 16px;">
+            ⚠️ Setup didn't finish: ${this.configError}<br>
+            Retry, or continue anyway and finish the rest in Settings later.
+          </div>` : ""}
       </div>
       <div class="wizard-footer">
         <span class="spacer"></span>
         ${this.isDownloading
           ? html`<button class="wizard-btn primary" disabled>Please wait…</button>`
-          : html`<button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>`}
+          : this.configError
+            ? html`
+                <button class="wizard-btn ghost" @click=${() => this.go("next")}>Continue anyway →</button>
+                <button class="wizard-btn primary" @click=${() => this.runConfigureStep()}>Retry</button>`
+            : html`<button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>`}
       </div>
     `;
   }

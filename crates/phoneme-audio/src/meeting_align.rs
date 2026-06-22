@@ -103,12 +103,15 @@ fn align_one_track(
     let capture_window_ms = (target_duration_ms - track_late_by_ms).max(0);
     let expected_raw = ms_to_samples(capture_window_ms, sample_rate);
 
-    let mut samples = raw.to_vec();
-    if samples.len() > expected_raw {
-        samples.truncate(expected_raw);
-    }
+    // Borrow only the in-window portion; truncating excess is a slice, not a
+    // clone — a full to_vec() here doubles a multi-hundred-MB track's footprint.
+    let samples: &[i16] = if raw.len() > expected_raw {
+        &raw[..expected_raw]
+    } else {
+        raw
+    };
 
-    let skip = leading_quiet_len(&samples);
+    let skip = leading_quiet_len(samples);
     let deficit = expected_raw.saturating_sub(samples.len());
     let missing_capture = deficit > ms_to_samples(SPARSE_DEFICIT_MS, sample_rate);
     // Sub-threshold noise at the buffer head must not disqualify sparse loopback.
@@ -129,7 +132,7 @@ fn align_one_track(
             .max(track_late_by_ms);
         (placement_ms, &samples[skip..])
     } else {
-        (track_late_by_ms, samples.as_slice())
+        (track_late_by_ms, samples)
     };
 
     let mut out = vec![0i16; target];

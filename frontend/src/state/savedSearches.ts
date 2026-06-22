@@ -10,7 +10,7 @@
 // saved search just re-sets the shared `filterStore`, which the recordings list
 // already re-queries on.
 
-import type { UiFilter } from "./filter";
+import type { RecordingKind, UiFilter } from "./filter";
 import {
   listSavedSearches as ipcList,
   upsertSavedSearch as ipcUpsert,
@@ -235,17 +235,31 @@ export function updateSavedSearchFilter(id: string, filter: UiFilter): SavedSear
   return cache;
 }
 
+/** Library-kind labels for the menu. Exhaustive over `RecordingKind` (minus
+ *  "all", which adds no part) so a new kind is a compile error here, not a
+ *  silent fall-through to the wrong label. */
+const KIND_LABELS: Record<Exclude<RecordingKind, "all">, string> = {
+  single: "single-track",
+  meeting: "meetings",
+  favorite: "favorites",
+  pinned: "pinned",
+  in_place: "dictation",
+};
+
 /** A short, human description of what a saved filter matches, for the menu. */
 export function describeFilter(f: UiFilter): string {
   const parts: string[] = [];
   if (f.like_id) parts.push(`~similar: ${f.like_label || f.like_id}`);
   else if (f.search) parts.push(`"${f.search}"${f.semantic ? " ✨" : ""}`);
   else if (f.semantic) parts.push("✨ semantic");
-  if (f.kind && f.kind !== "all") {
-    parts.push(f.kind === "meeting" ? "meetings" : f.kind === "favorite" ? "favorites" : "single-track");
-  }
+  if (f.kind && f.kind !== "all") parts.push(KIND_LABELS[f.kind]);
   if (f.tag_id != null) parts.push("tagged");
+  if (f.tagState === "untagged") parts.push("untagged");
+  else if (f.tagState === "tagged") parts.push("any tag");
   if (f.entity_value) parts.push(`🔎 ${f.entity_value}`);
+  if (f.task_state === "has_open") parts.push("open tasks");
+  else if (f.task_state === "has_tasks") parts.push("has tasks");
+  if (f.lowConfidence) parts.push("low confidence");
   if (f.status) parts.push(String(f.status));
   if (f.since || f.until) {
     const s = f.since ? f.since.split("T")[0] : "…";

@@ -2,6 +2,26 @@
 
 use super::*;
 
+/// How many ids one batched `WHERE recording_id IN (…)` child query binds at
+/// once. Kept well under SQLite's older 999 bound-parameter cap so an
+/// unpaginated `list()` over a large corpus splits into a handful of queries
+/// rather than failing — a paginated library page is a single chunk.
+const IN_CHUNK: usize = 900;
+
+/// Build a `?, ?, …` placeholder list of length `n` for an `IN (…)` clause. `n`
+/// is always a chunk length the caller controls (never user input), so the
+/// generated text is safe to interpolate; the values themselves are still bound.
+fn in_placeholders(n: usize) -> String {
+    let mut s = String::with_capacity(n * 2);
+    for i in 0..n {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push('?');
+    }
+    s
+}
+
 impl Catalog {
     /// Insert a new recording row. The pipeline calls this once, when capture
     /// starts; later stages update the same row in place.
@@ -424,9 +444,10 @@ impl Catalog {
     /// [`Self::find_replace_transcript`] over **every** recording's live
     /// transcript, in one call.
     ///
-    /// Each recording is processed through `find_replace_transcript`, so the
-    /// per-recording guarantees carry over verbatim: literal (not regex)
-    /// substring matching, case-insensitive by default, only the live
+    /// Each recording runs the same literal replace as `find_replace_transcript`
+    /// (applied inline over a single batched `id, transcript` read, not a re-`get()`
+    /// per row), so the per-recording guarantees carry over verbatim: literal (not
+    /// regex) substring matching, case-insensitive by default, only the live
     /// `transcript` is rewritten (the preserved original/clean baselines stay,
     /// keeping each edit revertible), and the recording is marked `user_edited`.
     /// The caller (the daemon) re-flows the timing layers and re-embeds for each
@@ -460,36 +481,47 @@ impl Catalog {
             return Ok(FindReplaceLibraryOutcome::default());
         }
 
-        // Every recording, unfiltered. We only need the ids, so fetch just the id
-        // column rather than `list()`, which would fully hydrate tags/entities/
-        // tasks/speaker-names for the whole corpus — all discarded here.
-        // `find_replace_transcript` re-reads each row's current transcript itself
-        // (and applies its own no-transcript / zero-match guards), so this stays
-        // correct even if the id snapshot is slightly stale.
-        let ids: Vec<String> = sqlx::query_scalar("SELECT id FROM recordings")
+        // Every recording's id + live transcript in one read. We pull the
+        // `transcript` column up front rather than re-`get()`ing each row in the
+        // loop: `get()` runs `SELECT *` plus four child queries (speaker names,
+        // entities, tasks) per recording, none of which a find-replace ever uses —
+        // it only reads the one column and writes it back. So this batch select is
+        // the find-replace counterpart of the id-only fetch (no whole-corpus
+        // hydration), and the per-recording no-transcript / zero-match guards are
+        // applied inline below, mirroring `find_replace_transcript`.
+        let rows = sqlx::query("SELECT id, transcript FROM recordings")
             .fetch_all(&self.pool)
             .await?;
 
         let mut outcome = FindReplaceLibraryOutcome::default();
-        for id in ids {
-            let id = RecordingId::from_string(id);
-            match self
-                .find_replace_transcript(&id, find, replace, case_sensitive)
-                .await
-            {
-                Ok(per) if per.replaced > 0 => {
+        for row in rows {
+            let id = RecordingId::from_string(row.try_get("id")?);
+            // No transcript yet → benign skip (the per-recording path reports this
+            // as NotFound, which the bulk path treats as a skip, not a failure).
+            let Some(current) = row.try_get::<Option<String>, _>("transcript")? else {
+                continue;
+            };
+
+            let (count, new_text) = if case_sensitive {
+                (current.matches(find).count(), current.replace(find, replace))
+            } else {
+                replace_ignore_case(&current, find, replace)
+            };
+            // Zero-match: nothing to write; skip it entirely (no event, no churn).
+            if count == 0 {
+                continue;
+            }
+
+            // Write the rewritten transcript directly via the same setter
+            // `find_replace_transcript` ends on — marks `user_edited`, leaves the
+            // original/clean baselines intact so the edit stays revertible.
+            match self.update_user_transcript(&id, &new_text).await {
+                Ok(()) => {
                     outcome.recordings_changed += 1;
-                    outcome.total_replacements += per.replaced;
-                    outcome.changed.push((id, per.transcript));
+                    outcome.total_replacements += count;
+                    outcome.changed.push((id, new_text));
                 }
-                // Zero-match: nothing was written; skip it entirely (no event,
-                // no churn).
-                Ok(_) => {}
-                // A recording with no transcript yet reports NotFound from the
-                // per-recording path — for the bulk path that's a benign skip, not
-                // a failure.
-                Err(crate::error::Error::NotFound { .. }) => {}
-                // Any other error is logged and skipped so one bad row can't abort
+                // A write failure is logged and skipped so one bad row can't abort
                 // the whole sweep — but it's counted as a failure so the caller can
                 // surface it rather than silently reporting a smaller success count.
                 Err(e) => {
@@ -941,15 +973,170 @@ impl Catalog {
             .into_iter()
             .map(row_to_recording)
             .collect::<Result<_>>()?;
-        // Populate tags + custom speaker names for each recording (N+1 query;
-        // acceptable for desktop UI scale).
+        // Populate tags, entities, tasks, and custom speaker names per row. Each
+        // child table is read in ONE batched `WHERE recording_id IN (…)` query over
+        // the whole page and bucketed back per recording, rather than four queries
+        // per row (the old N+1). Best-effort, matching the per-row `.unwrap_or_default()`
+        // this replaced: a child-query failure leaves that child empty rather than
+        // failing the list.
+        let ids: Vec<String> = recs.iter().map(|r| r.id.as_str().to_string()).collect();
+        let mut tags = self.tags_for_many(&ids).await.unwrap_or_default();
+        let mut entities = self.entities_for_many(&ids).await.unwrap_or_default();
+        let mut tasks = self.tasks_for_many(&ids).await.unwrap_or_default();
+        let mut speaker_names = self.speaker_names_for_many(&ids).await.unwrap_or_default();
         for rec in &mut recs {
-            rec.tags = self.tags_for(&rec.id).await.unwrap_or_default();
-            rec.entities = self.list_entities(&rec.id).await.unwrap_or_default();
-            rec.tasks = self.list_tasks(&rec.id).await.unwrap_or_default();
-            rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
+            let key = rec.id.as_str().to_string();
+            rec.tags = tags.remove(&key).unwrap_or_default();
+            rec.entities = entities.remove(&key).unwrap_or_default();
+            rec.tasks = tasks.remove(&key).unwrap_or_default();
+            rec.speaker_names = speaker_names.remove(&key).unwrap_or_default();
         }
         Ok(recs)
+    }
+
+    /// Batched counterpart of [`Self::tags_for`]: every page recording's tags in
+    /// one query, keyed by recording id. Per-recording order matches `tags_for`
+    /// (name-sorted). The id list is chunked under SQLite's bound-parameter cap so
+    /// an unpaginated `list()` over a large corpus stays one query per chunk.
+    async fn tags_for_many(
+        &self,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<Tag>>> {
+        let mut map: std::collections::HashMap<String, Vec<Tag>> =
+            std::collections::HashMap::new();
+        for chunk in ids.chunks(IN_CHUNK) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let sql = format!(
+                "SELECT rt.recording_id, t.id, t.name, t.color \
+                 FROM tags t JOIN recording_tags rt ON rt.tag_id = t.id \
+                 WHERE rt.recording_id IN ({}) \
+                 ORDER BY t.name",
+                in_placeholders(chunk.len())
+            );
+            let mut q = sqlx::query(&sql);
+            for id in chunk {
+                q = q.bind(id);
+            }
+            let rows = q.fetch_all(&self.pool).await?;
+            for r in rows {
+                let rid: String = r.try_get("recording_id")?;
+                map.entry(rid).or_default().push(Tag {
+                    id: r.try_get("id")?,
+                    name: r.try_get("name")?,
+                    color: r.try_get("color")?,
+                });
+            }
+        }
+        Ok(map)
+    }
+
+    /// Batched counterpart of [`Self::list_entities`]: every page recording's
+    /// entities in one query, keyed by recording id. Per-recording order matches
+    /// `list_entities` (kind, then value).
+    async fn entities_for_many(
+        &self,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<Entity>>> {
+        let mut map: std::collections::HashMap<String, Vec<Entity>> =
+            std::collections::HashMap::new();
+        for chunk in ids.chunks(IN_CHUNK) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let sql = format!(
+                "SELECT recording_id, kind, value FROM entities \
+                 WHERE recording_id IN ({}) \
+                 ORDER BY kind, value",
+                in_placeholders(chunk.len())
+            );
+            let mut q = sqlx::query(&sql);
+            for id in chunk {
+                q = q.bind(id);
+            }
+            let rows = q.fetch_all(&self.pool).await?;
+            for r in rows {
+                let rid: String = r.try_get("recording_id")?;
+                map.entry(rid).or_default().push(Entity {
+                    kind: r.try_get("kind")?,
+                    value: r.try_get("value")?,
+                });
+            }
+        }
+        Ok(map)
+    }
+
+    /// Batched counterpart of [`Self::list_tasks`]: every page recording's tasks in
+    /// one query, keyed by recording id. Per-recording order matches `list_tasks`
+    /// (open first, then sort_order, then row id).
+    async fn tasks_for_many(
+        &self,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<Task>>> {
+        let mut map: std::collections::HashMap<String, Vec<Task>> =
+            std::collections::HashMap::new();
+        for chunk in ids.chunks(IN_CHUNK) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let sql = format!(
+                "SELECT recording_id, id, text, due_hint, done FROM tasks \
+                 WHERE recording_id IN ({}) \
+                 ORDER BY recording_id, done, sort_order, id",
+                in_placeholders(chunk.len())
+            );
+            let mut q = sqlx::query(&sql);
+            for id in chunk {
+                q = q.bind(id);
+            }
+            let rows = q.fetch_all(&self.pool).await?;
+            for r in rows {
+                let rid: String = r.try_get("recording_id")?;
+                map.entry(rid).or_default().push(Task {
+                    id: r.try_get("id")?,
+                    text: r.try_get("text")?,
+                    due_hint: r.try_get("due_hint")?,
+                    done: r.try_get("done")?,
+                });
+            }
+        }
+        Ok(map)
+    }
+
+    /// Batched counterpart of [`Self::speaker_names_for`]: every page recording's
+    /// custom speaker names in one query, keyed by recording id. Per-recording
+    /// order matches `speaker_names_for` (by speaker label).
+    async fn speaker_names_for_many(
+        &self,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<SpeakerName>>> {
+        let mut map: std::collections::HashMap<String, Vec<SpeakerName>> =
+            std::collections::HashMap::new();
+        for chunk in ids.chunks(IN_CHUNK) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let sql = format!(
+                "SELECT recording_id, speaker_label, name FROM speaker_names \
+                 WHERE recording_id IN ({}) \
+                 ORDER BY recording_id, speaker_label",
+                in_placeholders(chunk.len())
+            );
+            let mut q = sqlx::query(&sql);
+            for id in chunk {
+                q = q.bind(id);
+            }
+            let rows = q.fetch_all(&self.pool).await?;
+            for r in rows {
+                let rid: String = r.try_get("recording_id")?;
+                map.entry(rid).or_default().push(SpeakerName {
+                    speaker_label: r.try_get("speaker_label")?,
+                    name: r.try_get("name")?,
+                });
+            }
+        }
+        Ok(map)
     }
 
     /// Fetch all recordings belonging to a single meeting session.

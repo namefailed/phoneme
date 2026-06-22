@@ -358,6 +358,16 @@ pub async fn refire_hook(
 /// Re-run only the LLM post-processing ("cleanup") step on a recording's stored
 /// transcript, without re-transcribing the audio. `model` optionally overrides
 /// the configured cleanup model for this one run.
+///
+/// Cleanup is the only one-shot LLM command that carries a per-run
+/// `provider`/`api_url`/`api_key` (the "Cleanup" rerun dialog lets the user pick
+/// a different provider for a single re-clean). The sibling one-shots —
+/// `rerun_summary`, `rerun_meeting_digest`, `rerun_period_digest` — deliberately
+/// take only `model`/`prompt`/`recipe_id` and always reuse the configured summary
+/// provider; their requests have no key field, so the frontend never sends one
+/// and there is nothing to mask-resolve. If a per-run provider is ever wanted for
+/// summary/digest too, those `Request` variants gain the same fields and the
+/// resolve below moves into a shared helper.
 #[tauri::command]
 pub async fn rerun_cleanup(
     bridge: Br<'_>,

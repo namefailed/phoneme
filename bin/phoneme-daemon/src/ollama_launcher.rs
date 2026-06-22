@@ -185,32 +185,48 @@ impl OllamaLauncher {
                 _ => LedgerKind::OwnedAlive,
             },
         };
-        match next_action(kind, reachable) {
-            Action::UseRunning => {}
+        // Whether we still need to poll for readiness after releasing the
+        // lock. The decision (and any ledger mutation) happens under the lock;
+        // the 15s readiness wait must not, or it serializes every concurrent
+        // LLM step behind a cold start.
+        let wait_after = match next_action(kind, reachable) {
+            Action::UseRunning => false,
             Action::MarkNotOurs => {
                 tracing::info!(
                     %base,
                     "found an already-running Ollama; it stays untouched for this daemon's lifetime"
                 );
                 *ledger = Ledger::NotOurs;
+                false
             }
             Action::LeaveAlone => {
                 tracing::debug!(
                     %base,
                     "Ollama endpoint is down but the process was never ours — not launching over it"
                 );
+                false
             }
-            Action::AwaitOwned => {
-                self.wait_ready(&base).await;
-            }
+            Action::AwaitOwned => true,
             Action::Spawn => {
+                // Store the Owned child *before* dropping the lock so a
+                // concurrent caller sees OwnedAlive (→ AwaitOwned) and never
+                // double-spawns. Only the readiness poll moves out from under
+                // the lock.
                 if let Some(child) = self.spawn(&base, log_dir) {
                     *ledger = Ledger::Owned {
                         child: Box::new(child),
                     };
-                    self.wait_ready(&base).await;
+                    true
+                } else {
+                    false
                 }
             }
+        };
+        // Single-flight is already secured (NotOurs recorded, or the Owned
+        // child stored); release the lock before the bounded readiness wait.
+        drop(ledger);
+        if wait_after {
+            self.wait_ready(&base).await;
         }
     }
 

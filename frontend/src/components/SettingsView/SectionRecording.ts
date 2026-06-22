@@ -25,7 +25,44 @@ export class SectionRecording {
     // the full device list is appended once the IPC returns (see loadDevices).
     container.innerHTML = this.markup();
     bindFieldEvents(container, this.config);
+    // The numeric fields are bound by hand (not via data-key/form.ts) so they
+    // clamp to sane ranges and never write NaN when cleared mid-edit.
+    this.bindNumbers();
     void this.loadDevices();
+  }
+
+  /** Wire the numeric Recording fields with min/max clamps and a NaN guard.
+   *  form.ts' generic binding does `Number(input.value)`, which is NaN for an
+   *  emptied field (a normal editing step) — that would serialize to a bad
+   *  value on Save. These bespoke handlers (mirroring SectionPreview) clamp to
+   *  range and fall back to the last good value when the input is blank/NaN. */
+  private bindNumbers() {
+    const wire = (
+      id: string,
+      key: string,
+      min: number,
+      max: number,
+      round: boolean,
+    ) => {
+      const el = this.container.querySelector<HTMLInputElement>(`#${id}`);
+      el?.addEventListener("change", () => {
+        const n = Number(el.value);
+        if (Number.isFinite(n)) {
+          const v = Math.min(max, Math.max(min, round ? Math.round(n) : n));
+          this.config.recording[key] = v;
+          // Reflect the clamped value back so the field shows what was stored.
+          el.value = String(v);
+        } else {
+          // Cleared/invalid — keep the previous value and restore the display.
+          el.value = String(this.config.recording[key] ?? min);
+        }
+      });
+    };
+    // u32 fields: non-negative whole numbers. dBFS is a level <= 0.
+    wire("rec-max-duration", "max_duration_secs", 0, 86400, true);
+    wire("rec-silence-dbfs", "silence_threshold_dbfs", -120, 0, false);
+    wire("rec-silence-window", "silence_window_ms", 0, 600000, true);
+    wire("rec-pre-roll", "pre_roll_ms", 0, 60000, true);
   }
 
   /** Initial microphone options: system default, plus the saved device (so it
@@ -84,10 +121,9 @@ export class SectionRecording {
         </div>
         <div class="settings-field">
           <label>Max duration (seconds)</label>
-          <div>${renderField(
-            { key: "recording.max_duration_secs", label: "", kind: "number" },
-            this.config.recording.max_duration_secs,
-          )}</div>
+          <div><input type="number" id="rec-max-duration" min="0" max="86400" step="1" value="${
+            this.config.recording.max_duration_secs ?? 0
+          }" /></div>
         </div>
         <div class="settings-field">
           <label>Auto-stop on silence</label>
@@ -102,10 +138,9 @@ export class SectionRecording {
         </div>
         <div class="settings-field">
           <label>Silence threshold (dBFS)</label>
-          <div>${renderField(
-            { key: "recording.silence_threshold_dbfs", label: "", kind: "number" },
-            this.config.recording.silence_threshold_dbfs,
-          )}</div>
+          <div><input type="number" id="rec-silence-dbfs" min="-120" max="0" step="1" value="${
+            this.config.recording.silence_threshold_dbfs ?? -45
+          }" /></div>
           <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             The volume level (in decibels) below which audio is considered "silence".<br/>
             <b>-45 dBFS</b> is good for quiet rooms. Use <b>-30 dBFS</b> for noisy environments to prevent background noise from keeping the recording open.
@@ -113,10 +148,9 @@ export class SectionRecording {
         </div>
         <div class="settings-field">
           <label>Silence window (ms)</label>
-          <div>${renderField(
-            { key: "recording.silence_window_ms", label: "", kind: "number" },
-            this.config.recording.silence_window_ms,
-          )}</div>
+          <div><input type="number" id="rec-silence-window" min="0" max="600000" step="100" value="${
+            this.config.recording.silence_window_ms ?? 3000
+          }" /></div>
           <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             How long you must pause (in milliseconds) before Phoneme considers you finished speaking and automatically stops the recording. (e.g. 1500 = 1.5 seconds)
           </span>
@@ -134,10 +168,9 @@ export class SectionRecording {
         </div>
         <div class="settings-field">
           <label>Pre-roll (ms)</label>
-          <div>${renderField(
-            { key: "recording.pre_roll_ms", label: "", kind: "number" },
-            this.config.recording.pre_roll_ms ?? 0,
-          )}</div>
+          <div><input type="number" id="rec-pre-roll" min="0" max="60000" step="100" value="${
+            this.config.recording.pre_roll_ms ?? 0
+          }" /></div>
           <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             Captures up to this many milliseconds of audio from <b>before</b> you hit record, so the first syllable isn't clipped. (e.g. 500 = 0.5 seconds)<br/>
             <b>0 disables it</b> (default). When set above 0, Phoneme keeps your <b>microphone open continuously</b> between recordings, holding the most recent audio in a rolling in-memory buffer that is constantly discarded. Nothing is written to disk unless you actually start a recording. Microphone source only — ignored for system audio.

@@ -49,7 +49,15 @@ async fn main() -> Result<ExitCode> {
         return Ok(commands::completions::run(args));
     }
 
-    let cfg = load_config()?;
+    // A bad config.toml is a common, purely-local failure: surface it with the
+    // spec's stable INVALID_CONFIG code instead of letting anyhow exit 1.
+    let cfg = match load_config() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("Error: {e:#}");
+            return Ok(ExitCode::from(exit::INVALID_CONFIG));
+        }
+    };
     let exit_code = dispatch(cli, &cfg).await;
     Ok(exit_code)
 }

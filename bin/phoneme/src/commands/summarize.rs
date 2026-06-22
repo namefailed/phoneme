@@ -26,6 +26,8 @@ pub async fn run(args: SummarizeArgs, cfg: &Config, json: bool) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
+    // Keep the id for the status message — `id` is moved into the request below.
+    let id_str = id.as_str().to_string();
     match client
         .send(Request::RerunSummary {
             id,
@@ -34,13 +36,20 @@ pub async fn run(args: SummarizeArgs, cfg: &Config, json: bool) -> ExitCode {
         })
         .await
     {
-        Ok(value) => {
+        Ok(_value) => {
+            // The daemon ACKs immediately and summarizes in the background, so
+            // the response carries no summary text — it lands later via
+            // SummaryUpdated/SummaryFailed. Report that it was requested rather
+            // than claiming it's already done.
             if json {
-                output::print_json(&value);
-            } else if let Some(text) = value.as_str() {
-                println!("{text}");
+                output::print_json(&serde_json::json!({
+                    "status": "requested",
+                    "id": id_str,
+                }));
             } else {
-                println!("summary generated");
+                println!(
+                    "summary requested (generating in the background; view with `phoneme show {id_str}`)"
+                );
             }
             ExitCode::SUCCESS
         }

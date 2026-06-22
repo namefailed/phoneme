@@ -195,8 +195,13 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
     for (filename, url) in files {
         let dest_path = semantic_dir.join(filename);
         // Treat a pre-existing file as done only if it passes its pin; a partial
-        // or tampered cache re-downloads (verify deletes it first).
-        if tokio::fs::metadata(&dest_path).await.is_ok() {
+        // or tampered cache re-downloads (verify deletes it first). A 0-byte husk
+        // skips the hash and goes straight to a clean re-download, matching
+        // wizard_download_model.
+        if tokio::fs::metadata(&dest_path)
+            .await
+            .is_ok_and(|m| m.len() > 0)
+        {
             let verify_path = dest_path.clone();
             let verify_url = url.to_string();
             let cached_ok = tokio::task::spawn_blocking(move || {
@@ -378,7 +383,14 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Com
         .map_err(|e| format!("failed to create bin dir: {}", e))?;
 
     let exe_path = bin_dir.join("whisper-server.exe");
-    if tokio::fs::metadata(&exe_path).await.is_ok() {
+    // A 0-byte exe is a husk from an interrupted extract, not an install: the
+    // exe carries no pinned checksum (only the zip does, below), so the least we
+    // can do is refuse to treat an empty file as a finished server and fall
+    // through to a clean re-download + re-extract.
+    if tokio::fs::metadata(&exe_path)
+        .await
+        .is_ok_and(|m| m.len() > 0)
+    {
         let _ = window.emit(
             "server_download_progress",
             DownloadProgress {

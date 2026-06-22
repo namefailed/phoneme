@@ -1444,9 +1444,14 @@ pub struct RecordingConfig {
     /// recordings, retaining the last `pre_roll_ms` of audio in an in-memory
     /// ring buffer that is continuously discarded. On RecordStart those buffered
     /// samples are prepended to the new recording so the first syllable isn't
-    /// clipped. **Default 0 = disabled** — when 0, the microphone is only opened
-    /// while actively recording (the historical behavior). The rolling buffer is
-    /// never written to disk unless a recording starts.
+    /// clipped. The rolling buffer is never written to disk unless a recording
+    /// starts.
+    ///
+    /// **Fresh-install default 1500ms** (see [`Config::default`]): the mic is
+    /// kept open continuously and the last 1.5s is retained in the discarded
+    /// ring buffer. **A key absent from a pre-existing config defaults to 0
+    /// (disabled)** via `#[serde(default)]`, so upgraders keep the historical
+    /// open-only-while-recording behavior until they opt in.
     #[serde(default)]
     pub pre_roll_ms: u32,
     /// Live streaming transcription preview. When `true`, the daemon transcribes
@@ -4432,17 +4437,28 @@ pub fn expand_cmd(s: &str) -> String {
     expand_home_tokens(s)
 }
 
-/// Replace `%USERPROFILE%`, `%APPDATA%`, and leading `~/` with absolute paths.
+/// Replace `%USERPROFILE%`, `%APPDATA%`, and a leading `~` (`~/`, `~\`, or a
+/// bare `~`) with absolute paths. The home dir is always forward-slashed so the
+/// result is a clean path regardless of whether the input used `\` or `/`.
 fn expand_home_tokens(s: &str) -> String {
-    let mut s = s
-        .replace("%USERPROFILE%", "~")
-        .replace("%APPDATA%", "~/AppData/Roaming");
-    if let Some(home_dir) =
-        directories::UserDirs::new().map(|u| u.home_dir().to_string_lossy().to_string())
-    {
-        s = s.replace("~/", &format!("{}/", home_dir.replace('\\', "/")));
+    let home = directories::UserDirs::new()
+        .map(|u| u.home_dir().to_string_lossy().replace('\\', "/"));
+    let Some(home) = home else {
+        // No home dir resolvable — leave tokens as-is rather than corrupt them.
+        return s.to_string();
+    };
+    let s = s
+        .replace("%USERPROFILE%", &home)
+        .replace("%APPDATA%", &format!("{home}/AppData/Roaming"));
+    // Expand a leading `~` only (not a `~` mid-path), matching `~/` and `~\`
+    // as well as a bare `~`.
+    if let Some(rest) = s.strip_prefix("~/").or_else(|| s.strip_prefix("~\\")) {
+        format!("{home}/{rest}")
+    } else if s == "~" {
+        home
+    } else {
+        s
     }
-    s
 }
 
 fn deserialize_string_or_vec<'de, D>(deserializer: D) -> std::result::Result<Vec<String>, D::Error>
@@ -6271,6 +6287,49 @@ mod tests {
         assert!(
             dir.ends_with("/models/embed") || dir.ends_with("\\models\\embed"),
             "the path suffix should be preserved, got: {dir}"
+        );
+    }
+
+    #[test]
+    fn expand_home_tokens_handles_backslash_userprofile() {
+        // `%USERPROFILE%\Documents\phoneme` (Windows-style) must fully resolve —
+        // no literal `~` or `%USERPROFILE%` left behind.
+        let out = expand_home_tokens("%USERPROFILE%\\Documents\\phoneme");
+        assert!(!out.contains('~'), "no tilde should survive, got: {out}");
+        assert!(
+            !out.contains("%USERPROFILE%"),
+            "token should be replaced, got: {out}"
+        );
+        assert!(
+            out.ends_with("\\Documents\\phoneme"),
+            "the suffix (incl. its backslash separators) is preserved verbatim, got: {out}"
+        );
+    }
+
+    #[test]
+    fn expand_home_tokens_handles_bare_userprofile() {
+        // A bare `%USERPROFILE%` (no trailing separator) must become the home
+        // dir, not a dangling `~`.
+        let out = expand_home_tokens("%USERPROFILE%");
+        assert!(!out.contains('~'), "no tilde should survive, got: {out}");
+        assert!(
+            !out.contains("%USERPROFILE%"),
+            "token should be replaced, got: {out}"
+        );
+        let home = directories::UserDirs::new()
+            .map(|u| u.home_dir().to_string_lossy().replace('\\', "/"))
+            .expect("home dir resolvable in tests");
+        assert_eq!(out, home);
+    }
+
+    #[test]
+    fn expand_home_tokens_handles_leading_backslash_tilde() {
+        // A leading `~\` (Windows) expands just like `~/`.
+        let out = expand_home_tokens("~\\models\\embed");
+        assert!(!out.starts_with('~'), "tilde should expand, got: {out}");
+        assert!(
+            out.ends_with("/models\\embed"),
+            "the suffix is preserved verbatim, got: {out}"
         );
     }
 

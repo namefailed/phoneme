@@ -503,7 +503,10 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
     }
 
     // Hook executable resolvable. An empty hook list is fine (treated as ok).
-    let hook_cmd = cfg.hook.commands.first().map(String::as_str).unwrap_or("");
+    // Read the expanded copy so a `~/`/`%APPDATA%` hook command resolves to its
+    // real path — the same expansion the pipeline applies before running it
+    // (see `Config::expanded`) — instead of a false Warning on the literal token.
+    let hook_cmd = xcfg.hook.commands.first().map(String::as_str).unwrap_or("");
     let hook_first_word = hook_cmd.split_whitespace().next().unwrap_or("");
     let (hook_ok, hook_detail) = if hook_first_word.is_empty() {
         (true, "no hook configured".into())
@@ -1003,10 +1006,13 @@ fn resolved_llm_url(conn: &LlmPostProcessConfig) -> String {
 }
 
 /// A free, GET-able probe target for a chat endpoint: the sibling model-list
-/// route when the URL has the standard shape (`…/chat/completions`,
-/// `…/messages`), else the URL itself. Never a completion route — the probe
-/// must not be able to bill anything.
-fn llm_probe_url(kind: LlmKind, url: &str) -> String {
+/// route, derived only when the URL has the standard shape
+/// (`…/chat/completions`, `…/messages`). `None` when the shape is
+/// unrecognized — we never fall back to the configured URL, because that may
+/// itself be a completion route, and the caller attaches the API key to this
+/// target. Falling back there would let a keyed GET hit a billable endpoint,
+/// breaking the invariant that the probe can't bill anything.
+fn llm_probe_url(kind: LlmKind, url: &str) -> Option<String> {
     let models = |suffix: &str| {
         url.strip_suffix(suffix)
             .map(|base| format!("{base}/models"))
@@ -1016,7 +1022,6 @@ fn llm_probe_url(kind: LlmKind, url: &str) -> String {
         LlmKind::Anthropic => models("/messages"),
         _ => None,
     }
-    .unwrap_or_else(|| url.to_string())
 }
 
 // ── Probe + check builders ───────────────────────────────────────────────────
@@ -1530,32 +1535,54 @@ pub async fn run_backend_checks_with_ports(
                     }),
                 });
 
-                let probe_url = llm_probe_url(kind, &url);
-                let key = members
-                    .iter()
-                    .map(|s| s.conn.api_key_str().trim().to_string())
-                    .find(|k| !k.is_empty());
-                let mut req = client.get(&probe_url);
-                if let Some(k) = &key {
-                    req = match kind {
-                        LlmKind::Anthropic => req
-                            .header("x-api-key", k)
-                            .header("anthropic-version", "2023-06-01"),
-                        _ => req.bearer_auth(k),
-                    };
+                // Only probe when we could derive the free model-list route. A
+                // non-standard URL (gateway path, trailing slash, Azure
+                // deployment) yields None — never fall back to the configured
+                // URL, since attaching the key to a possible completion route
+                // could bill. Say the shape is unrecognized instead.
+                match llm_probe_url(kind, &url) {
+                    Some(probe_url) => {
+                        let key = members
+                            .iter()
+                            .map(|s| s.conn.api_key_str().trim().to_string())
+                            .find(|k| !k.is_empty());
+                        let mut req = client.get(&probe_url);
+                        if let Some(k) = &key {
+                            req = match kind {
+                                LlmKind::Anthropic => req
+                                    .header("x-api-key", k)
+                                    .header("anthropic-version", "2023-06-01"),
+                                _ => req.bearer_auth(k),
+                            };
+                        }
+                        let (ok, detail) = probe_any_response(req, &probe_url).await;
+                        out.push(CheckResult {
+                            name: format!("LLM endpoint ({steps_list})"),
+                            ok,
+                            detail,
+                            fix_action: None,
+                            category: category_for(ok, CheckCategory::Warning),
+                            explanation: "Probes the provider's free model-list route — a reachable endpoint plus a configured key is as much as Doctor can verify without a billable request.".into(),
+                            fix_hint: (!ok).then(|| {
+                                "Check your network/proxy, or the connection's base URL (Settings → Post-Processing → Connection).".into()
+                            }),
+                        });
+                    }
+                    None => {
+                        out.push(CheckResult {
+                            name: format!("LLM endpoint ({steps_list})"),
+                            // Info, not a failure: the connection may run fine —
+                            // we just can't safely probe it without risking a
+                            // keyed GET against a completion route.
+                            ok: true,
+                            detail: format!("{url} — non-standard shape; skipped to avoid a keyed request to a possible completion route"),
+                            fix_action: None,
+                            category: CheckCategory::Info,
+                            explanation: "Skips the model-list probe when the base URL isn't a recognized chat-completion route — Doctor won't attach the API key to an endpoint that might bill.".into(),
+                            fix_hint: None,
+                        });
+                    }
                 }
-                let (ok, detail) = probe_any_response(req, &probe_url).await;
-                out.push(CheckResult {
-                    name: format!("LLM endpoint ({steps_list})"),
-                    ok,
-                    detail,
-                    fix_action: None,
-                    category: category_for(ok, CheckCategory::Warning),
-                    explanation: "Probes the provider's free model-list route — a reachable endpoint plus a configured key is as much as Doctor can verify without a billable request.".into(),
-                    fix_hint: (!ok).then(|| {
-                        "Check your network/proxy, or the connection's base URL (Settings → Post-Processing → Connection).".into()
-                    }),
-                });
             }
             // Enabled steps whose connection resolves to nothing runnable —
             // the pipeline silently skips them, so say so instead of probing.
@@ -2642,6 +2669,60 @@ mod tests {
         assert!(!model_path_looks_heavy("C:/models/ggml-tiny.en.bin"));
         assert!(!model_path_looks_heavy("base.bin"));
         assert!(!model_path_looks_heavy(""));
+    }
+
+    #[test]
+    fn llm_probe_url_only_derives_from_a_recognized_chat_route() {
+        // Standard shapes → the sibling free model-list route.
+        assert_eq!(
+            llm_probe_url(LlmKind::OpenAiCompat, "https://api.openai.com/v1/chat/completions"),
+            Some("https://api.openai.com/v1/models".to_string())
+        );
+        assert_eq!(
+            llm_probe_url(LlmKind::Anthropic, "https://api.anthropic.com/v1/messages"),
+            Some("https://api.anthropic.com/v1/models".to_string())
+        );
+
+        // Non-standard shapes (gateway path, trailing slash, deployment URL) →
+        // None, never the configured URL: the caller attaches the key to this
+        // target, so falling back to a possible completion route could bill.
+        assert_eq!(
+            llm_probe_url(LlmKind::OpenAiCompat, "https://gw.example.com/proxy"),
+            None
+        );
+        assert_eq!(
+            llm_probe_url(LlmKind::OpenAiCompat, "https://api.openai.com/v1/chat/completions/"),
+            None
+        );
+        assert_eq!(
+            llm_probe_url(LlmKind::Anthropic, "https://api.anthropic.com/v1/complete"),
+            None
+        );
+        assert_eq!(llm_probe_url(LlmKind::Unusable, "anything"), None);
+    }
+
+    #[tokio::test]
+    async fn llm_endpoint_with_non_standard_url_is_skipped_not_keyed() {
+        // A configured URL that isn't a recognized chat-completion route must
+        // never get a keyed GET (it could be a completion endpoint that bills).
+        // The endpoint check is present, Info, and explains the skip.
+        let mut cfg = Config::default();
+        cfg.summary.auto = true;
+        cfg.llm_post_process.provider = "openai".into();
+        cfg.llm_post_process.set_api_key("sk-TEST-NEVER-PRINT");
+        // No /chat/completions suffix → unrecognized shape.
+        cfg.llm_post_process.api_url = "http://127.0.0.1:19987/proxy".into();
+
+        let backend = run_backend_checks(&cfg).await;
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "LLM endpoint (summary)")
+            .expect("llm endpoint check present");
+        assert!(ep.ok, "skipped probe is not a failure: {}", ep.detail);
+        assert_eq!(ep.category, CheckCategory::Info);
+        assert!(ep.detail.contains("non-standard shape"), "detail: {}", ep.detail);
+        // The key never leaks, and we never reached out to the proxy URL.
+        assert!(!format!("{backend:?}").contains("sk-TEST-NEVER-PRINT"));
     }
 
     #[test]

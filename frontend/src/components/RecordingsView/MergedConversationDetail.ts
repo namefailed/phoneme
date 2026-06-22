@@ -109,6 +109,12 @@ export class MergedConversationDetail extends LitElement {
     this.config = (e as CustomEvent).detail ?? null;
   };
 
+  /** The meeting id we've already run speaker recognition for, so the heavy
+   *  per-track `recognizeSpeakers` batch fires once per opened meeting — not on
+   *  every event-driven `reload()` (a track finished, a digest updated, …) while
+   *  the merged view stays open. Reset when the meeting changes. */
+  private suggestionsLoadedFor: string | null = null;
+
   /** Teardown for the daemon-event subscription that feeds `digestStream`. */
   private llmUnsub: (() => void) | null = null;
   /** Set once the element disconnected, so a subscription that resolves after
@@ -183,7 +189,10 @@ export class MergedConversationDetail extends LitElement {
   private async loadSession() {
     this.loading = true;
     this.error = null;
-    this.suggestions = [];
+    // Only wipe the suggestions banner when the meeting actually changed; a
+    // same-meeting reload keeps the already-recognized voices in place (we no
+    // longer re-run recognition on every reload — see suggestionsLoadedFor).
+    if (this.suggestionsLoadedFor !== this.meetingId) this.suggestions = [];
     // A reload for a DIFFERENT meeting drops any in-flight digest stream/pending
     // from the previous one, so a late delta for the old meeting's digest can't
     // paint into the one now loading. A reload for the SAME meeting (e.g. a track
@@ -244,8 +253,16 @@ export class MergedConversationDetail extends LitElement {
     }
     // Recognition is a non-blocking convenience — let the reading render first,
     // then fill the banner when the matches come back. Skip if we've switched
-    // meetings; the new meeting's load runs its own loadSuggestions().
-    if (this.meetingId === mid) void this.loadSuggestions();
+    // meetings; the new meeting's load runs its own loadSuggestions(). Run the
+    // heavy per-track recognition batch only ONCE per opened meeting — the parent
+    // calls reload()->loadSession() on every daemon event (track finished, digest
+    // updated, …), and re-recognizing every track each time is wasted work on a
+    // low-spec box. Subsequent same-meeting reloads keep the suggestions already
+    // shown (accept/dismiss mutate them in place).
+    if (this.meetingId === mid && this.suggestionsLoadedFor !== mid) {
+      this.suggestionsLoadedFor = mid;
+      void this.loadSuggestions();
+    }
   }
 
   /** Recognize unnamed speakers across every track and collect the suggestions
@@ -277,8 +294,13 @@ export class MergedConversationDetail extends LitElement {
   }
 
   /** Accept a suggestion: name that track's speaker (which enrolls + reinforces
-   *  the voice). `commitSpeakerName` reloads the session, refreshing the banner. */
+   *  the voice). Drop the chip right away — the speaker now has a name, and we no
+   *  longer re-recognize on the post-commit reload (see suggestionsLoadedFor), so
+   *  the banner must be pruned here (same as dismissSuggestion). */
   private acceptSuggestion(s: SpeakerSuggestion & { recordingId: string }) {
+    this.suggestions = this.suggestions.filter(
+      (x) => !(x.recordingId === s.recordingId && x.speaker_label === s.speaker_label),
+    );
     void this.commitSpeakerName(s.recordingId, s.speaker_label, s.name);
   }
 
@@ -321,7 +343,15 @@ export class MergedConversationDetail extends LitElement {
   private handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
-      (e.target as HTMLElement).blur();
+      (e.target as HTMLElement).blur(); // commit on blur (saveMeetingName)
+    } else if (e.key === "Escape") {
+      // Cancel: revert the edited text to the stored name, then blur. The blur's
+      // saveMeetingName then sees no change and no-ops — mirrors the speaker chip
+      // input's Escape-to-cancel.
+      e.preventDefault();
+      const el = e.target as HTMLElement;
+      el.innerText = this.recordings[0]?.meeting_name || this.meetingId; // match the rendered fallback
+      el.blur();
     }
   }
 

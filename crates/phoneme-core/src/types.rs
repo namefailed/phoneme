@@ -304,6 +304,13 @@ pub struct SavedSearchFilter {
     /// The entity facet filter's `kind`, paired with [`Self::entity_value`].
     #[serde(default)]
     pub entity_kind: Option<String>,
+    /// The frontend's task-presence filter (sidebar Tasks section): `has_open` /
+    /// `has_tasks`. Carried through verbatim to the daemon's [`ListFilter::task_state`]
+    /// so a saved search captured with a Tasks filter actually narrows server-side
+    /// (the same class of fix as `entity_value` / `tag_state`). The `UiFilter` key is
+    /// already snake_case (`task_state`); accept the camelCase alias too, defensively.
+    #[serde(default, alias = "taskState")]
+    pub task_state: Option<String>,
     /// `true` (default) = newest first; `false` = oldest first.
     #[serde(default)]
     pub sort_desc: Option<bool>,
@@ -385,6 +392,7 @@ impl SavedSearchFilter {
             tag_id: self.tag_id,
             entity_value: self.entity_value,
             entity_kind: self.entity_kind,
+            task_state: self.task_state,
             sort_desc: self.sort_desc,
             ..ListFilter::default()
         };
@@ -1224,6 +1232,14 @@ mod tests {
         let untagged: SavedSearchFilter =
             serde_json::from_str(r#"{"tag_state":"untagged"}"#).unwrap();
         assert_eq!(untagged.into_list_filter(0.6).tagged, Some(false));
+
+        // `task_state` rides through verbatim to the daemon's `task_state`.
+        let tasks: SavedSearchFilter =
+            serde_json::from_str(r#"{"task_state":"has_open"}"#).unwrap();
+        assert_eq!(
+            tasks.into_list_filter(0.6).task_state.as_deref(),
+            Some("has_open")
+        );
 
         // UI-only fields (semantic / like_id / like_label) are accepted-and-ignored.
         let ui: SavedSearchFilter = serde_json::from_str(

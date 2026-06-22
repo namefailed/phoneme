@@ -232,6 +232,17 @@ pub async fn run_with(
             return Ok(());
         }
 
+        // Arm the restart edge BEFORE the spawn/probe window. `notify_waiters`
+        // stores no permit, so a Doctor "Fix" fired while we sit in
+        // expanded()/locate/port-probe/spawn (none of which select on the
+        // notify) would otherwise be dropped — leaving a hung-but-alive server
+        // the Fix can't heal. An enabled `Notified` registers as a waiter now,
+        // so a notify during that window is captured and observed the moment the
+        // inner select polls it.
+        let restart_fut = state.whisper_restart.notified();
+        tokio::pin!(restart_fut);
+        restart_fut.as_mut().enable();
+
         let cfg = state
             .config
             .load()
@@ -386,8 +397,9 @@ pub async fn run_with(
                 // Explicit restart (the Doctor's "Fix"): bounce the child with
                 // the backoff reset. This is how a hung server gets healed; the
                 // exit-based auto-restart only sees processes that die on their
-                // own.
-                _ = state.whisper_restart.notified() => {
+                // own. Uses the pre-enabled future so a Fix fired during the
+                // spawn/probe window above isn't dropped.
+                _ = &mut restart_fut => {
                     tracing::info!("whisper-server restart requested; bouncing");
                     let _ = kill_gracefully(&mut child).await;
                     backoff = RESTART_BACKOFF_INITIAL;
@@ -456,6 +468,12 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         if shutdown.is_shutting_down() {
             return Ok(());
         }
+
+        // Arm the restart edge before the spawn/probe window (see the main
+        // supervisor) so a Doctor "Fix" fired mid-spawn isn't dropped.
+        let restart_fut = state.whisper_restart.notified();
+        tokio::pin!(restart_fut);
+        restart_fut.as_mut().enable();
 
         // Unexpanded snapshot for stable change-detection; expanded copy for the
         // actual paths we spawn with.
@@ -623,8 +641,9 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
                     break;
                 }
                 // Explicit restart (the Doctor's "Fix") — same semantics as the
-                // main supervisor's arm above.
-                _ = state.whisper_restart.notified() => {
+                // main supervisor's arm above, pre-enabled so a Fix during the
+                // spawn/probe window isn't dropped.
+                _ = &mut restart_fut => {
                     tracing::info!("preview whisper-server restart requested; bouncing");
                     let _ = kill_gracefully(&mut child).await;
                     backoff = RESTART_BACKOFF_INITIAL;
@@ -692,6 +711,12 @@ pub async fn run_preview2(state: AppState, mut shutdown: ShutdownSignal) -> anyh
         if shutdown.is_shutting_down() {
             return Ok(());
         }
+
+        // Arm the restart edge before the spawn/probe window (see the main
+        // supervisor) so a Doctor "Fix" fired mid-spawn isn't dropped.
+        let restart_fut = state.whisper_restart.notified();
+        tokio::pin!(restart_fut);
+        restart_fut.as_mut().enable();
 
         let raw = state.config.load();
         let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
@@ -819,7 +844,9 @@ pub async fn run_preview2(state: AppState, mut shutdown: ShutdownSignal) -> anyh
                     exited = true;
                     break;
                 }
-                _ = state.whisper_restart.notified() => {
+                // Explicit restart (the Doctor's "Fix") — pre-enabled so a Fix
+                // during the spawn/probe window isn't dropped.
+                _ = &mut restart_fut => {
                     tracing::info!("2nd preview whisper-server restart requested; bouncing");
                     let _ = kill_gracefully(&mut child).await;
                     backoff = RESTART_BACKOFF_INITIAL;
@@ -880,6 +907,12 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
         if shutdown.is_shutting_down() {
             return Ok(());
         }
+
+        // Arm the restart edge before the spawn/probe window (see the main
+        // supervisor) so a Doctor "Fix" fired mid-spawn isn't dropped.
+        let restart_fut = state.whisper_restart.notified();
+        tokio::pin!(restart_fut);
+        restart_fut.as_mut().enable();
 
         // Unexpanded snapshot for stable change-detection; expanded copy for the
         // actual paths we spawn with (so `~`/`%APPDATA%` model paths resolve).
@@ -1053,8 +1086,9 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
                     break;
                 }
                 // Explicit restart (the Doctor's "Fix") — same semantics as the
-                // other supervisors.
-                _ = state.whisper_restart.notified() => {
+                // other supervisors, pre-enabled so a Fix during the spawn/probe
+                // window isn't dropped.
+                _ = &mut restart_fut => {
                     tracing::info!("dictation whisper-server restart requested; bouncing");
                     let _ = kill_gracefully(&mut child).await;
                     backoff = RESTART_BACKOFF_INITIAL;
@@ -1352,5 +1386,37 @@ mod tests {
         let wake = backoff_pause(Duration::from_millis(50), &restart, &mut shutdown).await;
         assert_eq!(wake, BackoffWake::Elapsed);
         assert!(started.elapsed() >= Duration::from_millis(45));
+    }
+
+    #[tokio::test]
+    async fn enabled_notified_captures_a_restart_during_the_spawn_window() {
+        // The supervisor arms an enabled `Notified` BEFORE the spawn/probe
+        // window so a Doctor "Fix" fired mid-spawn isn't lost. This is the
+        // property that fix leans on: an enabled future captures a
+        // `notify_waiters` that fires before it's awaited, where a fresh
+        // `notified()` created after the notify would miss it (no permit).
+        let restart = tokio::sync::Notify::new();
+
+        // Arm the edge as the loop does, then simulate the spawn/probe window
+        // (locate / port-probe / spawn) during which the Fix arrives.
+        let armed = restart.notified();
+        tokio::pin!(armed);
+        armed.as_mut().enable();
+        restart.notify_waiters(); // the Fix, fired mid-"spawn"
+
+        // Awaiting it (as the inner select would) resolves immediately.
+        tokio::time::timeout(Duration::from_secs(1), &mut armed)
+            .await
+            .expect("an enabled notified must observe a restart fired before the await");
+
+        // A future created only AFTER the notify would have missed it.
+        let late = restart.notified();
+        tokio::pin!(late);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut late)
+                .await
+                .is_err(),
+            "a notify fired before this future existed must not wake it"
+        );
     }
 }

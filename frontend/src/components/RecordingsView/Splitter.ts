@@ -4,29 +4,41 @@
 /**
  * Renders a drag handle into `container` and reports the left pane's share
  * as a percentage, clamped 20–80, via `onChange` on every mouse move while
- * dragging — the owner applies it to the layout (and persists it). Listens
- * on `document` so dragging keeps tracking outside the handle; the owning
- * view has to call `dispose()` on teardown or each remount leaks listeners.
+ * dragging — the owner applies it to the layout. `onCommit` fires once when
+ * the drag ends, for one-shot work like persistence (keep `onChange` cheap:
+ * it runs dozens of times a second). Listens on `document` so dragging keeps
+ * tracking outside the handle; the owning view has to call `dispose()` on
+ * teardown or each remount leaks listeners.
  */
 export class Splitter {
   private container: HTMLElement;
   private leftPercent: number;
   private onChange: (percent: number) => void;
+  private onCommit?: (percent: number) => void;
   private onMouseUp: () => void;
   private onMouseMove: (e: MouseEvent) => void;
 
-  constructor(container: HTMLElement, initial: number, onChange: (pct: number) => void) {
+  constructor(
+    container: HTMLElement,
+    initial: number,
+    onChange: (pct: number) => void,
+    onCommit?: (pct: number) => void,
+  ) {
     this.container = container;
     this.leftPercent = initial;
     this.onChange = onChange;
+    this.onCommit = onCommit;
 
     let dragging = false;
     let startX = 0;
     let startPercent = 0;
 
     this.onMouseUp = () => {
+      if (!dragging) return;
       dragging = false;
       document.body.style.cursor = "";
+      // Persist once here, not per move — see onChange/onCommit note above.
+      this.onCommit?.(this.leftPercent);
     };
     this.onMouseMove = (e: MouseEvent) => {
       if (!dragging) return;

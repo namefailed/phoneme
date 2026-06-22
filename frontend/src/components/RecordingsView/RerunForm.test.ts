@@ -260,4 +260,82 @@ describe("RerunForm (shared by the detail Re-run flow and the bulk bar)", () => 
     const payload = submitAndCapture(element);
     expect(payload).toEqual({ step: "hook", command: "python process.py" });
   });
+
+  it("emits an All payload carrying one-time cleanup/summary overrides (no apiKey leaked)", async () => {
+    const element = await mountReady();
+    // Defaults to "all"; just tweak the cleanup/summary fields so the override
+    // branch carries non-blank values, then submit.
+    expect((element.querySelector(".rerun-step-select") as HTMLSelectElement).value).toBe("all");
+
+    const cleanupModel = element.querySelector(".rerun-cleanup-model") as HTMLInputElement;
+    cleanupModel.value = "llama3.2:3b";
+    cleanupModel.dispatchEvent(new Event("input"));
+    const cleanupPrompt = element.querySelector(".rerun-cleanup-prompt") as HTMLTextAreaElement;
+    cleanupPrompt.value = "tidy it up";
+    cleanupPrompt.dispatchEvent(new Event("input"));
+    const summaryPrompt = element.querySelector(".rerun-summary-prompt") as HTMLTextAreaElement;
+    summaryPrompt.value = "three bullets";
+    summaryPrompt.dispatchEvent(new Event("input"));
+    await element.updateComplete;
+
+    const payload = submitAndCapture(element);
+    // ollama is not an API provider, so cleanupApiUrl stays null; titleModel is
+    // always null (the form has no title slot), and there is no apiKey field at all.
+    expect(payload).toEqual({
+      step: "all",
+      model: "ggml-medium.bin",
+      overrides: {
+        cleanupProvider: "ollama",
+        cleanupModel: "llama3.2:3b",
+        cleanupPrompt: "tidy it up",
+        cleanupApiUrl: null,
+        summaryModel: null,
+        summaryPrompt: "three bullets",
+        titleModel: null,
+      },
+    });
+    // No API key ever rides along in the All overrides (toEqual already pins the
+    // exact shape; this makes the privacy intent explicit). Narrow the union
+    // first so `overrides` is reachable.
+    expect(payload?.step).toBe("all");
+    if (payload && payload.step === "all") {
+      expect(payload.overrides).not.toHaveProperty("apiKey");
+      expect(payload.overrides).not.toHaveProperty("cleanupApiKey");
+    }
+  });
+
+  it("emits an All payload with null overrides when no AI provider is configured", async () => {
+    mockConfig({ llm_post_process: { enabled: false, provider: "none", model: "" } });
+
+    const element = await mountReady();
+    // With cleanup off, the All step is just transcribe + hooks: the cleanup /
+    // summary panels aren't even rendered.
+    expect(element.querySelector(".rerun-cleanup-model")).toBeFalsy();
+    expect(element.querySelector(".rerun-summary-model-host")).toBeFalsy();
+
+    const payload = submitAndCapture(element);
+    expect(payload).toEqual({ step: "all", model: "ggml-medium.bin", overrides: null });
+  });
+
+  it("submitting is a no-op while the step is disabled (Cleanup with post-processing off)", async () => {
+    mockConfig({ llm_post_process: { enabled: false, provider: "none", model: "" } });
+
+    const element = await mountReady();
+    await selectStep(element, "cleanup");
+
+    // The run button is disabled and submit() bails before dispatching `rerun`.
+    expect((element.querySelector(".rerun-submit") as HTMLButtonElement).disabled).toBe(true);
+    const payload = submitAndCapture(element);
+    expect(payload).toBeNull();
+  });
+
+  it("emits a summarize payload from blank overrides", async () => {
+    const element = await mountReady();
+    await selectStep(element, "summarize");
+
+    // Blank model + prompt fall back to null; the transcript is summarized with
+    // the configured settings.
+    const payload = submitAndCapture(element);
+    expect(payload).toEqual({ step: "summarize", model: null, prompt: null });
+  });
 });

@@ -1010,15 +1010,15 @@ export class SectionInPlace {
         : names
             .map(
               (name) => `
-        <div class="ip-app-row" data-name="${escHtml(name)}"
+        <div class="ip-app-row" data-name="${escapeAttr(name)}"
           style="display: flex; gap: 6px; width: 100%; align-items: center;">
           <span style="flex: 1 1 auto; min-width: 0; font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis;">${escHtml(name)}</span>
-          <select class="ip-app-mode" data-name="${escHtml(name)}">
+          <select class="ip-app-mode" data-name="${escapeAttr(name)}">
             <option value="type" ${overrides[name] === "type" ? "selected" : ""}>Type</option>
             <option value="paste" ${overrides[name] === "paste" ? "selected" : ""}>Paste</option>
             <option value="off" ${overrides[name] === "off" ? "selected" : ""}>Off</option>
           </select>
-          <button class="ip-app-remove" type="button" data-name="${escHtml(name)}" title="Remove">✕</button>
+          <button class="ip-app-remove" type="button" data-name="${escapeAttr(name)}" title="Remove">✕</button>
         </div>`,
             )
             .join("");
@@ -1075,11 +1075,11 @@ export class SectionInPlace {
         : names
             .map(
               (name) => `
-        <div class="ip-app-recipe-row" data-name="${escHtml(name)}"
+        <div class="ip-app-recipe-row" data-name="${escapeAttr(name)}"
           style="display: flex; gap: 6px; width: 100%; align-items: center;">
           <span style="flex: 1 1 auto; min-width: 0; font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis;">${escHtml(name)}</span>
-          <select class="ip-app-recipe" data-name="${escHtml(name)}">${this.recipeOptions(map[name])}</select>
-          <button class="ip-app-recipe-remove" type="button" data-name="${escHtml(name)}" title="Remove">✕</button>
+          <select class="ip-app-recipe" data-name="${escapeAttr(name)}">${this.recipeOptions(map[name])}</select>
+          <button class="ip-app-recipe-remove" type="button" data-name="${escapeAttr(name)}" title="Remove">✕</button>
         </div>`,
             )
             .join("");

@@ -53,9 +53,11 @@ export class RerunFormElement extends LitElement {
 
   @state() private summaryModel = "";
   @state() private summaryPrompt = "";
-  // Summary uses an LLM too — its model picker inherits the post-process
-  // provider/key/URL when the summary's own fields are blank (mirrors the
-  // daemon's pipeline), so the model list matches whatever will actually run.
+  // Summary uses an LLM too. These only steer the model picker's list fetch so it
+  // shows models for the connection that will actually run — they are NOT sent as
+  // a one-time override: rerun_summary's wire carries model + prompt only and the
+  // daemon resolves the connection from config. (The "All" step is different — its
+  // summary inherits the one-time cleanup connection, which that wire does carry.)
   @state() private summaryProvider = "";
   @state() private summaryApiUrl = "";
   @state() private summaryApiKey = "";
@@ -288,6 +290,11 @@ export class RerunFormElement extends LitElement {
     return (
       (this.rerunStep === "cleanup" && !this.llmPostProcessEnabled)
       || (this.rerunStep === "summarize" && !this.llmPostProcessEnabled)
+      // Custom hook chosen but left blank: a blank command would silently
+      // re-fire ALL configured hooks (command = null) — the opposite of the
+      // user's intent — so block submit until they type one.
+      || (this.rerunStep === "hook" && this.customHookCommandSelected
+          && this.selectedHookCommand.trim() === "")
     );
   }
 
@@ -318,8 +325,15 @@ export class RerunFormElement extends LitElement {
           runHooks: this.runHooksAfterTranscribing,
           postProcess: this.postProcessOnTranscribe,
         };
-      case "hook":
-        return { step: "hook", command: this.selectedHookCommand === "" ? null : this.selectedHookCommand };
+      case "hook": {
+        // null = re-fire all configured hooks (the "All configured commands"
+        // option). In custom mode the value is the typed command, trimmed; a
+        // blank custom command can't reach here (runDisabled blocks submit).
+        const cmd = this.customHookCommandSelected
+          ? orNull(this.selectedHookCommand)
+          : (this.selectedHookCommand === "" ? null : this.selectedHookCommand);
+        return { step: "hook", command: cmd };
+      }
       case "all":
       default: {
         const isApi = isApiLlmProvider(this.cleanupProvider);
@@ -377,8 +391,11 @@ export class RerunFormElement extends LitElement {
   }
 
   /** Cleanup provider/model/prompt panel, with a quick provider pick that
-   *  fills provider + URL + model in one go (shared by the Cleanup and All steps). */
-  private renderCleanupPanel() {
+   *  fills provider + URL + model in one go (shared by the Cleanup and All steps).
+   *  `showApiKey` is false in the "All" step: its wire override
+   *  (`RerunAllOverrides`) carries no key — cleanup reuses the configured key —
+   *  so a one-time key here would be silently dropped. */
+  private renderCleanupPanel(showApiKey = true) {
     const inputStyle = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
     const labelStyle = "font-size: 0.7857rem; color: var(--fg-muted);";
     const isApi = isApiLlmProvider(this.cleanupProvider);
@@ -407,11 +424,13 @@ export class RerunFormElement extends LitElement {
           <input type="text" class="rerun-cleanup-url" style=${inputStyle}
             .value=${this.cleanupApiUrl} @input=${this.handleCleanupApiUrlInput} placeholder="Provider default" />
         </div>
-        <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style=${labelStyle}>API key</label>
-          <input type="password" class="rerun-cleanup-key" style=${inputStyle}
-            .value=${this.cleanupApiKey} @input=${this.handleCleanupApiKeyInput} placeholder="Configured key" />
-        </div>
+        ${showApiKey ? html`
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style=${labelStyle}>API key</label>
+            <input type="password" class="rerun-cleanup-key" style=${inputStyle}
+              .value=${this.cleanupApiKey} @input=${this.handleCleanupApiKeyInput} placeholder="Configured key" />
+          </div>
+        ` : nothing}
       ` : nothing}
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <label style=${labelStyle}>Model</label>
@@ -444,7 +463,7 @@ export class RerunFormElement extends LitElement {
         </div>
         ${this.llmPostProcessEnabled ? html`
           <div style=${sectionStyle}>Cleanup</div>
-          ${this.renderCleanupPanel()}
+          ${this.renderCleanupPanel(false)}
           <div style=${sectionStyle}>Summary</div>
           ${this.renderSummaryPanel()}
           <p style="margin: 0; font-size: 0.7857rem; color: var(--fg-muted); line-height: 1.4;">

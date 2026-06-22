@@ -67,6 +67,12 @@ export class SidebarElement extends LitElement {
   @state() private dragOverSection: SidebarSection | null = null;
   private unsubFilter: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
+  /** Loaders marked dirty by a daemon event but not yet run — flushed once, on a
+   *  microtask, by {@link scheduleReload}. Coalesces a burst of lifecycle events
+   *  (e.g. a bulk delete emitting N `recording_deleted`s, each touching three
+   *  loaders) into at most one of each load instead of 3N IPC round-trips. */
+  private dirtyLoaders = new Set<"kindCounts" | "tags" | "entities" | "tasks">();
+  private reloadScheduled = false;
 
   private onSectionDragStart(key: SidebarSection, e: DragEvent) {
     this.dragSection = key;
@@ -212,12 +218,11 @@ export class SidebarElement extends LitElement {
         eventName === "tag_attached" ||
         eventName === "tag_detached"
       ) {
-        void this.loadTags();
         // Attaching/detaching (or deleting) a tag shifts the tagged↔untagged
         // split, so the Tagged/Untagged badges (from kindTotals) must refresh too
         // — not just the per-tag counts. Otherwise "Untagged 8" lingers after you
         // tag everything, until a reload.
-        void this.loadKindCounts();
+        this.scheduleReload("tags", "kindCounts");
       }
       // Recording lifecycle events shift the Library counts (a row appears,
       // finishes, or is removed); refresh the badges off the same triggers.
@@ -227,13 +232,13 @@ export class SidebarElement extends LitElement {
         eventName === "recording_cancelled" ||
         eventName === "transcription_done"
       ) {
-        void this.loadKindCounts();
+        this.scheduleReload("kindCounts");
       }
       // The entity facet (distinct entities + recording counts) shifts whenever a
       // recording's entities are (re)extracted or a recording is removed; refresh
       // it off those triggers, the entity counterpart of the tag-event refresh.
       if (eventName === "entities_updated" || eventName === "recording_deleted") {
-        void this.loadEntities();
+        this.scheduleReload("entities");
       }
       // The task list shifts whenever a recording's tasks are (re)extracted, a
       // task is toggled done (the Open count changes), or a recording is removed;
@@ -242,7 +247,7 @@ export class SidebarElement extends LitElement {
         eventName === "tasks_updated" ||
         eventName === "recording_deleted"
       ) {
-        void this.loadTasks();
+        this.scheduleReload("tasks");
       }
     });
     // If the element disconnected while subscribe was awaiting,
@@ -250,6 +255,25 @@ export class SidebarElement extends LitElement {
     // late listener down now instead of leaking it.
     if (!this.isConnected) unsub();
     else this.unsubEvents = unsub;
+  }
+
+  /** Mark loaders dirty and flush them once, on the next microtask, so a burst of
+   *  daemon events in one tick (a bulk delete, a re-extract) collapses into a
+   *  single run of each touched loader. */
+  private scheduleReload(...which: Array<"kindCounts" | "tags" | "entities" | "tasks">) {
+    for (const w of which) this.dirtyLoaders.add(w);
+    if (this.reloadScheduled) return;
+    this.reloadScheduled = true;
+    queueMicrotask(() => {
+      this.reloadScheduled = false;
+      const dirty = this.dirtyLoaders;
+      this.dirtyLoaders = new Set();
+      if (!this.isConnected) return;
+      if (dirty.has("kindCounts")) void this.loadKindCounts();
+      if (dirty.has("tags")) void this.loadTags();
+      if (dirty.has("entities")) void this.loadEntities();
+      if (dirty.has("tasks")) void this.loadTasks();
+    });
   }
 
   private setTagFilter(id: number | null) {

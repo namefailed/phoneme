@@ -2,6 +2,18 @@
 
 use super::*;
 
+/// RRF weights for the two fused retrievers, in `[vector, lexical]` order. The
+/// semantic list is weighted slightly higher — paraphrase recall is the point —
+/// with the lexical list as the complementary safety net. Shared by every fusion
+/// caller ([`Catalog::hybrid_search`], the search bar, and [`Catalog::retrieve_context`],
+/// the Ask RAG) so the two can't drift.
+const HYBRID_RRF_WEIGHTS: [f32; 2] = [1.0, 0.85];
+
+/// Small relevance floor for a lexical-only hit so it surfaces honestly rather
+/// than reading "0% relevant" despite being an exact-term match. Shared by the
+/// search bar and Ask so both floor identically.
+const LEXICAL_ONLY_RELEVANCE: f32 = 0.30;
+
 impl Catalog {
     /// Drop the in-memory embedding snapshot. Called from every path that mutates
     /// a stored vector so the next search rebuilds from SQLite. A poisoned lock is
@@ -650,6 +662,143 @@ impl Catalog {
         Ok(out)
     }
 
+    /// The shared core of [`Self::hybrid_search`] and [`Self::retrieve_context`]:
+    /// run the two (optionally three) retrievers, fuse them with RRF, and return
+    /// the surviving results in fused order as
+    /// `(dedupe_key, RecordingId, display_relevance, matched_lexically)`.
+    ///
+    /// `display_relevance` is the calibrated best-chunk cosine, floored to
+    /// [`LEXICAL_ONLY_RELEVANCE`] for a lexical hit; a semantic-only hit below
+    /// `min_relevance` is dropped. When `filter` is `Some`, results are restricted
+    /// to its in-scope dedupe keys (predicate fields only — see
+    /// [`Self::hybrid_search`]'s doc) before this returns, so the caller's
+    /// `limit`/`top_k` cut keeps the top in-scope results. `include_tags` folds
+    /// tag-name matches into the lexical side (the search bar wants this; Ask
+    /// deliberately doesn't — see [`Self::retrieve_context`]).
+    ///
+    /// The caller layers what it needs on top: [`Self::hybrid_search`] just maps to
+    /// `(id, relevance)` + truncates; [`Self::retrieve_context`] recovers the
+    /// best-matching chunk per surviving result for citation granularity.
+    async fn fuse_hybrid(
+        &self,
+        query: &str,
+        query_vec: &[f32],
+        min_relevance: f32,
+        filter: Option<&ListFilter>,
+        include_tags: bool,
+    ) -> Result<Vec<(String, RecordingId, f32, bool)>> {
+        // When a filter is given, pre-compute the in-scope dedupe keys so the fused
+        // ranking can be restricted to them. Built from the same `list` query the
+        // Library uses (predicate fields only — query and pagination dropped), then
+        // mapped to dedupe keys so a meeting passes if either of its tracks matches.
+        let allowed_keys: Option<std::collections::HashSet<String>> = match filter {
+            Some(f) => {
+                let scoped = ListFilter {
+                    // Drop query, pagination, and sort: this list only derives the
+                    // in-scope candidate set, it doesn't order or page it.
+                    search: None,
+                    limit: None,
+                    offset: None,
+                    sort_desc: None,
+                    ..f.clone()
+                };
+                let rows = self.list(&scoped).await?;
+                Some(
+                    rows.into_iter()
+                        .map(|r| r.meeting_id.unwrap_or_else(|| r.id.as_str().to_string()))
+                        .collect(),
+                )
+            }
+            None => None,
+        };
+
+        let vec_rank = self.vector_ranking(query_vec).await?;
+        let mut lex_rank = self.lexical_ranking(query).await?;
+        // Fold tag-name matches into the lexical (exact-intent) set so searching
+        // a tag surfaces its recordings in semantic mode too — the plain `list()`
+        // already does this for non-semantic search. Deduped by key and appended
+        // after the FTS hits, so true transcript matches keep their stronger rank.
+        // Ask omits this (`include_tags == false`): grounding an answer on a
+        // recording whose tag *name* contains a query word is noise.
+        if include_tags {
+            let mut seen: std::collections::HashSet<String> =
+                lex_rank.iter().map(|(k, _)| k.clone()).collect();
+            for (key, id) in self.tag_ranking(query).await? {
+                if seen.insert(key.clone()) {
+                    lex_rank.push((key, id));
+                }
+            }
+        }
+
+        // Everything below is keyed by the meeting-stable dedupe key (meeting_id or
+        // recording id), not the raw recording id, so a meeting collapses to a
+        // single result even when the vector and lexical retrievers each pick a
+        // different track of it as their representative.
+
+        // dedupe_key -> best raw cosine (for calibration into a relevance %).
+        let cosine_by_key: std::collections::HashMap<String, f32> = vec_rank
+            .iter()
+            .map(|(key, _id, c)| (key.clone(), *c))
+            .collect();
+        // dedupe_key -> a representative RecordingId to return for that key.
+        // Prefer the vector retriever's pick (best-chunk track); fall back to the
+        // lexical retriever's for lexical-only hits.
+        let mut rec_id_by_key: std::collections::HashMap<String, RecordingId> =
+            std::collections::HashMap::new();
+        for (key, id, _c) in &vec_rank {
+            rec_id_by_key
+                .entry(key.clone())
+                .or_insert_with(|| id.clone());
+        }
+        for (key, id) in &lex_rank {
+            rec_id_by_key
+                .entry(key.clone())
+                .or_insert_with(|| id.clone());
+        }
+        let lexical_keys: std::collections::HashSet<String> =
+            lex_rank.iter().map(|(key, _id)| key.clone()).collect();
+
+        // Fuse the two orderings on the dedupe key.
+        let vec_keys: Vec<String> = vec_rank.iter().map(|(key, _, _)| key.clone()).collect();
+        let lex_keys: Vec<String> = lex_rank.iter().map(|(key, _)| key.clone()).collect();
+        let fused = crate::fusion::reciprocal_rank_fusion(
+            &[&vec_keys[..], &lex_keys[..]],
+            Some(&HYBRID_RRF_WEIGHTS),
+        );
+
+        let mut out: Vec<(String, RecordingId, f32, bool)> = Vec::new();
+        for (key, _fused_score) in fused {
+            // Restrict to the in-scope candidate set when a filter was given.
+            // Applied here — after ranking, before the caller's cut — so the top
+            // in-scope results survive rather than the top overall.
+            if let Some(allowed) = &allowed_keys {
+                if !allowed.contains(&key) {
+                    continue;
+                }
+            }
+            let Some(rec_id) = rec_id_by_key.get(&key).cloned() else {
+                continue;
+            };
+            let matched_lexically = lexical_keys.contains(&key);
+            let relevance = match cosine_by_key.get(&key) {
+                Some(c) => crate::fusion::calibrate_cosine(*c),
+                None => 0.0,
+            };
+            // A lexical hit is kept regardless of its (possibly weak) cosine; a
+            // semantic-only hit must clear the relevance floor.
+            let display = if matched_lexically {
+                relevance.max(LEXICAL_ONLY_RELEVANCE)
+            } else {
+                relevance
+            };
+            if !matched_lexically && display < min_relevance {
+                continue;
+            }
+            out.push((key, rec_id, display, matched_lexically));
+        }
+        Ok(out)
+    }
+
     /// Hybrid semantic + lexical search with Reciprocal Rank Fusion (RRF).
     ///
     /// This is the search the daemon uses. It merges the ordered listings from two
@@ -701,120 +850,15 @@ impl Catalog {
         min_relevance: f32,
         filter: Option<&ListFilter>,
     ) -> Result<Vec<(RecordingId, f32)>> {
-        // S3: when a filter is given, pre-compute the in-scope dedupe keys so the
-        // fused ranking can be restricted to them. Built from the same `list` query
-        // the Library uses (predicate fields only — query and pagination dropped),
-        // then mapped to dedupe keys so a meeting passes if either of its tracks
-        // matches.
-        let allowed_keys: Option<std::collections::HashSet<String>> = match filter {
-            Some(f) => {
-                let scoped = ListFilter {
-                    // Drop query, pagination, and sort: this list only derives the
-                    // in-scope candidate set, it doesn't order or page it.
-                    search: None,
-                    limit: None,
-                    offset: None,
-                    sort_desc: None,
-                    ..f.clone()
-                };
-                let rows = self.list(&scoped).await?;
-                Some(
-                    rows.into_iter()
-                        .map(|r| r.meeting_id.unwrap_or_else(|| r.id.as_str().to_string()))
-                        .collect(),
-                )
-            }
-            None => None,
-        };
-
-        let vec_rank = self.vector_ranking(query_vec).await?;
-        let mut lex_rank = self.lexical_ranking(query).await?;
-        // Fold tag-name matches into the lexical (exact-intent) set so searching
-        // a tag surfaces its recordings in semantic mode too — the plain `list()`
-        // already does this for non-semantic search. Deduped by key and appended
-        // after the FTS hits, so true transcript matches keep their stronger rank.
-        {
-            let mut seen: std::collections::HashSet<String> =
-                lex_rank.iter().map(|(k, _)| k.clone()).collect();
-            for (key, id) in self.tag_ranking(query).await? {
-                if seen.insert(key.clone()) {
-                    lex_rank.push((key, id));
-                }
-            }
-        }
-
-        // Everything below is keyed by the meeting-stable dedupe key (meeting_id or
-        // recording id), not the raw recording id, so a meeting collapses to a
-        // single result even when the vector and lexical retrievers each pick a
-        // different track of it as their representative.
-
-        // dedupe_key -> best raw cosine (for calibration into a relevance %).
-        let cosine_by_key: std::collections::HashMap<String, f32> = vec_rank
-            .iter()
-            .map(|(key, _id, c)| (key.clone(), *c))
+        // The shared retrieve + fuse + floor + S3-scope core, with tag-name folding
+        // (the search bar wants it). Map to `(id, relevance)` and truncate.
+        let fused = self
+            .fuse_hybrid(query, query_vec, min_relevance, filter, true)
+            .await?;
+        let mut results: Vec<(RecordingId, f32)> = fused
+            .into_iter()
+            .map(|(_key, rec_id, display, _matched_lexically)| (rec_id, display))
             .collect();
-        // dedupe_key -> a representative RecordingId to return for that key.
-        // Prefer the vector retriever's pick (best-chunk track); fall back to the
-        // lexical retriever's for lexical-only hits.
-        let mut rec_id_by_key: std::collections::HashMap<String, RecordingId> =
-            std::collections::HashMap::new();
-        for (key, id, _c) in &vec_rank {
-            rec_id_by_key
-                .entry(key.clone())
-                .or_insert_with(|| id.clone());
-        }
-        for (key, id) in &lex_rank {
-            rec_id_by_key
-                .entry(key.clone())
-                .or_insert_with(|| id.clone());
-        }
-        let lexical_keys: std::collections::HashSet<String> =
-            lex_rank.iter().map(|(key, _id)| key.clone()).collect();
-
-        // Fuse the two orderings on the dedupe key.
-        let vec_keys: Vec<String> = vec_rank.iter().map(|(key, _, _)| key.clone()).collect();
-        let lex_keys: Vec<String> = lex_rank.iter().map(|(key, _)| key.clone()).collect();
-        // Weight the semantic list slightly higher: the whole point is paraphrase
-        // recall, and the lexical list is the complementary safety net.
-        let fused = crate::fusion::reciprocal_rank_fusion(
-            &[&vec_keys[..], &lex_keys[..]],
-            Some(&[1.0, 0.85]),
-        );
-
-        // Small relevance floor for a lexical-only hit so it surfaces honestly
-        // rather than reading "0% relevant" despite being an exact-term match.
-        const LEXICAL_ONLY_RELEVANCE: f32 = 0.30;
-
-        let mut results: Vec<(RecordingId, f32)> = Vec::new();
-        for (key, _fused_score) in fused {
-            // S3: restrict to the in-scope candidate set when a filter was given.
-            // Applied here — after ranking, before the `truncate(limit)` below —
-            // so the top in-scope results survive rather than the top overall.
-            if let Some(allowed) = &allowed_keys {
-                if !allowed.contains(&key) {
-                    continue;
-                }
-            }
-            let Some(rec_id) = rec_id_by_key.get(&key).cloned() else {
-                continue;
-            };
-            let is_lexical = lexical_keys.contains(&key);
-            let relevance = match cosine_by_key.get(&key) {
-                Some(c) => crate::fusion::calibrate_cosine(*c),
-                None => 0.0,
-            };
-            // A lexical hit is kept regardless of its (possibly weak) cosine; a
-            // semantic-only hit must clear the relevance floor.
-            let display = if is_lexical {
-                relevance.max(LEXICAL_ONLY_RELEVANCE)
-            } else {
-                relevance
-            };
-            if !is_lexical && display < min_relevance {
-                continue;
-            }
-            results.push((rec_id, display));
-        }
         results.truncate(limit);
         Ok(results)
     }
@@ -863,99 +907,23 @@ impl Catalog {
         min_relevance: f32,
         filter: Option<&ListFilter>,
     ) -> Result<Vec<RetrievedChunk>> {
-        // Same in-scope candidate set as hybrid_search's S3 path: predicate fields
-        // only, mapped to meeting-stable dedupe keys so a meeting passes when
-        // either track matches.
-        let allowed_keys: Option<std::collections::HashSet<String>> = match filter {
-            Some(f) => {
-                let scoped = ListFilter {
-                    search: None,
-                    limit: None,
-                    offset: None,
-                    sort_desc: None,
-                    ..f.clone()
-                };
-                let rows = self.list(&scoped).await?;
-                Some(
-                    rows.into_iter()
-                        .map(|r| r.meeting_id.unwrap_or_else(|| r.id.as_str().to_string()))
-                        .collect(),
-                )
-            }
-            None => None,
-        };
-
-        // Reproduce the fusion hybrid_search trusts (minus tag_ranking — see the
-        // doc comment). vec_rank is `(key, rec_id, best_cosine)`; lex_rank is
-        // `(key, rec_id)`.
-        let vec_rank = self.vector_ranking(query_vec).await?;
-        let lex_rank = self.lexical_ranking(query).await?;
-
-        // Per-key maps, identical to hybrid_search.
-        let cosine_by_key: std::collections::HashMap<String, f32> = vec_rank
-            .iter()
-            .map(|(key, _id, c)| (key.clone(), *c))
-            .collect();
-        let mut rec_id_by_key: std::collections::HashMap<String, RecordingId> =
-            std::collections::HashMap::new();
-        for (key, id, _c) in &vec_rank {
-            rec_id_by_key
-                .entry(key.clone())
-                .or_insert_with(|| id.clone());
-        }
-        for (key, id) in &lex_rank {
-            rec_id_by_key
-                .entry(key.clone())
-                .or_insert_with(|| id.clone());
-        }
-        let lexical_keys: std::collections::HashSet<String> =
-            lex_rank.iter().map(|(key, _id)| key.clone()).collect();
-
-        // Fuse on the dedupe key with the identical call + weights as the search
-        // bar, so relevance and ordering match.
-        let vec_keys: Vec<String> = vec_rank.iter().map(|(key, _, _)| key.clone()).collect();
-        let lex_keys: Vec<String> = lex_rank.iter().map(|(key, _)| key.clone()).collect();
-        let fused = crate::fusion::reciprocal_rank_fusion(
-            &[&vec_keys[..], &lex_keys[..]],
-            Some(&[1.0, 0.85]),
-        );
-
-        // Same floor as hybrid_search: a lexical hit is kept regardless of cosine
-        // and floored to this; a semantic-only hit must clear `min_relevance`.
-        const LEXICAL_ONLY_RELEVANCE: f32 = 0.30;
+        // The exact same retrieve + fuse + floor + scope core the search bar uses,
+        // minus tag-name folding (`include_tags == false` — grounding on a tag
+        // *name* match is noise; see the doc comment). Returns surviving results in
+        // fused order as `(key, rec_id, display, matched_lexically)`; we layer
+        // chunk recovery on top. `matched_lexically` gates the floor (already
+        // applied inside `fuse_hybrid`) but is NOT the emitted `is_lexical` flag —
+        // that's decided below by whether a per-chunk vector was actually recovered
+        // for the citation (a recording can match BOTH retrievers, and when it has
+        // a real chunk to cite it is a vector hit, not a lexical-only one).
+        let fused = self
+            .fuse_hybrid(query, query_vec, min_relevance, filter, false)
+            .await?;
 
         let mut out: Vec<RetrievedChunk> = Vec::new();
-        for (key, _fused_score) in fused {
+        for (_key, rec_id, display, _matched_lexically) in fused {
             if out.len() >= top_k {
                 break;
-            }
-            if let Some(allowed) = &allowed_keys {
-                if !allowed.contains(&key) {
-                    continue;
-                }
-            }
-            let Some(rec_id) = rec_id_by_key.get(&key).cloned() else {
-                continue;
-            };
-            // Whether this key was surfaced by the lexical (FTS5) retriever. This
-            // gates the relevance floor — a lexical hit is kept regardless of its
-            // (possibly weak) cosine, exactly as `hybrid_search` does — but it is
-            // NOT what the emitted `is_lexical` flag reports: that is decided below
-            // by whether a per-chunk vector was actually recovered for the citation
-            // (a recording can match BOTH retrievers, and when it has a real chunk
-            // to cite it is a vector hit, not a lexical-only one).
-            let matched_lexically = lexical_keys.contains(&key);
-            let relevance = match cosine_by_key.get(&key) {
-                Some(c) => crate::fusion::calibrate_cosine(*c),
-                None => 0.0,
-            };
-            let display = if matched_lexically {
-                relevance.max(LEXICAL_ONLY_RELEVANCE)
-            } else {
-                relevance
-            };
-            if !matched_lexically && display < min_relevance {
-                continue;
             }
 
             // Recover the recording's live transcript; an audio-only /

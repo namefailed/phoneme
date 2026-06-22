@@ -102,7 +102,11 @@ fn word_count(s: &str) -> usize {
 ///   target) stays near [`CHUNK_TARGET_WORDS`] words, comfortably under the
 ///   model's 256-token limit so no chunk is silently truncated.
 /// - Consecutive chunks share [`CHUNK_OVERLAP_SENTENCES`] sentence(s) so an idea
-///   spanning a boundary is wholly contained in at least one chunk.
+///   spanning a boundary is wholly contained in at least one chunk. The one
+///   exception is a single sentence at/over the target, which fills a chunk on
+///   its own: the chunk before and after it share no boundary sentence with it
+///   (overlapping would duplicate an already-oversized sentence). That whole
+///   sentence is still wholly inside its own chunk, so no idea is split.
 /// - Short transcripts yield exactly one chunk (the whole text), so behavior for
 ///   one-liners is unchanged from the old whole-transcript embedding.
 /// - At most [`MAX_CHUNKS_PER_RECORDING`] chunks are returned, and a transcript
@@ -135,16 +139,27 @@ pub fn chunk_transcript(text: &str) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut i = 0;
     while i < sentences.len() {
+        // This is the last chunk we're allowed to emit. The adaptive `target`
+        // sizes most transcripts to finish well under the cap, but when each
+        // chunk holds only a sentence or two (long dictated sentences, where two
+        // ~target/2-word sentences fill a chunk yet advance by one), the chunk
+        // count tracks the *sentence* count, not total/target, and can reach the
+        // cap with sentences still uncovered. Folding the remainder into this
+        // final chunk keeps the count bounded without dropping the tail — a
+        // coarse last chunk beats an unsearchable back half. (See the cap docs.)
+        let is_last_allowed = chunks.len() + 1 == MAX_CHUNKS_PER_RECORDING;
+
         let mut chunk_sentences: Vec<&str> = Vec::new();
         let mut words = 0;
         let mut j = i;
         // Grow the chunk sentence by sentence until we'd exceed the target.
         // Always include at least one sentence, even if it alone exceeds the
         // target (a single very long run-on still becomes its own chunk rather
-        // than being dropped).
+        // than being dropped). On the final allowed chunk, ignore the target and
+        // take everything that's left so no sentence is dropped.
         while j < sentences.len() {
             let w = word_count(&sentences[j]);
-            if !chunk_sentences.is_empty() && words + w > target {
+            if !is_last_allowed && !chunk_sentences.is_empty() && words + w > target {
                 break;
             }
             chunk_sentences.push(&sentences[j]);
@@ -153,10 +168,9 @@ pub fn chunk_transcript(text: &str) -> Vec<String> {
         }
 
         chunks.push(chunk_sentences.join(" "));
-        // Safety net. The adaptive `target` above is sized so the whole
-        // transcript fits well under the cap, so this should never trip for
-        // real input; it only guards against a pathological run of one-word
-        // sentences that forces minimal forward progress.
+        // The inner loop already absorbed everything remaining on the final
+        // allowed chunk, so reaching the cap here means we're done — every
+        // sentence is covered.
         if chunks.len() >= MAX_CHUNKS_PER_RECORDING {
             break;
         }
@@ -165,8 +179,11 @@ pub fn chunk_transcript(text: &str) -> Vec<String> {
             break;
         }
         // Step the window forward, leaving `CHUNK_OVERLAP_SENTENCES` of the just-
-        // emitted chunk as the start of the next. `max(i+1)` guarantees forward
-        // progress so we can't loop forever when a single sentence fills a chunk.
+        // emitted chunk as the start of the next. When one sentence filled the
+        // chunk (it alone is at/over target) there's nothing to overlap and
+        // `advance` is 0; `max(i+1)` then guarantees forward progress, so that
+        // oversized sentence simply isn't shared with its neighbours (see the
+        // overlap note in the docs above).
         let advance = chunk_sentences
             .len()
             .saturating_sub(CHUNK_OVERLAP_SENTENCES);
@@ -307,6 +324,65 @@ mod tests {
         assert!(
             chunks.iter().any(|c| c.contains(last)),
             "the tail sentence must appear in some chunk, not be dropped"
+        );
+    }
+
+    #[test]
+    fn cap_keeps_the_tail_with_long_sentences() {
+        // Long dictated sentences (~30 words) make each chunk hold only ~2
+        // sentences while advancing by 1, so the chunk count tracks the sentence
+        // count and hits the cap well before total/target would. The final
+        // allowed chunk must absorb the rest so the very last sentence is still
+        // searchable — coarsening, not a dropped tail. (Regression: the cap used
+        // to break mid-transcript here.)
+        let body_sentence =
+            "This is a fairly long dictated sentence with about thirty distinct \
+             words in it so that only a couple of these will fit inside one \
+             single chunk at the normal target size okay.";
+        assert!(
+            word_count(body_sentence) >= 27,
+            "fixture must be a long sentence, got {}",
+            word_count(body_sentence)
+        );
+        let body = vec![body_sentence; 80].join(" ");
+        let last = "This very last long sentence absolutely must remain searchable.";
+        let transcript = format!("{body} {last}");
+
+        let chunks = chunk_transcript(&transcript);
+        assert!(
+            chunks.len() <= MAX_CHUNKS_PER_RECORDING,
+            "still capped, got {}",
+            chunks.len()
+        );
+        assert!(
+            chunks.iter().any(|c| c.contains(last)),
+            "the tail sentence must appear in some chunk, not be dropped"
+        );
+    }
+
+    #[test]
+    fn long_sentence_between_short_ones_isolates_the_seam() {
+        // A single run-on sentence longer than the target fills a chunk by
+        // itself, so it shares no boundary sentence with its neighbours (the
+        // documented overlap exception). The whole run-on still lands wholly in
+        // one chunk, so nothing is split — assert exactly that.
+        let long = vec!["word"; CHUNK_TARGET_WORDS + 5].join(" ");
+        let transcript = format!(
+            "First short sentence here. Second short sentence here. {long}. \
+             Fourth short sentence here. Fifth short sentence here."
+        );
+        let chunks = chunk_transcript(&transcript);
+
+        // The overlong sentence must be wholly contained in some single chunk.
+        let long_with_dot = format!("{long}.");
+        assert!(
+            chunks.iter().any(|c| c.contains(&long_with_dot)),
+            "the long run-on must be wholly inside one chunk"
+        );
+        // And no sentence may be lost: the last short sentence is still present.
+        assert!(
+            chunks.iter().any(|c| c.contains("Fifth short sentence here.")),
+            "no sentence may be dropped around the long-sentence seam"
         );
     }
 }

@@ -463,6 +463,14 @@ export class RecordingsView {
       this.applyCloseSplit();
     }
 
+    // Pane B refreshes itself for the live summarizing stream only — content
+    // events (transcript/summary/speaker/tag/entities) funnel through here, so
+    // re-show it (guarding unsaved edits) to keep the split's right pane in sync
+    // when its recording is edited/retranscribed/renamed elsewhere.
+    if (this.splitId && !this.detail2.hasDirtyEdits()) {
+      void this.detail2.show(this.splitId);
+    }
+
     const s = this.state.get();
     const selectedId = s.selectedId;
     if (selectedId && !s.recordings.some(r => r.id === selectedId || r.meeting_id === selectedId.replace("session:", ""))) {

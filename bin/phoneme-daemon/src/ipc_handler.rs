@@ -886,18 +886,28 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             .await
         {
             Ok(outcome) => {
-                // Re-flow timing + re-embed + emit TranscriptUpdated for each
-                // recording that actually changed. Zero-match recordings were
-                // skipped by the catalog and never appear in `changed`, so no
-                // spurious events or version churn.
-                for (id, transcript) in &outcome.changed {
-                    reflow_and_reembed_after_edit(state, id, transcript).await;
-                }
-                Response::Ok(serde_json::json!({
+                // The catalog already persisted every replacement and counted
+                // them, so answer with the counts now and run the per-recording
+                // re-flow/re-embed upkeep off the connection. embed_and_store is
+                // ONNX-heavy, so a library-wide replace touching many recordings
+                // would otherwise stall the single-connection bridge for the whole
+                // pass (handler invariant up top). Mirrors rerun_cleanup: spawn,
+                // report progress via DaemonEvent (one TranscriptUpdated per changed
+                // recording, just emitted from the task). Zero-match recordings were
+                // skipped by the catalog and never appear in `changed`.
+                let response = Response::Ok(serde_json::json!({
                     "recordings_changed": outcome.recordings_changed,
                     "total_replacements": outcome.total_replacements,
                     "failed": outcome.failed,
-                }))
+                }));
+                let task_state = state.clone();
+                let changed = outcome.changed;
+                tokio::spawn(async move {
+                    for (id, transcript) in &changed {
+                        reflow_and_reembed_after_edit(&task_state, id, transcript).await;
+                    }
+                });
+                response
             }
             Err(e) => err_response(&e),
         },

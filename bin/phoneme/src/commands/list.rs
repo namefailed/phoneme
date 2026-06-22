@@ -184,13 +184,24 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> Result<ListFilter, ExitC
     // RFC 3339 timestamp is also accepted. Try RFC 3339 first; on failure fall
     // back to a date-only parse interpreted at local start-of-day, so the
     // documented date form actually filters instead of being silently dropped.
-    let parse_date = |s: String| {
+    //
+    // `end_of_day` snaps the bare-date form to 23:59:59 for `--until`: the daemon
+    // applies it as `started_at <= ?`, so a bare `--until 2026-05-19` at
+    // start-of-day would drop everything recorded that day (off-by-one vs the
+    // documented "inclusive" bound). `--since` keeps start-of-day, which is the
+    // right inclusive lower bound. Explicit RFC 3339 timestamps are honoured as-is.
+    let parse_date = |s: String, end_of_day: bool| {
         if let Ok(d) = chrono::DateTime::parse_from_rfc3339(&s) {
             return Some(d.with_timezone(&chrono::Local));
         }
+        let time = if end_of_day {
+            (23, 59, 59)
+        } else {
+            (0, 0, 0)
+        };
         chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
             .ok()
-            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .and_then(|d| d.and_hms_opt(time.0, time.1, time.2))
             .and_then(|naive| {
                 use chrono::TimeZone;
                 chrono::Local.from_local_datetime(&naive).single()
@@ -200,10 +211,10 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> Result<ListFilter, ExitC
     // dropping it would widen the query to the whole library — the same footgun
     // --status / --kind are clap-validated against (see args.rs). The flags carry
     // no clap value_parser (the format is too lax for a fixed set), so guard here.
-    let parse_flag = |name: &str, v: Option<String>| -> Result<Option<_>, ExitCode> {
+    let parse_flag = |name: &str, v: Option<String>, end_of_day: bool| -> Result<Option<_>, ExitCode> {
         match v {
             None => Ok(None),
-            Some(s) => match parse_date(s.clone()) {
+            Some(s) => match parse_date(s.clone(), end_of_day) {
                 Some(d) => Ok(Some(d)),
                 None => {
                     eprintln!("error: could not parse {name} '{s}' (expected e.g. 2026-05-19)");
@@ -212,8 +223,8 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> Result<ListFilter, ExitC
             },
         }
     };
-    let since = parse_flag("--since", args.since)?;
-    let until = parse_flag("--until", args.until)?;
+    let since = parse_flag("--since", args.since, false)?;
+    let until = parse_flag("--until", args.until, true)?;
     // `kind` is applied in SQL (before LIMIT/OFFSET) so pagination stays correct.
     let kind = args.kind.as_deref().and_then(|k| match k {
         "single" => Some(ListKind::Single),
@@ -239,4 +250,57 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> Result<ListFilter, ExitC
         low_confidence_below: None, // no CLI flag for this yet
         task_state: None,           // no CLI flag for this yet (see `phoneme tasks`)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Timelike;
+
+    /// A `ListArgs` with everything off, so a test can set just the field it cares
+    /// about without spelling out the whole struct.
+    fn empty_args() -> ListArgs {
+        ListArgs {
+            limit: None,
+            offset: None,
+            since: None,
+            until: None,
+            status: None,
+            tag: None,
+            search: None,
+            semantic: None,
+            kind: None,
+            saved: None,
+        }
+    }
+
+    // `--until <day>` is documented as an inclusive upper bound, but the daemon
+    // applies it as `started_at <= ?`. A bare date must therefore resolve to
+    // end-of-day, or a same-day recording (e.g. 09:00) gets dropped.
+    #[test]
+    fn until_bare_date_snaps_to_end_of_day() {
+        let mut args = empty_args();
+        args.until = Some("2026-05-19".into());
+        let filter = build_filter(args, None).expect("filter builds");
+        let until = filter.until.expect("until parsed");
+        assert_eq!((until.hour(), until.minute(), until.second()), (23, 59, 59));
+
+        // The whole named day is included: a 09:00 recording satisfies the bound.
+        use chrono::TimeZone;
+        let same_day = chrono::Local
+            .with_ymd_and_hms(2026, 5, 19, 9, 0, 0)
+            .single()
+            .unwrap();
+        assert!(same_day <= until);
+    }
+
+    // `--since` is the lower bound, so start-of-day is correct — leave it alone.
+    #[test]
+    fn since_bare_date_stays_start_of_day() {
+        let mut args = empty_args();
+        args.since = Some("2026-05-19".into());
+        let filter = build_filter(args, None).expect("filter builds");
+        let since = filter.since.expect("since parsed");
+        assert_eq!((since.hour(), since.minute(), since.second()), (0, 0, 0));
+    }
 }

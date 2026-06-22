@@ -86,17 +86,21 @@ impl Catalog {
             let done = t.done || preserved;
             // Re-inserted rows are 'llm' and take their extraction order; manual
             // rows (kept above) keep their own sort_order. On a text collision
-            // (a duplicate extraction, or a surviving manual task with the same
-            // text) upsert rather than silently dropping the row: the extracted
-            // values win and the row becomes 'llm', so the just-computed
-            // carried-over `done` is never discarded. A plain INSERT (no OR
+            // (a duplicate extraction, or a surviving manual task the LLM now
+            // extracts verbatim) upsert rather than silently dropping the row:
+            // the extracted values win, so the just-computed carried-over `done`
+            // is never discarded. But a colliding 'manual' row STAYS 'manual' —
+            // flipping it to 'llm' would mean the next re-extraction's DELETE
+            // (above) silently removes a user-owned task, breaking this module's
+            // promise that manual tasks survive a re-run. A plain INSERT (no OR
             // IGNORE) means a genuine constraint/FK error surfaces instead.
             sqlx::query(
                 "INSERT INTO tasks (recording_id, text, due_hint, done, source, sort_order) \
                  VALUES (?, ?, ?, ?, 'llm', ?) \
                  ON CONFLICT(recording_id, text) DO UPDATE SET \
                  due_hint = excluded.due_hint, done = excluded.done, \
-                 source = 'llm', sort_order = excluded.sort_order",
+                 source = CASE WHEN tasks.source = 'manual' THEN 'manual' ELSE 'llm' END, \
+                 sort_order = excluded.sort_order",
             )
             .bind(id.as_str())
             .bind(&t.text)
