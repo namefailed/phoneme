@@ -1955,9 +1955,9 @@ export class RecordingsView {
       if (!host) continue;
       const btn = document.createElement("button");
       btn.type = "button";
-      // The detail/transcript panes show it at top-center (the list keeps the
-      // familiar bottom-center placement).
-      btn.className = hostId === "rv-list" ? "back-to-top" : "back-to-top back-to-top--top";
+      // Top-center on every pane (list + detail): the button drops in from the
+      // top once you've scrolled down, consistent across the whole view.
+      btn.className = "back-to-top back-to-top--top";
       btn.title = "Back to top";
       btn.setAttribute("aria-label", "Back to top");
       btn.innerHTML =
