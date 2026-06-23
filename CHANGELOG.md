@@ -283,6 +283,35 @@ trust boundary.*
   entities came from an earlier run; and a single malformed object in the model's
   JSON reply no longer discards every entity — the array is parsed element-by-
   element, keeping all the well-formed ones.
+- [x] **Opt-in, local-only diagnostics bundle** — a **Doctor → Export diagnostics**
+  button (and the `ExportDiagnostics` IPC behind it) writes one sanitized JSON
+  snapshot you can attach to a bug report. It carries exactly three things:
+  app + OS info, the **masked** config (every API key / secret redacted through
+  the same `secrets::mask_json` the GUI and CLI redactors use — never a plaintext
+  key), and a bounded tail of the daemon log (400 lines by default, hard-capped).
+  No audio, no transcripts, no catalog contents, and **no network** — the daemon
+  assembles it from disk + in-memory config and writes it to
+  `<data_dir>/diagnostics/phoneme-diagnostics-<timestamp>.json`, returning the path
+  to reveal. "No telemetry" stays true; this just means a field crash is no longer
+  invisible. A masking round-trip test asserts no secret can leak into the bundle.
+- [x] **No more hook double-fire** — the daemon's legacy `hook.commands` loop is now
+  gated behind `schema_version < CURRENT_SCHEMA_VERSION`, so it runs **only** for a
+  genuinely un-migrated config. Before, a stale or hand-edited config that already
+  carried a migrated schema version (with recipe-driven Hook entries) *and* still
+  had non-empty `hook.commands` could fire a shell hook **twice** — once from the
+  legacy loop, once from the recipe's `run_hook_steps`. Migration empties
+  `hook.commands` and is idempotent, so the gate closes that window while still
+  honoring legacy hooks for an old config that hasn't migrated yet. A regression
+  test (`stale_legacy_hook_does_not_double_fire_post_migration`) pins the
+  single-fire invariant.
+- [x] **CI hardening** — the `cargo audit` and `pnpm audit` jobs are now **blocking**
+  rather than advisory: `continue-on-error` is gone, so a new vulnerability fails
+  the build instead of scrolling past in green (handle a real advisory with a
+  scoped `--ignore RUSTSEC-…` + a reason, never by muting the whole job). The
+  workspace test job also dropped `--test-threads=1` and runs `cargo test
+  --workspace` in parallel now that per-test DB isolation (in-memory + per-test
+  tempdir) exists — so CI catches isolation rot instead of masking it behind serial
+  execution.
 
 ### Providers & models
 
@@ -571,6 +600,16 @@ trust boundary.*
   re-flow + the text re-embeds like a hand edit (`FindReplace` IPC,
   `catalog::find_replace_transcript`). A no-match is a no-op; prints/returns the
   replacement count.
+- [x] **`phoneme speaker calibrate`** — a read-only command that suggests a
+  `voiceprint_match_threshold` from *your own* enrolled voices, so the speaker-
+  recognition cutoff has a measured basis instead of the hand-picked `0.5`. It
+  scores every same-named-voice pair (genuine) against every different-named-voice
+  pair (impostor) with the recognizer's own cosine, finds the equal-error-rate
+  (EER) threshold that best separates them, and prints the suggested value beside
+  the current one (`--json` for the full report). It only ever suggests — it never
+  touches the config — and reports "not enough labelled data" below two named
+  voices with two-plus captures each. Wraps the `phoneme_core::voiceprint_eval`
+  metric (the dev EER harness) over an opened-read-only catalog; no daemon needed.
 
 ### Transcription
 

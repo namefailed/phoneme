@@ -7,7 +7,8 @@ the result is a **list you tick off** rather than chips you approve.
 
 ## The Tasks list (detail pane)
 
-Open any recording and look for the **✅ Tasks** section under the tags:
+Open any recording and look for the **✅ Tasks** section below the transcript
+(beside [Entities](entities.md)):
 
 - Each action item is a row with a **checkbox**. Tick it to mark the task done —
   done tasks dim and strike through, and sort below the open ones.
@@ -73,21 +74,23 @@ phoneme tasks
 # Only the still-open tasks
 phoneme tasks --open
 
-# Mark task #3 of a recording done (or undone) — the id is shown in the list
-phoneme tasks done 20260519T143500823 3
-phoneme tasks undone 20260519T143500823 3
+# Mark a task done (or undone). The numeric arg is the task's DB row id — the
+# `#N` shown beside it by `phoneme tasks` / `phoneme show`, NOT a per-recording
+# ordinal.
+phoneme tasks done 20260519T143500823 142
+phoneme tasks undone 20260519T143500823 142
 
 # Add a task by hand (kept across re-extraction); --due is optional
 phoneme tasks add 20260519T143500823 "Send the roadmap" --due "by Friday"
 
 # Edit a task's text (the due hint is kept unless you change it)
-phoneme tasks edit 20260519T143500823 3 "Send the v2 roadmap"
-phoneme tasks edit 20260519T143500823 3 "Send it" --due "Monday"   # change due
-phoneme tasks edit 20260519T143500823 3 "Send it" --clear-due      # drop due
+phoneme tasks edit 20260519T143500823 142 "Send the v2 roadmap"
+phoneme tasks edit 20260519T143500823 142 "Send it" --due "Monday"   # change due
+phoneme tasks edit 20260519T143500823 142 "Send it" --clear-due      # drop due
 
-# Delete a task, or set the task order (ids in the order you want)
-phoneme tasks delete 20260519T143500823 3
-phoneme tasks reorder 20260519T143500823 5 2 4 1
+# Delete a task, or set the task order (row ids in the order you want them)
+phoneme tasks delete 20260519T143500823 142
+phoneme tasks reorder 20260519T143500823 145 142 144 141
 ```
 
 Every task action mirrors the GUI exactly — the CLI, the detail-pane list, and
@@ -105,3 +108,14 @@ up in the app live, and vice-versa.
   task and reappears unchecked — to make a task permanent, add or edit it by hand
   so it's *manual* and exempt from re-extraction entirely.
 - Deleting a recording deletes its tasks with it.
+
+## See also
+
+Tasks are one of Phoneme's per-recording AI enrichments. The others work the same
+way — opt-in, on-demand or per-pipeline, with hand edits that survive
+re-extraction:
+
+- [Entities](entities.md) — the people, orgs, topics, and terms a recording
+  mentions, with a cross-recording browse facet.
+- [Topic Timelines (Auto-Chapters)](topic_timelines.md) — a navigable,
+  time-coded chapter list per recording.

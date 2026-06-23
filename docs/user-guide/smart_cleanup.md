@@ -1,8 +1,13 @@
 # ✨ Smart Cleanup (LLM Post-Processing)
 
-Phoneme provides best-in-class transcription accuracy, but human speech is inherently messy. We stutter, we repeat ourselves, and we use filler words. 
+Whisper transcribes what you actually said, and human speech is messy — we
+stutter, repeat ourselves, and use filler words.
 
-**Smart Cleanup** solves this. Instead of just saving the raw Whisper transcription, Phoneme can automatically pipe your transcript through a Large Language Model (LLM) before saving it. This allows you to effortlessly remove dysfluency, fix phonetic misunderstandings, translate languages on-the-fly, or format your spoken thoughts into pristine bullet points.
+**Smart Cleanup** addresses this. Instead of saving the raw Whisper
+transcription, Phoneme can pipe your transcript through a Large Language Model
+(LLM) before saving it. Use it to remove dysfluency, fix phonetic
+misunderstandings, translate languages on the fly, or reformat your spoken
+thoughts into bullet points.
 
 ## ⚙️ How it works
 
@@ -74,7 +79,7 @@ Phoneme ships **one-click presets** for a long list of providers (Ollama, LM Stu
 
 ### 🏠 Local AI (Free, Offline, Private)
 
-For the ultimate privacy-respecting, local-first experience, run the LLM locally with Ollama (or LM Studio / Jan / any local OpenAI-compatible server).
+To keep everything on your machine, run the LLM locally with Ollama (or LM Studio / Jan / any local OpenAI-compatible server).
 
 1. Download and install [Ollama](https://ollama.com/).
 2. Open your terminal and run: `ollama run llama3.2:3b` (a fast, capable 3B model).
@@ -134,7 +139,7 @@ A **timeout** (`[llm_post_process].timeout_secs`, default 300) controls how long
 
 ## 📝 Prompts & Presets
 
-The magic of the LLM is in the prompt. You can select one of our default presets, or write your own to teach the AI exactly how you want your notes formatted.
+The prompt is what controls the LLM's output. Pick one of the default presets, or write your own to tell the AI exactly how you want your notes formatted.
 
 <!-- SCREENSHOT PLACEHOLDER: Settings -> Post-Processing showing the prompt text area -->
 

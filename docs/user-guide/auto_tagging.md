@@ -39,6 +39,10 @@ tagging older recordings after you enable the feature.
 | Provider | `Same as post-processing` (default) reuses your cleanup connection; or pick Ollama / OpenAI-compatible / Groq / Anthropic |
 | API key / URL | Only for cloud providers; blank inherits the cleanup values |
 | Model | Blank = the cleanup model |
+
+The provider/key/URL/model controls are the same connection block used
+everywhere else, and the inherit-from-cleanup behavior works exactly as it does
+for Summary and Title — see [Providers & Models](providers_and_models.md).
 | Max suggestions | 1–12 (default 5) |
 | Instructions | The prompt that steers the tagger — your tag list and the transcript are appended automatically |
 
@@ -64,7 +68,8 @@ prompt = "You tag voice-note transcripts. …"
 ## Privacy note
 
 Auto-tagging sends the transcript to whichever provider you configure — with
-**Local Ollama** everything stays on your machine, exactly like Smart Cleanup.
+**Local Ollama** everything stays on your machine, exactly like
+[Smart Cleanup](smart_cleanup.md).
 
 ## Auto-applying existing tags
 

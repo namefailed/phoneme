@@ -105,10 +105,10 @@ trait, so tests swap the real microphone (`CpalSource`) for a `GeneratorSource`
 that emits synthetic audio — you can run the entire suite without a physical
 microphone.
 
-To run the Rust backend tests (always single-threaded — many tests mutate
-process-global env vars; see [Testing & CI](testing_and_ci.md) for why):
+To run the Rust backend tests (they run in parallel — each test owns an isolated
+in-memory or tempdir catalog; see [Testing & CI](testing_and_ci.md)):
 ```bash
-cargo test --workspace -- --test-threads=1
+cargo test --workspace
 ```
 
 To run the frontend tests:

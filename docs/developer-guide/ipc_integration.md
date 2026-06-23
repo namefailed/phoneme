@@ -4,6 +4,14 @@ Phoneme provides a full CLI (`phoneme record start`, `phoneme list`, etc.) that 
 
 For developers, hackers, and power users who want the lowest-latency automation possible—or who want to build their own custom user interfaces on top of Phoneme's engine—you can integrate directly with Phoneme's Inter-Process Communication (IPC) layer.
 
+This page is the wire contract for the daemon's named pipe — the surface every
+other client sits on top of. If you don't need raw-pipe access, two thin bridges
+expose a subset over friendlier transports: the
+[Local REST API](rest_api.md) (HTTP/SSE over loopback) and the
+[MCP server](mcp_server.md) (JSON-RPC over stdio for AI clients). The
+[`phoneme` CLI](cli_reference.md) and the
+[Hook system](plugins_and_hooks.md) also drive this same daemon.
+
 ## 🏛️ The IPC Architecture
 
 The Phoneme Daemon acts as a headless, always-on engine. It exposes a single, unified interface over a local named pipe.
@@ -110,10 +118,14 @@ active recording has nothing new to attach them to):
 **Catalog & import:**
 - `list_recordings` (with a `filter`), `kind_counts` (per-Library-kind totals for the sidebar badges), `get_recording`, `list_meeting`, `get_segments` (machine transcript segments with ms timing + speaker labels; empty list when none are stored)
 - `get_meeting_digest` (`{ "meeting_id" }`) — the **whole-meeting digest**: one LLM synthesis across **all** of a meeting's tracks (mic + system together), distinct from a single track's `summary`. Ok = the digest DTO `{ meeting_id, digest, digest_model }` or `null` when none has been generated yet (a normal state, not `not_found`). The merged meeting view fetches it alongside `list_meeting`.
+- `list_meeting_digests` — every stored meeting digest, the many-meetings sibling of `get_meeting_digest`. Ok = a JSON array (possibly empty) of the same `{ meeting_id, digest, digest_model }` DTO.
 - `get_period_digest` (`{ "key" }`) — a **period digest**: one LLM rollup across **every** recording in a date window, distinct from `get_meeting_digest` (which is meeting-scoped). `key` is the stable id derived from the canonical `since`/`until` bounds. Ok = the digest DTO `{ key, label, since, until, digest, digest_model, source_count }` or `null` when none has been generated for that range yet.
 - `list_period_digests` — every stored period digest, newest range first. Ok = a JSON array (possibly empty) of the same DTO. A pure read used by the digest panel's history and the library-backup export (period digests live in their own side table, not carried by `list_recordings`).
 - `get_words` (machine transcript **words** — the finer per-word layer beneath `get_segments`; ordered JSON array of `{ idx, start_ms, end_ms, text, speaker, confidence }`, where `confidence` is a 0..1 per-word score or `null` when the provider gives none — whisper-family endpoints emit only segment-level logprobs, so only Deepgram/AssemblyAI populate it. `speaker` is the `[Speaker N]` label (or `null` when undiarized): Deepgram/AssemblyAI tag words from their own speaker labels, and local diarization now tags each word too — it assigns speakers per word off the diarizer's per-frame activation matrix rather than per whole segment. Empty list when none are stored. Fetched lazily by the word-level features — word↔waveform seek and confidence highlighting)
-- `delete_recording` (`keep_audio` bool), `import_recording` (`.wav`/`.mp3`/`.m4a`/`.flac`)
+- `delete_recording` (`keep_audio` bool), `delete_session` (`{ "meeting_id", "keep_audio" }` — delete every track of a meeting as a unit), `import_recording` (`.wav`/`.mp3`/`.m4a`/`.flac`)
+- `export_clip` (`{ "id", "start_ms", "end_ms", "out_path"? }`) — export a `[start_ms, end_ms)` slice of a recording's audio to a new WAV (frame-aligned, source format; `end_ms` clamped to the duration). Ok `{"path":"<written file>"}`; `invalid_config` for a bad range. `phoneme clip`.
+- `reimport_from_disk` (`{ "dry_run"? }`) — scan the audio dir for `.wav` files whose RecordingId has no catalog row and re-link each (insert a `queued` row + enqueue). Strictly **non-destructive**. Ok `{"count":N}` (or `{"count":N,"paths":[...]}` when `dry_run`). `phoneme doctor --reimport`.
+- `rebuild_catalog` — **destructive** in-process rebuild from disk: clears every recording row (losing transcripts/edits/tags/summaries), then re-imports every WAV as a fresh `Queued` recording. Refused while a recording/meeting is in flight. Ok `{"count":N}`. Settings → Doctor, behind a type-to-confirm.
 - `list_saved_searches`, `upsert_saved_search`, `delete_saved_search`, and `run_saved_search` (`{ "id" }`) — execute a stored saved search server-side: the daemon parses the saved `filter_json` into a `ListFilter` and runs the same query as `list_recordings`, returning the same recordings array. `not_found` for an unknown id, `invalid_config` when the stored filter won't parse.
 - `list_ai_activity` (`recording_id` optional, `limit`) — the persisted AI-activity log: completed streaming LLM sessions (cleanup/summary and their re-runs) with the exact prompt + response, newest first. Powers the 🧠 popout's history so it survives app restarts. `recording_id` filters to one recording; omit it for the whole library's recent activity. The daemon prunes the table to a bounded recent window.
 - **Dictation re-grab history** (opt-in, off unless `[in_place].keep_history` is on; the daemon prunes to the newest 50 on every insert):
@@ -134,15 +146,42 @@ active recording has nothing new to attach them to):
   - `split_speaker` (`{ "id", "label", "segment_idxs": [0-based, …], "new_label" }`) — move the listed segments from `label` onto a fresh `new_label` (no name/voiceprint until enrolled). An unknown idx, or one not currently `label`, aborts the whole op with no write.
 - `set_recording_title` (`{ "id", "title": string|null }`) — set a display title; a non-null title is marked **user-owned** so auto-generation never overwrites it, while `null`/empty clears back to auto (regenerated on the next pipeline run). Emits the same `transcript_updated` refresh event edits use.
 
+**Named-speaker recognition** (match diarized speakers against an enrolled voice library):
+- `recognize_speakers` (`{ "id" }`) — on-demand: the still-unnamed diarized speakers whose voiceprints match a known voice. Ok = a JSON array of `SpeakerSuggestion` (empty when recognition is off or nothing matches).
+- `dismiss_speaker_suggestion` (`{ "id", "speaker_label": 1-based }`) — suppress a suggestion so it isn't offered again for that recording + speaker. Ok = `{}`.
+- `list_named_voices` — the named-voice library (id, name, sample count per enrolled voice). Ok = a JSON array of `NamedVoice`.
+- `rename_named_voice` (`{ "id", "name" }`) — rename one enrolled voice. Ok = `{}`.
+- `merge_named_voices` (`{ "from_id", "into_id" }`) — re-point the source's samples onto the target and delete the source. Ok = `{"merged":bool}`.
+- `forget_named_voice` (`{ "id" }`) — **reversibly** soft-delete a voice (it vanishes from `list_named_voices` + recognition and its captures are unlinked; the raw per-recording voiceprints stay). Ok = `{"removed":bool}`.
+- `undo_forget_named_voice` (`{ "id" }`) — undo a `forget_named_voice`: un-soft-delete the voice, re-link the captures it unlinked (skipping any re-named onto another voice since), recompute its centroid. Ok = `{"restored":bool}`.
+
+**Chapters (LLM auto-chapters with timing):**
+- `suggest_chapters` (`{ "id" }`) — on-demand run of the chapter step for one recording (regardless of recipe membership). Awaits the model; the time-ranged chapters land on the recording **replacing** any previous set, and `chapters_updated` fires (or `chapters_failed`). A recording with no transcript *segments* (no timing to chapter) is a clean no-op, not an error.
+- `get_chapters` (`{ "id" }`) — fetch one recording's chapters in chronological order. Ok = a JSON array (possibly empty) of `Chapter` objects (`start_ms`/`end_ms`, `title`, optional `summary`). An empty list — including for an unknown id — is a normal state, not `not_found` (mirrors `get_segments`).
+
+**Transcript versions** (the compounding chain — raw ASR at `idx` 0, then each Transform step's output; powers the Compare-versions view):
+- `list_transcript_versions` (`{ "id" }`) — Ok = a JSON array of `{ idx, step_id, label, model, text }` in `idx` order, empty for a recording that ran no Transform.
+- `get_transcript_version` (`{ "id", "idx" }`) — one version by step `idx` (`0` = raw ASR). Ok = the version object or `null` when absent.
+- `revert_to_version` (`{ "id", "idx" }`) — revert the live transcript to a recorded version's text, through the same path as a manual edit (re-flows the timing variants + re-embeds). Ok `null`; emits `transcript_updated`; `not_found` when the recording or that version is missing.
+
 **Tag suggestions (LLM auto-tag):**
 - `suggest_tags` (on-demand suggest for one recording), `approve_tag_suggestion`, `dismiss_tag_suggestion`, `clear_all_tag_suggestions` (library-wide bulk clear)
 
-**Entity extraction (LLM structured entities):**
+**Entity extraction (LLM structured entities) + manual CRUD:**
 - `suggest_entities` (`{ "id" }`) — on-demand run of the entity-extraction step for one recording (regardless of recipe membership). Awaits the model like `suggest_tags`; the typed entities (`person` / `org` / `topic` / `term`) land on the recording, **replacing** any previous set, and `entities_updated` fires (or `entities_failed`). The `Recording` DTO carries them as `entities: [{kind, value}, …]` plus the `entities_model` provenance field.
+- `get_entities` (`{ "id" }`) — fetch one recording's entities (kind- then value-sorted) without pulling the whole `get_recording` row. Ok = a JSON array (possibly empty) of `{kind, value}`; an unknown id yields an empty list (mirrors `get_chapters`). The cross-recording facet is `list_all_entities` (below).
+- `add_entity` (`{ "id", "kind", "value" }`) — add a user-curated entity. Manual entities survive re-extraction (only LLM rows are replaced). Ok `null`; emits `entities_updated`.
+- `update_entity` (`{ "id", "kind", "value", "new_kind", "new_value" }`) — edit one entity in place, keyed by its current `(kind, value)`; marks it manual so the fix survives re-extraction. Ok `null`; emits `entities_updated`.
+- `delete_entity` (`{ "id", "kind", "value" }`) — delete one entity from a recording, keyed by `(kind, value)`. Ok `null`; emits `entities_updated`.
+- `merge_entities` (`{ "kind", "from_values": [...], "to_value" }`) — library-wide: fold every `from_values` entity of `kind` into `to_value` across all recordings. Ok `null`; emits `entities_merged`.
 
-**Task extraction (LLM action items, with a mutable done flag):**
+**Task extraction (LLM action items, with a mutable done flag) + manual CRUD:**
 - `suggest_tasks` (`{ "id" }`) — on-demand run of the task-extraction step for one recording (regardless of recipe membership). Awaits the model like `suggest_entities`; the action items (`{text, due_hint?}`) land on the recording **replacing** the previous set, **but any `done` flag the user set is preserved** when a task's text survives, and `tasks_updated` fires (or `tasks_failed`). The `Recording` DTO carries them as `tasks: [{id, text, due_hint, done}, …]` (open first) plus the `tasks_model` provenance field. `due_hint` is the model's free-text deadline phrase verbatim — never a parsed date.
-- `set_task_done` (`{ "id", "task_id", "done" }`) — toggle one task's `done` flag (the one task mutation; entities have no analogue). Emits `tasks_updated` for the recording so open views refresh; `not_found` when `task_id` matches no row.
+- `set_task_done` (`{ "id", "task_id", "done" }`) — toggle one task's `done` flag (the one entities lack). Emits `tasks_updated`; `not_found` when `task_id` matches no row.
+- `add_task` (`{ "id", "text", "due_hint"? }`) — add a user-created task. Manual tasks survive re-extraction. Ok `null`; emits `tasks_updated`.
+- `update_task` (`{ "id", "task_id", "text", "due_hint"? }`) — edit one task's text/due hint. Ok `null`; emits `tasks_updated`; `not_found` for an unknown `task_id`.
+- `delete_task` (`{ "id", "task_id" }`) — delete one task. Ok `null`; emits `tasks_updated`; `not_found` for an unknown `task_id`.
+- `reorder_tasks` (`{ "id", "task_ids": [...] }`) — set the user's task order (each id's position becomes its `sort_order`); ids not in the recording are ignored. Ok `null`; emits `tasks_updated`.
 
 The `list_recordings` filter takes `limit`/`offset` (pagination),
 `since`/`until` (RFC 3339), `status` (one of the recording statuses below),
@@ -183,6 +222,10 @@ first (`Catalog::list_all_tasks`). It is the task counterpart of `list_all_entit
 powers the sidebar's Tasks section and `phoneme tasks`, and pairs with the
 `task_state` list filter above. When `only_open` is `true`, done tasks are dropped.
 
+`task_counts` returns the cheap badge counts the sidebar's Tasks section needs
+without pulling the full `list_all_tasks` payload (see
+`phoneme_core::types::TaskCounts`).
+
 Recording `status` values: `recording`, `paused`, `queued`, `transcribing`,
 `cleaning_up`, `summarizing`, `tagging`, `hook_running`, `done`,
 `transcribe_failed`, `hook_failed`, `cleanup_failed`, `summarize_failed`,
@@ -215,7 +258,8 @@ as a failure.
 **Queue (inbox) operations:** inspect and manage the durable inbox the queue worker drains.
 - `list_queue` (processing item(s) first, then pending in claim order), `queue_counts` (`{pending, processing, done, failed}`)
 - `cancel_queued` (drop one pending item → marks it `cancelled`), `cancel_all_queued` (drop every pending item), `cancel_processing` (abort the in-flight item)
-- `reorder_queue` (`ids`: desired claim order), `set_queue_paused` (`paused` bool), `queue_paused` (query), `clear_failed` (empty the `failed/` quarantine)
+- `reorder_queue` (`ids`: desired claim order), `set_queue_paused` (`paused` bool), `queue_paused` (query)
+- `clear_failed` (empty the `failed/` quarantine), `dismiss_failed` (`{ "id" }` — remove one quarantined `failed/<id>.json` payload; the per-item counterpart to `clear_failed`, leaving the catalog row untouched)
 
 **Tags:** `list_tags`, `list_all_tags`, `add_tag`, `update_tag`, `delete_tag`,
 `attach_tag`, `detach_tag`, `tags_for`, `tag_usage_counts`, `merge_tags`.
@@ -246,6 +290,12 @@ generation) instead arrives as a terminal `ask_activity` with `error` set. Empty
 retrieval returns a terminal "nothing matched" answer **without** calling the LLM.
 
 **Diagnostics:** `run_doctor` (runs all health checks; the GUI Doctor view).
+`export_diagnostics` writes an opt-in, **local-only** sanitized bundle for bug
+reports — app/version/OS info, the *masked* config (every secret redacted; never
+a plaintext key), and a tail of the daemon log — to
+`<data_dir>/diagnostics/phoneme-diagnostics-<timestamp>.json`, and returns
+`{"path":"<written file>"}`. It makes no network calls and includes no
+audio/transcripts/catalog data (the GUI Doctor's "Export diagnostics" button).
 
 **Daemon control:** `daemon_status`, `reload_config`, `shutdown`, `hook_test`,
 `subscribe_events` (see Event Streaming below).
@@ -319,7 +369,14 @@ failed.
 Task extraction emits `tasks_updated` (`{ id }`) when the action items are stored,
 toggled (`set_task_done`), or re-extracted, or `tasks_failed` (`{ id, error }`) on
 failure — the task twins of `entities_updated` / `entities_failed`, equally
-best-effort.
+best-effort. A library-wide `merge_entities` emits `entities_merged` so every
+view that browses entities (the sidebar facet, the Entity manager, an open
+recording's chips) refetches.
+
+Chapter generation emits `chapters_updated` (`{ id }`) when the time-ranged
+chapters are stored, or `chapters_failed` (`{ id, error }`) on failure — the
+chapter twins of `entities_updated` / `entities_failed`. The Chapters view
+re-fetches (`get_chapters`) on the success event.
 
 **Ask my archive stream** (`ask_activity`, after sending `ask` with a
 `request_id`): the daemon ships the citation `sources` first (before any token),

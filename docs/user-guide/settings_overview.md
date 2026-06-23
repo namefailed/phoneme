@@ -21,7 +21,7 @@ The left sidebar lists every section; a **search box** at the top jumps to any f
 | 🏷️ **Tags** | Create, rename, recolor, delete, merge tags |
 | 🔍 **Search** | Saved searches + the semantic-search embedding model |
 | 👤 **Profiles** | Named full-config snapshots |
-| ⚙️ **System** | Storage & retention, Tray, Advanced (+ Doctor) |
+| ⚙️ **System** | Storage & retention, Startup & tray, Diagnostics (+ Doctor) |
 
 ---
 
@@ -54,7 +54,7 @@ See [Providers & Models](providers_and_models.md) and [Whisper & Diarization](di
 | **Pre-roll** | Milliseconds of idle mic buffer prepended on record start (anti-clip; microphone source only) |
 | **Streaming preview** | Live partial transcript while recording (opt-in) |
 
-The **Audio source** here is the global default. Each custom hotkey can capture a different source — see [Hotkeys](#-hotkeys) below and [Hotkeys & Recording Modes](hotkeys_and_recording_modes.md).
+The **Audio source** here (under **Settings → Capture**) is the global default. Each custom hotkey can capture a different source — see [Hotkeys](#-hotkeys) below and [Hotkeys & Recording Modes](hotkeys_and_recording_modes.md).
 
 ## ⌨️ Dictation
 

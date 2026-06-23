@@ -115,7 +115,7 @@ Phoneme isn't for everyone, and that's fine. If one of these fits your needs bet
 | [Hotkeys & Recording Modes](docs/user-guide/hotkeys_and_recording_modes.md) | Hold, toggle, CLI bindings |
 | [Settings Overview](docs/user-guide/settings_overview.md) | Every settings screen (with screenshots) |
 | [Smart Cleanup & Summary](docs/user-guide/smart_cleanup.md) | LLM post-processing + AI summary |
-| [Semantic Search](docs/user-guide/semantic_search.md) | Meaning-based recall |
+| [Semantic Search & Ask](docs/user-guide/semantic_search.md) | Meaning-based recall + Ask your archive (cited answers) |
 | [FAQ](docs/user-guide/faq.md) | Common questions |
 | [Troubleshooting](docs/user-guide/troubleshooting.md) | Fixes and diagnostics |
 

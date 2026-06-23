@@ -392,13 +392,33 @@ These two top-level booleans were the old per-feature migration latches. They ar
 
 ## `[[hotkeys]]`
 
-Custom keybinds beyond the three built-ins (`[hotkey]` / `[in_place_hotkey]` / `[meeting_hotkey]`). An array-of-tables; each binds a combo to an action and carries its own pipeline. Only the Playbook-era additions are shown here.
+Custom keybinds beyond the three built-ins (`[hotkey]` / `[in_place_hotkey]` / `[meeting_hotkey]`). An array-of-tables; each binds a combo to an action and carries its own pipeline. Normally edited through **Settings → Keybinds** (the per-binding Hotkey Manager — see [Hotkeys & recording modes](../user-guide/hotkeys_and_recording_modes.md)); the keys below are what each table stores.
+
+**Base keys** (every binding):
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `id` | *(required)* | Stable unique id (the manager mints a UUID) — the registration key and the payload tag the daemon uses to identify the binding. |
+| `label` | `""` | User-facing name shown in the Hotkey Manager. |
+| `enabled` | `true` | Whether this binding is active. |
+| `combo` | *(required)* | The key combination, e.g. `"Ctrl+Alt+N"`. |
+| `mode` | `hold` | `hold` (push-to-talk — record while held) or `toggle` (press to start, press again to stop). |
+| `action` | `record` | What pressing the combo does: `record` (a normal recording), `in_place` (dictation typed into the focused window), or `meeting` (a mic + system-audio meeting). |
+
+**Playbook-era additions:**
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `recipe_id` | `""` | The `[[recipes]]` id this binding's recordings run. Empty = the global `default` recipe (today's normal pipeline), so a pre-Playbook binding is unchanged. A deleted recipe falls back to `default`. **Ignored when `action = "meeting"`** — a meeting resolves its recipe per-track via the daemon's multi-track path, not the single-recording ledger. Supersedes the legacy `pipeline` flags. |
 | `whisper_model` | `""` | Per-keybind transcription (STT) model override. Empty uses the globally configured model; a non-empty value transcribes this binding's recordings with that model (a local model-file path, or a cloud model id — same shape as the per-job retranscribe override). **Ignored when `action = "meeting"`** for the same reason as `recipe_id`. |
 | `source` | _(unset)_ | Per-keybind capture-source override: `"microphone"` or `"system_audio"`. Unset (the default) follows the global `[recording].source`, so existing bindings are unchanged. Lets one hotkey record the mic and another record system audio. The source actually used is stored on each recording's `track` and shown in the list's **Source** column. **Ignored when `action = "meeting"`** — a meeting always records both tracks. |
+
+**`[[hotkeys]].in_place` sub-table** — only meaningful when `action = "in_place"`:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `full_pipeline` | `false` | `false` = fast lane: type the quick transcription immediately. `true` = run this binding's `recipe_id` (cleanup / LLM, …) before inserting — slower, but lets one in-place key reshape the transcript (e.g. into a prompt) first. |
+| `type_mode` | `"type"` | How the text is inserted: `"type"` (simulated keystrokes), `"paste"` (clipboard + Ctrl+V), or `"off"` (don't auto-insert; still saved to the library). |
 
 ---
 

@@ -155,6 +155,11 @@ recording, open **Rename speakers** in the detail pane: each row now carries a
   `phoneme speaker merge <ID> <FROM> <INTO>`
 - **Split** one speaker into two — move some segments onto a fresh label:
   `phoneme speaker split <ID> <LABEL> <NEW_LABEL> <SEGMENT_IDX>…`
+- **Rename** a speaker label to a display name (the stored transcript keeps its
+  `[Speaker N]` markers, so a rename is reversible):
+  `phoneme speaker rename <ID> <LABEL> <NAME>`
+- **Clear** a label's custom name, reverting it to the default "Speaker N":
+  `phoneme speaker clear <ID> <LABEL>`
 
 CLI segment indices come from `phoneme show --segments` (the app resolves them
 from the turn you click). The correction is applied
@@ -246,6 +251,22 @@ more misses), lower is looser. The `82%` in a suggestion is that similarity, so
 you can see where to set the bar. To turn the whole feature off, clear
 **Recognize known speakers**.
 
+Rather than guess the threshold, you can have Phoneme suggest one from your own
+voices:
+
+```bash
+phoneme speaker calibrate
+```
+
+It scores every same-named-voice pair (genuine matches) against every
+different-named-voice pair (impostors) with the recognizer's own cosine
+similarity, finds the equal-error-rate (EER) point that best separates the two,
+and prints the suggested value beside your current `voiceprint_match_threshold`.
+It's **read-only** — it only suggests, it never writes the config, so applying the
+number is up to you. It needs enough labelled data to be meaningful (at least two
+named voices, each with two or more captures); below that it reports "not enough
+labelled data".
+
 > [!NOTE]
 > Voiceprints are captured **when a recording is transcribed**, so recordings made
 > before recognition existed have none — **Re-transcribe** them (or record fresh
@@ -265,6 +286,12 @@ First Run Wizard. The **Models folder** field in **Settings → Diarization**
 (`diarization.models_dir`) is **optional** — leave it blank to use the auto-managed
 cache; only point it at a folder if you keep a custom speakrs bundle (segmentation
 + embedding ONNX) somewhere specific.
+
+> [!NOTE]
+> Every `[diarization]` key mentioned on this page — `provider`, `models_dir`,
+> `solo_one_speaker`, `expected_speakers`, `name_propagation`,
+> `voiceprint_match_threshold`, and the rest — is documented with its type and
+> default in [config_reference → `[diarization]`](../developer-guide/config_reference.md#diarization).
 
 > [!NOTE]
 > Local diarization runs entirely on your machine and needs noticeably more RAM,

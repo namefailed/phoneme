@@ -1,8 +1,9 @@
 # 🔌 Plugins and Hooks (Extensibility)
 
-Phoneme's philosophy is simple: **we transcribe your voice, you decide exactly where it goes.** 
-
-To achieve this, Phoneme is built around an extensible, script-based Hook system. While Phoneme v2.0 will introduce a formalized JSON Plugin Registry, the current architecture allows limitless integration by piping JSON directly to user-owned subprocesses.
+Phoneme transcribes your voice; you decide where the transcript goes. The
+mechanism is a script-based **Hook** system: the daemon runs your executable and
+pipes the final transcript to it as JSON. A v2.0 JSON Plugin Registry is on the
+roadmap; until then, integration is whatever subprocess you point a Hook at.
 
 ## 📜 The Hook Contract
 
@@ -183,6 +184,13 @@ surfaces failures but keeps the recording usable).
 > **auto-migrates** those into Hook entries on the Default recipe and clears the
 > `[hook]` table — a one-time migration tracked by `schema_version` (it runs
 > exactly once and is never re-applied). Edit them in the Playbook from then on.
+>
+> Because the migration **clears** `[hook]`, the table is vestigial: **do not set
+> it in a new config**. Anything you put there is migrated-and-cleared once, then
+> ignored — it is not a live config surface, and hooks belong in the Playbook.
+> The only hook-related **top-level** table that survives is **`[webhook]`** (the
+> global outbound network policy below), which governs every Hook entry's webhook
+> regardless of which recipe it lives on.
 
 ## ⚡ Keyword-triggered hooks
 
@@ -343,7 +351,8 @@ See the [Threat model → Mitigations in place](threat_model.md#mitigations-in-p
 
 ## ⌨️ Writing Your Own Plugin
 
-Writing a plugin is trivial. Because Phoneme handles the audio capture, transcription, and LLM cleanup, your plugin only has to parse a JSON string from stdin.
+Phoneme handles audio capture, transcription, and LLM cleanup, so a plugin only
+has to parse the JSON object on stdin and do something with it.
 
 A minimal Python hook:
 
@@ -375,6 +384,7 @@ This runs your configured hook with a sample payload and prints the exit code, d
 
 ## 🔮 Future Roadmap: The Plugin Marketplace
 
-While shell scripts offer incredible power, our v2.0 roadmap includes a formalized **Plugin Marketplace**. 
-
-Plugins will be packaged in a standardized registry, allowing users to browse, install, and configure integrations (like Notion, Jira, or custom CRM pipelines) directly from the Phoneme UI with a single click, rather than managing shell scripts.
+Shell scripts cover everything today, but the v2.0 roadmap adds a **Plugin
+Marketplace**: a standardized registry so integrations (Notion, Jira, a custom
+CRM pipeline) can be browsed, installed, and configured from the Phoneme UI
+instead of hand-managed as scripts.

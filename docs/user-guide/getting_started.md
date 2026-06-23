@@ -1,8 +1,10 @@
 # 🚀 Getting Started with Phoneme
 
-Welcome to Phoneme! Phoneme is built on a fundamental philosophy: **Build it your own way.** We provide the tools—lightning-fast transcription, offline privacy, extensive post-processing, and limitless extensibility—but *you* decide how they fit together. 
-
-Whether you want a 100% offline, privacy-first setup that runs entirely on your local hardware, or you want to connect to the fastest cloud APIs for instant results, Phoneme supports it.
+Phoneme is a local-first voice-to-text app for Windows: it records your mic (or
+system audio), transcribes with Whisper, and runs your transcripts through a
+configurable post-processing pipeline (cleanup, summary, tags, hooks). It runs
+100% offline by default — Whisper runs on your machine — and can be pointed at
+cloud transcription or LLM providers per step if you want.
 
 ## 🧙‍♂️ The First Run Wizard
 
@@ -48,7 +50,7 @@ Choosing **Customize setup** reveals all **11 steps**:
 > [!NOTE]
 > Steps adapt to your choices. **Connect AI** only appears if you turned a feature off and need a cloud key for it; **Setting up** skips straight through if nothing is left to download.
 
-You can re-run the wizard any time from **Settings → System → Advanced**. Screenshots of each settings area live in [Settings Overview](settings_overview.md).
+You can re-run the wizard any time from **Settings → System → Diagnostics**. Screenshots of each settings area live in [Settings Overview](settings_overview.md).
 
 ### Choosing your features
 

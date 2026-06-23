@@ -71,8 +71,11 @@ A grab-bag of low-cost ideas that don't yet clear the bar on their own:
   absolute cap; one config knob, mitigates the dropped-key-up stuck-recording footgun.
 
 ### MCP / REST surface breadth
-The CLI has near-total IPC parity, but **MCP exposes ~16 of 135 requests and REST ~9** —
-no meeting/queue/tag/edit/re-run ops, and `REST record/start` is hold-mode-only.
+The CLI has near-total IPC parity, but **MCP exposes 32 tools and REST 24 routes**
+against the daemon's much larger IPC request surface — still a slice, not the whole.
+REST has since grown to cover meeting start/stop, queue, tags, title/favorite/pinned,
+and cleanup/summary re-runs; the remaining gaps are the deeper edit/version ops, and
+`REST record/start` is hold-mode-only.
 - **Why parked here, not roadmapped:** the in-app **Phoneme Agent** (ROADMAP H2) and
   the **browser extension** (H2, rides REST) both *depend* on broader coverage, so the
   breadth work is best scoped *with* them rather than as a standalone item.

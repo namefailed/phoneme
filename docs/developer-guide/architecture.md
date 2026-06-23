@@ -39,7 +39,7 @@ talk to it over a local named pipe.
                      │  + a one-way event subscription  │
                      ▼                                  ▼
         ┌───────────────────────────────────────────────────────────┐
-        │  named pipe  \\.\pipe\phoneme   (owner-only ACL)            │
+        │  named pipe  \\.\pipe\phoneme-daemon  (owner-only ACL)      │
         └───────────────────────────────┬───────────────────────────┘
                                          │
                                          ▼
@@ -301,9 +301,28 @@ the queue. Stage order — each optional stage gated by config and **non-fatal**
    subprocess with the transcript on stdin.
 7. **summary** — optional LLM summary.
 8. **tags** — optional LLM auto-tag *suggestions* (you approve them, §7).
-9. **done + webhook** — flip the row to `done` and POST the
-   [payload](../../crates/phoneme-core/src/types.rs) to a configured
-   [webhook](../../crates/phoneme-core/src/webhook.rs).
+9. **enrichment** — optional LLM passes that extract structured metadata into their
+   own catalog tables, each gated by recipe membership:
+   - **entities** — typed entities (person / org / topic / term),
+     [`extract_entities`](../../bin/phoneme-daemon/src/pipeline.rs) → the `entities`
+     table.
+   - **chapters** — time-ranged topic chapters snapped to real segment timing,
+     [`extract_chapters`](../../bin/phoneme-daemon/src/pipeline.rs) /
+     [`parse_chapters`](../../bin/phoneme-daemon/src/pipeline.rs) → the `chapters`
+     table.
+   - **tasks** — action items (each with an optional free-text `due_hint` and a
+     user-owned `done` flag), [`extract_tasks`](../../bin/phoneme-daemon/src/pipeline.rs)
+     → the `tasks` table.
+
+   Each writes the model that produced it (`entities_model` / `chapters_model` /
+   `tasks_model`), replaces any prior set wholesale, and is non-fatal. The **same**
+   extractors back on-demand IPC handlers — `SuggestEntities` / `SuggestChapters` /
+   `SuggestTasks` (the detail pane's **Extract** buttons and the
+   `phoneme suggest-entities` / `suggest-tasks` / `chapters` CLI verbs) — so a manual
+   run behaves identically to the pipeline.
+10. **done + webhook** — flip the row to `done` and POST the
+    [payload](../../crates/phoneme-core/src/types.rs) to a configured
+    [webhook](../../crates/phoneme-core/src/webhook.rs).
 
 Results land in the catalog as they settle; progress is broadcast as
 `PipelineStageChanged` / `LlmActivity` events; the catalog status column tracks
@@ -568,6 +587,18 @@ carries a `CheckCategory` (severity) and, for the GUI, a `fix_action` so a click
 (or `phoneme doctor --fix`) sweeps a hung/orphaned whisper-server and respawns it
 from config. The supervisor's explicit `whisper_restart` notify is the only path
 that heals a *hung* (not just dead) server. See [troubleshooting.md](../user-guide/troubleshooting.md).
+
+### Diagnostics bundle
+
+Doctor's **Export diagnostics** button (the `ExportDiagnostics` IPC request) writes
+an opt-in, **local-only** sanitized snapshot for a bug report
+([`diagnostics.rs`](../../crates/phoneme-core/src/diagnostics.rs)): app/version/OS
+info, the **masked** config (every secret redacted through the shared
+`phoneme_core::secrets` layer — never a plaintext key), and a tail of the daemon
+log. It deliberately includes **no audio, no transcripts, no catalog contents, and
+makes no network call** — the daemon assembles it from disk plus in-memory config and
+writes it to `<data_dir>/diagnostics/phoneme-diagnostics-<timestamp>.json`, returning
+the path for the UI to reveal. The user chooses whether to share the file.
 
 ---
 

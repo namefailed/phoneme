@@ -36,8 +36,9 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [Search & Organization](user-guide/search_and_organization.md) — Keyword search, tags, favorites, saved searches, side-by-side, bulk actions
 - [Auto-Tagging](user-guide/auto_tagging.md) — AI-suggested tags, approved by you before they apply
 - [Tasks from Voice](user-guide/tasks_and_reminders.md) — AI-extracted, checkable action items per recording + library-wide
+- [Entities](user-guide/entities.md) — Extract and curate people / orgs / topics / terms; browse and filter the library by them
 - [Topic Timelines](user-guide/topic_timelines.md) — AI auto-chapters: a navigable, time-coded outline per recording
-- [Semantic Search](user-guide/semantic_search.md) — Meaning-based search (offline ONNX embeddings)
+- [Semantic Search & Ask](user-guide/semantic_search.md) — Meaning-based search (offline ONNX embeddings) + Ask your archive (cited, written answers)
 - [Importing Audio](user-guide/importing_audio.md) — Bring `.wav` / `.mp3` / `.m4a` / `.flac` into the pipeline
 - [Exporting & Backup](user-guide/exporting_and_backup.md) — JSON, CSV, TXT, catalog backup
 - [Config Profiles](user-guide/config_profiles.md) — Work vs personal TOML snapshots
@@ -69,12 +70,16 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [MCP Server](developer-guide/mcp_server.md) — Expose Phoneme to MCP hosts (Claude Desktop) via `phoneme-mcp`
 - [REST API](developer-guide/rest_api.md) — Opt-in localhost HTTP/REST + SSE bridge (`phoneme-rest`)
 - [Plugins & Hooks](developer-guide/plugins_and_hooks.md) — Hook payloads, presets, keyword rules
+- [Feature Parity](developer-guide/feature_parity.md) — What each surface (GUI · CLI · IPC · MCP · REST) exposes, side by side
 
 ### Build & quality
 - [Building from Source](developer-guide/building_from_source.md) — Rust, Tauri, three-terminal dev workflow
 - [Configuration Reference](developer-guide/config_reference.md) — Full `config.toml` schema
 - [Testing & CI](developer-guide/testing_and_ci.md) — `cargo test`, Vitest, GitHub Actions
 - [Manual Smoke Test](smoke-test.md) — Pre-release checklist (~10 minutes)
+
+### Design notes
+- [Phoneme Agent — harness decision record](design/phoneme-agent-harness.md) — Which agent harness powers the Phoneme Agent, and why
 
 ### Component READMEs
 - [Frontend](../frontend/README.md) — Vite + TypeScript + Lit layout

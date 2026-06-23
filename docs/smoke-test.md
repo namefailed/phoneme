@@ -13,13 +13,18 @@
 ## Install + wizard
 
 - [ ] Install the new MSI.
-- [ ] First launch: wizard appears.
-  - [ ] Step 2 (mode) — three cards visible, mode 3 selectable.
-  - [ ] Step 3 (configure) — Test button reports success for working endpoint.
-  - [ ] Step 4 (microphone) — device list populates.
-  - [ ] Step 5 (hook) — default points at `to-stdout.ps1`; `to-clipboard.ps1` listed as an alternative.
-  - [ ] Step 6 (hotkey) — toggle off by default.
-  - [ ] Step 7 (done) — big Record button visible.
+- [ ] First launch: wizard appears. The full (Customize) flow has 11 steps —
+      `welcome`, `mode` (Features), `configure` (Setting up), `connect` (Connect AI),
+      `mic` (Microphone), `preview` (Live Preview), `summary` (Auto Summary),
+      `hook` (Destination), `hotkey` (Hotkeys), `review`, `done`. Express mode
+      (the default) auto-applies the per-feature screens and short-circuits to
+      `welcome → configure → mic → hotkey → review → done`.
+  - [ ] `mode` (Features) — three cards visible, mode 3 selectable.
+  - [ ] `configure` (Setting up) — the Test/connection step reports success for a working endpoint.
+  - [ ] `mic` (Microphone) — device list populates.
+  - [ ] `hook` (Destination) — default points at `to-stdout.ps1`; `to-clipboard.ps1` listed as an alternative.
+  - [ ] `hotkey` (Hotkeys) — toggle off by default.
+  - [ ] `done` — big Record button visible.
 - [ ] Finish wizard. Recordings view appears empty.
 
 ## Core flow
@@ -65,12 +70,14 @@
 ## Settings
 
 - [ ] Open Settings via tray or ⚙ button.
-- [ ] All ten sections render: Whisper, Recording, Hotkey, Hook, Storage, Tray, Interface, Accessibility, Editor, Advanced.
-- [ ] Interface section: switch theme — UI repaints immediately.
-- [ ] Smart Cleanup: enable with Ollama provider, enter model name, save.
-      Next recording should run the LLM cleanup step.
-- [ ] Change the silence threshold and Save. Verify `%APPDATA%\phoneme\config.toml`
-      is updated atomically.
+- [ ] All 14 tabs render in order: Appearance, Transcription, Capture, Dictation,
+      Live Preview, Post-Processing, Playbook, Integrations, Hotkeys, Diarization,
+      Tags, Search, Profiles, System.
+- [ ] Appearance: switch theme — UI repaints immediately.
+- [ ] Post-Processing: enable Smart Cleanup with the Ollama provider, enter a
+      model name, Save. The next recording should run the LLM cleanup step.
+- [ ] Capture: change the silence threshold and Save. Verify
+      `%APPDATA%\phoneme\config.toml` is updated atomically.
 
 ## Doctor
 

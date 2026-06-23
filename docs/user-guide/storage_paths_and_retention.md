@@ -38,8 +38,9 @@ most one warning per day).
 Retention deletes **catalog rows and audio** together unless `delete_audio = true`
 — set that to drop the WAV while keeping the transcript searchable (the same
 "keep the audio file" idea as a manual delete, applied automatically). Only
-finished recordings (done or failed) are ever cleaned up; anything still
-recording or processing is left alone.
+recordings in a **terminal state** — done, failed, or cancelled — are ever
+cleaned up; anything still recording or processing is left alone until it
+finishes.
 
 ## Backup strategy
 
@@ -48,7 +49,8 @@ recording or processing is left alone.
 | Transcripts + metadata | Copy `catalog.db` (stop daemon first for consistency) |
 | Audio | Copy `recording.audio_dir` tree |
 | Config + hooks | Copy `%APPDATA%\phoneme\` |
-| Full export | GUI bulk export JSON/CSV/TXT — see [Exporting & Backup](exporting_and_backup.md) |
+| Whole library (catalog + audio) | `phoneme export backup.zip` (or **Settings → Storage → Back up to .zip…**) — one portable archive that restores with `phoneme import-backup`. See [Exporting & Backup](exporting_and_backup.md#-creating-a-backup-archive). |
+| Transcripts as text | GUI bulk export / **Export recordings** → JSON / CSV / TXT (text only, no audio). See [Exporting transcripts](exporting_and_backup.md#-exporting-transcripts-from-the-gui). |
 
 ## Rebuilding the catalog
 

@@ -21,9 +21,9 @@ daemon-is-down state is itself the answer for them, so they print
 
 | Behavior | Commands |
 |----------|----------|
-| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `digest` (generate), `suggest-tags`, `notes`, `edit`, `find-replace`, `clip`, `speaker rename/clear/reassign/merge/split`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed/dismiss-failed`, `tag add/update/delete/attach/detach/clear-suggestions/merge`, `profile use`, `hook test`, `export` (zip and `--captions`), `config reload`, `daemon start` |
-| **Observe-only** (fail fast with exit 3 when no daemon) | `list`, `show`, `search`, `watch`, `doctor`, `daemon status`, `queue list/counts/status`, `queue skip`*, `tag list/for/usage`, `meeting tracks`, `digest --show`, `profile list` |
-| **Purely local** (no daemon involved at all) | `config` (print), `config path`, `config set`, `profile save`, `version` |
+| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `digest` (generate), `suggest-tags`, `suggest-entities`, `suggest-tasks`, `chapters` (generate **and** `--show`), `ask`, `notes`, `edit`, `find-replace`, `clip`, `speaker rename/clear/reassign/merge/split`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed/dismiss-failed`, `tag` (every subcommand — `list/for/usage/suggestions` and the mutating ones), `entities add/edit/delete/merge`, `tasks done/undone/add/edit/delete/reorder`, `dictation regrab/forget/clear`, `profile use`, `hook test`, `export` (zip and `--captions`), `import-backup`, `config reload`, `daemon start` |
+| **Observe-only** (fail fast with exit 3 when no daemon) | `list`, `show`, `search`, `watch`, `doctor`, `daemon status`, `queue list/counts/status`, `queue skip`*, `meeting tracks`, `digest --show`, `entities` (list), `tasks` (list, `--open`), `dictation history`, `profile list` |
+| **Purely local** (no daemon involved at all) | `config` (print), `config path`, `config set`, `profile save`, `speaker calibrate`, `completions`, `version` |
 
 \* `queue skip` mutates, but only a live daemon mid-LLM-stage has anything to
 skip — spawning one just to skip nothing would mask reality.
@@ -418,6 +418,8 @@ list; errors when there's no transcript to chapter (exit 6) or the id is unknown
 ```bash
 phoneme chapters 20260519T143500823          # generate + print
 phoneme chapters 20260519T143500823 --show   # print stored chapters only
+```
+
 ### ✅ `phoneme suggest-tasks <ID>`
 
 Re-run the LLM task-extraction step on a recording on demand (the CLI face of the
@@ -580,6 +582,22 @@ A label below 1, a self-merge, a split onto the same label, or a negative index
 is rejected locally (exit 1) before any request is sent. An unknown segment
 index, or a `merge from` / `split` index that doesn't currently carry the named
 label, errors with no partial write.
+
+**Calibrating the recognition threshold** (`calibrate`) is read-only — it tunes
+nothing on its own, it just tells you what to set. It scores every
+same-named-voice pair (genuine) against every different-named-voice pair
+(impostor) with the recognizer's own cosine, finds the equal-error-rate (EER)
+threshold that best separates the two, and prints that suggested value beside the
+current [`[diarization].voiceprint_match_threshold`](config_reference.md#diarization).
+It **never writes** — apply the suggestion yourself with
+`phoneme config set diarization.voiceprint_match_threshold <value>` if you agree.
+It needs enough labelled data to be meaningful — at least two named voices, each
+with two or more captures — and reports `not enough labelled data` below that.
+
+```bash
+# Suggest an EER-optimal match threshold from your enrolled voices
+phoneme speaker calibrate
+```
 
 ### 🔎 `phoneme search <QUERY>`
 

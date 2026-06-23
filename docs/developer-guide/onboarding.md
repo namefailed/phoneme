@@ -1,6 +1,6 @@
 # 🚀 New Developer Onboarding Guide
 
-Welcome to Phoneme! This guide walks you through setting up your local environment, the three-terminal development workflow, and the coding conventions used across our frontend and backend.
+This guide covers setting up your local environment, the three-terminal development workflow, and the coding conventions used across the frontend and backend.
 
 ---
 
@@ -113,10 +113,11 @@ deeper on each side.
 Before opening a pull request, run the test suites and code linters locally.
 
 ### Running Tests
-- **Rust backend tests** (always `--test-threads=1` — many tests mutate
-  process-global env vars and must run serially; see [Testing & CI](testing_and_ci.md)):
+- **Rust backend tests** (run in parallel — each test owns an isolated in-memory
+  or tempdir catalog, so there's nothing shared to serialize on; see
+  [Testing & CI](testing_and_ci.md)):
   ```bash
-  cargo test --workspace -- --test-threads=1
+  cargo test --workspace
   ```
   *(Tests swap the real microphone for a synthetic `GeneratorSource`, so they run
   on headless CI runners without physical microphones).*

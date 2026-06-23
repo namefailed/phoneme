@@ -47,7 +47,8 @@ phoneme chapters 20260519T143500823
 phoneme chapters 20260519T143500823 --show
 ```
 
-Each line prints as `mm:ss  Title`. Pass `--json` for machine-readable output.
+Each line prints as `mm:ss  Title`; a chapter that has a summary prints
+`mm:ss  Title  — summary`. Pass `--json` for machine-readable output.
 
 ## Notes & limits
 
@@ -60,3 +61,13 @@ Each line prints as `mm:ss  Title`. Pass `--json` for machine-readable output.
   character offset.
 - Deleting a recording deletes its chapters with it; chapters travel with library
   exports.
+
+## See also
+
+Chapters are one of Phoneme's per-recording AI enrichments. The others follow the
+same opt-in, hand-edit-survives pattern:
+
+- [Tasks from Voice](tasks_and_reminders.md) — action items pulled into a
+  checkable list.
+- [Entities](entities.md) — extracted people, orgs, topics, and terms, with a
+  cross-recording browse facet.

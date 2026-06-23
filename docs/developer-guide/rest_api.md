@@ -9,7 +9,9 @@ Server-Sent Events. There is no business logic in the bridge — the daemon stay
 the single source of truth.
 
 Source: `bin/phoneme-rest/`. Schema for the `[rest_api]` config section:
-`crates/phoneme-core/src/config.rs`.
+`crates/phoneme-core/src/config.rs`. The underlying wire contract every endpoint
+forwards to is the [IPC Integration Guide](ipc_integration.md); the
+[MCP server](mcp_server.md) is the other thin bridge over the same daemon.
 
 ---
 
@@ -29,14 +31,20 @@ authenticating reverse proxy on the same host; **do not** change the bind
 address.
 
 A *browser* on the same machine is still in scope, though, so the server
-defends against the two ways a web page can reach a loopback service:
+defends against the two ways a web page can reach a loopback service. Both
+checks run in one middleware (`loopback_guard`) that wraps **every route and
+every method uniformly** — a `GET`, an `EventSource`, a `POST`, and a `DELETE`
+are all gated the same way, so there is no method or path it skips:
 
 - **DNS rebinding** — a request whose `Host` header is present and not
   `127.0.0.1`/`localhost`/`[::1]` (any port) is refused with `403`. A page that
   rebinds its own hostname to loopback always sends that foreign `Host`.
-- **CSRF** — a state-changing `POST` (`/api/record/start`, `/api/record/stop`)
-  whose `Origin` header is present and not a loopback origin is refused with
-  `403`. Cross-site `fetch`/form submits always carry a foreign `Origin`.
+- **CSRF / cross-origin reads** — a request whose `Origin` header is present and
+  not a loopback origin is refused with `403`, *regardless of method*. That
+  covers a cross-site `POST`/form submit, but equally a cross-origin `GET` or an
+  `EventSource` to `/api/events` — a foreign page can neither read a response
+  nor open an SSE stream to exhaust slots. Cross-site requests always carry a
+  foreign `Origin`; a `null` (sandboxed/opaque) origin counts as foreign too.
 
 Non-browser local clients (the `phoneme` CLI, `curl`, scripts) send neither
 header and are unaffected. Both checks live in `bin/phoneme-rest/src/server.rs`.
@@ -91,6 +99,7 @@ Each endpoint still maps one HTTP request to exactly one `phoneme-ipc`
 | `GET`  | `/api/recordings/{id}` | `GetRecording` | `id` must be the canonical 18-char id; a malformed id is `400` and is never forwarded. |
 | `GET`  | `/api/recordings/{id}/segments` | `GetSegments` | Transcript segments in timeline order (may be an empty array — a normal state). |
 | `GET`  | `/api/recordings/{id}/words` | `GetWords` | The per-word layer beneath `segments` (word seek, confidence); may be empty. |
+| `GET`  | `/api/recordings/{id}/chapters` | `GetChapters` | Auto-chapters in chronological order (`start_ms`/`end_ms`, `title`, optional `summary`); may be an empty array — a normal state when the recording has no timing to chapter or the auto-chapter step never ran. |
 | `GET`  | `/api/recordings/{id}/similar` | `MoreLikeThis` | "More like this" from the recording's stored vectors. Query param: `limit` (usize, default `20`). |
 | `GET`  | `/api/recordings/{id}/tags` | `TagsFor` | The tags attached to one recording. |
 | `GET`  | `/api/tags` | `ListTags` | Tags attached to at least one recording. |
@@ -100,8 +109,9 @@ Each endpoint still maps one HTTP request to exactly one `phoneme-ipc`
 
 ### Mutate
 
-A state-changing `POST`/`DELETE` carrying a foreign `Origin` is refused with
-`403` (CSRF; see the security section). All id-bearing routes reject a malformed
+Like every route, a `POST`/`DELETE` carrying a foreign `Origin` (or a non-loopback
+`Host`) is refused with `403` (CSRF / rebinding; see the security section — the
+guard is uniform, not POST-only). All id-bearing routes reject a malformed
 `{id}` with `400` before any IPC is sent.
 
 | Method | Path | Daemon `Request` | Body / notes |
@@ -207,10 +217,11 @@ curl -s 'http://127.0.0.1:3737/api/recordings?limit=10'
 # Only meeting tracks, second page of 20
 curl -s 'http://127.0.0.1:3737/api/recordings?kind=meeting&limit=20&offset=20'
 
-# One recording, its transcript segments, and its per-word layer
+# One recording, its transcript segments, its per-word layer, and its chapters
 curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042
 curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/segments
 curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/words
+curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/chapters
 
 # Semantic search, and "more like this" from one recording
 curl -s 'http://127.0.0.1:3737/api/search?q=quarterly%20planning&limit=5'

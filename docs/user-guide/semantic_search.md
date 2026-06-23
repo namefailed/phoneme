@@ -73,6 +73,51 @@ Open a recording and you can jump straight from it to everything else you've sai
 
 Because the source's stored vectors are the query, "More like this" only requires that the **source** recording is indexed; candidates are whatever else has vectors.
 
+## Ask your archive
+
+Search returns *recordings*. **Ask** returns an *answer* — a short, written reply
+to a question, drawn from your own transcripts and **cited** back to the
+recordings it came from. It's local RAG (retrieval-augmented generation): Phoneme
+retrieves the most relevant transcript chunks with the **same hybrid retriever as
+search** (vector + FTS5, fused with RRF), feeds them to your configured cleanup
+LLM provider as grounding, and streams back an answer whose inline `[1]` `[2]`
+markers link to the source recordings.
+
+Ask needs two things turned on:
+
+- **Semantic search enabled** (the embedder loads the model and indexes chunks —
+  the retrieval half), and
+- **an LLM post-processing provider configured** (the same provider Smart Cleanup
+  and summaries use — the generation half). With **Local Ollama** the whole thing
+  runs offline; nothing leaves your machine.
+
+### From the app
+
+Click the **💬** button in the header to open the **Ask** panel. Type a question
+and submit. The panel lists the **citation sources** first, then streams the
+answer; each `[n]` chip in the answer is clickable and opens that source
+recording in the detail pane. If nothing matched, it tells you so rather than
+inventing an answer.
+
+### From the CLI
+
+```bash
+# Answer a question from your transcripts, with citations
+phoneme ask "what did we decide about the Q3 timeline?"
+
+# Pull more grounding chunks (default 8; clamped server-side)
+phoneme ask "open questions on the rewrite" --top-k 12
+
+# Scope the evidence the same way search does — by tag, status, or kind
+phoneme ask "action items from the standups" --tag work --kind meeting
+phoneme ask "what broke last week" --status done
+```
+
+`--tag` takes a tag id or name, `--status` a recording status (e.g. `done`,
+`transcribe_failed`), and `--kind` is `single` or `meeting` — all mirror the
+[`phoneme search`](search_and_organization.md#-full-text-search-fts5) filters, so
+Ask is grounded on exactly the slice you'd have searched.
+
 ## Comparing FTS5 vs semantic
 
 | | Keyword (FTS5) | Semantic (hybrid) |
@@ -93,4 +138,8 @@ Semantic mode already *fuses in* the keyword ranking, so it's the right default 
 | Results vanished after changing the model | A new model changes the vector dimension — **Re-embed all recordings** |
 | High RAM at startup | Expected — the ONNX model loads once; disable semantic search if RAM is tight |
 
-See also [Search & Organization](search_and_organization.md) and [Configuration Reference](../developer-guide/config_reference.md).
+## See also
+
+- [Ask your archive](#ask-your-archive) — get a written, cited answer instead of a list of recordings.
+- [Search & Organization](search_and_organization.md) — keyword search, tags, filters, saved searches.
+- [Configuration Reference](../developer-guide/config_reference.md) — every `[semantic_search]` key.

@@ -8,7 +8,7 @@ The app is open source (MIT / Apache-2.0). **Default configuration is 100% local
 
 ### Does Phoneme work on macOS or Linux?
 
-**Windows only today.** macOS and Linux are on the [v2.0 roadmap](../../CHANGELOG.md). Meeting Mode on macOS will require a virtual loopback device (BlackHole, etc.).
+**Windows only today.** macOS and Linux are on the [v2.0 roadmap](../../ROADMAP.md). Meeting Mode on macOS will require a virtual loopback device (BlackHole, etc.).
 
 ### Where is the source code?
 
@@ -37,7 +37,7 @@ Use **Cancel** in the UI or `phoneme record cancel`.
 ### Can one hotkey record my microphone and another record system audio?
 
 Yes. By default every Record / in-place hotkey follows the global **Settings →
-Capture → Recording** source, but each binding can override it. Open
+Capture** audio source, but each binding can override it. Open
 **Settings → Hotkeys → Custom Hotkeys**, expand a Record or in-place hotkey, and
 set its **Audio source** to *Microphone* or *System audio (loopback)* — so you
 can have one combo capture the mic and another capture system audio, each with
@@ -165,7 +165,7 @@ and engine is decided when the tray spawns the engine.
 | Tray icon missing | [Troubleshooting → Tray](troubleshooting.md) |
 | Ollama didn't auto-start | [Troubleshooting → Ollama](troubleshooting.md) |
 | Corrupt model download | [Troubleshooting → Model wizard](troubleshooting.md) |
-| Empty recordings list | `phoneme doctor --rebuild-catalog` |
+| Empty recordings list | [`phoneme doctor --reimport`](troubleshooting.md#-empty--wrong-recordings-list-catalog-out-of-sync) (safe; re-links audio) |
 
 ---
 

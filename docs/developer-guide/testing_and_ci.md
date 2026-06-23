@@ -8,11 +8,11 @@ Five jobs run on every push/PR to `main`/`master`:
 
 | Job | Commands |
 |-----|----------|
-| **Rust** | `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy --workspace -- -D clippy::unwrap_used` (no `unwrap()` on production paths — `--all-targets` is dropped so test code is exempt) · an inject-guard assertion step · `cargo test --workspace -- --test-threads=1` (with `PHONEME_DISABLE_INPUT_INJECTION=1`) |
+| **Rust** | `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy --workspace -- -D clippy::unwrap_used` (no `unwrap()` on production paths — `--all-targets` is dropped so test code is exempt) · an inject-guard assertion step · `cargo test --workspace` (parallel, with `PHONEME_DISABLE_INPUT_INJECTION=1`) |
 | **Rustdoc** | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` — fails on any rustdoc warning, including a `missing_docs` gap or a broken intra-doc link |
 | **Frontend** | `pnpm install --frozen-lockfile` · `pnpm lint` · `pnpm exec vitest run` · `pnpm type-check` · `pnpm build` |
 | **Tauri build** | `cargo build --workspace` then `cargo tauri build --debug` — runs only after Rust + Frontend pass |
-| **Dependency audit** | `cargo audit` + `pnpm audit` — **advisory only** (`continue-on-error`), surfaces RUSTSEC / npm advisories without blocking merges |
+| **Dependency audit** | `cargo audit` + `pnpm audit` — a **blocking gate**: a new RUSTSEC / npm advisory fails CI. A known-unfixable advisory is scoped out narrowly on the offending step (`cargo audit --ignore RUSTSEC-XXXX-NNNN` with a why-comment), never by muting the whole job |
 
 Both the Rust and Rustdoc jobs need `frontend/dist` to exist before they compile (the Tauri macro in `src-tauri` requires it), so CI creates an empty `frontend/dist` first.
 
@@ -42,7 +42,7 @@ subsystem-level deep dives in [Internals](internals.md).
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy --workspace -- -D clippy::unwrap_used
-cargo test --workspace -- --test-threads=1
+cargo test --workspace
 $env:RUSTDOCFLAGS="-D warnings"; cargo doc --workspace --no-deps
 
 cd frontend
@@ -55,16 +55,18 @@ pnpm build
 
 Stop `phoneme-daemon` and `phoneme-tray` before `cargo test` if link fails with "Access is denied" on `.exe` files.
 
-### The serial-test contract (`--test-threads=1`)
+### Per-test isolation (tests run in parallel)
 
-`cargo test` is always run with `-- --test-threads=1`, locally and in CI. This is
-not optional: many backend tests mutate **process-global** state — chiefly the
-`PHONEME_DATA_LOCAL` / `PHONEME_CONFIG` environment variables that redirect the
-inbox, catalog, and log directories into a per-test temp dir. Environment variables
-are shared across threads, so running tests in parallel would let one test's temp
-path leak into another's. Single-threaded execution keeps each test's data dirs
-isolated. If you add a test that sets an env var, assume the serial contract and
-restore/remove the var when done.
+`cargo test --workspace` runs **in parallel**, locally and in CI — there is no
+`--test-threads=1`. The discipline that makes that safe is per-test isolation, not
+serialization: each test owns its own catalog (an in-memory SQLite DB or a per-test
+`tempfile::tempdir()`), so there is no shared on-disk database to race on. Tests do
+**not** mutate the process-global `PHONEME_DATA_LOCAL` / `PHONEME_CONFIG` env vars to
+point the daemon at a temp dir — those overrides exist for integration *harnesses*
+that spawn a real daemon child (each child gets its own dir on its own env), not for
+in-process unit tests sharing one process's environment. If you add a test, give it
+its own tempdir/in-memory DB; don't reach for a shared env var or assume any test
+ordering.
 
 ### Avoiding lock contention with a separate target dir
 
@@ -74,7 +76,7 @@ Cargo at a separate target directory:
 
 ```powershell
 $env:CARGO_TARGET_DIR="target-test"
-cargo test --workspace -- --test-threads=1
+cargo test --workspace
 ```
 
 `target-test/` is gitignored. Parallel work in another terminal may hold the

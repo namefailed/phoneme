@@ -6,7 +6,7 @@ Phoneme supports several ways to start and stop capture. You can use the UI butt
 
 ## Global hotkeys (defaults)
 
-Configure under **Settings → Capture → Hotkeys**. All hotkeys are **disabled by default** until you enable them in the wizard or settings.
+Configure under **Settings → Hotkeys**. All hotkeys are **disabled by default** until you enable them in the wizard or settings.
 
 | Hotkey | Default combo | Default mode | Purpose |
 |--------|---------------|--------------|---------|
@@ -23,7 +23,7 @@ Meeting Mode uses **toggle only** — a meeting can run for many minutes.
 
 ## Custom Hotkeys
 
-Beyond the three built-ins, **Settings → Capture → Hotkeys → Custom Hotkeys** lets you bind any number of extra global shortcuts, each with its own behaviour. Like the built-ins, custom hotkeys fire app-wide — even while the window is hidden.
+Beyond the three built-ins, **Settings → Hotkeys → Custom Hotkeys** lets you bind any number of extra global shortcuts, each with its own behaviour. Like the built-ins, custom hotkeys fire app-wide — even while the window is hidden.
 
 Each custom hotkey has:
 
@@ -32,7 +32,7 @@ Each custom hotkey has:
 - **Hold / Toggle** — same meaning as the built-ins.
 - **Recipe** — the Playbook chain its recordings run. **Default pipeline** = whatever normal recordings run (cleanup → title → summary → tags); pick a named recipe to run a different chain instead (e.g. a "Dictate → prompt" recipe that reshapes a dictation into a polished LLM prompt). Build and edit chains in the **Playbook** settings section.
 - **Whisper model** — optionally transcribe *this* hotkey's recordings with a different speech-to-text model than the configured one — a bigger model for an important dictation, or a tiny one for a throwaway note. Leave it on **Use the configured model** to inherit the global Whisper model.
-- **Audio source** — which audio *this* hotkey captures: **Default (Recording settings)** / **Microphone** / **System audio (loopback) — Windows**. **Default** follows the global source in **Settings → Capture → Recording**, so existing bindings are unchanged. Set it to give one hotkey the microphone and another system audio — each with its own recipe and model. See [Per-hotkey audio source](#per-hotkey-audio-source) below.
+- **Audio source** — which audio *this* hotkey captures: **Default (Recording settings)** / **Microphone** / **System audio (loopback) — Windows**. **Default** follows the global source in **Settings → Capture**, so existing bindings are unchanged. Set it to give one hotkey the microphone and another system audio — each with its own recipe and model. See [Per-hotkey audio source](#per-hotkey-audio-source) below.
 - **In-place options** (when the action is In-place) — fast lane (type the quick transcription immediately) vs. run the recipe first, and how to insert the text (type / paste / off).
 
 The recipe, Whisper-model, and audio-source overrides apply only to recordings created by that hotkey; normal recordings and the three built-ins are unchanged. If a hotkey points at a recipe you later delete, its recordings fall back to the default pipeline.
@@ -41,7 +41,7 @@ The recipe, Whisper-model, and audio-source overrides apply only to recordings c
 
 ### Per-hotkey audio source
 
-By default every Record / In-place hotkey captures whatever the global **source** in **Settings → Capture → Recording** is set to (microphone, or system audio via WASAPI loopback). Expanding a hotkey's **▸ Recipe & options** reveals an **Audio source** dropdown that overrides that *for this hotkey only*:
+By default every Record / In-place hotkey captures whatever the global **source** in **Settings → Capture** is set to (microphone, or system audio via WASAPI loopback). Expanding a hotkey's **▸ Recipe & options** reveals an **Audio source** dropdown that overrides that *for this hotkey only*:
 
 | Choice | What it captures |
 |--------|------------------|
@@ -78,7 +78,7 @@ Click **Record** or use the record hotkey.
   - **After N seconds** — stops after exactly the number of seconds you type into the row.
 
   The choice is remembered on this device, applies to every later click of the Record button, and shows in the button's tooltip. Until you pick one, the old default applies: manual stop, or silence-stop if **Auto-stop on silence** (`recording.auto_stop_on_silence`) is enabled in **Settings → Capture**. Meetings are unaffected — they always run until you end them.
-- **Built-in record hotkey** — Hold or Toggle, per **Settings → Capture → Hotkeys**. Hold is always hold-to-record regardless of the auto-stop setting (the dropdown has no hold option — a mouse click can't be held).
+- **Built-in record hotkey** — Hold or Toggle, per **Settings → Hotkeys**. Hold is always hold-to-record regardless of the auto-stop setting (the dropdown has no hold option — a mouse click can't be held).
 - **CLI** — the same three behaviors: stop signal, one-shot (`--oneshot`, stop on silence), and fixed-duration (`--duration N`) recording.
 
 ### Pause / resume
@@ -103,7 +103,7 @@ Both tracks share a **wall-clock timeline** so scrubbing to the same timestamp o
 
 ## Normalize audio level
 
-A microphone left turned down captures the same words far quieter than the transcription model expects, and quiet recordings transcribe worse. Turn on **Normalize audio level** under **Settings → Capture → Recording** (`recording.normalize`) to fix this: when a recording finishes, Phoneme boosts its gain so the loudest moment sits just below clipping before the WAV is written.
+A microphone left turned down captures the same words far quieter than the transcription model expects, and quiet recordings transcribe worse. Turn on **Normalize audio level** under **Settings → Capture** (`recording.normalize`) to fix this: when a recording finishes, Phoneme boosts its gain so the loudest moment sits just below clipping before the WAV is written.
 
 - It is a single gain applied to the whole recording, so relative dynamics are preserved — loud parts stay louder than quiet parts.
 - It only ever **boosts quiet audio**: an already-loud recording is left as captured, and a silent clip is never amplified into hiss.

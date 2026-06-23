@@ -149,22 +149,30 @@ Notes:
   (`whisper.mode = "external"`) is yours to manage — the daemon never moves
   or rewrites it.
 
-## ⚠️ Hook fails or times out
+## ⚠️ A Playbook Hook step fails or times out
+
+Hooks are **Hook steps in a Playbook recipe** — a shell command and/or an
+outbound webhook that runs after transcription (see [Plugins & Hooks](../developer-guide/plugins_and_hooks.md)).
+Edit them under **Settings → Playbook** (expand the recipe, open the Hook step);
+the global webhook policy lives under **Settings → Integrations**.
 
 Check the daemon log (hook activity is logged there; a failed hook also stores its last ~4 KB of stderr on the recording):
 ```
 %LOCALAPPDATA%\phoneme\logs\daemon.log
 ```
 
-Test the hook directly:
+Test the configured hook with a sample payload:
 ```bash
 phoneme hook test
 ```
 
 Common causes:
-- Script not found (check `hook.command` in `%APPDATA%\phoneme\config.toml`)
+- Script not found — check the command on the Hook step (Settings → Playbook). In
+  config it is the `hook.commands` array in `%APPDATA%\phoneme\config.toml`.
 - Script needs `-ExecutionPolicy Bypass` (we set this for `.ps1` automatically)
 - Script does network I/O exceeding `hook.timeout_secs` — bump the timeout
+- A failed hook is **surfaced but non-fatal** by default; flag the step
+  **"fail the recording"** if you want a hook failure to mark the recording Failed.
 
 ## 🦙 Ollama didn't start automatically
 
@@ -224,16 +232,43 @@ If you were downloading the default model inside the First Run Wizard and the ap
 > ```
 Then restart Phoneme to try the download again.
 
-## 💥 Catalog corruption
+## 💥 Empty / wrong recordings list (catalog out of sync)
 
-If the recordings list is empty or wrong but you have audio files on disk:
+If the recordings list is empty or wrong but you still have audio files on disk,
+start with the **safe** recovery — it never deletes anything:
 
 ```bash
-phoneme doctor --rebuild-catalog
+phoneme daemon start          # must be running for --reimport
+phoneme doctor --reimport
 ```
 
-This walks `audio_dir/` and `inbox/done/` and reconstructs the catalog
-database from disk.
+`--reimport` asks the running daemon to scan your audio directory and re-link any
+`.wav` that has no catalog row — it re-creates the row from the file and
+re-transcribes it. Existing rows, transcripts, tags, notes and titles are left
+untouched. This fixes the common case (audio present, catalog missing the rows)
+without losing data.
+
+### Last resort: rebuild the catalog from scratch
+
+> [!CAUTION]
+> `phoneme doctor --rebuild-catalog` is **destructive**. It deletes `catalog.db`
+> (and its WAL / ANN sidecars), so **every transcript, tag, note and title is
+> lost** — those live only in the database, not in the audio files. The audio
+> `.wav` files are kept. Only reach for this if the database itself is corrupt
+> and `--reimport` can't run.
+
+If the catalog file is genuinely damaged, rebuild it and then re-link the audio:
+
+```bash
+phoneme doctor --rebuild-catalog   # stops the daemon, deletes catalog.db
+phoneme daemon start               # fresh, empty catalog
+phoneme doctor --reimport          # re-link the audio (re-transcribes)
+```
+
+`--rebuild-catalog` shuts the daemon down first and waits (bounded) for it to
+release the SQLite handles; if the daemon won't exit it leaves the files
+untouched. The re-transcribed transcripts come back, but anything that lived
+only in the catalog (your hand edits, tags, notes, manual titles) does not.
 
 ## 🗺️ Where is everything?
 

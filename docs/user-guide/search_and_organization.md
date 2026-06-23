@@ -8,7 +8,7 @@ At the top of the main UI, you will find a global Search bar.
 
 ![Main recordings view](../screenshots/main.png)
 
-Under the hood, Phoneme uses a lightning-fast SQLite FTS5 (Full-Text Search) engine. Every time you transcribe a recording, the text is instantly indexed.
+Under the hood, Phoneme uses SQLite FTS5 (Full-Text Search). Every time you transcribe a recording, the text is indexed.
 
 This means:
 - **Instant Results**: Searching through 5,000 recordings takes less than 10 milliseconds.
@@ -23,6 +23,8 @@ Keyword search only matches words you actually said. **Semantic search** uses of
 Enable it from the **Semantic Search** settings section (search Settings for "Semantic", or set `semantic_search.enabled = true`). Full guide: [Semantic Search](semantic_search.md).
 
 Once a recording is indexed you can also search *from* it: the **✨ Similar** button in its detail view fills the list with the semantically closest recordings — no query to type. See ["More like this"](semantic_search.md#more-like-this).
+
+Want an *answer* rather than a list? The header's **💬 Ask** panel (and `phoneme ask`) reads across your transcripts with the same hybrid retriever and replies with citations back to the source recordings. See [Ask your archive](semantic_search.md#ask-your-archive).
 
 ## 🏷️ Organizing with Tags
 

@@ -42,6 +42,9 @@ keyboard-navigated yet, but `Esc` leaves it.)
 | `g` then `T` | Open the Tag Manager (quick popup) |
 | `g` then `P` | Settings → Profiles |
 | `g` then `S` | Settings → Search (saved searches) |
+| `g` then `H` | Settings → Dictation (re-grab dictation history) |
+| `g` then `b` | Go to / reveal the sidebar |
+| `g` then `1` / `g` then `2` | Jump to the left / right split pane |
 | `x` then `b` | Toggle the sidebar (vim twin of `Ctrl + B`) |
 | `x` then `/` | Toggle the top (search/header) bar (vim twin of `Ctrl + /`) |
 | `Ctrl + ,` | Open Settings |
@@ -206,5 +209,5 @@ list → close the recording. From the **Notes** (or transcript) editor, use
 ## Customizing
 
 The global record hotkeys (push-to-talk, in-place dictation, meeting toggle)
-are configured under **Settings → Capture**, and work system-wide even when
-Phoneme is in the tray.
+are configured under **Settings → Hotkeys**, and work system-wide even when
+Phoneme is in the tray. See [Hotkeys & Recording Modes](hotkeys_and_recording_modes.md).

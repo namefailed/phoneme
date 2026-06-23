@@ -13,7 +13,7 @@ Transcribe-in-Place allows you to use Phoneme as a system-wide dictation engine.
 5. Speak your thought.
 6. Release the hotkey.
 
-Phoneme will silently record your voice, pass it to your active transcription engine (e.g. the blazing fast Native Whisper engine), and instantly type the result into your active window.
+Phoneme will silently record your voice, pass it to your active transcription engine, and type the result into your active window.
 
 ## ⚡ The fast lane
 
@@ -119,7 +119,7 @@ voice_commands_enabled = true
 **Macros** are *trigger → expansion* shorthands: when you dictate the trigger,
 it's replaced with the expansion typed verbatim. Say **"my email"** and your
 address lands instead; say **"sig"** and a whole signature block appears. Edit
-them under **Settings → Capture → Dictation → Text macros**.
+them under **Settings → Dictation → Text macros**.
 
 | Say | Becomes (example) |
 |-----|-------------------|

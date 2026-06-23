@@ -139,7 +139,7 @@ centralizes "what should the server run right now"; and a `Drop` guard
 (`WhisperOverrideGuard`) clears the override on every pipeline exit path. The swap
 runs under the `whisper_sem` permit and waits for `/health` before transcribing.
 
-`pipeline.rs:74-165` — `WhisperOverrideGuard`, `apply_model_override`; `whisper_supervisor.rs:117-130` — `effective_model_path`
+`pipeline.rs` — `WhisperOverrideGuard`, `apply_model_override`; `whisper_supervisor.rs` — `effective_model_path`
 
 ### Effective-port negotiation between two whisper-servers
 
@@ -160,7 +160,7 @@ published and configured ports; the chosen port is published to
 when down. Every consumer resolves effective-or-configured at provider-build time,
 and the readiness wait re-evaluates the base URL through a closure on each poll.
 
-`whisper_supervisor.rs:21-41,121-130` — effective ports, `port_is_free`; `pipeline.rs:367-404` — `wait_for_whisper_ready` closure
+`whisper_supervisor.rs` — effective ports, `port_is_free`; `pipeline.rs` — `wait_for_whisper_ready` closure
 
 ### Cancellable crash-backoff so a Doctor "Fix" is never lost
 
@@ -347,6 +347,30 @@ spans, summed in the pipeline from the persisted segment timeline.
 `recompute_named_centroid`; `voiceprint.rs` — `weighted_mean_centroid`;
 `pipeline.rs` — per-speaker duration sum at capture.
 
+### A centroid is only comparable within its own embedding model
+
+**Problem.** Named-speaker recognition matches a captured voiceprint against the
+library by cosine similarity. But a centroid is only meaningful relative to the
+embedding model that produced it: swap `[diarization].models_dir` for a different
+ONNX bundle and the new vectors live in a different space, so a cosine against an
+old centroid is noise — yet it can still clear the match threshold *by luck* and
+silently bind the wrong named voice.
+
+**Why it's subtle.** The score itself looks healthy; nothing in the cosine reveals
+that the two vectors came from incompatible models. And the fix can't just hard-fail
+old data — a library enrolled before model tracking existed has no model tag, and
+must keep matching exactly as it did before so an upgrade doesn't erase recognition.
+
+**Solution.** Each captured row stores the `embedding_model` it was produced under
+(`speaker_voiceprints.embedding_model`, from `diarization::embedding_model_id`). The
+match query excludes centroids from a *different* model — `sv.embedding_model = ?
+OR sv.embedding_model = ''` — so only same-model (or untagged-legacy) centroids are
+ever compared. The empty string is the wildcard: pre-migration rows default to `''`
+("model unknown") and keep matching everything, so an existing library is unchanged
+until new, model-tagged captures arrive.
+
+`catalog/speakers.rs` — `save_speaker_voiceprint` (`embedding_model`), `named_voice_centroids` (the same-model filter); `diarization.rs` — `embedding_model_id`; migration `20260623000002_voiceprint_model_version.sql`
+
 ### Keeping written words atomic across a hand-off, and subword spacing
 
 **Problem.** Per-word argmax places boundaries on a ~17 ms grid, so a token at a
@@ -397,7 +421,7 @@ migration owns a version step) makes the migrations idempotent — superseding t
 old per-feature `playbook_migrated` / `hooks_migrated` latches, whose values are
 still read once on load to infer the starting version of a pre-versioning config.
 
-`pipeline.rs:173-365` — `apply_rerun_overrides`, `ensure_default_recipe_steps`; `pipeline.rs:1447` (`resolve_recipe`), `pipeline.rs:1545` (`run_transform_steps`, the recipe executor)
+`pipeline.rs` — `apply_rerun_overrides`, `ensure_default_recipe_steps`, `resolve_recipe`, `run_transform_steps` (the recipe executor)
 
 ### Robustly parsing tags and titles out of chatty LLMs
 
@@ -419,7 +443,7 @@ length-capped, de-duped, canonicalized against existing tags, and optionally
 auto-accepted. `sanitize_llm_title` strips `Title:` prefixes and wrapping
 quotes/markdown and caps at 8 words.
 
-`pipeline.rs:852-898` — `parse_tag_names`; `pipeline.rs:1093-1115` — `sanitize_llm_title`
+`pipeline.rs` — `parse_tag_names`, `sanitize_llm_title`
 
 ### Idle-based streaming timeout for slow local LLMs
 
@@ -437,7 +461,7 @@ covering the cold first-token load) and lets total generation run as long as tok
 arriving; the non-streaming call gets the same floor. A genuine stall fails with an
 actionable message pointing at a smaller model or a higher timeout.
 
-`pipeline.rs:418-514` — `run_llm_stage` streaming, coalesced deltas
+`pipeline.rs` — `run_llm_stage` streaming, coalesced deltas
 
 ---
 
@@ -461,7 +485,7 @@ input simulator.
 *not*. `spawn_type_first` owns none of the catalog state (the queued pipeline does), so
 there's exactly one authoritative insertion.
 
-`pipeline.rs:748-774` — `pipeline_should_type`; `in_place.rs:98-130` — `spawn_type_first`
+`pipeline.rs` — `pipeline_should_type`; `in_place.rs` — `spawn_type_first`
 
 ### A dictation fast lane that never waits behind the queue or a meeting
 
@@ -660,7 +684,7 @@ recovery detects the `done`+`processing` pair and drops the stale processing fil
 of re-queuing; orphaned `queued`/`paused` rows with no inbox file are swept to
 `transcribe_failed`.
 
-`pipeline.rs:1260-1284` — `finalize_canceled`; CHANGELOG (WAV atomic write, idempotent crash recovery)
+`pipeline.rs` — `finalize_canceled`; CHANGELOG (WAV atomic write, idempotent crash recovery)
 
 ### Full kill-on-close process tree via Windows Job Objects
 

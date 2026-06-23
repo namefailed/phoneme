@@ -30,7 +30,7 @@ the meeting "both" second preview, and dictation), the retention loop, and the
 embedding backfill → serve IPC until shutdown.
 
 ```text
-  \\.\pipe\phoneme ──accept──► ipc_server ──spawn per client──► ipc_handler task
+  \\.\pipe\phoneme-daemon ──accept──► ipc_server ──spawn per client──► ipc_handler task
                                                                      │
                        request/response                             │ commands
                                                                      ▼
@@ -152,6 +152,18 @@ The catalog lives in `catalog.db` under local app data
   *persisted* here, not transient-event-only, so the 🧠 popout's history survives a
   daemon/app restart; `list_ai_activity` reads it back (newest first), and the
   daemon prunes the table to a bounded recent window.
+- **Enrichment child tables** — `entities`, `chapters`, and `tasks` each hang off a
+  recording (FK `ON DELETE CASCADE`) and hold the structured output of an optional
+  LLM enrichment stage. `entities` is read-only typed entities
+  (`(kind, value)`, unique per recording); `chapters` is an ordered set of
+  `(start_ms, end_ms, title, summary)` spans snapped to real segment timing; `tasks`
+  carries action items, each with a nullable free-text `due_hint` and the one mutable
+  user-owned field, a `done` flag (`idx_tasks_done` backs the cross-library
+  "open tasks" facet). All three are replaced wholesale on each run, and the model
+  that produced them is stored on `recordings` (`entities_model` / `chapters_model` /
+  `tasks_model`). They are written by the pipeline and by the on-demand
+  `SuggestEntities` / `SuggestChapters` / `SuggestTasks` handlers (see
+  [architecture.md](architecture.md#3-a-recordings-life)).
 
 ### Status is a string column
 

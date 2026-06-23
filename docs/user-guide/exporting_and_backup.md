@@ -30,15 +30,18 @@ phoneme export backup.zip
 ### What's inside the Zip?
 
 The export archive is completely portable and contains:
-1. **`catalog.json`**: a machine-readable JSON object:
+1. **`catalog.json`**: a machine-readable JSON object with **five top-level arrays**:
    ```json
    {
      "version": 1,
-     "recordings": [ /* every recording, full row: transcripts, timestamps, durations, summary, meeting_id, … */ ],
-     "tags": [ /* your tag definitions */ ]
+     "recordings": [ /* every recording, full row: transcripts, timestamps, durations, summary, meeting_id, plus its own tasks + entities … */ ],
+     "tags": [ /* your tag definitions */ ],
+     "meeting_digests": [ /* one whole-meeting digest per meeting */ ],
+     "period_digests": [ /* one daily/weekly/custom rollup per date range */ ],
+     "chapters": [ /* one entry per recording that has auto-chapters */ ]
    }
    ```
-   Each recording row includes the current transcript and the preserved original (raw) transcript, timestamps and durations, and meeting IDs for Meeting Mode sessions.
+   Each recording row includes the current (live) transcript, timestamps and durations, meeting IDs for Meeting Mode sessions, and the recording's own [tasks](tasks_and_reminders.md) (with their done flags) and [entities](entities.md). The side tables that aren't recording columns — meeting digests, [period digests](meeting_mode.md#-period-digests), and [chapters](topic_timelines.md) — ride in their own arrays.
 2. **`audio/`**: your `.wav` files, organised into per-day subfolders (`audio/<YYYY-MM-DD>/<recording>.wav`) that match each recording's date prefix in `catalog.json`. (Backups made by older versions stored every file flat in `audio/`; both layouts restore correctly.)
 
 ## ♻️ Restoring a backup archive
@@ -59,10 +62,19 @@ it to let go before touching the database; start it again afterwards with
 Restoring is **idempotent**. A recording whose id already exists is skipped —
 never overwritten — so re-running on the same backup never duplicates anything,
 and an edit you've made since the backup survives. The command reports how many
-recordings it imported and how many it skipped. The recording metadata,
-transcripts, tags, audio, and whole-meeting digests round-trip; derived data
-such as transcript segments, search embeddings and speaker voiceprints isn't
-stored in the backup and is regenerated when you re-transcribe.
+recordings it imported and how many it skipped.
+
+**What round-trips** (stored in the backup and restored): recording metadata,
+the current transcript, tags, audio, the recording's
+[tasks](tasks_and_reminders.md) — each with its **done** flag — and its
+[entities](entities.md), plus the side tables: whole-meeting digests,
+[period digests](meeting_mode.md#-period-digests), and
+[chapters](topic_timelines.md).
+
+**What is regenerated on re-transcribe** (not stored in the backup): the original
+(raw) and cleaned transcript layers, transcript segments, per-word timings,
+search embeddings, and speaker voiceprints. These derive from the audio, so they
+come back the next time the recording is transcribed.
 
 ## 🎬 Exporting Captions (SRT / WebVTT)
 
@@ -113,7 +125,9 @@ Open the recording, then under the waveform click **✂ Clip…**. Type a **Star
 and **End** time in seconds, or click **⟱ Playhead** beside either field to drop
 in the waveform's current playback position. Press **Export clip** (or Enter in a
 field). Phoneme writes the WAV next to the source — named
-`<recording>_clip_<start>-<end>.wav` — and shows you the saved path in a toast.
+`<recording>_clip_<start_ms>-<end_ms>.wav`, where the bounds are in
+**milliseconds** (so a `12.5 s → 30 s` clip becomes
+`…_clip_12500-30000.wav`) — and shows you the saved path in a toast.
 
 The range is validated before anything is sent: the end must be after the start,
 the start must fall within the recording, and the end is clamped to the
@@ -123,7 +137,9 @@ An empty or back-to-front range just shows a hint and doesn't write a file.
 ### From the CLI
 
 ```bash
-# Seconds as floats; END is clamped to the recording's duration.
+# Seconds as floats; END is clamped to the recording's duration. With no output
+# path, lands next to the source as <recording>_clip_12500-30000.wav (the suffix
+# is the range in milliseconds).
 phoneme clip 20260519T143500823 12.5 30
 
 # Choose the output path explicitly (otherwise it lands next to the source).

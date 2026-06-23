@@ -77,6 +77,7 @@ update this file in the same PR.
 | Outbound network | Optional HMAC-SHA256 webhook signing: a non-empty `[webhook] hmac_secret` adds an `X-Phoneme-Signature: sha256=<hex>` header (HMAC over the exact body bytes) so the receiver can verify authenticity; the secret is DPAPI-encrypted at rest and masked in the UI | `phoneme-core::webhook` | S-H1 |
 | IPC pipe | `HookTest` output is redacted before it crosses the pipe: credential-shaped tokens (`sk-`/`ghp_`/`AKIA`-style prefixes, `Bearer` values, `key=`-style assignments) are masked and the text is length-capped — on the failure path too, since `HookFailed` embeds the command's stderr in its message | `phoneme-core::hook::redact_secrets` + `phoneme-daemon::ipc_handler` | — |
 | Tampered downloads | Every artifact the first-run wizard loads or extracts is pinned to an exact SHA-256: the whisper GGML models, the semantic-search ONNX model + tokenizer, and `whisper-bin-x64.zip` (verified **before** it's unzipped). A download whose bytes don't match its pin — or that has no pin — is deleted and the wizard surfaces an error rather than loading it. A unit test fails if a wizard URL has no pin. (The Ollama installer is intentionally unpinned — a third-party auto-updating installer the user launches themselves.) | `phoneme-tray::checksums` (`expected_sha256` / `file_sha256`) | S-H7 |
+| Diagnostics export | The opt-in `ExportDiagnostics` bundle is **local-only and sanitized**: it includes app/version/OS info, the **masked** config (secrets redacted via `phoneme_core::secrets`), and a tail of the daemon log — and **excludes audio, transcripts, catalog contents, and any network call**. It's written under the app data dir; the user chooses whether to share it. So a bug report can't accidentally leak recorded material or a plaintext key | `phoneme-core::diagnostics` (`write_bundle`) | #248 |
 
 ## Content Security Policy
 
@@ -147,6 +148,6 @@ documented data location both work as-is.
   masks credential-shaped tokens, `Bearer` values, and `key=`-style assignments
   (and caps the length) before `HookTest` output returns over IPC; the failure
   path is covered too, since `HookFailed` embeds stderr in its message.*
-- ~~**`cargo audit` + `pnpm audit` in CI** — dependency-vulnerability gate.~~ *Done — non-blocking advisory job added in PR #66.*
+- ~~**`cargo audit` + `pnpm audit` in CI** — dependency-vulnerability gate.~~ *Done — a **blocking** CI job: a new RUSTSEC / npm advisory fails the build (a known-unfixable advisory is scoped out narrowly with `--ignore RUSTSEC-XXXX-NNNN` plus a why-comment, never by muting the whole job).*
 
 See [ROADMAP.md](../../ROADMAP.md) → *Security & privacy hardening* for status.
