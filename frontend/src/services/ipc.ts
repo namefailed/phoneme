@@ -747,6 +747,61 @@ export async function refireHook(id: string, command: string | null = null): Pro
   await tauriInvoke("refire_hook", { id, command });
 }
 
+/** Result of running a hook command against a representative sample payload.
+ *  `stderr_tail` is secret-redacted by the daemon before it crosses the pipe. */
+export type HookTestResult = {
+  exit_code: number;
+  duration_ms: number;
+  stderr_tail: string;
+};
+
+/** Run one hook command against a sample payload — the Hook Manager's "Test"
+ *  affordance for a command the user is still editing. `command` is the command
+ *  to test; `null` tests the first configured hook. A non-zero `exit_code`
+ *  resolves normally (the run completed but the command failed); only a launch
+ *  failure rejects. */
+export async function hookTest(command: string | null = null): Promise<HookTestResult> {
+  return await tauriInvoke<HookTestResult>("hook_test", { command });
+}
+
+/** Literal find-and-replace across one recording's live transcript. Re-flows
+ *  word/segment timing and re-embeds the result; the original/clean baselines
+ *  are preserved so the edit stays revertible. Returns the number of
+ *  occurrences replaced (`0` = no match, a true no-op). A change arrives via the
+ *  `TranscriptUpdated` daemon event. */
+export async function findReplace(
+  id: string,
+  find: string,
+  replace: string,
+  caseSensitive = false,
+): Promise<{ replaced: number }> {
+  return await tauriInvoke<{ replaced: number }>("find_replace", {
+    id,
+    find,
+    replace,
+    caseSensitive,
+  });
+}
+
+/** Library-wide literal find-and-replace — the same substring replacement run
+ *  over every recording's live transcript. Each changed recording is re-flowed
+ *  and re-embedded (heavy: the daemon ACKs with the counts immediately and runs
+ *  the re-embed pass in the background, emitting one `TranscriptUpdated` per
+ *  changed recording). Recordings with no match are skipped. Returns the count
+ *  of recordings changed, total occurrences replaced, and the number of
+ *  recordings whose rewrite errored. */
+export async function findReplaceLibrary(
+  find: string,
+  replace: string,
+  caseSensitive = false,
+): Promise<{ recordings_changed: number; total_replacements: number; failed: number }> {
+  return await tauriInvoke<{
+    recordings_changed: number;
+    total_replacements: number;
+    failed: number;
+  }>("find_replace_library", { find, replace, caseSensitive });
+}
+
 /**
  * Re-run only the LLM post-processing ("cleanup") step on a recording's stored
  * transcript, without re-transcribing the audio. The preserved original

@@ -132,6 +132,33 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         }
     }
 
+    if args.diagnostics {
+        // Parity with the GUI Doctor's "Export diagnostics" button: ask the
+        // running daemon to write the sanitized bundle and print the path it
+        // returns, nothing else. Observe-only — there's no point spawning a
+        // daemon just to dump diagnostics; if one isn't up, say so.
+        let mut client = match Client::connect_observe(cfg).await {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("error: daemon not reachable — start it first: phoneme daemon start");
+                return ExitCode::from(exit::GENERIC_FAIL);
+            }
+        };
+        match client.send(Request::ExportDiagnostics).await {
+            Ok(v) => {
+                match v.get("path").and_then(|p| p.as_str()) {
+                    Some(path) => println!("{path}"),
+                    None => {
+                        eprintln!("error: daemon did not return a diagnostics path");
+                        return ExitCode::from(exit::GENERIC_FAIL);
+                    }
+                }
+                return ExitCode::SUCCESS;
+            }
+            Err(code) => return code,
+        }
+    }
+
     let mut checks: Vec<CheckResult> = Vec::new();
 
     // Daemon reachability (CLI-specific — the GUI doesn't talk to itself over

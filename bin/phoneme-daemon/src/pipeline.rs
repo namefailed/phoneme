@@ -2764,12 +2764,30 @@ enum ResolvedStep {
 /// and the API key inherited from the cleanup section unless the entry carries its
 /// own non-blank key. Built-in migrated entries carry no key, so they inherit just
 /// as the legacy pipeline did.
+/// A Playbook entry's LLM connection is inherit-anchored in the UI ("Same as
+/// Post-Processing default" writes a blank provider), so an entry never
+/// legitimately pins "none". Older configs migrated the [llm_post_process]
+/// default (provider "none") into the seeded entries, which made every LLM step
+/// resolve to no provider and silently skip — leaving raw transcripts with no
+/// cleanup/title/summary/tags even though a global provider was configured.
+/// Treat an entry provider of "none" as inherit so the step uses the global
+/// connection. ("none" as a deliberate "off" still works on the global
+/// [llm_post_process] base + the Re-run modal's own override, neither of which
+/// goes through here.)
+fn entry_provider(provider: &str) -> &str {
+    if provider.trim().eq_ignore_ascii_case("none") {
+        ""
+    } else {
+        provider
+    }
+}
+
 fn entry_llm_config(
     cfg: &Config,
     entry: &phoneme_core::config::PlaybookLlm,
 ) -> LlmPostProcessConfig {
     cfg.llm_post_process.resolve_step(
-        &entry.provider,
+        entry_provider(&entry.provider),
         &entry.api_url,
         entry.api_key_str(),
         &entry.model,
@@ -2787,7 +2805,7 @@ fn meeting_entry_llm_config(
     entry: &phoneme_core::config::PlaybookLlm,
 ) -> LlmPostProcessConfig {
     summary_llm_config(cfg).resolve_step(
-        &entry.provider,
+        entry_provider(&entry.provider),
         &entry.api_url,
         entry.api_key_str(),
         &entry.model,

@@ -365,6 +365,68 @@ pub async fn refire_hook(
     forward(&bridge, Request::RefireHook { id, command }).await
 }
 
+/// Run a single hook command against a representative sample payload — the Hook
+/// Manager's "Test" button. `command` is the command to test (a hook the user is
+/// editing but hasn't saved); `None` tests the first configured hook. Returns
+/// `{ exit_code, duration_ms, stderr_tail }` (secret-redacted by the daemon).
+#[tauri::command]
+pub async fn hook_test(bridge: Br<'_>, command: Option<String>) -> Result<Value, CommandError> {
+    forward(
+        &bridge,
+        Request::HookTest {
+            custom_command: command,
+        },
+    )
+    .await
+}
+
+/// Literal find-and-replace across one recording's live transcript. The daemon
+/// re-flows word/segment timing onto the result and re-embeds it; the
+/// original/clean baselines are preserved so the edit stays revertible. Returns
+/// `{ replaced }` (occurrences replaced; 0 = no-op).
+#[tauri::command]
+pub async fn find_replace(
+    bridge: Br<'_>,
+    id: String,
+    find: String,
+    replace: String,
+    case_sensitive: bool,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::FindReplace {
+            id,
+            find,
+            replace,
+            case_sensitive,
+        },
+    )
+    .await
+}
+
+/// Library-wide literal find-and-replace — runs the same substring replacement
+/// over every recording's live transcript, re-flowing timing and re-embedding
+/// each changed one (recordings with no match are skipped). Returns
+/// `{ recordings_changed, total_replacements, failed }`.
+#[tauri::command]
+pub async fn find_replace_library(
+    bridge: Br<'_>,
+    find: String,
+    replace: String,
+    case_sensitive: bool,
+) -> Result<Value, CommandError> {
+    forward(
+        &bridge,
+        Request::FindReplaceLibrary {
+            find,
+            replace,
+            case_sensitive,
+        },
+    )
+    .await
+}
+
 /// Re-run only the LLM post-processing ("cleanup") step on a recording's stored
 /// transcript, without re-transcribing the audio. `model` optionally overrides
 /// the configured cleanup model for this one run.

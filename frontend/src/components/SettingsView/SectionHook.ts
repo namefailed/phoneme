@@ -1,5 +1,7 @@
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
+import { hookTest } from "../../services/ipc";
+import { errText } from "../../utils/error";
 
 /**
  * Settings → Integrations, OUTBOUND half. Post-transcription scripts and webhook
@@ -67,6 +69,21 @@ export class SectionHook {
           <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             Shell commands, keyword-triggered actions, and outbound webhooks all live as Hook
             entries there. Existing <code>[hook]</code> config was migrated once on upgrade.
+          </span>
+        </div>
+        <div class="settings-field stacked">
+          <label>Test a hook command</label>
+          <div style="display: flex; gap: 6px; align-items: stretch;">
+            <input type="text" id="hook-test-cmd" placeholder="Leave blank to test the first configured hook…"
+              style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 0.8571rem; color: var(--fg-default); font-family: inherit;" />
+            <button class="inline-button" id="hook-test-run" type="button">Test</button>
+          </div>
+          <div id="hook-test-result" role="status" aria-live="polite"
+            style="display: none; margin-top: 8px; padding: 8px 10px; border-radius: 4px; border: 1px solid var(--border-subtle); background: var(--bg-surface); font-size: 0.8214rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word;"></div>
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 6px; display: block;">
+            Runs the command once against a sample recording payload (the JSON Phoneme pipes to a hook
+            on stdin) and reports its exit code, run time, and any stderr — so you can check a hook
+            works before relying on it. Nothing is recorded; secrets in the output are redacted.
           </span>
         </div>
         <div class="settings-field">
@@ -137,10 +154,55 @@ export class SectionHook {
       window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view: "settings", section: "system" } }));
     });
 
+    this.bindHookTest(container);
     this.renderHeaders(container);
     container.querySelector("#wh-add-header")?.addEventListener("click", () => {
       this.headerRows.push({ name: "", value: "" });
       this.renderHeaders(container);
+    });
+  }
+
+  /** Wire the "Test a hook command" tool: run the typed command (or the first
+   *  configured hook when blank) against a sample payload and show the outcome
+   *  inline. Enter in the field also runs it. */
+  private bindHookTest(container: HTMLElement) {
+    const input = container.querySelector<HTMLInputElement>("#hook-test-cmd");
+    const btn = container.querySelector<HTMLButtonElement>("#hook-test-run");
+    const result = container.querySelector<HTMLElement>("#hook-test-result");
+    if (!input || !btn || !result) return;
+
+    const run = async () => {
+      const command = input.value.trim();
+      btn.disabled = true;
+      btn.textContent = "Testing…";
+      result.style.display = "block";
+      result.style.borderColor = "var(--border-subtle)";
+      result.textContent = "Running the hook against a sample payload…";
+      try {
+        const r = await hookTest(command || null);
+        const ok = r.exit_code === 0;
+        const lines = [
+          `${ok ? "✓" : "✕"} Exit code ${r.exit_code}${ok ? " (success)" : " (failed)"} · ${r.duration_ms} ms`,
+        ];
+        if (r.stderr_tail.trim()) lines.push("", "stderr:", r.stderr_tail.trimEnd());
+        result.textContent = lines.join("\n");
+        result.style.borderColor = ok ? "var(--ok)" : "var(--err)";
+      } catch (e) {
+        // A launch failure (no command configured, spawn error) rejects.
+        result.textContent = `✕ ${errText(e)}`;
+        result.style.borderColor = "var(--err)";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Test";
+      }
+    };
+
+    btn.addEventListener("click", run);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void run();
+      }
     });
   }
 

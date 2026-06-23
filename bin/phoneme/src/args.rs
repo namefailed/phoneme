@@ -653,6 +653,12 @@ pub struct DoctorArgs {
     /// whisper-server(s) when the Whisper / live-preview probe fails).
     #[arg(long)]
     pub fix: bool,
+    /// Write an opt-in, local-only diagnostics bundle for bug reports (app + OS
+    /// info, the masked config with secrets redacted, and a tail of the daemon
+    /// log — no audio, transcripts or catalog) and print the file path. Parity
+    /// with the GUI Doctor's "Export diagnostics" button; needs a running daemon.
+    #[arg(long)]
+    pub diagnostics: bool,
 }
 
 #[derive(Debug, clap::Args)]

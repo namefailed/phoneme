@@ -1038,6 +1038,13 @@ phoneme doctor --rebuild-catalog
 # them), leaving every existing recording untouched. Prefer this over
 # --rebuild-catalog when you've just lost rows, not the whole catalog.
 phoneme doctor --reimport
+
+# Write an opt-in, local-only diagnostics bundle for bug reports and print the
+# file path (nothing else). The bundle holds app + OS info, the MASKED config
+# (secrets redacted), and a tail of the daemon log — no audio, transcripts or
+# catalog. Parity with the GUI Doctor's "Export diagnostics" button; needs a
+# running daemon (errors if one isn't up).
+phoneme doctor --diagnostics
 ```
 
 With `--json`, each check object keeps the original `name`/`ok`/`detail` keys

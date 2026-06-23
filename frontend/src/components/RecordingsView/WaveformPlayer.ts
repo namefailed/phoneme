@@ -61,6 +61,7 @@ export class WaveformPlayerElement extends LitElement {
       progressColor,
       cursorColor: accent,
       cursorWidth: 2,
+      dragToSeek: true,
       barWidth: 2,
       barGap: 1,
       height: this.waveHeight,

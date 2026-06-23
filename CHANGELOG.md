@@ -269,6 +269,12 @@ trust boundary.*
   `ListMeetingDigests` read, fetched alongside the tag list) and replays it on
   restore via the idempotent digest upsert, so a re-import never clobbers a digest
   regenerated since. Pre-digest backups still restore cleanly.
+- [x] **Meeting digest is a structured digest, not a second summary** — the
+  whole-meeting digest no longer reads like a longer version of the generic
+  Summary. It now emits a fixed markdown shape — a one-line **Overview**, bulleted
+  **Key topics**, **Decisions** (or "None"), and **Action items** with the owner
+  when stated (or "None") — synthesized across every interleaved participant track,
+  so a meeting reads at a glance and stays distinct from the per-recording summary.
 - [x] **Deleting every track of a meeting clears its digest** — removing a meeting
   track-by-track (rather than via *Delete session*) left its digest row orphaned,
   since the digest table has no foreign key to cascade. Deleting the last track of
@@ -294,6 +300,12 @@ trust boundary.*
   `<data_dir>/diagnostics/phoneme-diagnostics-<timestamp>.json`, returning the path
   to reveal. "No telemetry" stays true; this just means a field crash is no longer
   invisible. A masking round-trip test asserts no secret can leak into the bundle.
+- [x] **`phoneme doctor --diagnostics`** — CLI parity with the GUI Doctor's
+  **Export diagnostics** button for headless/server users: the flag asks the
+  running daemon to write the same sanitized bundle (`ExportDiagnostics`) and
+  prints just the resulting file path (nothing else, so it pipes cleanly). Like
+  the rest of `doctor` it uses the observe-only client path — it errors clearly
+  when no daemon is up rather than spawning one.
 - [x] **No more hook double-fire** — the daemon's legacy `hook.commands` loop is now
   gated behind `schema_version < CURRENT_SCHEMA_VERSION`, so it runs **only** for a
   genuinely un-migrated config. Before, a stale or hand-edited config that already
@@ -1551,6 +1563,27 @@ trust boundary.*
 
 ### GUI parity
 
+- [x] **Find & Replace in the app (single recording + whole library).** The
+  detail pane's action row gained a **🔁 Find/Replace…** control that opens a
+  themed, Esc-closable modal: a **Find** field, a **Replace with** field, a
+  **Match case** toggle, and a **scope** switch — **This recording** (default,
+  carries the open recording's id) or **Whole library**. It's the GUI front for
+  `phoneme find-replace [<ID>] <FIND> <REPLACE>` / `--library`: the recording
+  scope calls `FindReplace` (re-flows timing + re-embeds the one transcript,
+  reporting the occurrences replaced), and the library scope calls
+  `FindReplaceLibrary` behind an explicit **destructive-action confirm** (it
+  rewrites + re-embeds *every* matching recording) and then reports recordings
+  changed, total replacements, and any per-recording failures. The
+  original/clean baselines are preserved either way, so each edit stays
+  revertible; changes flow back via the existing `TranscriptUpdated` events.
+- [x] **Test a hook command from the Hook Manager.** Settings → Integrations
+  gained a **Test a hook command** tool: type a command (or leave it blank to
+  test the first configured hook) and **Test** runs it once against a
+  representative sample payload — the same JSON Phoneme pipes to a hook on stdin
+  — then shows the **exit code, run time, and any stderr** inline. The GUI front
+  for `phoneme hook test` (the `HookTest` request); nothing is recorded and
+  credential-shaped values in the output are redacted before they reach the
+  WebView.
 - [x] **Export an audio clip from the app.** The detail pane gained a **✂ Clip…**
   control under the waveform: pick a **Start** and **End** in seconds (or hit
   **⟱ Playhead** to set either from the current playback position) and **Export

@@ -4102,7 +4102,7 @@ async fn run_meeting_recipe_falls_back_to_built_in_digest_when_unset_or_missing(
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             // The built-in digest prompt's distinctive phrase.
-            .and(body_string_contains("summarizing a whole meeting"))
+            .and(body_string_contains("structured digest of a whole meeting"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "choices": [{ "message": { "role": "assistant", "content": "FALLBACK DIGEST" } }]
             })))
@@ -4121,6 +4121,29 @@ async fn run_meeting_recipe_falls_back_to_built_in_digest_when_unset_or_missing(
                 });
         assert_eq!(digest, "FALLBACK DIGEST", "recipe_id={recipe_id:?}");
     }
+}
+
+#[test]
+fn playbook_entry_with_none_provider_inherits_global_connection() {
+    // A migrated config can pin a Playbook entry's provider to "none" (the
+    // [llm_post_process] default leaked into the seeded entries). That used to
+    // make every LLM step resolve to no provider and silently skip, leaving raw
+    // transcripts. The entry resolvers must treat "none" as inherit so the step
+    // uses the global connection.
+    use phoneme_core::config::Config;
+    let mut cfg = Config::default();
+    cfg.llm_post_process.provider = "ollama".into();
+    for e in cfg.playbook.iter_mut() {
+        e.llm.provider = "none".into();
+    }
+    let (cleanup, _) = crate::pipeline::cleanup_entry_config(&cfg);
+    assert_eq!(
+        cleanup.provider, "ollama",
+        "a cleanup entry pinned to 'none' must inherit the global provider"
+    );
+    let (summary, _) = crate::pipeline::entry_config_for_target(&cfg, "summary")
+        .expect("seeded summary entry exists");
+    assert_eq!(summary.provider, "ollama", "enrichment entries inherit too");
 }
 
 #[tokio::test]

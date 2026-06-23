@@ -168,6 +168,14 @@ export class ActionRowElement extends LitElement {
     );
   };
 
+  /** Find / Replace — open the modal scoped to this recording (it also offers a
+   *  whole-library scope). Dynamic import so the modal only loads on first use,
+   *  matching the Re-run picker's lazy import. */
+  private openFindReplace = async () => {
+    const { openFindReplace } = await import("../FindReplace");
+    await openFindReplace(this.recordingId);
+  };
+
   /** Delete this recording — defers to RecordingsView's shared delete flow (the
    *  same `phoneme:request-delete` the title bar used before this button moved
    *  back here) so it gets the confirm + undo path. */
@@ -302,6 +310,7 @@ export class ActionRowElement extends LitElement {
             : null}
         </span>
         <button class="action-clip" title="Clip a time range of this recording's audio to a WAV file" @click=${this.toggleClip}>✂ Clip…</button>
+        <button class="action-find-replace" title="Find and replace text in this recording's transcript (or across the whole library)" @click=${this.openFindReplace}>🔁 Find/Replace…</button>
         <button class="danger" title="Delete this recording" @click=${this.handleDelete}>🗑 Delete</button>
       </div>
     `;
