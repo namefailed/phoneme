@@ -61,13 +61,20 @@ mod meeting;
 // meeting/period digest handlers), so the split is invisible to callers.
 pub(crate) use extract::{
     chapters_llm_config, entities_llm_config, extract_chapters, extract_entities, extract_tasks,
-    parse_chapters, parse_entities, parse_tasks, run_chapters_step, run_entities_step,
-    run_tasks_step, tasks_llm_config,
+    run_chapters_step, run_entities_step, run_tasks_step, tasks_llm_config,
 };
 pub(crate) use meeting::{
-    assemble_meeting_transcript, assemble_period_transcript, generate_meeting_digest,
-    generate_period_digest, run_meeting_recipe, PERIOD_DIGEST_MAX_CHARS,
+    assemble_meeting_transcript, assemble_period_transcript, generate_period_digest,
+    run_meeting_recipe,
 };
+// Re-exported only for the unit tests, which reach these by `crate::pipeline::*`.
+// The non-test build never calls them through the parent (extract/meeting use the
+// parsers + digest helper internally), so a plain re-export would be an
+// unused-import warning outside `cfg(test)`.
+#[cfg(test)]
+pub(crate) use extract::{parse_chapters, parse_entities, parse_tasks};
+#[cfg(test)]
+pub(crate) use meeting::{generate_meeting_digest, PERIOD_DIGEST_MAX_CHARS};
 
 /// Coalesce streamed deltas until this many chars accumulate, then flush one
 /// LlmActivity event — keeps the event bus from being flooded token-by-token.
