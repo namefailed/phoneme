@@ -775,6 +775,39 @@ mark.search-hit {
   flex-wrap: wrap;
   gap: 6px;
 }
+/* Entities grouped by kind: one labelled row per kind (People / Organizations /
+   Topics / Terms) so the pane reads as structured facets, not a chip soup. The
+   label is a fixed-ish gutter; the chips wrap in the remaining space. */
+.entity-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.entity-group {
+  display: grid;
+  grid-template-columns: 116px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.entity-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding-top: 3px;
+  white-space: nowrap;
+}
+.entity-group-label .ent-ico { font-size: 0.95em; }
+.entity-group-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
 /* Both classes so this beats the later, equal-specificity `.tag-chip` base rule
    (color: inherit / the default tag tint) — chips carry `tag-chip tag-chip--entity`. */
 .tag-chip.tag-chip--entity {
