@@ -18,7 +18,7 @@ import { showToast } from "../../utils/toast";
  * toggle, library kind (All/Voice Notes/Meetings/Favorites), tag, status,
  * date range, sort — so applying one restores everything exactly. This
  * section manages them: save the current filters, apply, rename, overwrite
- * with the current filters, delete. (The header 🔖 dropdown stays as the
+ * with the current filters, delete. (The header 🗃️ dropdown stays as the
  * quick popup; both read the same catalog-backed list.)
  */
 export class SectionSavedSearches {
@@ -78,7 +78,7 @@ export class SectionSavedSearches {
         <p style="font-size: 0.8571rem; color:var(--fg-muted); margin:0 0 4px;">
           A saved search snapshots <b>everything</b> the library is filtered by — search text,
           semantic toggle, library type, tag, status, date range and sort order — and restores
-          it all with one click (or the header's 🔖 menu).
+          it all with one click (or the header's 🗃️ menu).
         </p>
 
         <div class="settings-field">

@@ -32,7 +32,7 @@ export type HeaderBarCallbacks = {
  * `phoneme-hide-header` body class instead of unmounting it.
  *
  * It renders, left to right: the search box (text/✨-semantic, with date +
- * sort + status filters), the 🔖 saved-searches dropdown, the live-preview
+ * sort + status filters), the 🗃️ saved-searches dropdown, the live-preview
  * ticker, the health pill, the Record split-button (record/meeting mode, the
  * stop-mode dropdown), and the ⚙ Settings split-button.
  *

@@ -11,7 +11,7 @@ import {
 } from "../state/savedSearches";
 
 /**
- * A 🔖 dropdown in the header that saves the current library filter under a
+ * A 🗃️ dropdown in the header that saves the current library filter under a
  * name and re-applies it later. Applying just re-sets the shared `filterStore`
  * (the recordings list already re-queries on filter changes), so applying stays
  * pure-frontend; the saved list itself is persisted in the catalog and arrives
@@ -136,7 +136,7 @@ export class SavedSearchesElement extends LitElement {
           aria-haspopup="menu"
           aria-expanded=${this.open}
           @click=${this.toggle}
-        >🔖</button>
+        >🗃️</button>
         <div
           class="ss-menu"
           role="menu"
