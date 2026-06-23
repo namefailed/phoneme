@@ -565,6 +565,7 @@ pub fn run() {
             commands::export_captions,
             commands::export_recording_json,
             commands::export_clip,
+            commands::edit_recording,
             commands::save_text_export,
             commands::export_library_zip,
             commands::restart_whisper,

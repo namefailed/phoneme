@@ -83,6 +83,13 @@ trust boundary.*
 
 ### Detail pane & editors
 
+- [x] **Audio editing ("✂ Edit…")** — the old single-range clip modal grew into an
+  editor: select sections on the waveform and **delete** them (trim the ends or
+  cut out the middle — each cut shades red and lists with its kept-duration), then
+  **Apply** with a choice each time: **replace** this recording's audio (the
+  original WAV is backed up to a `.orig-<ts>.wav` sibling) and re-transcribe, or
+  **save a copy** as a new recording (original untouched). Backed by a pure
+  `phoneme_audio::wav::edit_wav` (keep-ranges concat) + a new `EditRecording` IPC.
 - [x] **Editor ⋯ overflow menus** — the Transcript and Notes editor headers each
   gain a ⋯ menu (Esc / click-outside to close); **Find & Replace** moved into it
   and the standalone action-row button is gone, so both editors reach it the same

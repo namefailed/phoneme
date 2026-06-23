@@ -461,6 +461,31 @@ pub enum Request {
         out_path: Option<String>,
     },
 
+    /// Edit a recording's audio in place: keep only `keep_ranges` (millisecond
+    /// `[start, end)` pairs, ascending + non-overlapping) and concatenate them,
+    /// dropping everything between — a trim is one range, deleting an inner
+    /// section is the gap between two. The daemon cuts via
+    /// `phoneme_audio::wav::edit_wav`, then either:
+    /// - `new_recording = true`: writes the result as a brand-new recording
+    ///   (the original is untouched) and enqueues it for transcription. Ok
+    ///   `{"id":"<new id>"}`.
+    /// - `new_recording = false`: backs the original WAV up to a `.orig-<ts>.wav`
+    ///   sibling, replaces the recording's audio with the edit, clears the now
+    ///   stale transcript, and re-enqueues it for a fresh transcription +
+    ///   pipeline. Ok `{"id":"<same id>","backup":"<path>"}`.
+    ///
+    /// `invalid_config` for an empty/overlapping range set, `not_found` for an
+    /// unknown recording, `io` on a read/write failure.
+    EditRecording {
+        /// The recording whose audio to edit.
+        id: RecordingId,
+        /// Ascending, non-overlapping `[start_ms, end_ms)` ranges to KEEP.
+        keep_ranges: Vec<(i64, i64)>,
+        /// `true` = save the edit as a new recording (original untouched);
+        /// `false` = replace this recording's audio in place (original backed up).
+        new_recording: bool,
+    },
+
     /// Scan the audio directory for `.wav` files whose RecordingId has no
     /// catalog row and re-link each: insert a `queued` row pointing at the
     /// existing file and enqueue it for the normal pipeline — recovering

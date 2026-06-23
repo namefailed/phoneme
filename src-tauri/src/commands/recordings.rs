@@ -1093,6 +1093,31 @@ pub async fn export_clip(
     .await
 }
 
+/// Edit a recording's audio (#262): keep only `keep_ranges` (`[start_ms, end_ms)`
+/// pairs, ascending + non-overlapping) and concatenate them — a trim is one
+/// range, deleting an inner section is the gap between two. `new_recording=true`
+/// saves the result as a fresh recording (original untouched); `false` replaces
+/// the recording's audio in place (the original is backed up first) and
+/// re-transcribes. A thin forwarder — every check lives in the daemon handler.
+#[tauri::command]
+pub async fn edit_recording(
+    bridge: Br<'_>,
+    id: String,
+    keep_ranges: Vec<(i64, i64)>,
+    new_recording: bool,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::EditRecording {
+            id,
+            keep_ranges,
+            new_recording,
+        },
+    )
+    .await
+}
+
 /// Zip-entry name for one audio file under `audio_dir`, preserving its day
 /// folder. WAVs live at `<audio_dir>/<YYYY-MM-DD>/<HHmmssMMM>.wav` and the stem
 /// is time-of-day only, so two recordings at the same ms-of-day on different

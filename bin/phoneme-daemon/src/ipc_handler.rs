@@ -1492,6 +1492,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             end_ms,
             out_path,
         } => export_clip(state, id, start_ms, end_ms, out_path).await,
+        Request::EditRecording {
+            id,
+            keep_ranges,
+            new_recording,
+        } => edit_recording(state, id, keep_ranges, new_recording).await,
         Request::ReimportFromDisk { dry_run } => reimport_from_disk(state, dry_run).await,
         Request::RebuildCatalog => {
             // Refuse while capture is live — clearing the table would orphan a
@@ -3504,6 +3509,135 @@ async fn export_clip(
             kind: IpcErrorKind::Internal,
             message: format!("clip task panicked: {e}"),
         }),
+    }
+}
+
+/// Edit a recording's audio (#262): keep only `keep_ranges` and concatenate them
+/// (a trim is one range; a deleted inner section is the gap between two) via the
+/// pure `phoneme_audio::wav::edit_wav`, on a blocking thread (read + cut + write
+/// is CPU/IO-bound). Two save modes:
+/// - `new_recording`: cut to a temp WAV, then run it through the normal import
+///   path so it lands as a fresh recording (original untouched) + enqueued.
+///   Ok `{"id":"<new id>"}`.
+/// - in place: back the original up to a `.orig-<ts>.wav` sibling, cut over the
+///   source, persist the new (shorter) duration, and re-enqueue for a fresh
+///   transcription + pipeline. Ok `{"id":"<same id>","backup":"<path>"}`.
+async fn edit_recording(
+    state: &AppState,
+    id: phoneme_core::RecordingId,
+    keep_ranges: Vec<(i64, i64)>,
+    new_recording: bool,
+) -> Response {
+    if keep_ranges.is_empty() {
+        return err_response(&phoneme_core::Error::InvalidConfig(
+            "edit needs at least one range to keep".into(),
+        ));
+    }
+    let rec = match state.catalog.get(&id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return not_found(format!("recording {id} not found")),
+        Err(e) => return err_response(&e),
+    };
+    let src = std::path::PathBuf::from(&rec.audio_path);
+
+    if new_recording {
+        // Cut to a temp WAV in the audio dir, then import it like a dropped file
+        // (canonical re-encode, size cap, fresh catalog row + enqueue). The
+        // original recording is never touched.
+        let tmp = state
+            .paths
+            .audio_dir
+            .join(format!("_edit-{}.wav", id.file_stem()));
+        let tmp_task = tmp.clone();
+        let src_task = src.clone();
+        let ranges = keep_ranges.clone();
+        let cut = tokio::task::spawn_blocking(move || {
+            phoneme_audio::wav::edit_wav(&src_task, &tmp_task, &ranges)
+        })
+        .await;
+        match cut {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => return err_response(&e),
+            Err(e) => {
+                return Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: format!("edit task panicked: {e}"),
+                })
+            }
+        }
+        let resp = import_recording(state, tmp.to_string_lossy().into_owned()).await;
+        let _ = tokio::fs::remove_file(&tmp).await; // import copied it in; drop the temp
+        return resp;
+    }
+
+    // ── Replace in place ──────────────────────────────────────────────────────
+    // Back the original up before overwriting it (recoverable on a bad edit),
+    // then cut over the source and re-transcribe the edited audio.
+    let backup = {
+        let ts = chrono::Local::now().format("%Y%m%dT%H%M%S");
+        let stem = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| id.to_string());
+        let name = format!("{stem}.orig-{ts}.wav");
+        match src.parent() {
+            Some(dir) => dir.join(name),
+            None => std::path::PathBuf::from(name),
+        }
+    };
+    let src_task = src.clone();
+    let backup_task = backup.clone();
+    let ranges = keep_ranges.clone();
+    let result = tokio::task::spawn_blocking(move || -> phoneme_core::error::Result<i64> {
+        std::fs::copy(&src_task, &backup_task).map_err(|e| {
+            phoneme_core::Error::Internal(format!("backing up original audio: {e}"))
+        })?;
+        // edit_wav reads the whole source into memory before writing, so editing
+        // over the source in place is safe; write_wav replaces it atomically.
+        phoneme_audio::wav::edit_wav(&src_task, &src_task, &ranges)?;
+        phoneme_audio::wav::duration_ms(&src_task)
+    })
+    .await;
+    let new_duration = match result {
+        Ok(Ok(ms)) => ms,
+        Ok(Err(e)) => return err_response(&e),
+        Err(e) => {
+            return Response::Err(IpcError {
+                kind: IpcErrorKind::Internal,
+                message: format!("edit task panicked: {e}"),
+            })
+        }
+    };
+
+    // Persist the new (shorter) duration + flip to Queued, then re-enqueue so the
+    // edited audio gets a fresh transcription + the full pipeline (same id). The
+    // stale transcript stays visible until the new one lands (status = Queued),
+    // mirroring a plain re-transcribe.
+    if let Err(e) = state
+        .catalog
+        .update_status_and_duration(&id, RecordingStatus::Queued, new_duration)
+        .await
+    {
+        return err_response(&e);
+    }
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: rec.started_at,
+        transcript: String::new(),
+        audio_path: rec.audio_path.clone(),
+        duration_ms: new_duration,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    match state.inbox.enqueue(&payload).await {
+        Ok(()) => {
+            tracing::info!(id = %id, backup = %backup.display(), new_duration, "edited recording in place");
+            Response::Ok(serde_json::json!({
+                "id": id.to_string(),
+                "backup": backup.to_string_lossy(),
+            }))
+        }
+        Err(e) => err_response(&e),
     }
 }
 

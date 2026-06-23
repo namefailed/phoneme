@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { exportClip } from "../../services/ipc";
+import { editRecording } from "../../services/ipc";
 import { errText } from "../../utils/error";
 import { showToast } from "../../utils/toast";
 import { closeModalOverlay } from "../../utils/modalAnim";
@@ -48,6 +48,12 @@ export class ClipExportElement extends LitElement {
   @state() private playing = false;
   /** Inline validation hint shown under the fields (empty = no error). */
   @state() private hint = "";
+  /** Sections to delete (ms ranges). The recording MINUS these is what's kept,
+   *  so trimming the ends and cutting out the middle are the same operation. */
+  @state() private cuts: { startMs: number; endMs: number }[] = [];
+  /** When true, the footer shows the Replace / Save-as-new choice (the
+   *  ask-each-time apply step) instead of the single Apply button. */
+  @state() private choosing = false;
 
   /** The modal's own waveform (separate from the detail pane's), created on open
    *  and destroyed on close. */
@@ -107,7 +113,10 @@ export class ClipExportElement extends LitElement {
 
   private openModal() {
     this.open = true;
-    // Default the first time it opens to the whole recording.
+    // A fresh edit: no cuts yet, region defaults to the whole recording so the
+    // user can drag in the first section to delete.
+    this.cuts = [];
+    this.choosing = false;
     if (this.durationMs > 0) {
       this.startSec = "0";
       this.endSec = formatSeconds(this.durationSec);
@@ -208,8 +217,9 @@ export class ClipExportElement extends LitElement {
     this.hint = "";
   }
 
-  private async doExport() {
-    if (this.busy) return;
+  /** Add the selected region to the cut list (a section to delete). Validated
+   *  like a clip range — non-empty, inside the recording. */
+  private addCut = () => {
     const result = validateClipRange(
       parseFloat(this.startSec),
       parseFloat(this.endSec),
@@ -219,16 +229,67 @@ export class ClipExportElement extends LitElement {
       this.hint = result.error;
       return;
     }
+    this.cuts = [...this.cuts, { startMs: result.range.startMs, endMs: result.range.endMs }];
+    this.choosing = false;
     this.hint = "";
+  };
+
+  private removeCut(i: number) {
+    this.cuts = this.cuts.filter((_, idx) => idx !== i);
+    this.choosing = false;
+  }
+
+  /** The ms ranges to KEEP = the recording minus the (merged) cuts, ascending +
+   *  non-overlapping, exactly what the daemon's `edit_wav` expects. */
+  private keepRanges(): [number, number][] {
+    const total = this.durationMs;
+    if (total <= 0) return [];
+    const sorted = [...this.cuts].sort((a, b) => a.startMs - b.startMs);
+    const merged: { startMs: number; endMs: number }[] = [];
+    for (const c of sorted) {
+      const last = merged[merged.length - 1];
+      if (last && c.startMs <= last.endMs) last.endMs = Math.max(last.endMs, c.endMs);
+      else merged.push({ ...c });
+    }
+    const keeps: [number, number][] = [];
+    let cursor = 0;
+    for (const c of merged) {
+      const s = Math.max(0, Math.min(c.startMs, total));
+      const e = Math.max(0, Math.min(c.endMs, total));
+      if (s > cursor) keeps.push([cursor, s]);
+      cursor = Math.max(cursor, e);
+    }
+    if (cursor < total) keeps.push([cursor, total]);
+    return keeps.filter(([a, b]) => b - a > 0);
+  }
+
+  private keptMs(): number {
+    return this.keepRanges().reduce((sum, [a, b]) => sum + (b - a), 0);
+  }
+
+  /** Apply the edit. `newRecording` = save the result as a new recording (the
+   *  original is untouched); otherwise replace this recording's audio in place
+   *  (the daemon backs the original up) and re-transcribe. */
+  private async applyEdit(newRecording: boolean) {
+    if (this.busy) return;
+    const keep = this.keepRanges();
+    if (!keep.length) {
+      this.hint = "That removes the whole recording — keep at least one section.";
+      this.choosing = false;
+      return;
+    }
     this.busy = true;
     try {
-      // out_path defaults to null — the daemon picks the sibling
-      // `_clip_<start>-<end>.wav` path, matching the CLI.
-      const { path } = await exportClip(this.recordingId, result.range.startMs, result.range.endMs);
-      showToast(`Clip saved to ${path}`, "success");
+      await editRecording(this.recordingId, keep, newRecording);
+      showToast(
+        newRecording
+          ? "Saved the edit as a new recording — transcribing now."
+          : "Edited the recording — re-transcribing the trimmed audio.",
+        "success",
+      );
       this.close();
     } catch (e) {
-      showToast(`Clip export failed: ${errText(e)}`, "error");
+      showToast(`Edit failed: ${errText(e)}`, "error");
     } finally {
       this.busy = false;
     }
@@ -252,7 +313,7 @@ export class ClipExportElement extends LitElement {
     e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
-      void this.doExport();
+      this.addCut();
     }
   }
 
@@ -267,14 +328,16 @@ export class ClipExportElement extends LitElement {
     const leftPct = d > 0 ? (this.startNum / d) * 100 : 0;
     const widthPct = d > 0 ? ((this.endNum - this.startNum) / d) * 100 : 100;
     const selLen = Math.max(0, this.endNum - this.startNum);
+    const keptSec = this.keptMs() / 1000;
+    const cutCount = this.cuts.length;
     return html`
       <div class="modal-overlay" @click=${(e: MouseEvent) => this.onOverlayClick(e)}>
         <div class="modal-dialog clip-dialog" role="dialog" aria-modal="true" aria-labelledby="clip-title">
           <div class="modal-header clip-header">
             <span class="modal-icon" aria-hidden="true">✂</span>
             <div class="clip-head-text">
-              <h3 class="modal-title" id="clip-title">Clip audio</h3>
-              <span class="clip-subtitle">Drag the handles or set the times, then export the selection as a new clip.</span>
+              <h3 class="modal-title" id="clip-title">Edit audio</h3>
+              <span class="clip-subtitle">Select a section and delete it — trim the ends or cut out the middle. Apply to replace this recording or save a copy.</span>
             </div>
             <button class="clip-close" @click=${this.close} title="Close (Esc)" aria-label="Close">✕</button>
           </div>
@@ -284,6 +347,11 @@ export class ClipExportElement extends LitElement {
             ${d > 0
               ? html`
                   <div class="clip-region-layer">
+                    ${this.cuts.map((c) => {
+                      const cl = (Math.max(0, Math.min(c.startMs, this.durationMs)) / this.durationMs) * 100;
+                      const cw = ((Math.min(c.endMs, this.durationMs) - c.startMs) / this.durationMs) * 100;
+                      return html`<div class="clip-cut-mask" style="left: ${cl}%; width: ${Math.max(0, cw)}%" title="Deleted section"></div>`;
+                    })}
                     <div class="clip-region-mask clip-region-mask--left" style="width: ${leftPct}%"></div>
                     <div class="clip-region-mask clip-region-mask--right" style="left: ${leftPct + widthPct}%"></div>
                     <div class="clip-region" style="left: ${leftPct}%; width: ${widthPct}%">
@@ -315,6 +383,8 @@ export class ClipExportElement extends LitElement {
               ${formatSeconds(this.startNum)}s → ${formatSeconds(this.endNum)}s
               <span class="clip-sel-len">(${formatSeconds(selLen)}s)</span>
             </span>
+            <span style="flex: 1;"></span>
+            <button class="clip-cut-btn" title="Delete the selected section (the rest is kept)" @click=${this.addCut}>✂ Delete section</button>
           </div>
 
           <div class="clip-fields">
@@ -352,16 +422,47 @@ export class ClipExportElement extends LitElement {
             </label>
           </div>
 
+          ${cutCount
+            ? html`<div class="clip-cuts">
+                <div class="clip-cuts-head">
+                  <span>Cuts (${cutCount})</span>
+                  <span class="clip-cuts-kept">keeps ${formatSeconds(keptSec)}s of ${formatSeconds(d)}s</span>
+                </div>
+                <div class="clip-cuts-list">
+                  ${this.cuts.map(
+                    (c, i) => html`<span class="clip-cut-chip">${formatSeconds(c.startMs / 1000)}–${formatSeconds(c.endMs / 1000)}s
+                      <button class="clip-cut-del" title="Undo this cut" aria-label="Undo cut" @click=${() => this.removeCut(i)}>✕</button></span>`,
+                  )}
+                </div>
+              </div>`
+            : html`<div class="clip-cuts-empty">No cuts yet — drag a section above and ✂ Delete it; everything else is kept.</div>`}
+
           ${this.hint ? html`<div class="clip-hint" role="alert">${this.hint}</div>` : ""}
 
           <div class="modal-actions">
-            <button class="modal-btn" @click=${this.close}>Cancel</button>
-            <button
-              class="modal-btn modal-btn-primary"
-              ?disabled=${this.busy}
-              title="Write the selected range to a new WAV next to the recording"
-              @click=${() => this.doExport()}
-            >${this.busy ? "Exporting…" : "Export clip"}</button>
+            ${this.choosing
+              ? html`
+                  <button class="modal-btn" ?disabled=${this.busy} @click=${() => { this.choosing = false; }}>← Back</button>
+                  <button
+                    class="modal-btn"
+                    ?disabled=${this.busy}
+                    title="Overwrite this recording's audio (the original is backed up) and re-transcribe the edit"
+                    @click=${() => this.applyEdit(false)}
+                  >${this.busy ? "Applying…" : "↻ Replace original"}</button>
+                  <button
+                    class="modal-btn modal-btn-primary"
+                    ?disabled=${this.busy}
+                    title="Keep this recording untouched and save the edit as a new one"
+                    @click=${() => this.applyEdit(true)}
+                  >${this.busy ? "Applying…" : "＋ Save as new"}</button>`
+              : html`
+                  <button class="modal-btn" @click=${this.close}>Cancel</button>
+                  <button
+                    class="modal-btn modal-btn-primary"
+                    ?disabled=${this.busy || cutCount === 0}
+                    title=${cutCount === 0 ? "Delete at least one section first" : "Apply the edit"}
+                    @click=${() => { this.hint = ""; this.choosing = true; }}
+                  >Apply edit…</button>`}
           </div>
         </div>
       </div>

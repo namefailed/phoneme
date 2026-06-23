@@ -301,7 +301,7 @@ export class ActionRowElement extends LitElement {
               </div>`
             : null}
         </span>
-        <button class="action-clip" title="Clip a time range of this recording's audio to a WAV file" @click=${this.toggleClip}>✂ Clip…</button>
+        <button class="action-clip" title="Edit this recording's audio — trim the ends or cut out sections, then replace it or save a copy" @click=${this.toggleClip}>✂ Edit…</button>
         <button class="danger" title="Delete this recording" @click=${this.handleDelete}>🗑 Delete</button>
       </div>
     `;

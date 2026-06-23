@@ -226,6 +226,10 @@ fn is_retry_safe(req: &Request) -> bool {
         // Writes a new WAV to disk; a blind re-send after a lost reply would
         // re-cut and overwrite the clip, so single-attempt only.
         | ExportClip { .. }
+        // Edits audio (cut + concat) and either creates a new recording or
+        // replaces + re-transcribes in place — a blind re-send could double-import
+        // or re-edit an already-edited file, so single-attempt only.
+        | EditRecording { .. }
         // Reverts the live transcript to a chosen version (an edit) — re-flows
         // timing + re-embeds, so single-attempt like other transcript edits.
         | RevertToVersion { .. }

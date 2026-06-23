@@ -137,6 +137,66 @@ pub fn clip_wav(src: &Path, out_path: &Path, start_ms: i64, end_ms: i64) -> Resu
     Ok(end_frame - start_frame)
 }
 
+/// Re-edit a WAV by keeping only `keep_ranges` (millisecond `[start, end)` pairs,
+/// in ascending order) and concatenating them — everything between the kept
+/// ranges is dropped. This is the core of the audio editor (#262): a plain trim
+/// is a single keep range, and deleting an inner section is the gap left between
+/// two keep ranges. Ranges are frame-aligned per channel (never mid-frame on
+/// stereo) and `end` is clamped to the recording. Must be ordered and
+/// non-overlapping, and at least one must land inside the recording. Returns the
+/// number of sample frames written.
+///
+/// Pure + filesystem-only (like [`clip_wav`]) so it unit-tests without a daemon.
+pub fn edit_wav(src: &Path, out_path: &Path, keep_ranges: &[(i64, i64)]) -> Result<usize> {
+    if keep_ranges.is_empty() {
+        return Err(Error::InvalidConfig(
+            "edit needs at least one keep range".into(),
+        ));
+    }
+
+    let (samples, cfg) = read_wav(src)?;
+    let channels = cfg.channels.as_u8().max(1) as usize;
+    let sample_rate = cfg.sample_rate.as_u32().max(1) as i64;
+    let total_frames = samples.len() / channels;
+
+    let mut out: Vec<i16> = Vec::new();
+    let mut prev_end_frame: usize = 0;
+    for (i, &(start_ms, end_ms)) in keep_ranges.iter().enumerate() {
+        if start_ms < 0 || end_ms < 0 {
+            return Err(Error::InvalidConfig(format!(
+                "keep range {i} must be non-negative (start={start_ms}ms, end={end_ms}ms)"
+            )));
+        }
+        if start_ms >= end_ms {
+            return Err(Error::InvalidConfig(format!(
+                "keep range {i} start must be before end (start={start_ms}ms, end={end_ms}ms)"
+            )));
+        }
+        let start_frame = ((start_ms * sample_rate) / 1000).max(0) as usize;
+        let end_frame = (((end_ms * sample_rate) / 1000).max(0) as usize).min(total_frames);
+        if start_frame < prev_end_frame {
+            return Err(Error::InvalidConfig(format!(
+                "keep ranges must be ordered and non-overlapping (range {i} starts before the previous range ended)"
+            )));
+        }
+        // A range fully past the recording clamps to nothing — skip it rather
+        // than error, so a trailing keep that overshoots the tail is harmless.
+        if start_frame >= end_frame {
+            continue;
+        }
+        out.extend_from_slice(&samples[start_frame * channels..end_frame * channels]);
+        prev_end_frame = end_frame;
+    }
+
+    if out.is_empty() {
+        return Err(Error::InvalidConfig(
+            "edit result is empty (every keep range is past the recording end)".into(),
+        ));
+    }
+    write_wav(out_path, &out, cfg)?;
+    Ok(out.len() / channels)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,6 +291,39 @@ mod tests {
         // Same format as the source.
         assert_eq!(cfg.sample_rate.as_u32(), 16_000);
         assert_eq!(cfg.channels.as_u8(), 1);
+    }
+
+    /// edit_wav keeps multiple ranges and concatenates them, dropping the gap —
+    /// the "delete an inner section" core. Keep [0,250) + [500,750) of a 1s clip.
+    #[test]
+    fn edit_keeps_ranges_and_drops_the_gap() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("source.wav");
+        let out = dir.path().join("edited.wav");
+        let samples: Vec<i16> = (0..16_000).map(|i| i as i16).collect();
+        write_wav(&src, &samples, test_cfg()).unwrap();
+
+        // Keep 0..250ms (frames 0..4000) + 500..750ms (frames 8000..12000),
+        // dropping 250..500ms in between.
+        let n = edit_wav(&src, &out, &[(0, 250), (500, 750)]).unwrap();
+        assert_eq!(n, 8000);
+        let (got, _) = read_wav(&out).unwrap();
+        let mut want: Vec<i16> = samples[0..4000].to_vec();
+        want.extend_from_slice(&samples[8000..12000]);
+        assert_eq!(got, want);
+    }
+
+    /// Overlapping / out-of-order keep ranges are rejected — they'd scramble the
+    /// audio rather than produce a coherent edit.
+    #[test]
+    fn edit_rejects_overlapping_ranges() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("source.wav");
+        let out = dir.path().join("edited.wav");
+        let samples: Vec<i16> = (0..16_000).map(|i| i as i16).collect();
+        write_wav(&src, &samples, test_cfg()).unwrap();
+        assert!(edit_wav(&src, &out, &[(0, 500), (250, 750)]).is_err());
+        assert!(edit_wav(&src, &out, &[]).is_err());
     }
 
     /// An `end_ms` past the recording's duration clamps to the tail rather than

@@ -1119,6 +1119,25 @@ export async function exportClip(
   return await tauriInvoke<{ path: string }>("export_clip", { id, startMs, endMs, outPath });
 }
 
+/** Edit a recording's audio (#262): keep only `keepRanges` (`[startMs, endMs)`
+ *  pairs, ascending + non-overlapping) and concatenate them — a trim is one
+ *  range, deleting an inner section is the gap between two. `newRecording=true`
+ *  saves the result as a NEW recording (original untouched, returns its id);
+ *  `false` replaces this recording's audio in place (original backed up) and
+ *  re-transcribes (returns the same id + the backup path). Rejects with the
+ *  structured command error on a bad range / IO failure — the caller toasts it. */
+export async function editRecording(
+  id: string,
+  keepRanges: [number, number][],
+  newRecording: boolean,
+): Promise<{ id: string; backup?: string }> {
+  return await tauriInvoke<{ id: string; backup?: string }>("edit_recording", {
+    id,
+    keepRanges,
+    newRecording,
+  });
+}
+
 /** Skip the LLM step (cleanup / summary / tagging) currently running for the
  *  active queue item; the pipeline continues with the next step. */
 export async function skipCurrentStage(): Promise<void> {
