@@ -3,7 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { listTags, tagUsageCounts, kindCounts, listAllEntities, taskCounts, type Tag, type KindCounts, type EntityFacet, type TaskCounts } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { filterStore, applyEntityFilter, applyTaskFilter, type UiFilter, type RecordingKind, type TagState } from "../../state/filter";
-import { showFavorites, showPinned, DISPLAY_PREFS_EVENT } from "./columnPrefs";
+import { showFavorites, showPinned, showSidebarTags, showSidebarTasks, showSidebarEntities, DISPLAY_PREFS_EVENT } from "./columnPrefs";
 import { loadSidebarOrder, saveSidebarOrder, type SidebarSection } from "./sidebarOrder";
 import "./QueuePanel";
 
@@ -145,6 +145,9 @@ export class SidebarElement extends LitElement {
     this.unsubFilter = filterStore.subscribe((f) => {
       this.filterState = f;
     });
+    // ponytail: load all three facets even if a section is hidden in Appearance —
+    // the counts/facets are cheap, and a re-shown section then renders instantly
+    // without a load round-trip. Gate per-section only if these endpoints get heavy.
     void this.loadTags();
     void this.loadKindCounts();
     void this.loadEntities();
@@ -468,6 +471,10 @@ export class SidebarElement extends LitElement {
    *  plus its body when open. Library is rendered separately and can't move; the
    *  order of these three is `this.sectionOrder` (persisted per device). */
   private renderMovableSection(key: SidebarSection) {
+    // Hidden entirely via Settings → Appearance → Sidebar sections (per device).
+    const shown =
+      key === "tags" ? showSidebarTags() : key === "tasks" ? showSidebarTasks() : showSidebarEntities();
+    if (!shown) return html``;
     const open = key === "tags" ? this.tagsOpen : key === "tasks" ? this.tasksOpen : this.entitiesOpen;
     const label = key === "tags" ? "Tags" : key === "tasks" ? "Tasks" : "Entities";
     const body = !open

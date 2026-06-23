@@ -47,6 +47,9 @@ cross-recording "everything I have to do" list. Every task in one place: tick it
 off in line, filter by text, toggle **Open only**, and click a task's recording
 pill to jump straight to it.
 
+> Don't use this section? Hide it from the sidebar via **Settings → Appearance →
+> Sidebar sections** — your tasks stay extracted; only the sidebar section is hidden.
+
 ## Turning it on
 
 Task extraction is **opt-in** — it doesn't run on every recording by default.

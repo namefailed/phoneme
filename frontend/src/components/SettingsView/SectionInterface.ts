@@ -1,6 +1,17 @@
 import { renderField, bindFieldEvents } from "./form";
 import { invoke } from "@tauri-apps/api/core";
-import { showFavorites, showPinned, setShowFavorites, setShowPinned } from "../RecordingsView/columnPrefs";
+import {
+  showFavorites,
+  showPinned,
+  setShowFavorites,
+  setShowPinned,
+  showSidebarTags,
+  showSidebarTasks,
+  showSidebarEntities,
+  setShowSidebarTags,
+  setShowSidebarTasks,
+  setShowSidebarEntities,
+} from "../RecordingsView/columnPrefs";
 
 /** Default visible columns, used by the reset action. */
 const DEFAULT_VISIBLE_COLUMNS = ["day", "time", "duration", "status", "source", "transcript"];
@@ -426,6 +437,32 @@ export class SectionInterface {
           </span>
         </div>
       </div>
+
+      <div class="settings-section">
+        <h3>Sidebar sections</h3>
+
+        <div class="settings-field" style="align-items: flex-start; border-bottom: none;">
+          <label style="margin-top: 8px;">Sections</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
+            <label class="col-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+              <input type="checkbox" id="show-sec-tags" class="toggle-switch" ${showSidebarTags() ? "checked" : ""} />
+              <span>Tags</span>
+            </label>
+            <label class="col-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+              <input type="checkbox" id="show-sec-tasks" class="toggle-switch" ${showSidebarTasks() ? "checked" : ""} />
+              <span>Tasks</span>
+            </label>
+            <label class="col-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+              <input type="checkbox" id="show-sec-entities" class="toggle-switch" ${showSidebarEntities() ? "checked" : ""} />
+              <span>Entities</span>
+            </label>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
+              Turn a section off to hide it from the left sidebar (its recordings stay searchable;
+              re-enable it here). Applies instantly (per device).
+            </span>
+          </div>
+        </div>
+      </div>
     `;
     bindFieldEvents(this.container, config);
 
@@ -437,6 +474,15 @@ export class SectionInterface {
     favCb?.addEventListener("change", () => setShowFavorites(favCb.checked));
     const pinCb = this.container.querySelector<HTMLInputElement>("#show-pinned");
     pinCb?.addEventListener("change", () => setShowPinned(pinCb.checked));
+
+    // Sidebar-section visibility: per-device, fires phoneme:display-prefs-changed
+    // so the sidebar shows/hides the section live (same flow as the columns above).
+    const secTagsCb = this.container.querySelector<HTMLInputElement>("#show-sec-tags");
+    secTagsCb?.addEventListener("change", () => setShowSidebarTags(secTagsCb.checked));
+    const secTasksCb = this.container.querySelector<HTMLInputElement>("#show-sec-tasks");
+    secTasksCb?.addEventListener("change", () => setShowSidebarTasks(secTasksCb.checked));
+    const secEntitiesCb = this.container.querySelector<HTMLInputElement>("#show-sec-entities");
+    secEntitiesCb?.addEventListener("change", () => setShowSidebarEntities(secEntitiesCb.checked));
 
     this.container
       .querySelector<HTMLSelectElement>("#anim-speed")

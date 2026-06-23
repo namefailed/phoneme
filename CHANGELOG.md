@@ -1117,6 +1117,10 @@ trust boundary.*
 
 ### Appearance & themes
 
+- [x] **Show/hide the Tags, Tasks & Entities sidebar sections** — a new **Sidebar
+  sections** block under Settings → Appearance toggles each of the three movable
+  sidebar sections on or off entirely (separate from collapsing them). Per-device,
+  applies instantly — the same live-update path as the Favorites / Pinned toggles.
 - [x] **Full theme palette pass + 5 new themes** — every built-in theme was audited
   token-by-token against its palette's official spec and corrected where it had
   drifted (Tokyo Night's non-canonical cyan, One Dark's amber/orange collision,

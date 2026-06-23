@@ -48,6 +48,10 @@ Click an entity row to filter the library to the recordings that mention it; cli
 it again to clear. It's the entity counterpart of the tag list — "show me every
 recording that mentions Acme Corp" without typing a search.
 
+> Don't use this section? Hide it from the sidebar via **Settings → Appearance →
+> Sidebar sections** — your entities stay extracted and searchable; only the
+> sidebar facet is hidden.
+
 ## Turning it on
 
 Entity extraction is **opt-in** — it doesn't run on every recording by default.
