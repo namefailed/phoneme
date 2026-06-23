@@ -217,6 +217,12 @@ trust boundary.*
 
 ### Reliability & foundation
 
+- [x] **Local Ollama no longer OOMs on a capped context** — every Ollama AI step
+  now sends `options.num_ctx` (new `[llm_post_process] num_ctx`, default `8192`).
+  Without it, recent Ollama reserves a KV cache for the model's *full* 128k window,
+  so even a 4B model demanded ~16 GiB and failed to load with *"model requires more
+  system memory."* The cap keeps the cache ~1 GiB and is plenty for a transcript;
+  raise it for very long recordings. Cloud providers are unaffected.
 - [x] **Saved searches honor the Low-confidence filter** — a saved search captured
   with the **Low confidence** filter on now actually filters server-side when run
   (`phoneme list --saved` / the Saved-searches menu). The saved-filter mirror was

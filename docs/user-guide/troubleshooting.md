@@ -199,6 +199,24 @@ fails with "couldn't reach":
   the server itself, but the first generation may still need a model pull
   (`ollama pull <model>` once, manually).
 
+## 🧠 Ollama: "model requires more system memory"
+
+An AI step fails with something like *"model requires more system memory (15.9
+GiB) than is available"* even for a small 3–4B model. The weights aren't the
+problem — the **KV cache for the context window** is. Modern models advertise a
+128k-token window, and Ollama reserves a cache sized to it, which dwarfs the
+weights (a 4B model can balloon to ~16 GiB).
+
+Phoneme caps this with `[llm_post_process] num_ctx` (default **8192** tokens →
+~1 GiB cache), so this normally never happens. If you still hit it:
+
+- **Are you mid-transcription?** A backlog of recordings on a large Whisper model
+  eats RAM; the LLM then can't load. Let the queue drain (or `phoneme queue
+  pause`), then run the AI step.
+- **Lower `num_ctx`** further (e.g. `4096`) for a tighter cache on a small box, or
+  raise it on a roomy one if long transcripts get truncated.
+- **Pick a smaller model** for the step, or close other memory hogs.
+
 ## 🔑 Doctor says my API key is missing
 
 With a cloud provider selected, the Doctor verifies a key is actually set for

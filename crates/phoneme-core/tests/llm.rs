@@ -19,6 +19,7 @@ fn cfg(provider: &str, api_url: &str, api_key: &str, model: &str) -> LlmPostProc
         model: model.to_string(),
         prompt: "Clean this up".to_string(),
         timeout_secs: 5,
+        num_ctx: 8192,
         autostart_ollama: true,
     }
 }
@@ -30,6 +31,9 @@ async fn ollama_provider_processes_text() {
         .and(path("/api/generate"))
         // prompt + text are combined into the Ollama `prompt` field.
         .and(body_string_contains("Clean this up"))
+        // the context window is capped via options.num_ctx so Ollama doesn't
+        // reserve a KV cache for the model's full 128k window (~16 GiB).
+        .and(body_string_contains("num_ctx"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(serde_json::json!({"response": "cleaned"})),
         )

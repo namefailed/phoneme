@@ -756,6 +756,15 @@ pub struct LlmPostProcessConfig {
     /// falling back to the raw transcript.
     #[serde(default = "default_llm_timeout_secs")]
     pub timeout_secs: u64,
+    /// Context window (in tokens) requested from a local Ollama model via
+    /// `options.num_ctx`. Ollama reserves a KV cache sized to this; left unset it
+    /// reserves the model's *full* native window (modern models advertise 128k),
+    /// whose cache dwarfs the weights — e.g. a 4B model balloons to ~16 GiB and
+    /// fails to load. Capping it keeps memory bounded and is plenty for a
+    /// transcript. Raise it for very long recordings on a roomy box; ignored by
+    /// the cloud (OpenAI/Groq/Anthropic) providers.
+    #[serde(default = "default_llm_num_ctx")]
+    pub num_ctx: u32,
     /// Launch `ollama serve` automatically when an LLM step is about to run
     /// against a **local** Ollama endpoint and nothing is listening there yet.
     /// Applies to every step that resolves an Ollama connection through this
@@ -775,6 +784,7 @@ impl_redacted_debug!(LlmPostProcessConfig {
     model,
     prompt,
     timeout_secs,
+    num_ctx,
     autostart_ollama,
 });
 
@@ -787,6 +797,7 @@ impl PartialEq for LlmPostProcessConfig {
             && self.model == other.model
             && self.prompt == other.prompt
             && self.timeout_secs == other.timeout_secs
+            && self.num_ctx == other.num_ctx
             && self.autostart_ollama == other.autostart_ollama
     }
 }
@@ -845,6 +856,7 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
         model: "llama3.2:3b".into(),
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
         timeout_secs: 300,
+        num_ctx: default_llm_num_ctx(),
         autostart_ollama: true,
     }
 }
@@ -1106,6 +1118,14 @@ fn default_llm_timeout_secs() -> u64 {
     // take minutes. Streaming providers additionally bound the IDLE time, not the
     // total, so a slow-but-progressing local model never trips this.
     300
+}
+
+fn default_llm_num_ctx() -> u32 {
+    // ponytail: 8192 is Ollama's own historical default — small KV cache (~1 GiB
+    // here vs ~13 GiB for a 128k window), fits a typical transcript, and restores
+    // the "just works" behaviour from before Ollama started sizing the cache to
+    // the model's full window. Bump it in config for very long recordings.
+    8192
 }
 
 /// Serde default for boolean fields that should default to `true` when absent

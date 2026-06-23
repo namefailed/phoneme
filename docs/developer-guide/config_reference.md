@@ -201,6 +201,7 @@ followed.
 | `model` | `llama3.2:3b` | Model id |
 | `prompt` | clean-up instruction | System prompt |
 | `timeout_secs` | `300` | LLM HTTP timeout — generous, since an LLM cleaning a long transcript can take minutes; streaming providers bound idle time rather than total, so a slow-but-progressing local model never trips it |
+| `num_ctx` | `8192` | Context window (tokens) requested from a **local Ollama** model via `options.num_ctx`. Ollama sizes its KV cache to this; left unset it reserves the model's *full* native window — modern models advertise 128k, whose cache dwarfs the weights (a 4B model balloons to ~16 GiB and fails to load on a 16 GiB box). 8192 fits a typical transcript with a ~1 GiB cache; raise it for very long recordings on a roomy machine. Ignored by cloud providers (OpenAI/Groq/Anthropic). |
 | `autostart_ollama` | `true` | Launch `ollama serve` on demand when an LLM step's effective connection is a **local** Ollama and nothing answers there. Applies to every step that inherits this connection (cleanup, summary, tags, titles, in-place polish). An Ollama that was already running when the daemon first probed it is never managed; one the daemon launched is stopped again at daemon shutdown. Remote URLs and non-Ollama providers never launch anything. |
 
 The cleanup provider speaks one of four wire protocols: `ollama`, `openai` (OpenAI-compatible chat completions — used by most cloud providers), `groq`, or `anthropic`. See [Providers & Models](../user-guide/providers_and_models.md).

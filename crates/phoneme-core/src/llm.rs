@@ -83,6 +83,7 @@ impl LlmPostProcessor {
                 url: non_empty_or(&cfg.api_url, crate::endpoints::OLLAMA_LLM_URL),
                 model: non_empty_or(&cfg.model, "llama3.2:3b"),
                 timeout,
+                num_ctx: cfg.num_ctx,
             })),
             "openai" => Some(Box::new(OpenAiChatProvider {
                 http: self.http.clone(),
@@ -179,6 +180,7 @@ struct OllamaProvider {
     url: String,
     model: String,
     timeout: Duration,
+    num_ctx: u32,
 }
 
 /// One NDJSON object from a streaming `/api/generate` response. `response` is a
@@ -217,6 +219,10 @@ impl LlmProvider for OllamaProvider {
             "model": self.model,
             "prompt": combine(prompt, text),
             "stream": true,
+            // Cap the context window so Ollama doesn't reserve a KV cache sized to
+            // the model's full native window (128k on modern models → ~16 GiB,
+            // which fails to load on a 16 GiB box). See [llm_post_process].num_ctx.
+            "options": { "num_ctx": self.num_ctx },
         });
         // A streaming generation legitimately runs far longer than a single
         // request deadline. `RequestBuilder::timeout` caps the whole response
