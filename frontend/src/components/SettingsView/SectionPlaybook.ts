@@ -30,8 +30,19 @@ const KINDS: { value: PlaybookKind; label: string; blurb: string }[] = [
   { value: "hook", label: "Hook", blurb: "Runs a shell command or webhook with the recording JSON — always, or only when the transcript matches a trigger." },
 ];
 
-/** Built-in enrichment targets (plus `custom:<key>` entered free-form). */
-const BUILTIN_TARGETS = ["title", "summary", "tags"] as const;
+/** Built-in enrichment targets (plus `custom:<key>` entered free-form).
+ *  `meeting_digest` is the per-meeting field a meeting template writes — listing
+ *  it here lets a meeting entry show "Writes to → Meeting digest" instead of
+ *  falling back to "summary", and lets you point a new entry at it. */
+const BUILTIN_TARGETS = ["title", "summary", "tags", "meeting_digest"] as const;
+
+/** Friendlier labels for the target dropdown (the values stay the raw keys). */
+const TARGET_LABELS: Record<string, string> = {
+  title: "Title",
+  summary: "Summary",
+  tags: "Tags",
+  meeting_digest: "Meeting digest",
+};
 
 const DEFAULT_LLM = () => ({ provider: "", model: "", prompt: "", api_url: "", api_key: "", timeout_secs: 300 });
 const DEFAULT_HOOK = () => ({ command: "", webhook_url: "", timeout_secs: 60, keyword: "", case_sensitive: false, required: false });
@@ -140,13 +151,18 @@ export class SectionPlaybook {
 
       <div class="settings-section">
         <h3>Recipes</h3>
-        <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block; margin: -6px 0 12px;">
+        <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block; margin: -6px 0 12px; line-height: 1.5;">
           Ordered chains of entries. <b>Default pipeline</b> is what every normal recording runs. The transcript
           flows through each step in order — transforms reshape the text, enrichments fill fields, hooks fire.
+          A recipe's <b>Runs over</b> setting makes it either a per-recording pipeline or a <b>meeting template</b>:
+          a meeting template is just a recipe scoped to a whole meeting, running an <b>enrichment entry</b> (its prompt,
+          Writes to → <i>Meeting digest</i>) once over the merged transcript. Build one with <b>+ Add meeting template</b>
+          below — it creates the entry and the recipe together — then pick it in the <b>Meeting template</b> selector.
         </span>
         <div id="pb-recipes" style="display: flex; flex-direction: column; gap: 12px;"></div>
-        <div style="margin-top: 12px;">
+        <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
           <button class="inline-button" id="pb-add-recipe" type="button">+ Add recipe</button>
+          <button class="inline-button" id="pb-add-meeting-template" type="button" title="Create a meeting-scope recipe and its digest entry together">+ Add meeting template</button>
         </div>
         <div class="settings-field" style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
           <label for="pb-meeting-recipe">Meeting template</label>
@@ -170,6 +186,7 @@ export class SectionPlaybook {
     `;
 
     this.container.querySelector<HTMLButtonElement>("#pb-add-recipe")?.addEventListener("click", () => this.addRecipe());
+    this.container.querySelector<HTMLButtonElement>("#pb-add-meeting-template")?.addEventListener("click", () => this.addMeetingTemplate());
     const runOnToggle = this.container.querySelector<HTMLInputElement>("#pb-run-on-transcribe");
     runOnToggle?.addEventListener("change", () => {
       (this.config.hook ?? (this.config.hook = {})).run_on_transcribe = runOnToggle.checked;
@@ -388,7 +405,7 @@ export class SectionPlaybook {
       <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
         <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.8571rem;">Writes to
           <select class="pb-target">
-            ${BUILTIN_TARGETS.map((t) => `<option value="${t}" ${t === sel ? "selected" : ""}>${t}</option>`).join("")}
+            ${BUILTIN_TARGETS.map((t) => `<option value="${t}" ${t === sel ? "selected" : ""}>${TARGET_LABELS[t] ?? t}</option>`).join("")}
             <option value="custom" ${sel === "custom" ? "selected" : ""}>custom field…</option>
           </select>
         </label>
@@ -510,6 +527,46 @@ export class SectionPlaybook {
     this.recipes.push({ id, name: "New recipe", description: "", builtin: false, steps: [] });
     this.expanded.add(id);
     this.renderRecipes();
+    this.notifyChanged();
+  }
+
+  /** Create a meeting template — the entry+recipe split made concrete in one
+   *  click. A new **enrichment entry** holds the prompt (it Writes to → Meeting
+   *  digest), and a new **meeting-scope recipe** runs that entry once over the
+   *  merged transcript. Both are expanded so the relationship is visible; the
+   *  recipe immediately appears in the Meeting template selector below. */
+  private addMeetingTemplate() {
+    const entryName = "New meeting digest";
+    const entryId = this.mintId(entryName);
+    this.entries.push({
+      id: entryId,
+      name: entryName,
+      description: "The prompt this meeting template runs over the merged transcript.",
+      builtin: false,
+      kind: "enrichment",
+      llm: {
+        ...DEFAULT_LLM(),
+        prompt:
+          "Summarize this meeting from its merged transcript (every participant's track interleaved, each turn prefixed with its source). Produce: a short overview, the key topics, decisions reached, and action items with owners. Output only the digest, no preamble.",
+      },
+      target: "meeting_digest",
+      hook: DEFAULT_HOOK(),
+    });
+    const recipeName = "New meeting template";
+    const recipeId = this.mintId(recipeName);
+    this.recipes.push({
+      id: recipeId,
+      name: recipeName,
+      description: "Runs once over a whole meeting's merged transcript.",
+      builtin: false,
+      scope: "meeting",
+      steps: [entryId],
+    });
+    this.expanded.add(entryId);
+    this.expanded.add(recipeId);
+    this.renderEntries();
+    this.renderRecipes();
+    this.renderMeetingRecipeSelect();
     this.notifyChanged();
   }
 

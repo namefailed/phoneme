@@ -81,6 +81,31 @@ trust boundary.*
   event, with matching `phoneme entities add | edit | delete | merge` CLI (full
   GUI ↔ CLI ↔ IPC parity).
 
+### Detail pane & editors
+
+- [x] **Editor ⋯ overflow menus** — the Transcript and Notes editor headers each
+  gain a ⋯ menu (Esc / click-outside to close); **Find & Replace** moved into it
+  and the standalone action-row button is gone, so both editors reach it the same
+  way and the action row is less crowded.
+- [x] **Views / Versions dropdowns open upward** — their triggers sit at the
+  bottom of the transcript pane, so a downward menu opened toward the pane edge;
+  opening up puts the options where the eye and cursor already are.
+- [x] **Gentler mouse focus in the detail pane** — clicking the transcript (or any
+  detail cell) no longer scroll-yanks the pane to re-center the cursor; the
+  clicked thing is already on screen. Keyboard navigation still scrolls the cursor
+  into view, where the pull is wanted.
+- [x] **Entities grouped by kind** — the detail-pane entities surface now lays out
+  one labelled row per kind (People / Organizations / Topics / Terms) instead of a
+  single mixed chip flow, so a recording's entities read as scannable facets.
+- [x] **Re-run modal follows the Playbook** — the Re-run / Quick-switch-models
+  modal pre-fills cleanup + summary from the Playbook entries (with the inherit-on-
+  blank connection) instead of the legacy sections, and enables its panels from the
+  *effective* connection rather than the old global toggle.
+- [x] **Meeting-template authoring is discoverable** — a **+ Add meeting template**
+  button in Settings → Playbook creates the entry (its prompt, Writes to → *Meeting
+  digest*) and the meeting-scope recipe together, "Meeting digest" is now a first-
+  class enrichment target, and the Recipes copy explains the entry-vs-recipe split.
+
 ### Transcripts
 
 - [x] **Daily / weekly digest (period digest)** — generate one LLM **rollup
