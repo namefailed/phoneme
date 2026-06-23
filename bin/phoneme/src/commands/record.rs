@@ -451,18 +451,18 @@ mod tests {
 
     #[tokio::test]
     async fn record_start_subcommand_resolves_recipe_by_name() {
-        // "Meeting notes" is the display name of the seeded `meeting_notes`
+        // "Meeting digest" is the display name of the seeded `meeting_digest`
         // recipe; the subcommand must send the resolved id, not the typed name.
         assert_action_sends(
             "start-recipe",
             RecordAction::Start {
                 in_place: false,
-                recipe: Some("Meeting notes".into()),
+                recipe: Some("Meeting digest".into()),
             },
             Request::RecordStart {
                 mode: RecordMode::Hold,
                 in_place: false,
-                recipe_id: Some("meeting_notes".into()),
+                recipe_id: Some("meeting_digest".into()),
                 whisper_model: None,
                 source: None,
             },

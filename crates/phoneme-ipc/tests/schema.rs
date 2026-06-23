@@ -38,13 +38,13 @@ fn record_start_request_roundtrips() {
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Hold,
         in_place: true,
-        recipe_id: Some("prompt_capture".into()),
+        recipe_id: Some("meeting_digest".into()),
         whisper_model: Some("ggml-large-v3.bin".into()),
         source: Some(CaptureSource::SystemAudio),
     });
     roundtrip(&Request::RecordToggle {
         in_place: false,
-        recipe_id: Some("prompt_capture".into()),
+        recipe_id: Some("meeting_digest".into()),
         whisper_model: None,
         source: None,
     });

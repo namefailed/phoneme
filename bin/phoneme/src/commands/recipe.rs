@@ -54,22 +54,22 @@ mod tests {
     use super::*;
 
     /// A config whose recipes are the seeded defaults (`default`,
-    /// `prompt_capture`, `meeting_notes`, `journal_note`).
+    /// `meeting_digest`, `standup`, `interview`).
     fn cfg() -> Config {
         Config::default()
     }
 
     #[test]
     fn resolves_by_id() {
-        let id = resolve(&cfg(), "meeting_notes").expect("id match");
-        assert_eq!(id, "meeting_notes");
+        let id = resolve(&cfg(), "meeting_digest").expect("id match");
+        assert_eq!(id, "meeting_digest");
     }
 
     #[test]
     fn resolves_by_name_case_insensitively() {
-        // "Meeting notes" is the display name of the `meeting_notes` recipe.
-        let id = resolve(&cfg(), "  MEETING NOTES  ").expect("name match");
-        assert_eq!(id, "meeting_notes");
+        // "Meeting digest" is the display name of the `meeting_digest` recipe.
+        let id = resolve(&cfg(), "  MEETING DIGEST  ").expect("name match");
+        assert_eq!(id, "meeting_digest");
     }
 
     #[test]

@@ -109,7 +109,7 @@ mod tests {
 
         let code = tokio::time::timeout(
             Duration::from_secs(5),
-            run(base_args(&id.to_string(), Some("Meeting notes")), &cfg),
+            run(base_args(&id.to_string(), Some("Meeting digest")), &cfg),
         )
         .await
         .expect("retranscribe must return promptly");
@@ -122,7 +122,7 @@ mod tests {
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
-                recipe_id: Some("meeting_notes".into()),
+                recipe_id: Some("meeting_digest".into()),
             }]
         );
     }

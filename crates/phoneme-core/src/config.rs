@@ -2551,9 +2551,11 @@ fn default_keyword_rules() -> Vec<KeywordRule> {
 }
 
 /// Curated starter Playbook entries — the built-in "moves" recipes reference.
-/// The four migrated LLM steps (cleanup → title → summary → auto-tag) plus a few
-/// example entries (prompt polish, action items, the journal Hook) that showcase
-/// what the Playbook can do.
+/// The four migrated LLM steps (cleanup → title → summary → auto-tag), the real
+/// enrichments (entities, chapters, tasks), the meeting-digest templates, plus a
+/// single copy-to-clipboard Hook to show what a no-AI Hook step looks like. The
+/// slim seed only applies to a fresh config; an existing `[[playbook]]` is left
+/// untouched.
 pub fn default_playbook() -> Vec<PlaybookEntry> {
     let llm = |prompt: &str| PlaybookLlm {
         prompt: prompt.into(),
@@ -2604,100 +2606,22 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             target: "tags".into(),
             hook: PlaybookHook::default(),
         },
-        // Example entries (not in the `default` recipe, so they don't auto-run) —
-        // they show off what the Playbook can do. Edit them, add them to a recipe
-        // or a custom hotkey, or delete them.
+        // The one bundled example of a no-AI Hook step (not in the `default`
+        // recipe, so it doesn't auto-run): copy the transcript to the system
+        // clipboard. Add it to a recipe or a custom hotkey, edit it, or delete it.
         PlaybookEntry {
-            id: "filler_removal".into(),
-            name: "Remove fillers".into(),
-            description: "Deterministically strip filler words (\"um\", \"uh\", …) — no AI, instant. Tune the lists under [filler].".into(),
-            builtin: false,
-            kind: PlaybookKind::FillerRemoval,
-            input: StepInput::Previous,
-            // FillerRemoval reads `[filler]`, not the LLM half — kept default.
-            llm: PlaybookLlm::default(),
-            target: String::new(),
-            hook: PlaybookHook::default(),
-        },
-        PlaybookEntry {
-            id: "prompt_polish".into(),
-            name: "Prompt polish".into(),
-            description: "Reshape a rough dictation into a clean, well-structured LLM prompt.".into(),
-            builtin: false,
-            kind: PlaybookKind::Transform,
-            input: StepInput::Previous,
-            llm: llm("Rewrite the following dictation into a single clear, well-structured prompt for an AI assistant. Keep the intent; fix grammar; output only the prompt."),
-            target: String::new(),
-            hook: PlaybookHook::default(),
-        },
-        PlaybookEntry {
-            id: "action_items".into(),
-            name: "Action items".into(),
-            description: "Pull any action items out of the transcript into a custom field.".into(),
-            builtin: false,
-            kind: PlaybookKind::Enrichment,
-            input: StepInput::Previous,
-            llm: llm("List any action items from this transcript as a short bulleted list. If there are none, reply 'None'."),
-            target: "custom:action_items".into(),
-            hook: PlaybookHook::default(),
-        },
-        PlaybookEntry {
-            id: "journal".into(),
-            name: "Append to journal".into(),
-            description: "A Hook step (no AI): append the transcript to a daily journal file.".into(),
+            id: "clipboard".into(),
+            name: "Copy to clipboard".into(),
+            description: "A Hook step (no AI): copy the transcript to the system clipboard.".into(),
             builtin: false,
             kind: PlaybookKind::Hook,
             input: StepInput::Previous,
             llm: PlaybookLlm::default(),
             target: String::new(),
             hook: PlaybookHook {
-                command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\\\phoneme-journal.md') -Value $d.transcript\"".into(),
+                command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript\"".into(),
                 ..Default::default()
             },
-        },
-        PlaybookEntry {
-            id: "formalize".into(),
-            name: "Formalize".into(),
-            description: "Rewrite the transcript in a polished, professional tone.".into(),
-            builtin: false,
-            kind: PlaybookKind::Transform,
-            input: StepInput::Previous,
-            llm: llm("Rewrite the following transcript in a clear, professional tone. Keep all meaning; fix grammar and remove filler. Output only the rewritten text."),
-            target: String::new(),
-            hook: PlaybookHook::default(),
-        },
-        PlaybookEntry {
-            id: "bulletize".into(),
-            name: "Bulletize".into(),
-            description: "Condense the transcript into concise bullet points.".into(),
-            builtin: false,
-            kind: PlaybookKind::Transform,
-            input: StepInput::Previous,
-            llm: llm("Condense the following transcript into concise, well-organized bullet points capturing every key point. Output only the bullets."),
-            target: String::new(),
-            hook: PlaybookHook::default(),
-        },
-        PlaybookEntry {
-            id: "sentiment".into(),
-            name: "Sentiment".into(),
-            description: "Tag the overall sentiment of the transcript into a custom field.".into(),
-            builtin: false,
-            kind: PlaybookKind::Enrichment,
-            input: StepInput::Previous,
-            llm: llm("Classify the overall sentiment of this transcript as exactly one word: Positive, Neutral, or Negative. Reply with only that word."),
-            target: "custom:sentiment".into(),
-            hook: PlaybookHook::default(),
-        },
-        PlaybookEntry {
-            id: "keywords".into(),
-            name: "Keywords".into(),
-            description: "Extract the key topics from the transcript into a custom field.".into(),
-            builtin: false,
-            kind: PlaybookKind::Enrichment,
-            input: StepInput::Previous,
-            llm: llm("Extract the 3-7 most important topics or keywords from this transcript. Reply with only a comma-separated list, lowercase."),
-            target: "custom:keywords".into(),
-            hook: PlaybookHook::default(),
         },
         // Entity extraction — a REAL enrichment (target `entities`, backed by the
         // `entities` child table), unlike the `custom:*` examples above which have
@@ -2733,10 +2657,10 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             hook: PlaybookHook::default(),
         },
         // Task extraction — a REAL enrichment (target `tasks`, backed by the
-        // `tasks` child table), unlike the `custom:action_items` example which has
-        // no store. Add it to a recipe (or the `default` recipe) to pull action
-        // items on every recording, or run it on demand from the detail pane /
-        // `phoneme suggest-tasks`. Opt-in by default (not in the `default` recipe).
+        // `tasks` child table). Add it to a recipe (or the `default` recipe) to
+        // pull action items on every recording, or run it on demand from the
+        // detail pane / `phoneme suggest-tasks`. Opt-in by default (not in the
+        // `default` recipe).
         PlaybookEntry {
             id: "tasks".into(),
             name: "Extract tasks".into(),
@@ -2747,21 +2671,6 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             llm: llm("Extract concrete action items or to-dos the speaker committed to or asked for. Reply with ONLY a JSON array of objects, each {\"text\":\"...\",\"due\":\"...\"}, where text is the action (imperative and short) and due is any deadline mentioned (a free-text phrase like \"by Friday\", or an empty string if none). Output at most 20 items, no duplicates, no preamble, no code fences."),
             target: "tasks".into(),
             hook: PlaybookHook::default(),
-        },
-        PlaybookEntry {
-            id: "todo_capture".into(),
-            name: "Capture to-dos".into(),
-            description: "A keyword-triggered Hook: when the transcript contains \"Todo:\", append it to a to-do file.".into(),
-            builtin: false,
-            kind: PlaybookKind::Hook,
-            input: StepInput::Previous,
-            llm: PlaybookLlm::default(),
-            target: String::new(),
-            hook: PlaybookHook {
-                command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\\\phoneme-todos.md') -Value ('- '+$d.transcript)\"".into(),
-                keyword: "Todo:".into(),
-                ..Default::default()
-            },
         },
         // ── Meeting-scope enrichment entries (a "meeting template" is a
         // `scope = Meeting` recipe built from these). Each is an Enrichment whose
@@ -2869,43 +2778,6 @@ pub fn default_recipes() -> Vec<PlaybookRecipe> {
                 "summary".into(),
                 "auto_tag".into(),
             ],
-        },
-        // Example recipe (not the default) — wire it to a custom in-place hotkey to
-        // dictate a rough idea and get back a polished AI prompt.
-        PlaybookRecipe {
-            id: "prompt_capture".into(),
-            name: "Dictate → prompt".into(),
-            description: "Clean up the dictation, then reshape it into a polished LLM prompt."
-                .into(),
-            builtin: false,
-            scope: RecipeScope::Recording,
-            steps: vec!["cleanup".into(), "prompt_polish".into()],
-        },
-        // Example: a full meeting-notes pass — clean up, summarize, pull action
-        // items, then auto-tag. Wire it to a hotkey or pick it per recording.
-        PlaybookRecipe {
-            id: "meeting_notes".into(),
-            name: "Meeting notes".into(),
-            description: "Clean up, then summarize, pull action items, and tag — a full notes pass."
-                .into(),
-            builtin: false,
-            scope: RecipeScope::Recording,
-            steps: vec![
-                "cleanup".into(),
-                "summary".into(),
-                "action_items".into(),
-                "auto_tag".into(),
-            ],
-        },
-        // Example: clean up the dictation, then append it to a daily journal file
-        // via the `journal` Hook entry — showcases a Hook step inside a recipe.
-        PlaybookRecipe {
-            id: "journal_note".into(),
-            name: "Journal note".into(),
-            description: "Clean up the dictation, then append it to your daily journal file.".into(),
-            builtin: false,
-            scope: RecipeScope::Recording,
-            steps: vec!["cleanup".into(), "journal".into()],
         },
         // ── Meeting templates (scope = Meeting). Each runs ONCE over a meeting's
         // merged transcript and writes the meeting digest. `meeting_digest` is the
@@ -4008,52 +3880,10 @@ impl Default for Config {
             in_place: InPlaceConfig::default(),
             filler: FillerConfig::default(),
             meeting_hotkey: default_meeting_hotkey(),
-            hotkeys: vec![
-                // Disabled-by-default examples so a fresh install shows what a
-                // custom keybind looks like (its own combo + recipe). The user
-                // enables / edits / deletes them in Settings → Hotkeys. Each
-                // points at a seeded recipe — there's no per-binding `hooks`
-                // field; the journal/webhook side-effects live in the recipe.
-                HotkeyBinding {
-                    id: "example-journal".into(),
-                    label: "Example: journal note".into(),
-                    enabled: false,
-                    combo: "Ctrl+Alt+J".into(),
-                    mode: HotkeyMode::Hold,
-                    action: HotkeyAction::Record,
-                    recipe_id: "journal_note".into(),
-                    whisper_model: String::new(),
-                    source: None,
-                    in_place: HotkeyInPlace::default(),
-                },
-                HotkeyBinding {
-                    id: "example-prompt".into(),
-                    label: "Example: dictate → prompt".into(),
-                    enabled: false,
-                    combo: "Ctrl+Alt+P".into(),
-                    mode: HotkeyMode::Hold,
-                    action: HotkeyAction::InPlace,
-                    recipe_id: "prompt_capture".into(),
-                    whisper_model: String::new(),
-                    source: None,
-                    in_place: HotkeyInPlace {
-                        full_pipeline: true,
-                        ..HotkeyInPlace::default()
-                    },
-                },
-                HotkeyBinding {
-                    id: "example-meeting-notes".into(),
-                    label: "Example: meeting notes".into(),
-                    enabled: false,
-                    combo: "Ctrl+Alt+M".into(),
-                    mode: HotkeyMode::Hold,
-                    action: HotkeyAction::Record,
-                    recipe_id: "meeting_notes".into(),
-                    whisper_model: String::new(),
-                    source: None,
-                    in_place: HotkeyInPlace::default(),
-                },
-            ],
+            // No example keybinds out of the box — the three built-ins (record /
+            // in-place / meeting) cover a fresh install. Users add their own in
+            // Settings → Keybinds, pointing at whatever recipe they like.
+            hotkeys: vec![],
             playbook: default_playbook(),
             recipes: default_recipes(),
             // Off by default: no language routes, so every recording uses the
@@ -6755,7 +6585,7 @@ mod tests {
             LanguageRoute {
                 language: "es".into(),
                 whisper_model: "ggml-large-v3.bin".into(),
-                recipe_id: "meeting_notes".into(),
+                recipe_id: "meeting_digest".into(),
                 enabled: true,
             },
             LanguageRoute {

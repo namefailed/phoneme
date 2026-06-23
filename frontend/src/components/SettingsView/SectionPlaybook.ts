@@ -59,6 +59,10 @@ function defaultPlaybook(): PlaybookEntry[] {
     { id: "auto_tag", name: "Auto-tag", builtin: true, kind: "enrichment", target: "tags", hook: DEFAULT_HOOK(),
       description: "Suggest tags for the recording (you approve before they apply).",
       llm: llm("Suggest a few short topical tags for this transcript. Reply with ONLY a comma-separated list of lowercase tags, no preamble.") },
+    { id: "clipboard", name: "Copy to clipboard", builtin: false, kind: "hook", target: "",
+      hook: { ...DEFAULT_HOOK(), command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript\"" },
+      description: "A Hook step (no AI): copy the transcript to the system clipboard.",
+      llm: DEFAULT_LLM() },
   ];
 }
 
@@ -132,11 +136,6 @@ export class SectionPlaybook {
           Edit the provided examples or add your own; turn the built-in steps on/off in Post-Processing.
         </span>
         <div id="pb-entries" style="display: flex; flex-direction: column; gap: 16px;"></div>
-        <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="inline-button" data-add="transform" type="button">+ Transform</button>
-          <button class="inline-button" data-add="enrichment" type="button">+ Enrichment</button>
-          <button class="inline-button" data-add="hook" type="button">+ Hook</button>
-        </div>
       </div>
 
       <div class="settings-section">
@@ -170,9 +169,6 @@ export class SectionPlaybook {
       </div>
     `;
 
-    this.container.querySelectorAll<HTMLButtonElement>("[data-add]").forEach((btn) => {
-      btn.addEventListener("click", () => this.addEntry(btn.dataset.add as PlaybookKind));
-    });
     this.container.querySelector<HTMLButtonElement>("#pb-add-recipe")?.addEventListener("click", () => this.addRecipe());
     const runOnToggle = this.container.querySelector<HTMLInputElement>("#pb-run-on-transcribe");
     runOnToggle?.addEventListener("change", () => {
@@ -290,12 +286,16 @@ export class SectionPlaybook {
         ? group.map((e) => this.entryCard(e)).join("")
         : `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No ${k.label.toLowerCase()} entries yet.</span>`;
       return `
-        <div class="pb-group">
+        <div class="pb-group" style="display: flex; flex-direction: column;">
           <div class="pb-group-label" title="${escapeAttr(k.blurb)}">${k.label}s</div>
           <div style="display: flex; flex-direction: column; gap: 12px;">${cards}</div>
+          <button class="inline-button pb-add-entry" data-add="${k.value}" type="button" style="margin-top: 10px; align-self: flex-start;">+ ${k.label}</button>
         </div>`;
     }).join("");
 
+    host.querySelectorAll<HTMLButtonElement>(".pb-add-entry").forEach((btn) => {
+      btn.addEventListener("click", () => this.addEntry(btn.dataset.add as PlaybookKind));
+    });
     host.querySelectorAll<HTMLElement>(".pb-card").forEach((card) => this.wireEntryCard(card));
   }
 

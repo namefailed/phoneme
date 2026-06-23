@@ -2643,7 +2643,7 @@ fn resolve_recipe_empty_falls_back_to_default() {
     );
 }
 
-/// A recipe that includes a Hook entry (the seeded `journal` hook) resolves a
+/// A recipe that includes a Hook entry (the seeded `clipboard` hook) resolves a
 /// `hook` step — Playbook hooks are real recipe steps now (H1). An entry with no
 /// command or webhook is skipped so it never adds an empty step.
 #[test]
@@ -2667,10 +2667,10 @@ fn resolve_recipe_includes_hook_steps_and_skips_empty_ones() {
     cfg.recipes.push(PlaybookRecipe {
         id: "with_hooks".into(),
         name: "With hooks".into(),
-        description: "Cleanup, the journal hook, and an empty (skipped) hook.".into(),
+        description: "Cleanup, the clipboard hook, and an empty (skipped) hook.".into(),
         builtin: false,
         scope: RecipeScope::Recording,
-        steps: vec!["cleanup".into(), "journal".into(), "empty_hook".into()],
+        steps: vec!["cleanup".into(), "clipboard".into(), "empty_hook".into()],
     });
     let labels: Vec<_> = crate::pipeline::resolve_recipe(&cfg, "with_hooks")
         .iter()
@@ -2679,16 +2679,31 @@ fn resolve_recipe_includes_hook_steps_and_skips_empty_ones() {
     assert_eq!(
         labels,
         vec!["transform", "hook"],
-        "the journal Hook entry resolves a hook step; the empty hook is skipped"
+        "the clipboard Hook entry resolves a hook step; the empty hook is skipped"
     );
 }
 
-/// A recipe with the seeded `filler_removal` entry resolves a deterministic
+/// A recipe with a `filler_removal` entry resolves a deterministic
 /// `filler_removal` step (no LLM provider involved) — the non-LLM Transform path.
 #[test]
 fn resolve_recipe_includes_filler_removal_step() {
-    use phoneme_core::config::{PlaybookRecipe, RecipeScope};
+    use phoneme_core::config::{
+        PlaybookEntry, PlaybookHook, PlaybookKind, PlaybookLlm, PlaybookRecipe, RecipeScope,
+    };
     let mut cfg = config_with_custom_recipe();
+    // The slim default seed no longer ships a `filler_removal` entry, so push one
+    // here to exercise the deterministic FillerRemoval path self-containedly.
+    cfg.playbook.push(PlaybookEntry {
+        id: "filler_removal".into(),
+        name: "Remove fillers".into(),
+        description: "Deterministically strip filler words — no AI.".into(),
+        builtin: false,
+        kind: PlaybookKind::FillerRemoval,
+        input: Default::default(),
+        llm: PlaybookLlm::default(),
+        target: String::new(),
+        hook: PlaybookHook::default(),
+    });
     cfg.recipes.push(PlaybookRecipe {
         id: "tidy".into(),
         name: "Tidy".into(),
@@ -2741,7 +2756,7 @@ fn route(
 #[test]
 fn resolve_language_route_exact_match_wins() {
     let routes = vec![
-        route("es", "large-es", "meeting_notes", true),
+        route("es", "large-es", "meeting_digest", true),
         route("*", "", "default", true),
     ];
     let r = crate::pipeline::resolve_language_route(&routes, Some("es")).unwrap();

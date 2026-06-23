@@ -25,7 +25,7 @@ describe("SectionPlaybook — seeded library renders", () => {
     // The constructor seeds config.playbook / config.recipes in place.
     const entries = config.playbook as Array<{ id: string }>;
     const recipes = config.recipes as Array<{ id: string; scope?: string }>;
-    expect(entries.map((e) => e.id)).toEqual(["cleanup", "title", "summary", "auto_tag"]);
+    expect(entries.map((e) => e.id)).toEqual(["cleanup", "title", "summary", "auto_tag", "clipboard"]);
     // The recording-scope `default` plus the meeting templates (the meeting seeds
     // mirror the Rust `default_recipes()`); `meeting_recipe_id` defaults empty.
     expect(recipes.map((r) => r.id)).toEqual([
@@ -40,9 +40,9 @@ describe("SectionPlaybook — seeded library renders", () => {
 
     // Each seeded entry renders a card; the default recipe renders too.
     const cards = host.querySelectorAll(".pb-card");
-    expect(cards.length).toBe(4);
+    expect(cards.length).toBe(5);
     const names = Array.from(host.querySelectorAll<HTMLInputElement>(".pb-name")).map((i) => i.value);
-    expect(names).toEqual(["Cleanup", "Title", "Summary", "Auto-tag"]);
+    expect(names).toEqual(["Cleanup", "Title", "Summary", "Auto-tag", "Copy to clipboard"]);
 
     // The Playbook + Recipes headings mount.
     const headings = Array.from(host.querySelectorAll("h3")).map((h) => h.textContent);

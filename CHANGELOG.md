@@ -345,6 +345,16 @@ trust boundary.*
 
 ### Internals & refactors
 
+- [x] **Slimmer bundled Playbook defaults** — a fresh config now seeds just the
+  built-in steps (cleanup, title, summary, auto-tag, the entities/chapters/tasks
+  enrichments, and the meeting-digest templates) plus a single **copy-to-clipboard**
+  Hook to show what a no-AI Hook step looks like. The nine pure-showcase example
+  entries (prompt polish, action items, formalize, bulletize, sentiment, keywords,
+  the journal/to-do Hooks, deterministic filler-removal) and their three example
+  recipes (dictate → prompt, meeting notes, journal note) are no longer seeded — the
+  dump of options was more clutter than help. Existing configs are untouched: the
+  seed only fills in a config that has no `[[playbook]]` tables, so anything you
+  already saved (or built by hand) stays exactly as it is.
 - [x] **Unified config `schema_version`** — the per-feature one-time-migration
   latches (`playbook_migrated`, `hooks_migrated`) are replaced by a single
   top-level `schema_version` integer. Each migration owns a version step (the
