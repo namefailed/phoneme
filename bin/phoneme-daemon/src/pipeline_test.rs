@@ -3565,8 +3565,11 @@ async fn skip_only_fires_for_the_active_processing_item() {
 /// pipeline still carries both firing paths — the legacy
 /// `[hook].commands`/`keyword_rules`/`webhook_url` loops and the recipe Hook
 /// executor `run_hook_steps` — so the guarantee that they don't both fire rests
-/// on `migrate_hooks` moving the legacy fields into recipe Hook entries and then
-/// clearing the legacy fields. This test mirrors the daemon's startup
+/// on `migrate_hooks` moving the legacy fields into recipe Hook entries, clearing
+/// the legacy fields, and bumping `schema_version`; the legacy loops then run only
+/// while `schema_version < CURRENT_SCHEMA_VERSION` (see
+/// `stale_legacy_hook_does_not_double_fire_post_migration` for the stale-config
+/// edge that version guard covers). This test mirrors the daemon's startup
 /// (`load_config` runs both migrations before any pipeline run): it seeds a
 /// legacy `[hook]` command + webhook, migrates, then runs the full pipeline and
 /// asserts the shell hook ran once (append-and-count, so a second fire would be
@@ -3714,6 +3717,156 @@ async fn configured_hook_fires_exactly_once_per_transcribe() {
         received.len(),
         1,
         "the configured webhook fired exactly once"
+    );
+}
+
+/// A stale config — migration already done (`schema_version` at
+/// `CURRENT_SCHEMA_VERSION`, the command folded into a recipe Hook entry) but
+/// `hook.commands` STILL non-empty — must not fire that command twice. This is
+/// the exact double-fire window the version guard closes: `migrate_hooks` is a
+/// no-op at this version (so it won't re-clear the leftover commands), and the
+/// legacy in-pipeline loop only iterates them when `schema_version <
+/// CURRENT_SCHEMA_VERSION`. With the guard the legacy loop is skipped and only
+/// `run_hook_steps` fires the migrated entry → one line. Without it the leftover
+/// command fires a second time → two.
+///
+/// Windows-only for the same reason as
+/// `configured_hook_fires_exactly_once_per_transcribe` (the marker uses
+/// `cmd /c`).
+#[tokio::test]
+#[cfg_attr(not(windows), ignore)]
+async fn stale_legacy_hook_does_not_double_fire_post_migration() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "stale hook double-fire check",
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    // Appended to (`>>`), so a double-fire shows as two lines.
+    let marker = tmp.path().join("hook-fires.txt");
+    let command = format!("cmd /c echo fired>> \"{}\"", marker.to_string_lossy());
+
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+
+    cfg.hook.run_on_transcribe = true;
+    cfg.hook.timeout_secs = 30;
+    cfg.hook.commands = vec![command.clone()];
+    cfg.hook.keyword_rules.clear();
+
+    // Normal migration: folds the command into a recipe Hook entry, clears the
+    // legacy field, and bumps `schema_version` to `CURRENT_SCHEMA_VERSION`.
+    cfg.migrate_playbook();
+    cfg.migrate_hooks();
+    assert_eq!(
+        cfg.schema_version,
+        phoneme_core::config::CURRENT_SCHEMA_VERSION,
+        "migrate_hooks advanced the schema version"
+    );
+    assert!(
+        cfg.hook.commands.is_empty(),
+        "migrate_hooks cleared the legacy command into a recipe Hook entry"
+    );
+
+    // Now corrupt the config into the stale state: re-inject the SAME command
+    // into the (already-migrated) legacy field, as a hand-edited or partially
+    // written config could carry it. `schema_version` stays at CURRENT, so
+    // re-running migration would NOT clear it again.
+    cfg.hook.commands = vec![command];
+    assert!(
+        !cfg.migrate_hooks(),
+        "migrate_hooks is a no-op at CURRENT_SCHEMA_VERSION (returns false, changes nothing)"
+    );
+    assert_eq!(
+        cfg.schema_version,
+        phoneme_core::config::CURRENT_SCHEMA_VERSION,
+        "migrate_hooks stays a no-op at CURRENT, leaving the stale command in place"
+    );
+    assert!(
+        !cfg.hook.commands.is_empty(),
+        "the stale command survived — migration won't re-clear it at this version"
+    );
+
+    let state = test_state(tmp.path(), cfg).await;
+
+    let audio_path = tmp.path().join("clip.wav");
+    std::fs::write(&audio_path, b"RIFF....not-real-audio").unwrap();
+    let id = RecordingId::new();
+    let started_at = chrono::Local::now();
+    let row = Recording {
+        id: id.clone(),
+        started_at,
+        duration_ms: 1000,
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        transcript: None,
+        model: None,
+        status: RecordingStatus::Transcribing,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: None,
+        meeting_name: None,
+        track: None,
+        in_place: false,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        pinned: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        entities_model: None,
+        chapters_model: None,
+        tasks_model: None,
+        title: None,
+        title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
+        mean_confidence: None,
+        detected_language: None,
+        tags: vec![],
+        entities: vec![],
+        tasks: vec![],
+        speaker_names: vec![],
+    };
+    state.catalog.insert(&row).await.unwrap();
+    seed_processing_inbox(&state, &id, &audio_path, started_at).await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: started_at,
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("pipeline run should succeed");
+
+    // Exactly one line: the migrated recipe Hook entry fired; the stale legacy
+    // command did NOT fire a second time.
+    let fires = std::fs::read_to_string(&marker).expect("the migrated hook wrote its marker");
+    let lines = fires.lines().filter(|l| !l.trim().is_empty()).count();
+    assert_eq!(
+        lines, 1,
+        "the stale legacy command must not double-fire post-migration, got: {fires:?}"
     );
 }
 

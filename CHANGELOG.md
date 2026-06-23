@@ -528,8 +528,16 @@ trust boundary.*
   recomputed; a split-off speaker has no name/voiceprint until enrolled. New
   `ReassignSegmentSpeaker` / `MergeSpeakers` / `SplitSpeaker` IPC (mutating, not retry-safe,
   emit `speaker_name_updated`) + Tauri commands, and CLI `phoneme speaker reassign|merge|split`.
-  The in-app detail-pane merge/split editor is a planned follow-up; the wire contract above is
-  what it will call.
+- [x] **In-recording speaker correction — in the app** — the correction backend above is now
+  wired into the UI. In the **merged meeting view**, every chronological turn has a small **⋯**
+  button beside its speaker chip that opens a keyboard-accessible, Esc-closable popover to
+  **reassign** that turn to another speaker, **split** it onto a brand-new speaker, or **merge**
+  that speaker into another (each scoped to the right track — the turn's segment indices are
+  resolved from the loaded timeline, so a clicked turn maps to the exact `reassign`/`split`
+  segments). The single-recording **Rename speakers** modal gains a per-speaker **Merge into…**
+  picker. Every op rides the new `ipc.ts` wrappers (`reassignSegmentSpeaker` / `mergeSpeakers` /
+  `splitSpeaker`) and refreshes off the daemon's `speaker_name_updated` event, the same reload
+  path as a rename.
 - [x] **Expected-speakers prior** — `[diarization].expected_speakers = n` tells the local
   diarizer how many voices to expect. If it still finds MORE than `n` (one voice over-split
   into several), Phoneme greedily merges the closest clusters by voiceprint cosine until exactly

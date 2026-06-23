@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing, PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listSession, setSpeakerName, getSegments, saveTextExport, recognizeSpeakers, dismissSpeakerSuggestion, getMeetingDigest, rerunMeetingDigest, type Recording, type TranscriptSegment, type SpeakerSuggestion, type MeetingDigest } from "../../services/ipc";
+import { listSession, setSpeakerName, getSegments, saveTextExport, recognizeSpeakers, dismissSpeakerSuggestion, getMeetingDigest, rerunMeetingDigest, reassignSegmentSpeaker, mergeSpeakers, splitSpeaker, type Recording, type TranscriptSegment, type SpeakerSuggestion, type MeetingDigest } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { formatDuration, fmtClock } from "../../utils/format";
 import { invoke } from "@tauri-apps/api/core";
@@ -10,6 +10,8 @@ import {
   mergedPlainText,
   mergeChronological,
   chronoPlainText,
+  segmentIdxsForChronoBlock,
+  speakersForRename,
   type MergedBlock,
   type ChronoBlock,
 } from "./mergeMeeting";
@@ -69,6 +71,14 @@ export class MergedConversationDetail extends LitElement {
    *  label), or null when none. Click a chip to edit; commit on Enter/blur. */
   @state() private editing: { recordingId: string; label: number } | null = null;
 
+  /** The chronological turn whose speaker-correction popover is open (keyed by
+   *  the block's stable `key`), or null when none. In-recording speaker
+   *  correction (U1): reassign this turn to another/new speaker, split it off, or
+   *  merge its speaker into another — the chrono twin of the single-recording
+   *  modal. Only chrono turns expose it (a turn maps to real segment indices);
+   *  Esc / outside-click / a committed action closes it. */
+  @state() private correcting: string | null = null;
+
   /** Recognized-speaker suggestions across the meeting's tracks (#9): unnamed
    *  diarized speakers whose voiceprints matched a known voice. Each carries the
    *  track `recordingId` so accepting names the right track's speaker. */
@@ -109,6 +119,16 @@ export class MergedConversationDetail extends LitElement {
     this.config = (e as CustomEvent).detail ?? null;
   };
 
+  /** Close the speaker-correction popover on a click outside it. A click inside
+   *  the popover (or on its toggle button) lands within a `.merged-correct`
+   *  wrapper, so it's left open; anything else closes it. */
+  private onDocPointerDown = (e: Event) => {
+    if (!this.correcting) return;
+    const target = e.target as Element | null;
+    if (target?.closest?.(".merged-correct")) return;
+    this.correcting = null;
+  };
+
   /** The meeting id we've already run speaker recognition for, so the heavy
    *  per-track `recognizeSpeakers` batch fires once per opened meeting — not on
    *  every event-driven `reload()` (a track finished, a digest updated, …) while
@@ -124,6 +144,7 @@ export class MergedConversationDetail extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener("config:saved", this.onConfigSaved);
+    document.addEventListener("pointerdown", this.onDocPointerDown);
     if (!this.config) {
       invoke("read_config").then((cfg) => {
         this.config = cfg;
@@ -139,6 +160,7 @@ export class MergedConversationDetail extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("config:saved", this.onConfigSaved);
+    document.removeEventListener("pointerdown", this.onDocPointerDown);
     this.gone = true;
     if (this.llmUnsub) {
       this.llmUnsub();
@@ -189,6 +211,9 @@ export class MergedConversationDetail extends LitElement {
   private async loadSession() {
     this.loading = true;
     this.error = null;
+    // Block keys are derived from segment timing, which a reload re-derives — drop
+    // any open correction popover so it can't anchor on a stale (gone) turn.
+    this.correcting = null;
     // Only wipe the suggestions banner when the meeting actually changed; a
     // same-meeting reload keeps the already-recognized voices in place (we no
     // longer re-run recognition on every reload — see suggestionsLoadedFor).
@@ -379,6 +404,85 @@ export class MergedConversationDetail extends LitElement {
     } else if (e.key === "Escape") {
       e.preventDefault();
       this.editing = null; // cancel without saving
+    }
+  }
+
+  // ── In-recording speaker correction (U1) ──────────────────────────────────
+  // A chrono turn maps to real segment indices, so it can be reassigned, split
+  // off, or have its whole speaker merged into another. Each op fires its IPC and
+  // lets the daemon's `SpeakerNameUpdated` event drive the reload (the parent
+  // turns it into reload()), exactly like commitSpeakerName. The ops are scoped to
+  // ONE track (recordingId) — labels are per-recording, so a meeting's two tracks
+  // never cross.
+
+  /** The 1-based speaker labels present on one track (still-marked + already
+   *  renamed), the rename modal's `speakersForRename` for the merged view's
+   *  reassign/merge pickers. */
+  private speakerLabelsFor(recordingId: string): number[] {
+    const rec = this.recordings.find((r) => r.id === recordingId);
+    if (!rec) return [];
+    return speakersForRename(rec.transcript, rec.speaker_names);
+  }
+
+  /** A fresh label for "new speaker" on a track: one past the highest existing
+   *  label, so reassign/split never collide with a current speaker. */
+  private nextSpeakerLabel(recordingId: string): number {
+    const labels = this.speakerLabelsFor(recordingId);
+    return labels.length ? Math.max(...labels) + 1 : 1;
+  }
+
+  /** Reassign every segment of one chrono turn to `newLabel` (a brand-new label
+   *  splits the turn onto a fresh speaker). Resolves the turn's segment indices
+   *  from the loaded timeline, then calls the per-segment IPC for each. */
+  private async reassignTurn(b: ChronoBlock, newLabel: number) {
+    this.correcting = null;
+    const idxs = segmentIdxsForChronoBlock(b, this.segmentsMap.get(b.recordingId));
+    if (idxs.length === 0) {
+      showToast("Couldn't map this turn to its segments — re-transcribe to backfill timing.", "error");
+      return;
+    }
+    try {
+      // Per-segment ops; the daemon emits one SpeakerNameUpdated per call, but the
+      // parent's reload is idempotent so the extra reloads just settle the view.
+      for (const idx of idxs) await reassignSegmentSpeaker(b.recordingId, idx, newLabel);
+      await this.loadSession();
+      this.onRefresh?.();
+    } catch (e) {
+      showToast(`Couldn't reassign turn: ${errText(e)}`, "error");
+    }
+  }
+
+  /** Split one chrono turn off its speaker onto a brand-new label (its segments
+   *  move; the rest of that speaker's turns stay). Uses the single split IPC so
+   *  the daemon validates the whole set in one transaction. */
+  private async splitTurn(b: ChronoBlock) {
+    this.correcting = null;
+    if (b.speaker == null) return; // only numeric (renamable) speakers split
+    const idxs = segmentIdxsForChronoBlock(b, this.segmentsMap.get(b.recordingId));
+    if (idxs.length === 0) {
+      showToast("Couldn't map this turn to its segments — re-transcribe to backfill timing.", "error");
+      return;
+    }
+    try {
+      await splitSpeaker(b.recordingId, b.speaker, idxs, this.nextSpeakerLabel(b.recordingId));
+      await this.loadSession();
+      this.onRefresh?.();
+    } catch (e) {
+      showToast(`Couldn't split turn: ${errText(e)}`, "error");
+    }
+  }
+
+  /** Merge one turn's speaker into another on the same track: every segment of
+   *  `from` becomes `into`, and `from` ceases to exist. */
+  private async mergeTurnSpeaker(b: ChronoBlock, intoLabel: number) {
+    this.correcting = null;
+    if (b.speaker == null || b.speaker === intoLabel) return;
+    try {
+      await mergeSpeakers(b.recordingId, b.speaker, intoLabel);
+      await this.loadSession();
+      this.onRefresh?.();
+    } catch (e) {
+      showToast(`Couldn't merge speakers: ${errText(e)}`, "error");
     }
   }
 
@@ -677,7 +781,7 @@ export class MergedConversationDetail extends LitElement {
             >
             <span class="chrono-source" aria-hidden="true" title=${b.source.label}>${b.source.icon}</span>
             ${b.speaker != null
-              ? this.renderSpeakerChip(b)
+              ? html`${this.renderSpeakerChip(b)}${this.renderCorrectChip(b)}`
               : b.displayName
                 ? html`<span class="merged-speaker">${b.displayName}</span>`
                 : nothing}
@@ -686,6 +790,75 @@ export class MergedConversationDetail extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  /** The per-turn speaker-correction affordance (chrono turns only — a turn maps
+   *  to real segment indices). A small "fix" button toggles a popover with:
+   *  reassign this turn to another/new speaker, split it onto a fresh speaker, or
+   *  merge this speaker into another. Keyboard-accessible (real button + focusable
+   *  controls); Esc / outside-click / a committed action closes it. */
+  private renderCorrectChip(b: ChronoBlock) {
+    if (b.speaker == null) return nothing; // numeric speakers only
+    const open = this.correcting === b.key;
+    const others = this.speakerLabelsFor(b.recordingId).filter((l) => l !== b.speaker);
+    return html`<span class="merged-correct" @click=${(e: Event) => e.stopPropagation()}>
+      <button
+        class="merged-correct-btn"
+        type="button"
+        title="Correct this turn's speaker — reassign, split, or merge"
+        aria-label="Correct this turn's speaker"
+        aria-expanded=${open ? "true" : "false"}
+        @click=${() => (this.correcting = open ? null : b.key)}
+      >⋯</button>
+      ${open
+        ? html`<div class="merged-correct-pop" role="menu" @keydown=${this.onCorrectKeyDown}>
+            ${others.length
+              ? html`<div class="merged-correct-row">
+                  <label>Reassign turn to</label>
+                  <select
+                    aria-label="Reassign this turn to a speaker"
+                    @change=${(e: Event) => {
+                      const v = Number((e.target as HTMLSelectElement).value);
+                      if (Number.isFinite(v) && v >= 1) void this.reassignTurn(b, v);
+                    }}
+                  >
+                    <option value="" selected disabled>Choose…</option>
+                    ${others.map((l) => html`<option value=${l}>Speaker ${l}</option>`)}
+                  </select>
+                </div>`
+              : nothing}
+            <button class="merged-correct-action" type="button" @click=${() => void this.splitTurn(b)}>
+              Split this turn into a new speaker
+            </button>
+            ${others.length
+              ? html`<div class="merged-correct-row">
+                  <label>Merge Speaker ${b.speaker} into</label>
+                  <select
+                    aria-label="Merge this speaker into another"
+                    @change=${(e: Event) => {
+                      const v = Number((e.target as HTMLSelectElement).value);
+                      if (Number.isFinite(v) && v >= 1) void this.mergeTurnSpeaker(b, v);
+                    }}
+                  >
+                    <option value="" selected disabled>Choose…</option>
+                    ${others.map((l) => html`<option value=${l}>Speaker ${l}</option>`)}
+                  </select>
+                </div>`
+              : nothing}
+          </div>`
+        : nothing}
+    </span>`;
+  }
+
+  /** Esc inside the correction popover closes it (the conventions: every popover
+   *  closes on Esc). Stops the key so it doesn't bubble to the recording-level
+   *  Escape handler. */
+  private onCorrectKeyDown(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.correcting = null;
+    }
   }
 
   /** Render one merged block. The source header is repeated only when the source

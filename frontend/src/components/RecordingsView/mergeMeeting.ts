@@ -246,6 +246,34 @@ export type ChronoBlock = MergedBlock & {
   speakerKey: string | null;
 };
 
+/**
+ * The 0-based segment indices of one chronological turn within its track — the
+ * `idx` values the speaker-correction ops (reassign/split) key on, since the
+ * stored segment order is exactly the `getSegments` array order.
+ *
+ * A `ChronoBlock` coalesces consecutive same-track, same-speaker segments inside
+ * `TURN_GAP_MS`, so its segments are that recording's segments whose start falls
+ * in `[startMs, endMs]` and whose stored speaker matches the block's `speakerKey`.
+ * The time bound alone could catch a same-time segment of the OTHER speaker on a
+ * gap boundary, so the speaker match is required too. Returns [] when the
+ * recording has no stored segments (older recordings) — reassign/split can't act
+ * on a turn with no segment indices.
+ */
+export function segmentIdxsForChronoBlock(
+  block: ChronoBlock,
+  segments: TranscriptSegment[] | undefined,
+): number[] {
+  if (!segments || segments.length === 0) return [];
+  const idxs: number[] = [];
+  segments.forEach((seg, idx) => {
+    const key = seg.speaker != null && seg.speaker !== "" ? String(seg.speaker) : null;
+    if (key === block.speakerKey && seg.start_ms >= block.startMs && seg.start_ms <= block.endMs) {
+      idxs.push(idx);
+    }
+  });
+  return idxs;
+}
+
 /** Coalescing gap: consecutive segments from the same track + speaker merge
  *  into one turn unless they're separated by more than this much silence —
  *  whisper emits one row per ASR segment, which reads far too granular as

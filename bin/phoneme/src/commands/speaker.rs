@@ -14,7 +14,9 @@
 
 use crate::args::{SpeakerAction, SpeakerArgs};
 use crate::client::Client;
-use phoneme_core::{Config, RecordingId};
+use crate::commands::doctor::resolve_data_local_dir;
+use crate::exit;
+use phoneme_core::{voiceprint_eval, Catalog, Config, RecordingId};
 use phoneme_ipc::Request;
 use std::process::ExitCode;
 
@@ -35,6 +37,13 @@ fn parse_id_and_label(id_str: &str, label: i64) -> Result<RecordingId, ExitCode>
 }
 
 pub async fn run(args: SpeakerArgs, cfg: &Config, json: bool) -> ExitCode {
+    // `calibrate` is a local, read-only catalog analysis — it suggests a
+    // threshold from your enrolled voices and never spawns a daemon or sends IPC,
+    // so it's handled before the spawning request path below.
+    if let SpeakerAction::Calibrate = args.action {
+        return run_calibrate(cfg, json).await;
+    }
+
     // Build the request and the success line, validating ids/labels locally so a
     // bad arg never spawns a daemon.
     let (request, done) = match args.action {
@@ -140,6 +149,8 @@ pub async fn run(args: SpeakerArgs, cfg: &Config, json: bool) -> ExitCode {
                 format!("{n} segment(s) split from speaker {label} onto {new_label}"),
             )
         }
+        // Handled by the early return above (local, read-only, no IPC).
+        SpeakerAction::Calibrate => unreachable!("calibrate is handled before the request path"),
     };
 
     let mut client = match Client::connect(cfg).await {
@@ -156,6 +167,149 @@ pub async fn run(args: SpeakerArgs, cfg: &Config, json: bool) -> ExitCode {
         }
         Err(code) => code,
     }
+}
+
+/// Group enrolled voiceprints by their named-voice id into the labelled set the
+/// EER harness consumes, preserving first-seen order so the output is stable.
+/// `labeled` arrives ordered by voice id (see `Catalog::labeled_voiceprints`), so
+/// same-voice rows are already contiguous, but we group defensively rather than
+/// assume it.
+fn group_by_voice(
+    labeled: Vec<(String, Vec<f32>)>,
+) -> Vec<(voiceprint_eval::SpeakerId, Vec<Vec<f32>>)> {
+    let mut order: Vec<String> = Vec::new();
+    let mut groups: std::collections::HashMap<String, Vec<Vec<f32>>> =
+        std::collections::HashMap::new();
+    for (id, centroid) in labeled {
+        match groups.get_mut(&id) {
+            Some(v) => v.push(centroid),
+            None => {
+                order.push(id.clone());
+                groups.insert(id, vec![centroid]);
+            }
+        }
+    }
+    order
+        .into_iter()
+        .map(|id| {
+            let vecs = groups.remove(&id).unwrap_or_default();
+            (id, vecs)
+        })
+        .collect()
+}
+
+/// `phoneme speaker calibrate` — suggest a `voiceprint_match_threshold` from the
+/// enrolled voices. Read-only: opens the catalog the daemon owns (WAL allows a
+/// concurrent reader, like `import-backup`'s open) and runs the pure EER metric
+/// over the labelled captures. Never writes config — it prints a suggestion.
+async fn run_calibrate(cfg: &Config, json: bool) -> ExitCode {
+    let data_local = match resolve_data_local_dir() {
+        Some(d) => d,
+        None => {
+            eprintln!("error: could not resolve data directory");
+            return ExitCode::from(exit::GENERIC_FAIL);
+        }
+    };
+    let catalog_path = data_local.join("catalog.db");
+    if !catalog_path.exists() {
+        eprintln!(
+            "error: no catalog at {} — nothing to calibrate yet",
+            catalog_path.display()
+        );
+        return ExitCode::from(exit::NOT_FOUND);
+    }
+    let catalog = match Catalog::open(&catalog_path).await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "error: could not open catalog at {}: {e}",
+                catalog_path.display()
+            );
+            return ExitCode::from(exit::GENERIC_FAIL);
+        }
+    };
+
+    let labeled = match catalog.labeled_voiceprints().await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("error: could not read voiceprints: {e}");
+            return ExitCode::from(exit::GENERIC_FAIL);
+        }
+    };
+    let speakers = group_by_voice(labeled);
+    let report = voiceprint_eval::calibrate(&speakers);
+
+    let current = cfg.diarization.voiceprint_match_threshold;
+    // Mean of a slice, or None when empty — for the human-readable summary.
+    let mean = |xs: &[f32]| -> Option<f64> {
+        if xs.is_empty() {
+            None
+        } else {
+            Some(xs.iter().map(|&x| x as f64).sum::<f64>() / xs.len() as f64)
+        }
+    };
+    let (genuine_scores, impostor_scores) = voiceprint_eval::trial_scores(&speakers);
+    let named_voices = speakers.len();
+
+    if json {
+        let payload = serde_json::json!({
+            "named_voices": named_voices,
+            "genuine_trials": report.genuine_trials,
+            "impostor_trials": report.impostor_trials,
+            "intra_mean": mean(&genuine_scores),
+            "inter_mean": mean(&impostor_scores),
+            "eer": report.eer,
+            "suggested_threshold": report.eer_threshold,
+            "current_threshold": current,
+        });
+        println!("{payload}");
+    }
+
+    // The EER is only defined with at least one genuine AND one impostor trial,
+    // i.e. two named voices, each with two or more captures. Below that, say so
+    // plainly rather than print a meaningless number.
+    if report.eer.is_none() || report.eer_threshold.is_none() {
+        if !json {
+            println!(
+                "not enough labelled data to calibrate: {named_voices} named voice(s), \
+                 {} same-voice pair(s), {} cross-voice pair(s).",
+                report.genuine_trials, report.impostor_trials
+            );
+            println!(
+                "enroll at least two named voices with two or more captures each, then re-run."
+            );
+            println!("current voiceprint_match_threshold = {current:.3} (unchanged).");
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    if !json {
+        let eer = report.eer.unwrap_or_default();
+        let suggested = report.eer_threshold.unwrap_or_default();
+        println!("speaker recognition calibration ({named_voices} named voices)");
+        println!(
+            "  same-voice (genuine) pairs : {}",
+            report.genuine_trials
+        );
+        println!(
+            "  cross-voice (impostor) pairs: {}",
+            report.impostor_trials
+        );
+        if let Some(m) = mean(&genuine_scores) {
+            println!("  intra (same-voice) mean cosine : {m:.3}");
+        }
+        if let Some(m) = mean(&impostor_scores) {
+            println!("  inter (cross-voice) mean cosine: {m:.3}");
+        }
+        println!("  equal-error rate (EER): {:.1}%", eer * 100.0);
+        println!("  suggested voiceprint_match_threshold: {suggested:.3}");
+        println!("  current voiceprint_match_threshold:   {current:.3}");
+        println!(
+            "this only suggests — set it with: phoneme config set \
+             diarization.voiceprint_match_threshold {suggested:.3}"
+        );
+    }
+    ExitCode::SUCCESS
 }
 
 #[cfg(test)]
@@ -334,5 +488,29 @@ mod tests {
         )
         .await;
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+    }
+
+    #[test]
+    fn group_by_voice_groups_and_preserves_order() {
+        // Interleaved rows still collapse to one entry per voice, in first-seen
+        // order — the labelled set the EER harness expects.
+        let labeled = vec![
+            ("ada".to_string(), vec![1.0, 0.0]),
+            ("bob".to_string(), vec![0.0, 1.0]),
+            ("ada".to_string(), vec![0.9, 0.1]),
+            ("bob".to_string(), vec![0.1, 0.9]),
+            ("ada".to_string(), vec![0.8, 0.2]),
+        ];
+        let grouped = group_by_voice(labeled);
+        assert_eq!(grouped.len(), 2, "two distinct voices");
+        assert_eq!(grouped[0].0, "ada", "first-seen voice first");
+        assert_eq!(grouped[0].1.len(), 3, "all of ada's captures grouped");
+        assert_eq!(grouped[1].0, "bob");
+        assert_eq!(grouped[1].1.len(), 2);
+    }
+
+    #[test]
+    fn group_by_voice_empty_is_empty() {
+        assert!(group_by_voice(Vec::new()).is_empty());
     }
 }

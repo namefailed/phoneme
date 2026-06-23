@@ -1276,6 +1276,18 @@ pub enum Request {
     /// daemon for the reachability check and `--fix`.
     RunDoctor,
 
+    /// Write an opt-in, **local-only** sanitized diagnostics bundle for bug
+    /// reports and return its path (#248). The daemon gathers app/version/OS
+    /// info, the *masked* config (every secret redacted via the shared
+    /// `phoneme_core::secrets` layer — never a plaintext key), and a tail of its
+    /// own log, then writes them as pretty JSON to
+    /// `<data_dir>/diagnostics/phoneme-diagnostics-<timestamp>.json`. Read-only
+    /// with respect to app state: it touches nothing but that one new file, and
+    /// makes no network calls and includes no audio/transcripts/catalog data.
+    /// Ok `{"path":"<written file>"}`; `io` for a write failure. The GUI Doctor's
+    /// "Export diagnostics" button.
+    ExportDiagnostics,
+
     // ── Daemon lifecycle & config ────────────────────────────────────────
     /// Liveness + identity probe. Ok `{"running":true,"pid":n,"version":"…",
     /// "whisper_preferred_port":n,"whisper_effective_port":n|null,
@@ -2330,5 +2342,17 @@ mod rerun_parity_wire_tests {
         };
         let back: Request = serde_json::from_value(serde_json::to_value(&period).unwrap()).unwrap();
         assert_eq!(back, period);
+    }
+
+    /// The diagnostics-export request is a payload-free variant: it tags as
+    /// `export_diagnostics` and round-trips unchanged. Guards the wire name the
+    /// tray command + CLI invoke against (#248).
+    #[test]
+    fn export_diagnostics_round_trips() {
+        let req = Request::ExportDiagnostics;
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["type"], "export_diagnostics");
+        let back: Request = serde_json::from_value(json).unwrap();
+        assert_eq!(back, req);
     }
 }

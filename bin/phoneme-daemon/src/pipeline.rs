@@ -41,7 +41,7 @@
 use crate::app_state::{AppState, WhisperModelOverride};
 use phoneme_core::config::{
     Config, InPlaceConfig, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
-    WhisperServerRole,
+    WhisperServerRole, CURRENT_SCHEMA_VERSION,
 };
 use phoneme_core::error::Result;
 use phoneme_core::transcription::DiarizationTrack;
@@ -4034,11 +4034,22 @@ pub async fn run(
             *speaking_ms.entry(label.clone()).or_insert(0) += (seg.end_ms - seg.start_ms).max(0);
         }
     }
+    // Tag each capture with the embedding model that produced it (#243) so
+    // recognition never compares centroids across incompatible models. Voiceprints
+    // only ever come from the local diarizer, so the id is derived from the live
+    // `[diarization]` config (models_dir → "pretrained" for the bundled default).
+    let embedding_model = phoneme_core::diarization::embedding_model_id(&cfg.diarization);
     for vp in &speaker_voiceprints {
         let duration_ms = speaking_ms.get(&vp.label.to_string()).copied().unwrap_or(0);
         if let Err(e) = state
             .catalog
-            .save_speaker_voiceprint(id.as_str(), vp.label as i64, &vp.centroid, duration_ms)
+            .save_speaker_voiceprint_tagged(
+                id.as_str(),
+                vp.label as i64,
+                &vp.centroid,
+                duration_ms,
+                &embedding_model,
+            )
             .await
         {
             tracing::warn!(id = %id.as_str(), label = vp.label, "failed to persist voiceprint: {e}");
@@ -4283,13 +4294,23 @@ pub async fn run(
     // — even though the legacy [hook] loops below and the recipe Hook executor
     // (`run_hook_steps`) both live on this path. `migrate_hooks` (run by
     // `load_config` before any pipeline run) moves the legacy
-    // commands/keyword_rules/webhook into recipe Hook entries and clears the legacy
-    // fields, so post-migration these loops iterate an empty list and the migrated
-    // entries fire only via `run_hook_steps`. Pre-migration the default recipe has
-    // no Hook step, so only these loops fire. The two paths never both fire the same
-    // hook. Kept (not deleted) so a config that somehow reaches the pipeline
-    // un-migrated still runs its legacy hooks. Locked by
-    // `configured_hook_fires_exactly_once_per_transcribe`.
+    // commands/keyword_rules/webhook into recipe Hook entries, clears the legacy
+    // fields, and bumps `schema_version` to `CURRENT_SCHEMA_VERSION`. So the
+    // legacy loops below run ONLY while migration hasn't happened
+    // (`schema_version < CURRENT_SCHEMA_VERSION`); once it has, the migrated
+    // entries fire solely via `run_hook_steps`. Pre-migration the default recipe
+    // has no Hook step, so only these loops fire. The two paths never both fire
+    // the same hook.
+    //
+    // The guard is on the version, not on `commands.is_empty()`: a stale or
+    // hand-edited config can carry `schema_version >= CURRENT_SCHEMA_VERSION`
+    // (migration considered done, the same commands already folded into recipe
+    // Hook entries) AND still have non-empty `hook.commands`. Iterating the list
+    // unconditionally would then fire those commands a SECOND time alongside
+    // `run_hook_steps`. Gating on the migration version closes that double-fire
+    // window while still running legacy hooks for a genuinely un-migrated config.
+    // Locked by `configured_hook_fires_exactly_once_per_transcribe` and
+    // `stale_legacy_hook_does_not_double_fire_post_migration`.
     //
     // Expand env vars / `~` in the legacy [hook].commands. If expansion fails we
     // fall back to the unexpanded config, but log it first: a silent fallback
@@ -4300,85 +4321,88 @@ pub async fn run(
         cfg.clone()
     });
 
-    for cmd in &expanded_cfg.hook.commands {
-        let trimmed = cmd.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let runner = HookRunner::new(
-            trimmed.to_string(),
-            Duration::from_secs(cfg.hook.timeout_secs),
-        );
-        match runner.run(&payload).await {
-            Ok(result) => {
-                final_exit_code = result.exit_code;
-                total_duration += result.duration_ms;
-                last_cmd = cmd.clone();
-                if result.exit_code != 0 {
-                    break;
+    if cfg.schema_version < CURRENT_SCHEMA_VERSION {
+        for cmd in &expanded_cfg.hook.commands {
+            let trimmed = cmd.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let runner = HookRunner::new(
+                trimmed.to_string(),
+                Duration::from_secs(cfg.hook.timeout_secs),
+            );
+            match runner.run(&payload).await {
+                Ok(result) => {
+                    final_exit_code = result.exit_code;
+                    total_duration += result.duration_ms;
+                    last_cmd = cmd.clone();
+                    if result.exit_code != 0 {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    state
+                        .catalog
+                        .update_status(&id, RecordingStatus::HookFailed)
+                        .await?;
+                    // Persist the reason on the row so it survives a restart (see the
+                    // transcribe-failed path). Best-effort; the quarantine below is
+                    // what actually fails the recording.
+                    if let Err(err) = state
+                        .catalog
+                        .update_error(&id, "hook_failed", &e.to_string())
+                        .await
+                    {
+                        tracing::warn!(error = %err, "failed to persist hook error reason");
+                    }
+                    state
+                        .inbox
+                        .finish_failed(&id, "hook_failed", &e.to_string())
+                        .await?;
+                    // The transcript is complete and persisted; the provenance-deferral
+                    // rationale (waiting for update_hook_result) doesn't apply on the
+                    // failure path — that write is never reached — so signal the
+                    // transcript to the UI before failing the recording.
+                    state.events.emit(DaemonEvent::TranscriptionDone {
+                        id: id.clone(),
+                        transcript: transcript.clone(),
+                    });
+                    state.events.emit(DaemonEvent::HookFailed {
+                        id,
+                        error: e.to_string(),
+                    });
+                    return Err(e);
                 }
             }
-            Err(e) => {
-                state
-                    .catalog
-                    .update_status(&id, RecordingStatus::HookFailed)
-                    .await?;
-                // Persist the reason on the row so it survives a restart (see the
-                // transcribe-failed path). Best-effort; the quarantine below is
-                // what actually fails the recording.
-                if let Err(err) = state
-                    .catalog
-                    .update_error(&id, "hook_failed", &e.to_string())
-                    .await
-                {
-                    tracing::warn!(error = %err, "failed to persist hook error reason");
-                }
-                state
-                    .inbox
-                    .finish_failed(&id, "hook_failed", &e.to_string())
-                    .await?;
-                // The transcript is complete and persisted; the provenance-deferral
-                // rationale (waiting for update_hook_result) doesn't apply on the
-                // failure path — that write is never reached — so signal the
-                // transcript to the UI before failing the recording.
-                state.events.emit(DaemonEvent::TranscriptionDone {
-                    id: id.clone(),
-                    transcript: transcript.clone(),
-                });
-                state.events.emit(DaemonEvent::HookFailed {
-                    id,
-                    error: e.to_string(),
-                });
-                return Err(e);
-            }
         }
-    }
 
-    // Conditional keyword-triggered hooks: run each rule whose pattern matches the
-    // (post-processed) transcript. These are supplementary — a failure is logged
-    // but doesn't fail the recording, since the always-on commands above already
-    // succeeded.
-    for rule in &expanded_cfg.hook.keyword_rules {
-        if !rule.matches(&payload.transcript) {
-            continue;
-        }
-        let cmd = rule.command.trim();
-        if cmd.is_empty() {
-            continue;
-        }
-        let runner = HookRunner::new(cmd.to_string(), Duration::from_secs(cfg.hook.timeout_secs));
-        match runner.run(&payload).await {
-            Ok(result) => {
-                total_duration += result.duration_ms;
-                last_cmd = rule.command.clone();
-                if result.exit_code != 0 {
-                    tracing::warn!(pattern = %rule.pattern, exit_code = result.exit_code, "keyword hook exited non-zero");
-                } else {
-                    tracing::info!(pattern = %rule.pattern, "keyword hook ran");
-                }
+        // Conditional keyword-triggered hooks: run each rule whose pattern matches
+        // the (post-processed) transcript. These are supplementary — a failure is
+        // logged but doesn't fail the recording, since the always-on commands above
+        // already succeeded.
+        for rule in &expanded_cfg.hook.keyword_rules {
+            if !rule.matches(&payload.transcript) {
+                continue;
             }
-            Err(e) => {
-                tracing::warn!(pattern = %rule.pattern, error = %e, "keyword hook failed to run");
+            let cmd = rule.command.trim();
+            if cmd.is_empty() {
+                continue;
+            }
+            let runner =
+                HookRunner::new(cmd.to_string(), Duration::from_secs(cfg.hook.timeout_secs));
+            match runner.run(&payload).await {
+                Ok(result) => {
+                    total_duration += result.duration_ms;
+                    last_cmd = rule.command.clone();
+                    if result.exit_code != 0 {
+                        tracing::warn!(pattern = %rule.pattern, exit_code = result.exit_code, "keyword hook exited non-zero");
+                    } else {
+                        tracing::info!(pattern = %rule.pattern, "keyword hook ran");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(pattern = %rule.pattern, error = %e, "keyword hook failed to run");
+                }
             }
         }
     }
@@ -4474,28 +4498,38 @@ pub async fn run(
         exit_code: final_exit_code,
     });
 
+    // Legacy [hook].webhook_url POST — same single-fire invariant and the same
+    // migration guard as the legacy command/keyword loops above: post-migration
+    // this URL is folded into a recipe Hook entry (fired by `run_hook_steps`) and
+    // the field is cleared, so firing it here too would double-POST. Gating on the
+    // migration version closes the stale-config window where `schema_version`
+    // reached CURRENT but `webhook_url` was left non-empty (hand-edited / partial
+    // write). Pre-migration it's the only path that fires the webhook.
+    //
     // Only POST when a non-blank URL is configured — an empty string (e.g. the
     // Settings field was filled then cleared) must not fire a request per run.
-    if let Some(url) = cfg
-        .hook
-        .webhook_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|u| !u.is_empty())
-    {
-        if let Err(e) = state
-            .webhook
-            .post(
-                url,
-                Duration::from_secs(cfg.hook.timeout_secs),
-                &payload,
-                // The [webhook] policy (SSRF guard) is read per-run so a config
-                // reload takes effect without restarting the daemon.
-                &cfg.webhook,
-            )
-            .await
+    if cfg.schema_version < CURRENT_SCHEMA_VERSION {
+        if let Some(url) = cfg
+            .hook
+            .webhook_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
         {
-            tracing::warn!(error = %e, "webhook failed");
+            if let Err(e) = state
+                .webhook
+                .post(
+                    url,
+                    Duration::from_secs(cfg.hook.timeout_secs),
+                    &payload,
+                    // The [webhook] policy (SSRF guard) is read per-run so a config
+                    // reload takes effect without restarting the daemon.
+                    &cfg.webhook,
+                )
+                .await
+            {
+                tracing::warn!(error = %e, "webhook failed");
+            }
         }
     }
 

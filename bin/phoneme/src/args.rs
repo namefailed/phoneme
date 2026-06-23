@@ -467,6 +467,15 @@ pub enum SpeakerAction {
         #[arg(required = true, num_args = 1.., value_name = "IDX")]
         segments: Vec<i64>,
     },
+    /// Calibrate the speaker-recognition match threshold against your own
+    /// enrolled voices (#243). Scores every same-named-voice pair (genuine) vs
+    /// every different-named-voice pair (impostor) with the recognizer's cosine,
+    /// finds the equal-error-rate (EER) threshold that best separates them, and
+    /// prints the suggested value beside the current `voiceprint_match_threshold`.
+    /// Read-only — it suggests, it never changes the config. Needs enough labelled
+    /// voiceprints (at least two named voices, each with two or more captures) to
+    /// be meaningful; below that it reports "not enough labelled data".
+    Calibrate,
 }
 
 #[derive(Debug, clap::Args)]

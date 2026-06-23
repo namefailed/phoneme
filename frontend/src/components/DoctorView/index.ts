@@ -53,6 +53,10 @@ export class DoctorViewElement extends LitElement {
    *  deliberate clicks, because it wipes transcripts/tags and re-transcribes. */
   @state() private rebuild: "idle" | "confirm" | "running" = "idle";
   private rebuildRevert: number | null = null;
+  /** Opt-in diagnostics export: idle → exporting. The daemon writes a sanitized
+   *  bundle (masked config + log tail + app/OS info — no audio/transcripts) and
+   *  returns its path, which we then reveal. */
+  @state() private exporting = false;
 
   /** Escape leaves the view (matching the modal twin) — but first disarms a
    *  staged destructive confirm, so a stray Esc can't skip the second click. */
@@ -189,6 +193,31 @@ export class DoctorViewElement extends LitElement {
       }
       this.rebuild = "idle";
       void this.runChecks();
+    }
+  }
+
+  /** Export an opt-in, local-only diagnostics bundle for bug reports (#248).
+   *  The daemon writes a sanitized JSON file (masked config — no plaintext keys
+   *  — plus a daemon-log tail and app/OS info; never audio or transcripts) under
+   *  the app data dir and returns its path. We open the containing folder so the
+   *  user can attach the file to a report. Calls the daemon command directly via
+   *  tauriInvoke (this view owns its own invokes). */
+  private async handleExportDiagnostics() {
+    if (this.exporting) return;
+    this.exporting = true;
+    try {
+      const { path } = await invoke<{ path: string }>("export_diagnostics");
+      showToast("Diagnostics saved — no audio, transcripts, or API keys included.", "success");
+      // Reveal the containing folder (open_file allows the app data dir; the
+      // file itself sits in its `diagnostics` subfolder). Strip the filename
+      // off the returned path, handling either separator.
+      const sep = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+      const folder = sep > 0 ? path.slice(0, sep) : path;
+      await invoke("open_file", { path: folder }).catch(() => {});
+    } catch (e) {
+      showToast(`Diagnostics export failed: ${errText(e)}`, "error");
+    } finally {
+      this.exporting = false;
     }
   }
 
@@ -411,6 +440,12 @@ export class DoctorViewElement extends LitElement {
                 ${this.rebuild === "running" ? "Rebuilding…"
                   : this.rebuild === "confirm" ? "⚠ Wipe & rebuild — click to confirm"
                   : "⟳ Rebuild catalog from disk"}
+              </button>
+              <button id="doctor-export-diagnostics"
+                ?disabled=${this.exporting}
+                title="Save a sanitized diagnostics file for a bug report: masked config (no API keys), a daemon-log tail, and app/OS info. No audio, transcripts, or network."
+                @click=${this.handleExportDiagnostics}>
+                ${this.exporting ? "Exporting…" : "🩺 Export diagnostics"}
               </button>
             </div>
           </div>

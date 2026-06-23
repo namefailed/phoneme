@@ -135,8 +135,17 @@ any of this; it just happens on the local word-level path.
 The cleanup passes get most of it right, but the diarizer still occasionally
 mis-assigns a stretch — two people collapsed into one speaker, or one person
 split across two. You can correct the assignments after the fact without
-re-transcribing. Today this lives on the CLI (`phoneme speaker`); the in-app
-detail-pane editor is a planned follow-up.
+re-transcribing, either in the app or on the CLI.
+
+**In the app.** Open the **merged meeting view** (click a meeting's group header):
+every turn has a small **⋯** button beside its speaker chip. It opens a tiny menu
+to **reassign** that turn to another speaker, **split** it onto a brand-new
+speaker, or **merge** that speaker into another — all on the right track, applied
+the moment you choose (Esc or a click away closes the menu). For a single
+recording, open **Rename speakers** in the detail pane: each row now carries a
+**Merge into…** picker that folds one speaker into another.
+
+**On the CLI** (`phoneme speaker`):
 
 - **Reassign** one segment to a different speaker (a brand-new label is fine — it
   just starts existing):
@@ -147,7 +156,8 @@ detail-pane editor is a planned follow-up.
 - **Split** one speaker into two — move some segments onto a fresh label:
   `phoneme speaker split <ID> <LABEL> <NEW_LABEL> <SEGMENT_IDX>…`
 
-Segment indices come from `phoneme show --segments`. The correction is applied
+CLI segment indices come from `phoneme show --segments` (the app resolves them
+from the turn you click). The correction is applied
 everywhere at once: the timeline / Synced views, the prose transcript's
 `[Speaker N]:` markers, and the per-word layer all update together. **Names**
 follow the obvious rule on a merge — the surviving speaker keeps its name (and

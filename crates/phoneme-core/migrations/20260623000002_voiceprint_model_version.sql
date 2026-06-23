@@ -1,0 +1,14 @@
+-- Tag each captured voiceprint with the embedding model that produced it (#243).
+--
+-- A centroid is only comparable to another centroid from the SAME embedding
+-- model: swap `[diarization].models_dir` for a different ONNX bundle and the
+-- new vectors live in a different space, so a cosine against an old centroid is
+-- meaningless — yet it can still clear the threshold by luck and silently match
+-- the wrong named voice. Recording which model captured a row lets recognition
+-- exclude incompatible centroids instead of trusting the score.
+--
+-- Existing rows get '' = "unknown model" (captured before this column existed).
+-- The match path treats '' as a wildcard that never blocks a comparison, so a
+-- library built before this migration keeps matching exactly as before until new
+-- (model-tagged) captures arrive.
+ALTER TABLE speaker_voiceprints ADD COLUMN embedding_model TEXT NOT NULL DEFAULT '';

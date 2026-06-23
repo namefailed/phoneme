@@ -16,6 +16,16 @@ pub async fn restart_whisper(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RestartWhisper).await
 }
 
+/// Write an opt-in, local-only sanitized diagnostics bundle for bug reports
+/// (#248) and return `{ path }`. The daemon assembles app/version/OS info, the
+/// masked config (no plaintext keys), and a tail of its log into one JSON file
+/// under the app data dir — no audio, no transcripts, no network. The Doctor's
+/// "Export diagnostics" button reveals the returned file.
+#[tauri::command]
+pub async fn export_diagnostics(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ExportDiagnostics).await
+}
+
 /// Check the background daemon's current runtime status.
 /// Returns whether the daemon is actively running and its process ID.
 #[tauri::command]

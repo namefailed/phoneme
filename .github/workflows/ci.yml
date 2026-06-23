@@ -59,7 +59,11 @@ jobs:
       - name: Test
         env:
           PHONEME_DISABLE_INPUT_INJECTION: "1"
-        run: cargo test --workspace -- --test-threads=1
+        # Tests run in parallel: every test gets its own isolated catalog
+        # (in-memory sqlite or a per-test tempdir), so there's no shared DB to
+        # serialize on. KEEP the inject-guard env above — the daemon E2E tests
+        # spawn a real binary that would otherwise type into the runner.
+        run: cargo test --workspace
 
   docs:
     name: Rustdoc
@@ -158,12 +162,12 @@ jobs:
         run: cargo tauri build --debug --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
   deps-audit:
-    name: Dependency audit (advisory)
+    name: Dependency audit
     runs-on: ubuntu-latest
-    # Advisory only for now: surfaces RUSTSEC / npm advisories without blocking
-    # merges (`continue-on-error`). Promote to a required gate on the core crates
-    # once the known-noise advisories are triaged. (audit hygiene)
-    continue-on-error: true
+    # Blocking gate: a new RUSTSEC or npm advisory fails CI. If a specific
+    # advisory is known-unfixable (no patched upstream yet), scope it narrowly
+    # on the offending step with `cargo audit --ignore RUSTSEC-XXXX-NNNN` (plus a
+    # comment saying why) instead of muting the whole job with continue-on-error.
     steps:
       - uses: actions/checkout@v4
 
@@ -175,10 +179,9 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: cargo audit
-        # Advisory: report RUSTSEC advisories in the log but never fail the job,
-        # so CI stays green while the backlog is triaged. Promote to a hard gate
-        # (drop continue-on-error) once the core crates are clean.
-        continue-on-error: true
+        # Blocking: any RUSTSEC advisory fails the build. To allow a single
+        # known-unfixable advisory through, add `--ignore RUSTSEC-XXXX-NNNN` here
+        # with a comment explaining why it's safe — don't re-mute the whole step.
         run: cargo audit
 
       - uses: pnpm/action-setup@v3
@@ -195,5 +198,6 @@ jobs:
 
       - name: pnpm audit (frontend)
         working-directory: frontend
-        continue-on-error: true
+        # Blocking: a new npm advisory fails the build. Narrow the scope with
+        # `--audit-level high` or `pnpm audit --fix` rather than muting the step.
         run: pnpm audit

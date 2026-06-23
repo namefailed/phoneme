@@ -105,6 +105,13 @@ impl Catalog {
     /// duration-weight (roadmap V4) so a long, clean capture outvotes a brief one
     /// when the named voice is recomputed. Pass `0` when it isn't known; the
     /// weighted mean treats `0` as the equal-weight fallback (legacy behavior).
+    ///
+    /// This untagged entry stamps `embedding_model = ''` ("unknown model"), which
+    /// the match path treats as a wildcard that never blocks a comparison — so it
+    /// preserves the pre-#243 behavior exactly. The pipeline calls
+    /// [`save_speaker_voiceprint_tagged`](Self::save_speaker_voiceprint_tagged)
+    /// instead, recording which embedding model produced the centroid so
+    /// recognition can exclude incompatible captures.
     pub async fn save_speaker_voiceprint(
         &self,
         recording_id: &str,
@@ -112,17 +119,40 @@ impl Catalog {
         centroid: &[f32],
         duration_ms: i64,
     ) -> Result<()> {
+        self.save_speaker_voiceprint_tagged(recording_id, speaker_label, centroid, duration_ms, "")
+            .await
+    }
+
+    /// Like [`save_speaker_voiceprint`](Self::save_speaker_voiceprint) but records
+    /// `embedding_model` — the id of the embedding model that produced `centroid`
+    /// (#243), from [`crate::diarization::embedding_model_id`]. A centroid is only
+    /// comparable to another from the *same* embedding model, so storing this lets
+    /// the match path exclude captures from a different model rather than risk a
+    /// meaningless cosine that happens to clear the threshold (see
+    /// [`recognize_speakers_for`](Self::recognize_speakers_for)). An empty string
+    /// means "unknown" (the legacy/untagged path) and is treated as a wildcard.
+    pub async fn save_speaker_voiceprint_tagged(
+        &self,
+        recording_id: &str,
+        speaker_label: i64,
+        centroid: &[f32],
+        duration_ms: i64,
+        embedding_model: &str,
+    ) -> Result<()> {
         let json = serde_json::to_string(centroid)?;
         sqlx::query(
-            "INSERT INTO speaker_voiceprints (recording_id, speaker_label, centroid, duration_ms) \
-             VALUES (?, ?, ?, ?) \
+            "INSERT INTO speaker_voiceprints \
+                 (recording_id, speaker_label, centroid, duration_ms, embedding_model) \
+             VALUES (?, ?, ?, ?, ?) \
              ON CONFLICT(recording_id, speaker_label) DO UPDATE SET \
-                 centroid = excluded.centroid, duration_ms = excluded.duration_ms",
+                 centroid = excluded.centroid, duration_ms = excluded.duration_ms, \
+                 embedding_model = excluded.embedding_model",
         )
         .bind(recording_id)
         .bind(speaker_label)
         .bind(&json)
         .bind(duration_ms)
+        .bind(embedding_model)
         .execute(&self.pool)
         .await?;
         if let Some(nid) = self.named_voice_for(recording_id, speaker_label).await? {
@@ -626,8 +656,11 @@ impl Catalog {
     ) -> Result<Vec<PropagationCandidate>> {
         // The live library is both the cohort for normalization and the source of
         // the target centroid. A forgotten or sample-less voice isn't here, so it
-        // yields no candidates.
-        let library = self.named_voice_centroids().await?;
+        // yields no candidates. Propagation isn't scoped to a single recording's
+        // embedding model (it scans captures library-wide), so pass "" — no
+        // model filter — and rely on the per-candidate dimension-mismatch skip
+        // below for any cross-model rows.
+        let library = self.named_voice_centroids("").await?;
         let target_idx = match library.iter().position(|(v, _)| v.id == named_voice_id) {
             Some(i) => i,
             None => return Ok(Vec::new()),
@@ -779,6 +812,30 @@ impl Catalog {
         Ok(applied)
     }
 
+    /// Every enrolled capture as `(named_voice_id, centroid)` — one row per
+    /// `speaker_voiceprints` row that has been named (`named_voice_id IS NOT
+    /// NULL`), with the voice id as its speaker label. The labelled dataset the
+    /// EER calibration harness ([`crate::voiceprint_eval`]) measures, so the
+    /// match threshold can be chosen from real recordings (`phoneme speaker
+    /// calibrate`, #243). Unenrolled captures carry no ground-truth label and are
+    /// excluded. Ordered by voice id then recording so the result is stable.
+    pub async fn labeled_voiceprints(&self) -> Result<Vec<(String, Vec<f32>)>> {
+        let rows = sqlx::query(
+            "SELECT named_voice_id, centroid FROM speaker_voiceprints \
+             WHERE named_voice_id IS NOT NULL \
+             ORDER BY named_voice_id, recording_id, speaker_label",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for r in rows {
+            let id: String = r.try_get("named_voice_id")?;
+            let centroid = serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            out.push((id, centroid));
+        }
+        Ok(out)
+    }
+
     /// All captured voiceprints for a recording, as `(speaker_label, centroid)`.
     pub async fn speaker_voiceprints_for(
         &self,
@@ -837,13 +894,45 @@ impl Catalog {
     /// The named-voice library as `(NamedVoice, centroid)` pairs, skipping
     /// empty entries (no samples). Used by recognition to score every captured
     /// speaker against the whole library at once.
-    async fn named_voice_centroids(&self) -> Result<Vec<(NamedVoice, Vec<f32>)>> {
-        let rows = sqlx::query(
-            "SELECT id, name, samples, centroid FROM named_voiceprints \
-             WHERE deleted_at IS NULL",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+    ///
+    /// `embedding_model` is the model the probe centroids were captured under
+    /// (#243). When it's a non-empty id, the library is restricted to voices that
+    /// have at least one capture under that same model — or an untagged (`''`)
+    /// capture, the legacy wildcard — so a voice built entirely from a different
+    /// embedding model can't be matched against (its centroid lives in an
+    /// incompatible space; the cosine would be meaningless yet could clear the
+    /// bar). An empty `embedding_model` means "model unknown" and disables the
+    /// filter, preserving the pre-#243 behavior for callers that can't determine
+    /// the current model.
+    async fn named_voice_centroids(
+        &self,
+        embedding_model: &str,
+    ) -> Result<Vec<(NamedVoice, Vec<f32>)>> {
+        // Only filter when we know the current model; an empty id is a wildcard.
+        // A voice qualifies if any of its linked captures shares the current model
+        // or is untagged (''), since an untagged capture is "unknown, assume
+        // comparable" — exactly how the column-level wildcard behaves.
+        let rows = if embedding_model.is_empty() {
+            sqlx::query(
+                "SELECT id, name, samples, centroid FROM named_voiceprints \
+                 WHERE deleted_at IS NULL",
+            )
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT nv.id AS id, nv.name AS name, nv.samples AS samples, \
+                        nv.centroid AS centroid \
+                 FROM named_voiceprints nv \
+                 WHERE nv.deleted_at IS NULL \
+                   AND EXISTS (SELECT 1 FROM speaker_voiceprints sv \
+                         WHERE sv.named_voice_id = nv.id \
+                           AND (sv.embedding_model = ? OR sv.embedding_model = ''))",
+            )
+            .bind(embedding_model)
+            .fetch_all(&self.pool)
+            .await?
+        };
         let mut out = Vec::with_capacity(rows.len());
         for r in rows {
             let samples: i64 = r.try_get("samples")?;
@@ -877,11 +966,19 @@ impl Catalog {
     /// library voices nearly tied) is left unknown rather than guessed. The result
     /// holds at most one suggestion per captured speaker and per name, ordered by
     /// `speaker_label`.
+    ///
+    /// `embedding_model` is the model the *current* recording's centroids were
+    /// captured under (#243), from [`crate::diarization::embedding_model_id`]. It
+    /// scopes the library to voices with a comparable (same-model, or legacy
+    /// untagged) capture, so swapping `diarization.models_dir` can't silently
+    /// match a probe against a centroid from an incompatible embedding model. Pass
+    /// `""` to disable the model filter (the model is unknown).
     pub async fn recognize_speakers_for(
         &self,
         recording_id: &str,
         threshold: f32,
         mode: crate::voiceprint::ScoreNorm,
+        embedding_model: &str,
     ) -> Result<Vec<SpeakerSuggestion>> {
         let captured = self.speaker_voiceprints_for(recording_id).await?;
         if captured.is_empty() {
@@ -907,7 +1004,7 @@ impl Catalog {
         if probes.is_empty() {
             return Ok(Vec::new());
         }
-        let library = self.named_voice_centroids().await?;
+        let library = self.named_voice_centroids(embedding_model).await?;
         Ok(Self::assign_speakers(&probes, &library, threshold, mode))
     }
 

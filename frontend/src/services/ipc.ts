@@ -1193,6 +1193,53 @@ export async function setSpeakerName(
   await tauriInvoke("set_speaker_name", { id, speakerLabel, name });
 }
 
+// ── In-recording speaker correction (U1) ───────────────────────────────────────
+// Unlike setSpeakerName (display-only), these change which segment belongs to
+// which speaker. The daemon keeps `transcript_segments` authoritative and rebuilds
+// the prose `[Speaker N]:` markers in one transaction, then emits
+// `SpeakerNameUpdated` — so re-fetch the recording / segments (or let the event
+// reload) to pick up the new attribution. Labels are 1-based `[Speaker N]`
+// indices; `idx`/`segmentIdxs` are the 0-based segment indices from
+// {@link getSegments} (the raw timeline).
+
+/** Reassign one transcript segment to a different speaker label. `idx` is the
+ *  0-based segment index from {@link getSegments}; `newLabel` is the 1-based
+ *  `[Speaker N]` index — a brand-new label simply starts existing (no name or
+ *  voiceprint is created for it). Rejects when no segment has that `idx`. */
+export async function reassignSegmentSpeaker(
+  id: string,
+  idx: number,
+  newLabel: number,
+): Promise<void> {
+  await tauriInvoke("reassign_segment_speaker", { id, idx, newLabel });
+}
+
+/** Merge two of a recording's speakers: every `fromLabel` segment becomes
+ *  `intoLabel`, then `fromLabel` ceases to exist. `into` keeps its name (adopts
+ *  `from`'s only when unnamed); `from`'s voiceprint is dropped. Rejects when no
+ *  segment carries `fromLabel`, or when the labels are equal / below 1. */
+export async function mergeSpeakers(
+  id: string,
+  fromLabel: number,
+  intoLabel: number,
+): Promise<void> {
+  await tauriInvoke("merge_speakers", { id, fromLabel, intoLabel });
+}
+
+/** Split some of a speaker's segments off onto a fresh label. The listed
+ *  `segmentIdxs` (0-based, from {@link getSegments}) move from `label` to
+ *  `newLabel` (which starts with no name/voiceprint); every other segment of
+ *  `label` stays. Rejects when any idx is missing or doesn't currently carry
+ *  `label`, when the list is empty, or when the labels are equal / below 1. */
+export async function splitSpeaker(
+  id: string,
+  label: number,
+  segmentIdxs: number[],
+  newLabel: number,
+): Promise<void> {
+  await tauriInvoke("split_speaker", { id, label, segmentIdxs, newLabel });
+}
+
 // ── Named-speaker recognition (#9) ─────────────────────────────────────────────
 
 /** A recognized-speaker suggestion: an unnamed diarized speaker whose voiceprint

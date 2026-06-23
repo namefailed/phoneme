@@ -2957,7 +2957,7 @@ async fn recognize_speakers_one_to_one_never_doubles_a_name() {
         .unwrap();
 
     let sugg = db
-        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off, "")
         .await
         .unwrap();
     let to_ada: Vec<_> = sugg.iter().filter(|s| s.named_voice_id == ada).collect();
@@ -3010,13 +3010,94 @@ async fn recognize_speakers_assigns_distinct_voices_one_each() {
         .unwrap();
 
     let sugg = db
-        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off, "")
         .await
         .unwrap();
     assert_eq!(sugg.len(), 2, "both speakers recognized");
     assert_eq!(sugg[0].speaker_label, 1, "sorted by speaker_label");
     assert_eq!(sugg[0].named_voice_id, ada);
     assert_eq!(sugg[1].named_voice_id, bob);
+}
+
+#[tokio::test]
+async fn recognize_speakers_excludes_other_embedding_models() {
+    // #243: a named voice built from a capture under embedding model "A" must not
+    // match a probe captured under model "B" — their centroids live in different
+    // spaces, so a near-perfect cosine here is an accident, not a real match.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+    // Enroll "Ada" from a capture tagged with model "A".
+    let src = embedded_recording(None);
+    db.insert(&src).await.unwrap();
+    db.save_speaker_voiceprint_tagged(src.id.as_str(), 1, &[1.0, 0.0, 0.0], 0, "A")
+        .await
+        .unwrap();
+    let _ada = db
+        .enroll_speaker(src.id.as_str(), 1, "Ada")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // A new recording's speaker is an (accidental) perfect cosine to Ada, but its
+    // capture was produced by a *different* embedding model, "B".
+    let rec = embedded_recording(None);
+    db.insert(&rec).await.unwrap();
+    db.save_speaker_voiceprint_tagged(rec.id.as_str(), 1, &[1.0, 0.0, 0.0], 0, "B")
+        .await
+        .unwrap();
+
+    // Recognizing under model "B" excludes Ada (her only capture is model "A").
+    let none = db
+        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off, "B")
+        .await
+        .unwrap();
+    assert!(
+        none.is_empty(),
+        "a model-B probe must not match a model-A-only voice: {none:?}"
+    );
+
+    // Recognizing under model "A" — the same model Ada was built from — matches.
+    let same = db
+        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off, "A")
+        .await
+        .unwrap();
+    assert_eq!(same.len(), 1, "same-model recognition still matches");
+    assert_eq!(same[0].speaker_label, 1);
+    assert_eq!(same[0].name, "Ada");
+
+    // An empty model id is the wildcard (model unknown) — it disables the filter,
+    // preserving the pre-#243 behavior, so Ada is matchable again.
+    let wildcard = db
+        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off, "")
+        .await
+        .unwrap();
+    assert_eq!(wildcard.len(), 1, "empty model id disables the filter");
+}
+
+#[tokio::test]
+async fn labeled_voiceprints_returns_only_enrolled_captures() {
+    // The calibration dataset (#243) is the *named* captures: an unenrolled one
+    // has no ground-truth label and must be excluded.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r1 = embedded_recording(None);
+    db.insert(&r1).await.unwrap();
+    db.save_speaker_voiceprint(r1.id.as_str(), 1, &[1.0, 0.0], 0)
+        .await
+        .unwrap();
+    db.save_speaker_voiceprint(r1.id.as_str(), 2, &[0.0, 1.0], 0)
+        .await
+        .unwrap();
+    // Enroll only speaker 1; speaker 2 stays unnamed.
+    let ada = db
+        .enroll_speaker(r1.id.as_str(), 1, "Ada")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let labeled = db.labeled_voiceprints().await.unwrap();
+    assert_eq!(labeled.len(), 1, "only the enrolled capture is labelled");
+    assert_eq!(labeled[0].0, ada, "labelled by its named-voice id");
+    assert_eq!(labeled[0].1, vec![1.0, 0.0]);
 }
 
 #[tokio::test]
@@ -3042,7 +3123,7 @@ async fn recognize_speakers_skips_ambiguous_speaker() {
         .await
         .unwrap();
     let sugg = db
-        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off, "")
         .await
         .unwrap();
     assert!(sugg.is_empty(), "an ambiguous speaker is left unknown");
@@ -3083,7 +3164,7 @@ async fn recognize_speakers_off_mode_unchanged_from_raw_assign() {
         .unwrap();
 
     let off = db
-        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+        .recognize_speakers_for(rec.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off, "")
         .await
         .unwrap();
     assert_eq!(off.len(), 2);
@@ -3135,7 +3216,7 @@ async fn recognize_speakers_snorm_routes_and_assigns() {
 
     // z-bar ~1.0: a genuine match stands well above its cohort mean.
     let sugg = db
-        .recognize_speakers_for(rec.id.as_str(), 1.0, crate::voiceprint::ScoreNorm::SNorm)
+        .recognize_speakers_for(rec.id.as_str(), 1.0, crate::voiceprint::ScoreNorm::SNorm, "")
         .await
         .unwrap();
     assert_eq!(sugg.len(), 2, "both distinct speakers recognized: {sugg:?}");
@@ -3759,7 +3840,7 @@ async fn forget_soft_deletes_then_undo_restores() {
     );
     // A deleted voice doesn't match in recognition.
     let sugg = db
-        .recognize_speakers_for(src.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off)
+        .recognize_speakers_for(src.id.as_str(), 0.5, crate::voiceprint::ScoreNorm::Off, "")
         .await
         .unwrap();
     assert!(sugg.is_empty(), "a forgotten voice never matches");

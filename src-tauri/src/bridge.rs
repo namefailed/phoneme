@@ -183,6 +183,12 @@ fn is_retry_safe(req: &Request) -> bool {
         | QueuePaused
         | QueueCounts
         | RunDoctor
+        // Diagnostics export only writes ONE new, timestamped, sanitized bundle
+        // file and reads the daemon log — it never mutates app state. The
+        // per-call timestamp means a blind re-send after a lost reply just drops
+        // a second identical bundle (harmless, unlike ExportClip which overwrites
+        // a fixed WAV path), so it's safe to silently reconnect-and-retry.
+        | ExportDiagnostics
         | ListTags
         | ListAllTags
         | TagsFor { .. }

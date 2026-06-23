@@ -14,6 +14,29 @@ use ndarray::{Array2, Array3};
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
+/// A stable identifier for the embedding model that produces a speaker centroid,
+/// derived from `[diarization]` config — stored on every captured voiceprint
+/// (#243) so recognition never compares centroids from incompatible models.
+///
+/// The embedding model is whatever speakrs loads: the bundled pretrained model
+/// when `models_dir` is empty (the default), or the user-supplied ONNX bundle at
+/// that path otherwise. Two captures are only comparable when this matches, so we
+/// key on exactly what selects the model — the `models_dir` value, normalized to
+/// `"pretrained"` for the empty/default case so the bundled model has one stable
+/// name rather than the empty string. A custom bundle is identified by its
+/// (trimmed) path, which is what changes when the user swaps it; that's enough to
+/// tell two bundles apart for the match-exclusion guard. Only the local diarizer
+/// produces embeddings, so this is meaningless for cloud/none providers (which
+/// store no voiceprints), and we don't fold the provider in.
+pub fn embedding_model_id(config: &DiarizationConfig) -> String {
+    let dir = config.models_dir.trim();
+    if dir.is_empty() {
+        "pretrained".to_string()
+    } else {
+        dir.to_string()
+    }
+}
+
 /// A speaker turn produced by the diarizer: `[start, end)` in seconds and an
 /// opaque speaker label. The label isn't a bare integer — pyannote emits
 /// `"SPEAKER_00"`-style strings — so we treat it as an arbitrary key and map it
@@ -475,26 +498,25 @@ pub(crate) const WORD_MIN_TURN_SECS: f64 = 0.6;
 /// attribution is kept, so a genuine hand-off inside a whisper segment is still
 /// split; only the noise islands are smoothed.
 ///
-/// This counts the diarization layer's word units, which for local whisper.cpp
-/// are subword tokens ("over ste pped", "don 't" each split into several), so the
-/// bound is roughly twice the spoken-word count it implies (~10 tokens ≈ ~5
-/// spoken words). It only ever applies to runs bracketed by the same speaker,
-/// where even a longish island is almost always that voice continuing, not a real
-/// interjection.
-// TODO: smooth on spoken-word units rather than this subword-token count
-// (coalesce tokens into whole words first, then size islands in words) so the
-// bound stops being a fuzzy "~2x" estimate.
+/// Sized in *spoken words* (whole written words), not the diarizer's raw tokens.
+/// Local whisper.cpp emits subword tokens ("over ste pped", "don 't" each split
+/// into several), so counting tokens made this bound a fuzzy "~2x" estimate that
+/// drifted with how heavily a stretch happened to be sub-tokenized; `words_in`
+/// now counts word-start tokens (`leading_space`) so an N-word island means N
+/// real words regardless of tokenization. It only ever applies to runs bracketed
+/// by the same speaker, where even a longish island is almost always that voice
+/// continuing, not a real interjection.
 const MAX_ISLAND_WORDS: usize = 10;
 
 /// The larger ceiling for a same-speaker-bracketed island that is also strictly
 /// shorter than both of its (same-speaker) neighbours. Between [`MAX_ISLAND_WORDS`]
 /// and this, a run is absorbed only when one voice clearly dominates on both
 /// sides — a brief blip mid-monologue the diarizer mis-scored to the other
-/// speaker (the real case: a ~16-token "cyber weapon? I mean, I mean, because you
-/// don't" stranded inside a 31-token question and a 144-token monologue, both the
-/// same speaker). Above this ceiling a run is a genuine turn and never silently
-/// merged, even if it happens to be shorter than two very long monologues. ~24
-/// tokens ≈ ~12 spoken words (whisper emits subword tokens).
+/// speaker (the real case: a "cyber weapon? I mean, I mean, because you don't"
+/// blip stranded inside a long question and a long monologue, both the same
+/// speaker). Above this ceiling a run is a genuine turn and never silently
+/// merged, even if it happens to be shorter than two very long monologues.
+/// Counted in spoken words like [`MAX_ISLAND_WORDS`].
 const MAX_BRACKETED_ISLAND_WORDS: usize = 24;
 
 /// A contiguous run of same-speaker words inside the per-word column sequence.
@@ -535,6 +557,22 @@ fn speaker_runs(words: &[&WordSpan], cols: &[Option<usize>]) -> Vec<SpeakerRun> 
     runs
 }
 
+/// How many *spoken words* the token range `[start, end]` spans. Local
+/// whisper.cpp hands diarization subword tokens ("over ste pped", "don 't" each
+/// split into several), so a raw token count over-states how many real words a
+/// run holds — and the island bounds drifted with how heavily a stretch happened
+/// to be sub-tokenized. Counting word-start tokens (`leading_space`) instead
+/// makes "N words" mean N written words regardless of tokenization. A non-empty
+/// range is at least 1 word even if it opens on a continuation token (a word that
+/// straddled a run boundary), so a lone token never measures as 0.
+fn spoken_word_count(words: &[&WordSpan], start: usize, end: usize) -> usize {
+    words[start..=end]
+        .iter()
+        .filter(|w| w.leading_space)
+        .count()
+        .max(1)
+}
+
 /// In-place smoothing of the per-word speaker columns: repeatedly absorb a
 /// flicker-island speaker run into a neighbour until none remain or only one
 /// speaker is left. A run is an island to absorb when it is:
@@ -557,7 +595,12 @@ fn speaker_runs(words: &[&WordSpan], cols: &[Option<usize>]) -> Vec<SpeakerRun> 
 /// keeping per-word attribution, so a genuine speaker hand-off inside one whisper
 /// segment is still split; only noise islands are removed.
 fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min_turn: f64) {
-    let words_in = |r: &SpeakerRun| r.end - r.start + 1;
+    // Size every run in spoken words (word-start tokens), not raw subword tokens,
+    // so the island bounds are a consistent word count rather than a fuzzy "~2x"
+    // token estimate. For an all-word-start sequence (every token a real word)
+    // this equals the old token count, so the behaviour only changes for genuinely
+    // sub-tokenized input.
+    let words_in = |r: &SpeakerRun| spoken_word_count(words, r.start, r.end);
     loop {
         let runs = speaker_runs(words, cols);
         if runs.len() < 2 {
@@ -2375,6 +2418,55 @@ mod tests {
         );
     }
 
+    /// The #249 unit fix: islands are sized in spoken words, not subword tokens.
+    /// Here a 6-spoken-word island is split into 14 subword tokens. Under the old
+    /// token count (14 > MAX_ISLAND_WORDS = 10) it would dodge the small-island
+    /// rule and, not being shorter than its 8-word same-speaker neighbours,
+    /// survive as a phantom turn. Counting word-starts, it's 6 words (<= 10), a
+    /// flicker island that's absorbed — the choppy-split fix the token count missed
+    /// on heavily sub-tokenized speech.
+    #[test]
+    fn subword_tokenized_island_is_sized_in_spoken_words() {
+        let mut words = Vec::new();
+        let mut cols = Vec::new();
+        let mut t = 0.0;
+        let push_word = |words: &mut Vec<WordSpan>,
+                             cols: &mut Vec<Option<usize>>,
+                             t: &mut f64,
+                             col: usize,
+                             pieces: usize| {
+            // First piece starts the written word; the rest are continuations.
+            words.push(word(*t, *t + 0.3, "w"));
+            cols.push(Some(col));
+            *t += 0.3;
+            for _ in 1..pieces {
+                words.push(cont(*t, *t + 0.3, "x"));
+                cols.push(Some(col));
+                *t += 0.3;
+            }
+        };
+        // Speaker 0: 8 single-token words. (8 words, 8 tokens)
+        for _ in 0..8 {
+            push_word(&mut words, &mut cols, &mut t, 0, 1);
+        }
+        // Speaker 1 island: 6 words, but heavily sub-tokenized to 14 tokens
+        // (two words of 3 pieces, four of 2 pieces = 6 + 8 = 14 tokens).
+        for &pieces in &[3usize, 3, 2, 2, 2, 2] {
+            push_word(&mut words, &mut cols, &mut t, 1, pieces);
+        }
+        // Speaker 0 again: 8 single-token words, bracketing the island.
+        for _ in 0..8 {
+            push_word(&mut words, &mut cols, &mut t, 0, 1);
+        }
+
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert!(
+            cols.iter().all(|c| *c == Some(0)),
+            "a 6-spoken-word island (14 tokens) bracketed by one voice is absorbed: {cols:?}"
+        );
+    }
+
     /// A real transition between two long turns (a different speaker each side,
     /// both long) is left intact — coherent two-speaker output, never over-merged.
     #[test]
@@ -2846,5 +2938,27 @@ mod tests {
 
         let healed = cache.get_or_load(&cfg, || Ok("healed")).unwrap();
         assert_eq!(*healed, "healed");
+    }
+
+    #[test]
+    fn embedding_model_id_normalizes_default_and_custom_bundle() {
+        // Empty (the default bundled model) → the stable "pretrained" id, not "".
+        assert_eq!(
+            embedding_model_id(&diar_cfg(DiarizationBackend::Local, "")),
+            "pretrained"
+        );
+        // Whitespace-only is still the default.
+        let blank = DiarizationConfig {
+            models_dir: "   ".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(embedding_model_id(&blank), "pretrained");
+        // A custom bundle is identified by its (trimmed) path — what changes when
+        // the user swaps models, so it tells two bundles apart for the match guard.
+        let custom = DiarizationConfig {
+            models_dir: "  /opt/models/wespeaker  ".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(embedding_model_id(&custom), "/opt/models/wespeaker");
     }
 }

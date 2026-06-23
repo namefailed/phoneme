@@ -1440,10 +1440,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // V2 score normalization: when off (default), use the raw cosine
                 // bar; when on, switch to the z-score bar.
                 let (mode, threshold) = voiceprint_scorer(&cfg.diarization);
+                // #243: scope the library to the current embedding model so a
+                // models_dir swap can't match against incompatible centroids.
+                let embedding_model =
+                    phoneme_core::diarization::embedding_model_id(&cfg.diarization);
                 catalog_call!(
                     state
                         .catalog
-                        .recognize_speakers_for(id.as_str(), threshold, mode)
+                        .recognize_speakers_for(id.as_str(), threshold, mode, &embedding_model)
                         .await => serialize
                 )
             } else {
@@ -1905,6 +1909,47 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 state.catalog.ann_health().await,
             ));
             serialize_response(checks)
+        }
+        Request::ExportDiagnostics => {
+            // Opt-in, local-only sanitized bundle for bug reports (#248): app +
+            // OS info, the MASKED config (secrets redacted via the shared
+            // `phoneme_core::secrets` layer), and a tail of this daemon's log —
+            // no audio, no transcripts, no catalog, no network. Written under the
+            // app data dir; the path is returned for the GUI to reveal.
+            //
+            // The data dir is the parent of the resolved log dir
+            // (`<data_local>/logs`); the diagnostics file lands in a
+            // `diagnostics/` sibling. The blocking file read/write runs on a
+            // blocking thread so it never stalls the IPC connection.
+            let cfg = state.config.load_full();
+            let log_dir = state.paths.log_dir.clone();
+            let data_dir = log_dir
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| log_dir.clone());
+            let result = tokio::task::spawn_blocking(move || {
+                phoneme_core::diagnostics::write_bundle(
+                    &cfg,
+                    env!("CARGO_PKG_VERSION"),
+                    &data_dir,
+                    &log_dir,
+                    phoneme_core::diagnostics::DEFAULT_LOG_TAIL_LINES,
+                )
+            })
+            .await;
+            match result {
+                Ok(Ok(path)) => Response::Ok(serde_json::json!({
+                    "path": path.to_string_lossy(),
+                })),
+                Ok(Err(e)) => Response::Err(IpcError {
+                    kind: IpcErrorKind::Io,
+                    message: format!("failed to write diagnostics bundle: {e}"),
+                }),
+                Err(e) => Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: format!("diagnostics export task failed: {e}"),
+                }),
+            }
         }
         Request::RestartWhisper => {
             // Sweep every whisper-server process (hung children AND orphans

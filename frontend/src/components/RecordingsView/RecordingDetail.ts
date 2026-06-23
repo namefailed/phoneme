@@ -12,6 +12,7 @@ import {
   setPinned,
   setFavorite,
   setSpeakerName,
+  mergeSpeakers,
   recognizeSpeakers,
   dismissSpeakerSuggestion,
   type Recording,
@@ -33,7 +34,7 @@ import { isLowConfidence, lowConfidenceThreshold } from "../../utils/confidence"
 import { TagChips } from "./TagChips";
 import { EntityChips } from "./EntityChips";
 import { TaskChips } from "./TaskChips";
-import { showFavorites, showPinned, DISPLAY_PREFS_EVENT } from "./columnPrefs";
+import { DISPLAY_PREFS_EVENT } from "./columnPrefs";
 import { TranscriptDiff } from "./TranscriptDiff";
 import { TranscriptEditor } from "./TranscriptEditor";
 import { NotesEditor } from "./NotesEditor";
@@ -1040,10 +1041,31 @@ export class RecordingDetail {
    *  `[Speaker N]` markers, so renames are reversible and never rewrite the text.
    *  Commits on Enter/blur. */
   private openSpeakersModal(r: Recording, labels: number[]) {
+    // The merge target options for one row: every OTHER speaker (merge folds this
+    // label into another). Hidden when there's only one speaker (nothing to fold
+    // into). In-recording speaker correction (U1): merge is label-based, so it
+    // lives here in the rename modal; per-turn reassign/split ride the timeline.
+    const mergeOptions = (label: number) =>
+      labels
+        .filter((l) => l !== label)
+        .map((l) => `<option value="${l}">Speaker ${l}</option>`)
+        .join("");
     const rows = labels
       .map((label) => {
         const name = speakerDisplayName(r.speaker_names, label);
         const isCustom = name !== `Speaker ${label}`;
+        const merge =
+          labels.length > 1
+            ? `
+            <select
+              class="speaker-merge-select"
+              aria-label="Merge Speaker ${label} into another speaker"
+              title="Merge this speaker into another — every turn becomes that speaker"
+            >
+              <option value="" selected>Merge into…</option>
+              ${mergeOptions(label)}
+            </select>`
+            : "";
         return `
           <div class="speaker-row" data-label="${label}">
             <span class="speaker-tag">Speaker ${label}</span>
@@ -1055,6 +1077,7 @@ export class RecordingDetail {
               placeholder="Speaker ${label}"
               aria-label="Name for Speaker ${label}"
             />
+            ${merge}
           </div>`;
       })
       .join("");
@@ -1067,7 +1090,7 @@ export class RecordingDetail {
           <button class="speakers-modal-close" aria-label="Close">✕</button>
         </div>
         <div class="speakers-block" style="margin: 0; padding: 0; border: none; background: none;">
-          <div class="speakers-hint">Renaming shows the name everywhere — the transcript keeps its <code>[Speaker N]</code> labels, so it's reversible.</div>
+          <div class="speakers-hint">Renaming shows the name everywhere — the transcript keeps its <code>[Speaker N]</code> labels, so it's reversible. <b>Merging</b> two speakers can't be undone — every turn of one becomes the other.</div>
           <div class="speakers-list">${rows}</div>
         </div>
         <div class="speakers-modal-footer">
@@ -1113,6 +1136,21 @@ export class RecordingDetail {
         const v = input.value;
         await this.commitSpeakerName(r.id, label, v, input.defaultValue);
         input.defaultValue = v.trim();
+      });
+    });
+
+    // Merge selects (U1): folding this speaker into another. A real change closes
+    // the modal — the merge reloads the recording (speaker_name_updated), and the
+    // label set the modal was built from is now stale.
+    overlay.querySelectorAll<HTMLSelectElement>(".speaker-merge-select").forEach((sel) => {
+      const rowEl = sel.closest<HTMLElement>(".speaker-row");
+      const from = Number(rowEl?.dataset.label);
+      sel.addEventListener("change", () => {
+        const into = Number(sel.value);
+        sel.value = ""; // reset the placeholder regardless of outcome
+        if (!Number.isFinite(from) || !Number.isFinite(into) || into < 1 || into === from) return;
+        close();
+        void this.commitMergeSpeakers(r.id, from, into);
       });
     });
 
@@ -1215,6 +1253,20 @@ export class RecordingDetail {
     const slot = this.speakerCommitChain.then(run, run);
     this.speakerCommitChain = slot;
     return slot;
+  }
+
+  /** Merge two of this recording's speakers (U1): every `from` segment becomes
+   *  `into`, then `from` ceases to exist. The daemon rebuilds the prose markers
+   *  and emits `speaker_name_updated`, which the parent turns into a refresh — so
+   *  here we only fire the IPC, toast the outcome, and let the reload repaint. */
+  private async commitMergeSpeakers(id: string, from: number, into: number): Promise<void> {
+    try {
+      await mergeSpeakers(id, from, into);
+      showToast(`Merged Speaker ${from} into Speaker ${into}`, "success");
+      this.onRefresh();
+    } catch (e) {
+      showToast(`Couldn't merge speakers: ${errText(e)}`, "error");
+    }
   }
 
   /** Render the stored summary into the peek box and wire its Regenerate button. */

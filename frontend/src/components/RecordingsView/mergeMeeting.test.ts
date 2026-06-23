@@ -8,6 +8,7 @@ import {
   speakerDisplayName,
   speakerLabelsIn,
   applySpeakerNames,
+  segmentIdxsForChronoBlock,
 } from "./mergeMeeting";
 import type { Recording, SpeakerName } from "../../services/ipc";
 
@@ -401,5 +402,73 @@ describe("chronoPlainText", () => {
     expect(chronoPlainText(blocks)).toBe(
       "[0:04] 🎤 Microphone: hello\n[0:09] 🔊 System audio · Speaker 1: hi",
     );
+  });
+});
+
+describe("segmentIdxsForChronoBlock", () => {
+  const seg = (start_ms: number, end_ms: number, text: string, speaker: string | null = null) => ({
+    start_ms,
+    end_ms,
+    text,
+    speaker,
+  });
+
+  it("maps a coalesced turn back to its 0-based segment indices", () => {
+    // One track: Speaker 1 (idx 0,1 coalesced within the gap), Speaker 2 (idx 2),
+    // Speaker 1 again 20s later (idx 3). The first block covers idx 0+1.
+    const mic = track("m", "mic", "a");
+    const sys = track("y", "system", "b");
+    const segs = new Map([
+      [
+        "y",
+        [
+          seg(0, 1000, "hi", "1"),
+          seg(2000, 3000, "there", "1"),
+          seg(3100, 4000, "hello", "2"),
+          seg(30000, 31000, "again", "1"),
+        ],
+      ],
+      ["m", [seg(0, 500, "x")]],
+    ]);
+    const blocks = mergeChronological([mic, sys], segs)!;
+    const sysBlocks = blocks.filter((b) => b.recordingId === "y");
+    // First system block is Speaker 1's coalesced turn → segments 0 and 1.
+    expect(segmentIdxsForChronoBlock(sysBlocks[0], segs.get("y"))).toEqual([0, 1]);
+    // The Speaker-2 turn → segment 2 only.
+    const spk2 = sysBlocks.find((b) => b.speaker === 2)!;
+    expect(segmentIdxsForChronoBlock(spk2, segs.get("y"))).toEqual([2]);
+  });
+
+  it("requires the speaker to match, not just the time window", () => {
+    // Two speakers within one block's time bound; only the matching label counts.
+    const block = {
+      key: "y:0",
+      recordingId: "y",
+      source: sourceFor("system"),
+      speaker: 1,
+      displayName: "Speaker 1",
+      text: "hi",
+      startMs: 0,
+      endMs: 5000,
+      speakerKey: "1",
+    };
+    const segments = [seg(0, 1000, "hi", "1"), seg(2000, 3000, "other", "2")];
+    expect(segmentIdxsForChronoBlock(block, segments)).toEqual([0]);
+  });
+
+  it("returns [] when the track has no stored segments", () => {
+    const block = {
+      key: "y:0",
+      recordingId: "y",
+      source: sourceFor("system"),
+      speaker: 1,
+      displayName: "Speaker 1",
+      text: "hi",
+      startMs: 0,
+      endMs: 5000,
+      speakerKey: "1",
+    };
+    expect(segmentIdxsForChronoBlock(block, [])).toEqual([]);
+    expect(segmentIdxsForChronoBlock(block, undefined)).toEqual([]);
   });
 });

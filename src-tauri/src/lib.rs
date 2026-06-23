@@ -550,6 +550,7 @@ pub fn run() {
             commands::cancel_all_queued,
             commands::cancel_processing,
             commands::run_doctor,
+            commands::export_diagnostics,
             commands::update_transcript,
             commands::update_meeting_name,
             commands::get_original_transcript,

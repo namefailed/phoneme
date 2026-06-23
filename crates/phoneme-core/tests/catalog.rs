@@ -2003,7 +2003,7 @@ async fn recognize_speakers_for_skips_named_and_dismissed() {
         .await
         .unwrap();
     let sugg = catalog
-        .recognize_speakers_for(r2.as_str(), 0.5, phoneme_core::voiceprint::ScoreNorm::Off)
+        .recognize_speakers_for(r2.as_str(), 0.5, phoneme_core::voiceprint::ScoreNorm::Off, "")
         .await
         .unwrap();
     assert_eq!(sugg.len(), 1, "only speaker 1 matches Alice");
@@ -2014,7 +2014,7 @@ async fn recognize_speakers_for_skips_named_and_dismissed() {
     // Naming speaker 1 stops suggesting over it.
     catalog.set_speaker_name(&r2, 1, "Alice").await.unwrap();
     assert!(catalog
-        .recognize_speakers_for(r2.as_str(), 0.5, phoneme_core::voiceprint::ScoreNorm::Off)
+        .recognize_speakers_for(r2.as_str(), 0.5, phoneme_core::voiceprint::ScoreNorm::Off, "")
         .await
         .unwrap()
         .is_empty());
@@ -2025,7 +2025,7 @@ async fn recognize_speakers_for_skips_named_and_dismissed() {
         .await
         .unwrap();
     let sugg = catalog
-        .recognize_speakers_for(r2.as_str(), 0.5, phoneme_core::voiceprint::ScoreNorm::Off)
+        .recognize_speakers_for(r2.as_str(), 0.5, phoneme_core::voiceprint::ScoreNorm::Off, "")
         .await
         .unwrap();
     assert_eq!(sugg.len(), 1);
@@ -2035,7 +2035,7 @@ async fn recognize_speakers_for_skips_named_and_dismissed() {
         .await
         .unwrap();
     assert!(catalog
-        .recognize_speakers_for(r2.as_str(), 0.5, phoneme_core::voiceprint::ScoreNorm::Off)
+        .recognize_speakers_for(r2.as_str(), 0.5, phoneme_core::voiceprint::ScoreNorm::Off, "")
         .await
         .unwrap()
         .is_empty());
