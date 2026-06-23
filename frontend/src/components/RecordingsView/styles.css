@@ -1895,7 +1895,13 @@ mark.search-hit {
   align-items: center;
   gap: 5px;
 }
-.th-trigger .ph-caret-ico { flex-shrink: 0; opacity: 0.75; }
+.th-trigger .ph-caret-ico {
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: transform var(--ui-motion-fast) ease;
+}
+/* Chevron rotates to point at the (drop-up) menu while it's open; gated by --ui-motion. */
+.th-trigger[aria-expanded="true"] .ph-caret-ico { transform: rotate(180deg); }
 .th-trigger.active {
   color: var(--accent);
   border-color: var(--accent);
