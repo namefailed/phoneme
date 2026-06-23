@@ -42,7 +42,8 @@ import type { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
 import { confirmRecordingDelete, deleteModeKeepsAudio } from "../ConfirmDelete";
-import { showActionToast, showToast } from "../../utils/toast";
+import { showToast } from "../../utils/toast";
+import { runUndoableDelete, runUndoableSessionDelete, type DeleteHost } from "./recordingsDelete";
 import { setHeaderHidden, isHeaderHidden } from "../../services/headerBar";
 import "./Sidebar";
 import "./ThinkingPopout";
@@ -577,112 +578,25 @@ export class RecordingsView implements NavHost {
       .then((mode) => {
         if (!mode) return;
         const keepAudio = deleteModeKeepsAudio(mode);
-        if (recordingIds.length) this.runUndoableDelete(recordingIds, keepAudio);
-        for (const sid of sessionIds) this.runUndoableSessionDelete(sid, keepAudio);
+        const host = this.deleteHost();
+        if (recordingIds.length) runUndoableDelete(host, recordingIds, keepAudio);
+        for (const sid of sessionIds) runUndoableSessionDelete(host, sid, keepAudio);
       })
       .finally(() => {
         this.deletePromptOpen = false;
       });
   }
 
-  /** The grace-period flow itself: hide now, delete (with the chosen
-   *  `keep_audio` flag) only when the Undo toast lapses. */
-  private runUndoableDelete(ids: string[], keepAudio: boolean) {
-    // Optimistically hide the rows, drop them from the selection (so the bulk
-    // bar count stays honest), and close the detail if the open one is going.
-    this.list.setPendingDelete(ids, true);
-    this.list.clearSelection();
-    const sel = this.state.get().selectedId;
-    if (sel && ids.includes(sel)) this.deselect();
-
-    const noun = ids.length === 1 ? "Recording" : `${ids.length} recordings`;
-    const label = keepAudio ? `${noun} removed — audio kept` : `${noun} deleted`;
-    showActionToast({
-      message: label,
-      actionLabel: "Undo",
-      icon: "🗑",
-      durationMs: 6000,
-      onAction: () => {
-        // Cancelled — just un-hide; nothing was ever sent to the backend.
-        this.list.setPendingDelete(ids, false);
-      },
-      onExpire: async () => {
-        const { deleteRecording } = await import("../../services/ipc");
-        const failed: string[] = [];
-        for (const id of ids) {
-          try {
-            await deleteRecording(id, keepAudio);
-          } catch (err) {
-            console.error("Failed to delete recording:", err);
-            failed.push(id);
-          }
-        }
-        // Reconcile the store first — the re-fetch drops the now-deleted rows
-        // (the daemon removes the catalog row before `deleteRecording` resolves,
-        // so they're already gone). Only then clear the hide set. Clearing it
-        // before the refresh lands would briefly un-hide rows that are still in
-        // the store, flashing them back onto the list right before they vanish.
-        await this.refresh();
-        this.list.setPendingDelete(ids, false);
-        // A failed delete un-hides the row (it's still in the store), but the
-        // grace-period toast already showed "deleted" and dismissed itself — so
-        // say it plainly instead of leaving that misleading success as the only
-        // feedback.
-        if (failed.length) {
-          showToast(
-            failed.length === 1
-              ? "Couldn't delete the recording — it's still here."
-              : `Couldn't delete ${failed.length} recordings — they're still here.`,
-            "error",
-          );
-        }
-      },
-    });
-  }
-
-  /** Grace-period delete of a whole meeting session: optimistically hide its
-   *  member tracks now, then fire a single `DeleteSession` (every track at once)
-   *  when the Undo toast lapses. The session header isn't itself a deletable
-   *  list row, so the hide is keyed by the member track ids from the store. */
-  private runUndoableSessionDelete(sessionId: string, keepAudio: boolean) {
-    const meetingId = sessionId.replace("session:", "");
-    const trackIds = this.state
-      .get()
-      .recordings.filter((r) => r.meeting_id === meetingId)
-      .map((r) => r.id);
-    this.list.setPendingDelete(trackIds, true);
-    this.list.clearSelection();
-    const sel = this.state.get().selectedId;
-    if (sel === sessionId || (sel && trackIds.includes(sel))) this.deselect();
-
-    const label = keepAudio ? "Meeting removed — audio kept" : "Meeting deleted";
-    showActionToast({
-      message: label,
-      actionLabel: "Undo",
-      icon: "🗑",
-      durationMs: 6000,
-      onAction: () => {
-        // Cancelled — un-hide the tracks; nothing was sent to the backend.
-        this.list.setPendingDelete(trackIds, false);
-      },
-      onExpire: async () => {
-        const { deleteSession } = await import("../../services/ipc");
-        let failed = false;
-        try {
-          await deleteSession(meetingId, keepAudio);
-        } catch (err) {
-          console.error("Failed to delete meeting session:", err);
-          failed = true;
-        }
-        // Reconcile first (the daemon already dropped the rows), then un-hide —
-        // same ordering as the per-recording flow to avoid a flash-back.
-        await this.refresh();
-        this.list.setPendingDelete(trackIds, false);
-        if (failed) {
-          showToast("Couldn't delete the meeting — it's still here.", "error");
-        }
-      },
-    });
+  /** Bundle the slice of state the undoable-delete flows (recordingsDelete.ts)
+   *  reach into, so they can live outside this orchestrator. */
+  private deleteHost(): DeleteHost {
+    return {
+      list: this.list,
+      selectedId: () => this.state.get().selectedId,
+      recordings: () => this.state.get().recordings,
+      deselect: () => this.deselect(),
+      refresh: () => this.refresh(),
+    };
   }
 
   private disposed = false;
