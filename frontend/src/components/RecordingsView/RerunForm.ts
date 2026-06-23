@@ -6,9 +6,46 @@ import { curatedTranscriptionModels } from "../../data/curatedModels";
 import { mountModelField } from "../SettingsView/modelField";
 import { invoke } from "@tauri-apps/api/core";
 import type { RerunPayload } from "./rerunActions";
+import type { PlaybookEntry } from "../../services/ipc";
 
 /** LLM cleanup providers selectable for a one-time Re-run → Cleanup override. */
 const CLEANUP_PROVIDERS = ["ollama", "openai", "groq", "anthropic"] as const;
+
+/** Find the Playbook entry the pipeline runs for a step: by its builtin id
+ *  (`cleanup` / `summary`), else by kind + enrichment target. The Playbook is the
+ *  source of truth for these now, so the Re-run modal pre-fills from it. */
+function findEntry(
+  playbook: PlaybookEntry[] | undefined,
+  id: string,
+  kind: PlaybookEntry["kind"],
+  target?: string,
+): PlaybookEntry | undefined {
+  const pb = Array.isArray(playbook) ? playbook : [];
+  return (
+    pb.find((e) => e.id === id) ??
+    pb.find((e) => e.kind === kind && (target === undefined || e.target === target))
+  );
+}
+
+/** Resolve an entry's effective LLM connection against the base
+ *  [llm_post_process] section — the daemon's inherit-on-blank rule (a blank or
+ *  "none" provider inherits the base; a blank model/url/key/prompt inherits too,
+ *  incl. the recent "none → inherit" fix). So the modal shows the connection the
+ *  step will actually run with, and the entry's own prompt/model when set. */
+function resolveEntryConn(
+  entryLlm: PlaybookEntry["llm"] | undefined,
+  base: { provider?: string; model?: string; prompt?: string; api_url?: string; api_key?: string },
+): { provider: string; model: string; prompt: string; api_url: string; api_key: string } {
+  const filled = (a?: string, b?: string) => ((a ?? "").trim() ? (a as string) : (b ?? ""));
+  const prov = (entryLlm?.provider ?? "").trim();
+  return {
+    provider: prov && prov.toLowerCase() !== "none" ? prov : (base.provider ?? ""),
+    model: filled(entryLlm?.model, base.model),
+    prompt: filled(entryLlm?.prompt, base.prompt),
+    api_url: filled(entryLlm?.api_url, base.api_url),
+    api_key: filled(entryLlm?.api_key, base.api_key),
+  };
+}
 
 /** Which step the unified "Re-run…" menu is currently configured to perform. */
 type RerunStep = "transcribe" | "cleanup" | "summarize" | "all" | "hook";
@@ -83,35 +120,44 @@ export class RerunFormElement extends LitElement {
       }
 
       if (this.config && this.config.llm_post_process) {
-        const llm = this.config.llm_post_process;
-        const provider = typeof llm.provider === "string" ? llm.provider.trim() : "";
-        this.llmPostProcessEnabled = !!llm.enabled &&
-          provider !== "" &&
-          provider.toLowerCase() !== "none";
-        this.cleanupModel = llm.model ?? "";
-        const lc = provider.toLowerCase();
-        this.cleanupProvider = (CLEANUP_PROVIDERS as readonly string[]).includes(lc)
-          ? lc
-          : "ollama";
-        this.cleanupPrompt = llm.prompt ?? "";
-        this.cleanupApiUrl = llm.api_url ?? "";
-        this.cleanupApiKey = llm.api_key ?? "";
+        const base = this.config.llm_post_process;
+        // The Playbook "cleanup" transform is the source of truth for the prompt +
+        // model; its connection inherits this base section on blank. Fall back to
+        // the bare section when no entry exists. Enabled = the EFFECTIVE connection
+        // is real, NOT the legacy `enabled` flag: the recipe drives the pipeline
+        // now, so cleanup can run even when that old global toggle is off.
+        const eff = resolveEntryConn(findEntry(this.config.playbook, "cleanup", "transform")?.llm, base);
+        const lc = (eff.provider || "").toLowerCase();
+        this.llmPostProcessEnabled = eff.provider !== "" && lc !== "none";
+        this.cleanupModel = eff.model;
+        this.cleanupProvider = (CLEANUP_PROVIDERS as readonly string[]).includes(lc) ? lc : "ollama";
+        this.cleanupPrompt = eff.prompt;
+        this.cleanupApiUrl = eff.api_url;
+        this.cleanupApiKey = eff.api_key;
       }
 
       if (this.config && this.config.summary) {
         const sum = this.config.summary;
         const pp = this.config.llm_post_process ?? {};
-        this.summaryModel = sum.model ?? "";
-        this.summaryPrompt = sum.prompt ?? "";
-        // Provider/key/URL inherit the post-process config when the summary's own
-        // are blank (mirrors the daemon's pipeline behaviour).
-        const sumProv = typeof sum.provider === "string" ? sum.provider.trim() : "";
-        const ppProv = typeof pp.provider === "string" ? pp.provider.trim() : "";
-        const provRaw = sumProv && sumProv.toLowerCase() !== "none" ? sumProv : ppProv;
-        const lc = provRaw.toLowerCase();
+        // Prefer the Playbook "summary" enrichment entry (source of truth); fall
+        // back to the legacy [summary] section. Either way the connection inherits
+        // [llm_post_process] on blank (mirrors the daemon's pipeline behaviour).
+        const entry = findEntry(this.config.playbook, "summary", "enrichment", "summary");
+        const sumLlm = entry?.llm ?? {
+          provider: sum.provider ?? "",
+          model: sum.model ?? "",
+          prompt: sum.prompt ?? "",
+          api_url: sum.api_url ?? "",
+          api_key: sum.api_key ?? "",
+          timeout_secs: 0,
+        };
+        const eff = resolveEntryConn(sumLlm, pp);
+        const lc = (eff.provider || "").toLowerCase();
+        this.summaryModel = eff.model;
+        this.summaryPrompt = eff.prompt;
         this.summaryProvider = (CLEANUP_PROVIDERS as readonly string[]).includes(lc) ? lc : "ollama";
-        this.summaryApiUrl = sum.api_url || pp.api_url || "";
-        this.summaryApiKey = sum.api_key || pp.api_key || "";
+        this.summaryApiUrl = eff.api_url;
+        this.summaryApiKey = eff.api_key;
       }
 
       if (this.config && this.config.whisper) {
