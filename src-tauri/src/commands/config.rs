@@ -192,6 +192,14 @@ pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
 /// (`tray::switch_to_profile`) so every path that adopts a new config behaves
 /// identically to a manual save.
 pub(crate) async fn apply_config(app: &tauri::AppHandle, slot: &BridgeSlot, config: &Config) {
+    // Refresh the process-wide config cache first, so the hot-path readers
+    // (global-shortcut handler, window-close, exit hook) see this config the
+    // instant it's applied — e.g. a changed hotkey combo/mode takes effect on
+    // the very next keypress. Every path that adopts a new config (write_config,
+    // switch_profile, tray profile switch) routes through here, so this single
+    // refresh covers them all.
+    crate::config_cache::set(config);
+
     // Update start at login registry key dynamically
     #[cfg(target_os = "windows")]
     {

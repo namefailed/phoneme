@@ -572,6 +572,10 @@ impl Tool for Summarize {
             id,
             model: None,
             prompt: None,
+            // The agent tool uses the configured summary connection (no override).
+            provider: None,
+            api_url: None,
+            api_key: None,
         })
     }
 }
@@ -1547,7 +1551,10 @@ mod tests {
             Request::RerunSummary {
                 id: id.clone(),
                 model: None,
-                prompt: None
+                prompt: None,
+                provider: None,
+                api_url: None,
+                api_key: None,
             }
         );
         assert_eq!(

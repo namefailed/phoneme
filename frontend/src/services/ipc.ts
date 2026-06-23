@@ -413,6 +413,14 @@ export async function getChapters(id: string): Promise<Chapter[]> {
   return await tauriInvoke<Chapter[]>("get_chapters", { id });
 }
 
+/** One recording's structured entities (person / org / topic / term), kind- then
+ *  value-sorted. The detail-pane entity chips use this instead of pulling the
+ *  whole {@link getRecording} row just for its `entities`. An empty list is a
+ *  normal state (no entities extracted yet). */
+export async function getEntities(id: string): Promise<Entity[]> {
+  return await tauriInvoke<Entity[]>("get_entities", { id });
+}
+
 /** One machine transcript word with its audio-relative timing.
  *  `idx` is the 0-based timeline order across the whole recording;
  *  `start_ms`/`end_ms` are offsets into the track's audio file; `speaker`
@@ -553,8 +561,11 @@ export async function rerunMeetingDigest(
   meetingId: string,
   model: string | null = null,
   recipeId: string | null = null,
+  provider: string | null = null,
+  apiUrl: string | null = null,
+  apiKey: string | null = null,
 ): Promise<void> {
-  await tauriInvoke("rerun_meeting_digest", { meetingId, model, recipeId });
+  await tauriInvoke("rerun_meeting_digest", { meetingId, model, recipeId, provider, apiUrl, apiKey });
 }
 
 /**
@@ -586,8 +597,11 @@ export async function rerunPeriodDigest(
   until: string,
   label: string,
   model: string | null = null,
+  provider: string | null = null,
+  apiUrl: string | null = null,
+  apiKey: string | null = null,
 ): Promise<void> {
-  await tauriInvoke("rerun_period_digest", { since, until, label, model });
+  await tauriInvoke("rerun_period_digest", { since, until, label, model, provider, apiUrl, apiKey });
 }
 
 /**
@@ -754,17 +768,23 @@ export async function rerunCleanup(
 
 /**
  * Generate (or regenerate) an LLM summary of a recording's current transcript
- * on demand, and store it. Reuses the configured `[llm_post_process]` provider
- * connection; `model`/`prompt` override the configured summary model/prompt for
- * this run only (never persisted). The summary text arrives via the
- * `SummaryUpdated` daemon event — re-fetch the recording when it fires.
+ * on demand, and store it. `model`/`prompt` override the configured summary
+ * model/prompt for this run only; `provider`/`apiUrl`/`apiKey` override the
+ * connection for this run only (mirroring {@link rerunCleanup}). `null` falls
+ * back to the configured summary / `[llm_post_process]` connection; a masked
+ * `apiKey` ({@link MASKED_SECRET}) means "use the configured key" (resolved in
+ * Rust — the real secret never round-trips through the WebView). None of it is
+ * persisted. The summary arrives via the `SummaryUpdated` daemon event.
  */
 export async function rerunSummary(
   id: string,
   model: string | null = null,
   prompt: string | null = null,
+  provider: string | null = null,
+  apiUrl: string | null = null,
+  apiKey: string | null = null,
 ): Promise<void> {
-  await tauriInvoke("rerun_summary", { id, model, prompt });
+  await tauriInvoke("rerun_summary", { id, model, prompt, provider, apiUrl, apiKey });
 }
 
 /** One entry in the transcription pipeline queue. */
@@ -1345,6 +1365,16 @@ export type TaskWithRecording = {
  *  `ListFilter.task_state`. */
 export async function listAllTasks(onlyOpen = false): Promise<TaskWithRecording[]> {
   return await tauriInvoke<TaskWithRecording[]>("list_all_tasks", { onlyOpen });
+}
+
+/** Library-wide task counts (`{ open, total }`). The cheap badge read the sidebar
+ *  Tasks section uses instead of fetching every row via {@link listAllTasks} just
+ *  to count it. */
+export type TaskCounts = { open: number; total: number };
+
+/** Fetch the library-wide open/total task counts for the sidebar Tasks badges. */
+export async function taskCounts(): Promise<TaskCounts> {
+  return await tauriInvoke<TaskCounts>("task_counts");
 }
 
 /**

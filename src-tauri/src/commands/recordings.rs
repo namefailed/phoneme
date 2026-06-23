@@ -149,6 +149,16 @@ pub async fn get_chapters(bridge: Br<'_>, id: String) -> Result<Value, CommandEr
     forward(&bridge, Request::GetChapters { id }).await
 }
 
+/// Fetch one recording's structured entities (person / org / topic / term) —
+/// a JSON array (possibly empty) of `{ kind, value }`, kind- then value-sorted.
+/// The per-recording read the detail-pane entity chips use instead of pulling the
+/// whole `get_recording` row; an unknown id yields an empty list.
+#[tauri::command]
+pub async fn get_entities(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::GetEntities { id }).await
+}
+
 /// Fetch one recording's machine transcript words in timeline order — the
 /// finer per-word layer beneath `get_segments`. Returns a JSON array (possibly
 /// empty) of `{ idx, start_ms, end_ms, text, speaker, confidence }`, ordered by
@@ -359,15 +369,12 @@ pub async fn refire_hook(
 /// transcript, without re-transcribing the audio. `model` optionally overrides
 /// the configured cleanup model for this one run.
 ///
-/// Cleanup is the only one-shot LLM command that carries a per-run
-/// `provider`/`api_url`/`api_key` (the "Cleanup" rerun dialog lets the user pick
-/// a different provider for a single re-clean). The sibling one-shots —
-/// `rerun_summary`, `rerun_meeting_digest`, `rerun_period_digest` — deliberately
-/// take only `model`/`prompt`/`recipe_id` and always reuse the configured summary
-/// provider; their requests have no key field, so the frontend never sends one
-/// and there is nothing to mask-resolve. If a per-run provider is ever wanted for
-/// summary/digest too, those `Request` variants gain the same fields and the
-/// resolve below moves into a shared helper.
+/// Each one-shot LLM command carries a per-run `provider`/`api_url`/`api_key` so
+/// the user can point a single re-run at a different provider. Cleanup resolves a
+/// masked key from the cleanup config inline (below); the summary/digest siblings
+/// — `rerun_summary`, `rerun_meeting_digest`, `rerun_period_digest` — share
+/// `resolve_summary_key`, which falls back from the summary key to the cleanup key
+/// the way the daemon's `summary_llm_config` does.
 #[tauri::command]
 pub async fn rerun_cleanup(
     bridge: Br<'_>,
@@ -404,16 +411,53 @@ pub async fn rerun_cleanup(
 
 /// Generate (or regenerate) an LLM summary of a recording's current transcript
 /// on demand. `model`/`prompt` override the configured summary model/prompt for
-/// this run only. The summary arrives via the `SummaryUpdated` daemon event.
+/// this run only; `provider`/`api_url`/`api_key` override the connection for this
+/// run only (mirroring `rerun_cleanup`). The summary arrives via the
+/// `SummaryUpdated` daemon event.
 #[tauri::command]
 pub async fn rerun_summary(
     bridge: Br<'_>,
     id: String,
     model: Option<String>,
     prompt: Option<String>,
+    provider: Option<String>,
+    api_url: Option<String>,
+    api_key: Option<String>,
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::RerunSummary { id, model, prompt }).await
+    let api_key = resolve_summary_key(api_key);
+    forward(
+        &bridge,
+        Request::RerunSummary {
+            id,
+            model,
+            prompt,
+            provider,
+            api_url,
+            api_key,
+        },
+    )
+    .await
+}
+
+/// A masked summary/digest key means "use the configured summary key" — resolve it
+/// here so the real secret is never round-tripped through the WebView. The summary
+/// connection inherits the cleanup key when its own is blank (matching the daemon's
+/// `summary_llm_config`), so fall back to the cleanup key too. Mirrors the inline
+/// resolve in `rerun_cleanup`, shared by the three summary/digest commands.
+fn resolve_summary_key(api_key: Option<String>) -> Option<String> {
+    if api_key.as_deref() == Some(MASKED_SECRET) {
+        config_io::read().ok().map(|c| {
+            let summary = c.summary.api_key_str().trim();
+            if summary.is_empty() {
+                c.llm_post_process.api_key_str().to_owned()
+            } else {
+                summary.to_owned()
+            }
+        })
+    } else {
+        api_key
+    }
 }
 
 /// Generate (or regenerate) a meeting's whole-meeting digest on demand — the
@@ -427,13 +471,20 @@ pub async fn rerun_meeting_digest(
     meeting_id: String,
     model: Option<String>,
     recipe_id: Option<String>,
+    provider: Option<String>,
+    api_url: Option<String>,
+    api_key: Option<String>,
 ) -> Result<Value, CommandError> {
+    let api_key = resolve_summary_key(api_key);
     forward(
         &bridge,
         Request::RerunMeetingDigest {
             meeting_id,
             model,
             recipe_id,
+            provider,
+            api_url,
+            api_key,
         },
     )
     .await
@@ -450,6 +501,7 @@ pub async fn rerun_meeting_digest(
 /// `DateTime<Local>` fields through the wire schema (the same shape `ListFilter`
 /// uses), so this command needs no direct chrono dependency. A malformed
 /// timestamp yields a descriptive error rather than reaching the daemon.
+#[allow(clippy::too_many_arguments)] // Tauri command: args map 1:1 to the frontend invoke (period window + model + optional cloud connection)
 #[tauri::command]
 pub async fn rerun_period_digest(
     bridge: Br<'_>,
@@ -457,13 +509,20 @@ pub async fn rerun_period_digest(
     until: String,
     label: String,
     model: Option<String>,
+    provider: Option<String>,
+    api_url: Option<String>,
+    api_key: Option<String>,
 ) -> Result<Value, CommandError> {
+    let api_key = resolve_summary_key(api_key);
     let req: Request = serde_json::from_value(serde_json::json!({
         "type": "rerun_period_digest",
         "since": since,
         "until": until,
         "label": label,
         "model": model,
+        "provider": provider,
+        "api_url": api_url,
+        "api_key": api_key,
     }))
     .map_err(|e| CommandError::from(format!("invalid period digest range: {e}")))?;
     forward(&bridge, req).await
@@ -1510,6 +1569,14 @@ pub async fn list_all_entities(bridge: Br<'_>) -> Result<Value, CommandError> {
 #[tauri::command]
 pub async fn list_all_tasks(bridge: Br<'_>, only_open: bool) -> Result<Value, CommandError> {
     forward(&bridge, Request::ListAllTasks { only_open }).await
+}
+
+/// Library-wide task counts (`{ open, total }`). The cheap badge read the sidebar
+/// Tasks section uses instead of fetching the full `list_all_tasks` list to count
+/// it; the full list still backs the "View all" task view.
+#[tauri::command]
+pub async fn task_counts(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::TaskCounts).await
 }
 
 /// Merge one tag into another: re-point all of `from_id`'s recordings onto

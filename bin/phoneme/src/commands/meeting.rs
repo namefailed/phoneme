@@ -85,6 +85,10 @@ pub async fn run(args: MeetingArgs, cfg: &Config, json: bool) -> ExitCode {
             meeting_id,
             model,
             recipe_id: template,
+            // The CLI uses the configured summary connection (no per-run override).
+            provider: None,
+            api_url: None,
+            api_key: None,
         },
     };
 

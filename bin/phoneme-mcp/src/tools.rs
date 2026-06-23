@@ -685,7 +685,10 @@ mod tests {
             Request::RerunSummary {
                 id: id.clone(),
                 model: None,
-                prompt: None
+                prompt: None,
+                provider: None,
+                api_url: None,
+                api_key: None,
             }
         );
         assert_eq!(

@@ -312,12 +312,21 @@ export class RerunFormElement extends LitElement {
           apiKey: isApi ? orNull(this.cleanupApiKey) : null,
         };
       }
-      case "summarize":
+      case "summarize": {
+        // The one-time connection mirrors cleanup: provider always carried, URL/key
+        // only for an API provider. The key is sent as loaded — a masked value
+        // ({@link MASKED_SECRET}) means "use the configured key", resolved in Rust.
+        const provider = this.summaryEffective("provider");
+        const isApi = isApiLlmProvider(provider);
         return {
           step: "summarize",
           model: orNull(this.summaryModel),
           prompt: this.summaryPrompt.trim() === "" ? null : this.summaryPrompt,
+          provider: orNull(provider),
+          apiUrl: isApi ? orNull(this.summaryEffective("url")) : null,
+          apiKey: isApi ? orNull(this.summaryEffective("key")) : null,
         };
+      }
       case "transcribe":
         return {
           step: "transcribe",
@@ -370,11 +379,47 @@ export class RerunFormElement extends LitElement {
     this.dispatchEvent(new CustomEvent("cancel", { bubbles: true, composed: true }));
   }
 
-  /** Summary model + instructions inputs (shared by the Summarize and All steps). */
-  private renderSummaryPanel() {
+  private handleSummaryProviderChange(e: Event) {
+    this.summaryProvider = (e.target as HTMLSelectElement).value;
+    // Re-mount the model field for the new effective provider (host-key guard).
+  }
+  private handleSummaryApiUrlInput(e: Event) {
+    this.summaryApiUrl = (e.target as HTMLInputElement).value;
+  }
+  private handleSummaryApiKeyInput(e: Event) {
+    this.summaryApiKey = (e.target as HTMLInputElement).value;
+  }
+
+  /** Summary model + instructions inputs (shared by the Summarize and All steps).
+   *  `showConnection` adds the one-time provider/URL/key fields — true for the
+   *  Summarize step (its wire carries them), false for the All step, whose summary
+   *  inherits the one-time cleanup connection (its `RerunAllOverrides` wire has no
+   *  summary connection fields, so a one-time provider/key here would be dropped). */
+  private renderSummaryPanel(showConnection = true) {
     const sInput = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
     const sLabel = "font-size: 0.7857rem; color: var(--fg-muted);";
+    const isApi = isApiLlmProvider(this.summaryEffective("provider"));
     return html`
+      ${showConnection ? html`
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style=${sLabel}>Provider</label>
+          <select class="rerun-summary-provider" style=${sInput} @change=${this.handleSummaryProviderChange}>
+            ${CLEANUP_PROVIDERS.map(p => html`<option value=${p} ?selected=${p === this.summaryEffective("provider")}>${p}</option>`)}
+          </select>
+        </div>
+        ${isApi ? html`
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style=${sLabel}>API URL (blank = provider default)</label>
+            <input type="text" class="rerun-summary-url" style=${sInput}
+              .value=${this.summaryApiUrl} @input=${this.handleSummaryApiUrlInput} placeholder="Provider default" />
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style=${sLabel}>API key</label>
+            <input type="password" class="rerun-summary-key" style=${sInput}
+              .value=${this.summaryApiKey} @input=${this.handleSummaryApiKeyInput} placeholder="Configured key" />
+          </div>
+        ` : nothing}
+      ` : nothing}
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <label style=${sLabel}>Summary model</label>
         <!-- Shared model picker (live list + curated fallback + ↻ Refresh +
@@ -465,7 +510,7 @@ export class RerunFormElement extends LitElement {
           <div style=${sectionStyle}>Cleanup</div>
           ${this.renderCleanupPanel(false)}
           <div style=${sectionStyle}>Summary</div>
-          ${this.renderSummaryPanel()}
+          ${this.renderSummaryPanel(false)}
           <p style="margin: 0; font-size: 0.7857rem; color: var(--fg-muted); line-height: 1.4;">
             Re-transcribes, then re-runs cleanup and the AI summary with these one-time settings, then your hooks. Overrides apply to this run only and aren't saved.
           </p>

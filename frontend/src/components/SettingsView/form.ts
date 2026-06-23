@@ -133,7 +133,16 @@ function readEl(el: HTMLElement): any {
   if (el.tagName === "SELECT") return (el as HTMLSelectElement).value;
   const input = el as HTMLInputElement;
   if (input.type === "checkbox") return input.checked;
-  if (input.type === "number") return Number(input.value);
+  if (input.type === "number") {
+    // Clearing or garbage in a number field gives "" / NaN; don't write that
+    // into config (it persists on Save and breaks the daemon). Fall back to the
+    // field's rendered default, then 0. Sections that need range clamps still
+    // wire their own bespoke handlers (SectionRecording / SectionPreview).
+    const n = Number(input.value);
+    if (Number.isFinite(n) && input.value.trim() !== "") return n;
+    const fallback = Number(input.defaultValue);
+    return Number.isFinite(fallback) ? fallback : 0;
+  }
   return input.value;
 }
 

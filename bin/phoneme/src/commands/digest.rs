@@ -163,6 +163,10 @@ pub async fn run(args: DigestArgs, cfg: &Config, json: bool) -> ExitCode {
         until: range.until,
         label: range.label.clone(),
         model: args.model,
+        // The CLI uses the configured summary connection (no per-run override).
+        provider: None,
+        api_url: None,
+        api_key: None,
     };
     match client.send(req).await {
         Ok(value) => {

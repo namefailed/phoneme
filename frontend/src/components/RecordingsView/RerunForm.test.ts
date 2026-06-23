@@ -334,8 +334,42 @@ describe("RerunForm (shared by the detail Re-run flow and the bulk bar)", () => 
     await selectStep(element, "summarize");
 
     // Blank model + prompt fall back to null; the transcript is summarized with
-    // the configured settings.
+    // the configured settings. The connection mirrors the inherited cleanup
+    // (ollama, a local provider) — provider carried, URL/key null (non-API).
     const payload = submitAndCapture(element);
-    expect(payload).toEqual({ step: "summarize", model: null, prompt: null });
+    expect(payload).toEqual({
+      step: "summarize",
+      model: null,
+      prompt: null,
+      provider: "ollama",
+      apiUrl: null,
+      apiKey: null,
+    });
+  });
+
+  it("carries a one-time summary connection (API provider + masked key)", async () => {
+    // An API summary provider with a masked key (the loaded `read_config` value):
+    // provider + URL + key all ride the payload; the masked key resolves in Rust.
+    mockConfig({
+      summary: {
+        model: "",
+        prompt: "",
+        provider: "openai",
+        api_url: "https://api.openai.com/v1",
+        api_key: "__phoneme_secret_kept__",
+      },
+    });
+    const element = await mountReady();
+    await selectStep(element, "summarize");
+
+    const payload = submitAndCapture(element);
+    expect(payload).toEqual({
+      step: "summarize",
+      model: null,
+      prompt: null,
+      provider: "openai",
+      apiUrl: "https://api.openai.com/v1",
+      apiKey: "__phoneme_secret_kept__",
+    });
   });
 });

@@ -1123,6 +1123,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::GetChapters { id } => {
             catalog_call!(state.catalog.chapters_for(&id).await => serialize)
         }
+        // Per-recording entities, the cheap read the detail-pane chips use instead
+        // of pulling the whole `GetRecording` row. Like `GetChapters`, an unknown id
+        // yields an empty list (not `NotFound`) — `list_entities` is the same N+1
+        // child query that fills `Recording::entities`.
+        Request::GetEntities { id } => {
+            catalog_call!(state.catalog.list_entities(&id).await => serialize)
+        }
         Request::SetTaskDone { id, task_id, done } => {
             // Toggle one task's done flag, then refresh open views. `not_found`
             // when the task id matches no row (a stale UI / bad id).
@@ -1812,20 +1819,71 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             )
             .await
         }
-        Request::RerunSummary { id, model, prompt } => {
-            rerun_summary(state, id, model, prompt).await
+        Request::RerunSummary {
+            id,
+            model,
+            prompt,
+            provider,
+            api_url,
+            api_key,
+        } => {
+            rerun_summary(
+                state,
+                id,
+                model,
+                prompt,
+                SummaryProviderOverrides {
+                    provider,
+                    api_url,
+                    api_key,
+                },
+            )
+            .await
         }
         Request::RerunMeetingDigest {
             meeting_id,
             model,
             recipe_id,
-        } => rerun_meeting_digest(state, meeting_id, model, recipe_id).await,
+            provider,
+            api_url,
+            api_key,
+        } => {
+            rerun_meeting_digest(
+                state,
+                meeting_id,
+                model,
+                recipe_id,
+                SummaryProviderOverrides {
+                    provider,
+                    api_url,
+                    api_key,
+                },
+            )
+            .await
+        }
         Request::RerunPeriodDigest {
             since,
             until,
             label,
             model,
-        } => rerun_period_digest(state, since, until, label, model).await,
+            provider,
+            api_url,
+            api_key,
+        } => {
+            rerun_period_digest(
+                state,
+                since,
+                until,
+                label,
+                model,
+                SummaryProviderOverrides {
+                    provider,
+                    api_url,
+                    api_key,
+                },
+            )
+            .await
+        }
         Request::RunDoctor => {
             let cfg = state.config.load();
             // Thread the bundled servers' live ports into the backend probes so a
@@ -2136,6 +2194,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::ListAllTasks { only_open } => {
             catalog_call!(state.catalog.list_all_tasks(only_open).await => to_value)
         }
+        Request::TaskCounts => catalog_call!(state.catalog.task_counts().await => to_value),
         Request::MergeTags { from_id, into_id } => {
             match state.catalog.merge_tags(from_id, into_id).await {
                 Ok(()) => {
@@ -2388,6 +2447,65 @@ struct CleanupOverrides {
     api_key: Option<String>,
 }
 
+/// One-time, per-run summary/digest connection overrides for [`rerun_summary`]
+/// and the two digest re-runs. Each field falls back to the configured summary /
+/// `[llm_post_process]` connection when `None` and is never persisted — the
+/// connection counterpart of the cleanup overrides (summary's `model`/`prompt`
+/// are carried separately). Applied by baking onto a config clone's `[summary]`
+/// section so `summary_llm_config`'s `resolve_step` does the inherit-from-cleanup
+/// fallback exactly as the auto pipeline does.
+#[derive(Default)]
+struct SummaryProviderOverrides {
+    provider: Option<String>,
+    api_url: Option<String>,
+    api_key: Option<String>,
+}
+
+impl SummaryProviderOverrides {
+    /// Layer these overrides onto a config clone's `[summary]` section in place.
+    /// A non-empty `provider`/key wins; an explicit (even empty) `api_url` is
+    /// honored — an empty URL is meaningful ("use the provider default"), matching
+    /// the cleanup override rule.
+    fn apply_to(self, summary: &mut phoneme_core::config::SummaryConfig) {
+        if let Some(p) = self.provider {
+            let p = p.trim();
+            if !p.is_empty() {
+                summary.provider = p.to_string();
+            }
+        }
+        if let Some(u) = self.api_url {
+            summary.api_url = u;
+        }
+        if let Some(k) = self.api_key {
+            let k = k.trim();
+            if !k.is_empty() {
+                summary.set_api_key(k.to_string());
+            }
+        }
+    }
+
+    /// The same override layering onto an already-resolved `LlmPostProcessConfig`
+    /// (the migrated `summary` Playbook entry's connection), matching `rerun_cleanup`'s
+    /// in-place provider/url/key handling exactly.
+    fn apply_to_llm(self, llm_cfg: &mut phoneme_core::config::LlmPostProcessConfig) {
+        if let Some(p) = self.provider {
+            let p = p.trim();
+            if !p.is_empty() {
+                llm_cfg.provider = p.to_string();
+            }
+        }
+        if let Some(u) = self.api_url {
+            llm_cfg.api_url = u;
+        }
+        if let Some(k) = self.api_key {
+            let k = k.trim();
+            if !k.is_empty() {
+                llm_cfg.set_api_key(k.to_string());
+            }
+        }
+    }
+}
+
 async fn rerun_cleanup(
     state: &AppState,
     id: phoneme_core::RecordingId,
@@ -2635,12 +2753,14 @@ async fn rerun_cleanup(
 /// on demand. Like `rerun_cleanup`, the network call runs in a spawned task so
 /// it doesn't block the IPC connection; the UI listens for `SummaryUpdated`.
 /// `model`/`prompt` override the configured summary model/prompt for this run
-/// only and are never persisted.
+/// only; `conn` carries the one-time provider/endpoint/key override (mirroring
+/// `rerun_cleanup`). None of it is ever persisted.
 async fn rerun_summary(
     state: &AppState,
     id: phoneme_core::RecordingId,
     model: Option<String>,
     prompt: Option<String>,
+    conn: SummaryProviderOverrides,
 ) -> Response {
     let recording = match state.catalog.get(&id).await {
         Ok(Some(r)) => r,
@@ -2694,12 +2814,17 @@ async fn rerun_summary(
             // Layer the one-shot model + prompt overrides via the shared helper
             // that `rerun_cleanup` (and the tests) use — the single source of truth
             // for "non-empty override wins, blank is ignored".
-            let (llm_cfg, entry_prompt) = crate::pipeline::apply_oneshot_overrides(
+            let (mut llm_cfg, entry_prompt) = crate::pipeline::apply_oneshot_overrides(
                 base_llm,
                 base_prompt,
                 model.as_deref(),
                 prompt.as_deref(),
             );
+            // Layer the one-shot connection override (provider/endpoint/key) on top,
+            // exactly like `rerun_cleanup` — a non-empty provider/key wins, an
+            // explicit (even empty) URL is honored. `LlmPostProcessConfig` is the
+            // same connection shape `apply_to` writes onto `[summary]`, so reuse it.
+            conn.apply_to_llm(&mut llm_cfg);
             // Name the endpoint in any real-error message (a stale per-step URL
             // is the classic cause and invisible in a generic message).
             let endpoint_hint = {
@@ -2722,6 +2847,9 @@ async fn rerun_summary(
             if let Some(p) = &prompt {
                 cfg_legacy.summary.prompt = p.clone();
             }
+            // Connection override onto [summary] — `summary_llm_config` then resolves
+            // it (inheriting the cleanup connection for any blank field) as ever.
+            conn.apply_to(&mut cfg_legacy.summary);
             Resolution::Legacy {
                 cfg: Box::new(cfg_legacy),
             }
@@ -2830,6 +2958,7 @@ async fn rerun_meeting_digest(
     meeting_id: String,
     model: Option<String>,
     recipe_id: Option<String>,
+    conn: SummaryProviderOverrides,
 ) -> Response {
     let tracks = match state.catalog.list_by_meeting(&meeting_id).await {
         Ok(rows) if !rows.is_empty() => rows,
@@ -2860,6 +2989,9 @@ async fn rerun_meeting_digest(
     if let Some(r) = recipe_id.filter(|r| !r.trim().is_empty()) {
         cfg.meeting_recipe_id = r;
     }
+    // One-time connection override (provider/endpoint/key) onto [summary], mirroring
+    // `rerun_summary` — `summary_llm_config` then resolves it for the digest run.
+    conn.apply_to(&mut cfg.summary);
 
     // Require a usable LLM provider up front so the user gets a clear error rather
     // than a silent failure inside the spawned task.
@@ -2939,6 +3071,7 @@ async fn rerun_period_digest(
     until: chrono::DateTime<chrono::Local>,
     label: String,
     model: Option<String>,
+    conn: SummaryProviderOverrides,
 ) -> Response {
     // Select the window's recordings, oldest-first so the merged transcript reads
     // chronologically. This is the existing list query — no new SQL.
@@ -2971,6 +3104,9 @@ async fn rerun_period_digest(
     if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
         cfg.summary.model = m;
     }
+    // One-time connection override (provider/endpoint/key) onto [summary], mirroring
+    // `rerun_summary` / the meeting digest.
+    conn.apply_to(&mut cfg.summary);
 
     // Require a usable LLM provider up front so the user gets a clear error rather
     // than a silent failure inside the spawned task.

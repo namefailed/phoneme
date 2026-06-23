@@ -436,17 +436,35 @@ fn meeting_digest_requests_and_events_roundtrip() {
         meeting_id: "meeting-abc".into(),
         model: None,
         recipe_id: None,
+        provider: None,
+        api_url: None,
+        api_key: None,
     });
     roundtrip(&Request::RerunMeetingDigest {
         meeting_id: "meeting-abc".into(),
         model: Some("llama3.2:3b".into()),
         recipe_id: None,
+        provider: None,
+        api_url: None,
+        api_key: None,
     });
     // With a one-shot meeting-template override.
     roundtrip(&Request::RerunMeetingDigest {
         meeting_id: "meeting-abc".into(),
         model: None,
         recipe_id: Some("standup".into()),
+        provider: None,
+        api_url: None,
+        api_key: None,
+    });
+    // With a one-shot summary-connection override.
+    roundtrip(&Request::RerunMeetingDigest {
+        meeting_id: "meeting-abc".into(),
+        model: None,
+        recipe_id: None,
+        provider: Some("openai".into()),
+        api_url: Some(String::new()),
+        api_key: Some("sk-test".into()),
     });
     roundtrip(&Request::GetMeetingDigest {
         meeting_id: "meeting-abc".into(),
@@ -475,12 +493,18 @@ fn period_digest_requests_and_events_roundtrip() {
         until,
         label: "2026-06-21".into(),
         model: None,
+        provider: None,
+        api_url: None,
+        api_key: None,
     });
     roundtrip(&Request::RerunPeriodDigest {
         since,
         until,
         label: "week of 2026-06-15".into(),
         model: Some("llama3.2:3b".into()),
+        provider: Some("groq".into()),
+        api_url: None,
+        api_key: Some("gk-test".into()),
     });
     // The read requests (by key, and the list-all the backup export uses).
     roundtrip(&Request::GetPeriodDigest {

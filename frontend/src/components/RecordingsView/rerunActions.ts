@@ -23,7 +23,7 @@ export type RerunAllParams = {
 export type RerunPayload =
   | { step: "transcribe"; model: string | null; runHooks: boolean; postProcess: boolean }
   | { step: "cleanup"; model: string | null; provider: string | null; prompt: string | null; apiUrl: string | null; apiKey: string | null }
-  | { step: "summarize"; model: string | null; prompt: string | null }
+  | { step: "summarize"; model: string | null; prompt: string | null; provider: string | null; apiUrl: string | null; apiKey: string | null }
   | { step: "all"; model: string | null; overrides: RerunAllParams | null; recipeId?: string | null }
   | { step: "hook"; command: string | null };
 
@@ -37,7 +37,7 @@ export async function applyRerun(id: string, p: RerunPayload): Promise<void> {
       await rerunCleanup(id, p.model, p.provider, p.prompt, p.apiUrl, p.apiKey);
       break;
     case "summarize":
-      await rerunSummary(id, p.model, p.prompt);
+      await rerunSummary(id, p.model, p.prompt, p.provider, p.apiUrl, p.apiKey);
       break;
     case "all":
       // Re-fire the whole pipeline: re-transcribe, then run the chosen Playbook

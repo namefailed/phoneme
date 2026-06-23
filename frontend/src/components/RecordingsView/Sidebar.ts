@@ -1,6 +1,6 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { listTags, tagUsageCounts, kindCounts, listAllEntities, listAllTasks, type Tag, type KindCounts, type EntityFacet, type TaskWithRecording } from "../../services/ipc";
+import { listTags, tagUsageCounts, kindCounts, listAllEntities, taskCounts, type Tag, type KindCounts, type EntityFacet, type TaskCounts } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { filterStore, applyEntityFilter, applyTaskFilter, type UiFilter, type RecordingKind, type TagState } from "../../state/filter";
 import { showFavorites, showPinned, DISPLAY_PREFS_EVENT } from "./columnPrefs";
@@ -50,9 +50,12 @@ export class SidebarElement extends LitElement {
   /** The cross-recording entity facet (distinct extracted entities + recording
    *  counts), grouped by kind into the Entities section. Mirrors `tags`. */
   @state() private entities: EntityFacet[] = [];
-  /** Every extracted task across the library (open first), backing the Tasks
-   *  section's Open / All counts. Mirrors `entities`. */
-  @state() private tasks: TaskWithRecording[] = [];
+  /** Library-wide task counts (open / total), backing the Tasks section's two
+   *  badges. Cheaper than pulling the full task list just to count it — the full
+   *  list still backs the "View all" task view (opened via `phoneme:open-tasks`).
+   *  Null until first loaded; the section reads it as 0/0 then. Mirrors
+   *  `kindTotals`. */
+  @state() private taskTotals: TaskCounts | null = null;
   @state() private filterState: UiFilter = filterStore.get();
   @state() private libraryOpen = localStorage.getItem("phoneme.sidebar.libraryOpen") !== "false";
   @state() private tagsOpen = localStorage.getItem("phoneme.sidebar.tagsOpen") !== "false";
@@ -196,15 +199,15 @@ export class SidebarElement extends LitElement {
     }
   }
 
-  /** Load every extracted task across the library for the Tasks section's Open /
-   *  All counts. Failures clear the list (the section then shows empty), mirroring
-   *  `loadEntities`. */
+  /** Load the library-wide task counts for the Tasks section's Open / All badges.
+   *  Just the counts, not the rows — the "View all" view fetches the full list
+   *  itself. Failures leave the previous value (the section reads null as 0/0),
+   *  mirroring `loadKindCounts`. */
   private async loadTasks() {
     try {
-      this.tasks = await listAllTasks(false);
+      this.taskTotals = await taskCounts();
     } catch (e) {
-      console.error("Failed to load tasks for sidebar:", e);
-      this.tasks = [];
+      console.error("Failed to load task counts for sidebar:", e);
     }
   }
 
@@ -399,8 +402,8 @@ export class SidebarElement extends LitElement {
    *  filter. Same row shape as the tag/entity rows, so the vim-layer's sidebar
    *  grid picks them up for keyboard nav. */
   private renderTaskRows(f: UiFilter) {
-    const total = this.tasks.length;
-    const open = this.tasks.filter((t) => !t.done).length;
+    const total = this.taskTotals?.total ?? 0;
+    const open = this.taskTotals?.open ?? 0;
     if (total === 0) {
       return html`<div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No tasks yet. Extract them from a recording's detail view.</div>`;
     }

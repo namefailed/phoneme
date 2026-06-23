@@ -1135,6 +1135,17 @@ pub struct KindCounts {
     pub untagged: i64,
 }
 
+/// Library-wide task counts, returned by `Request::TaskCounts` and rendered as
+/// the sidebar's Tasks badges. The cheap counts the sidebar needs without
+/// fetching the full `list_all_tasks` rows just to count them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskCounts {
+    /// Tasks still open (not done).
+    pub open: i64,
+    /// Every task across the library, done or not.
+    pub total: i64,
+}
+
 /// The payload sent to hook scripts on stdin (and stored verbatim in inbox JSON).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookPayload {

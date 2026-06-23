@@ -237,6 +237,9 @@ pub fn rerun_summary(id: RecordingId) -> Request {
         id,
         model: None,
         prompt: None,
+        provider: None,
+        api_url: None,
+        api_key: None,
     }
 }
 
@@ -530,9 +533,14 @@ mod tests {
                 id: got,
                 model,
                 prompt,
+                provider,
+                api_url,
+                api_key,
             } => {
                 assert_eq!(got, id);
                 assert!(model.is_none() && prompt.is_none());
+                // REST doesn't expose the per-run connection overrides.
+                assert!(provider.is_none() && api_url.is_none() && api_key.is_none());
             }
             other => panic!("expected RerunSummary, got {other:?}"),
         }

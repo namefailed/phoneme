@@ -173,6 +173,8 @@ fn is_retry_safe(req: &Request) -> bool {
         // Pure read of a recording's stored auto-chapters; idempotent like
         // GetSegments.
         | GetChapters { .. }
+        // Pure read of a recording's stored entities; idempotent like GetChapters.
+        | GetEntities { .. }
         | ListTranscriptVersions { .. }
         | GetTranscriptVersion { .. }
         | GetOriginalTranscript { .. }
@@ -189,6 +191,8 @@ fn is_retry_safe(req: &Request) -> bool {
         | ListAllEntities
         // Pure read: the cross-recording task list. Idempotent.
         | ListAllTasks { .. }
+        // Pure read: the library-wide open/total task counts. Idempotent.
+        | TaskCounts
         | SemanticSearch { .. }
         | MoreLikeThis { .. } => true,
 

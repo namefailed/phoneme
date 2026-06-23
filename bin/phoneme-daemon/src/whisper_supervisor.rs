@@ -1,22 +1,27 @@
 //! whisper-server supervisor — keeps the bundled STT server(s) alive so the
 //! pipeline and the live preview always have something local to dial.
 //!
-//! Three independent loops, one per supervised role — exactly the set
-//! `Config::needed_whisper_servers()` declares and no more. [`run`] supervises
-//! the main (final-transcription) server from `[whisper]` (always, unless that
-//! is External); [`run_preview`] a second, thread-capped server from
-//! `[preview_whisper]` when the preview needs its own; and [`run_dictation`] an
-//! optional third server from `[in_place].stt`, only when the user opts into a
-//! dedicated dictation server (`use_own_bundled_server`, default off). A loop
-//! whose role isn't needed idles on a 5 s poll and clears its port, so a config
-//! toggle adds or removes its server through that same poll — there's no
-//! separate reconciler. Each loop spawns the binary, then watches four wake
-//! sources at once: child exit (respawn with 2 s → 60 s backoff, reset after a
-//! healthy minute), a spec-change poll (model/port/mode differs from what the
-//! child was spawned with), an explicit `whisper_restart` notify (the Doctor's
-//! "Fix", the only path that heals a hung server), and shutdown. The crash
-//! backoff itself is cancellable by restart/shutdown, so a Doctor fix is never
-//! lost to a sleeping supervisor.
+//! One generic [`supervise`] loop, run as a separate task per supervised
+//! [`Role`] — exactly the set `Config::needed_whisper_servers()` declares and no
+//! more. [`run`] supervises the main (final-transcription) server from
+//! `[whisper]` (always, unless that is External); [`run_preview`] a second,
+//! thread-capped server from `[preview_whisper]` when the preview needs its own;
+//! [`run_preview2`] an optional meeting-"both" twin of the preview on
+//! [`Config::preview2_port`]; and [`run_dictation`] an optional in-place
+//! dictation server from `[in_place].stt`, only when the user opts in
+//! (`use_own_bundled_server`, default off). Each is a one-line wrapper that hands
+//! its `Role` to `supervise`; the role drives the per-role differences (port
+//! slot, model-override slot, spec comparison, self-stop, thread cap, log
+//! strings). A role whose server isn't needed idles on a 5 s poll and clears its
+//! port, so a config toggle adds or removes its server through that same poll —
+//! there's no separate reconciler. The loop spawns the binary, then watches
+//! several wake sources at once: child exit (respawn with 2 s → 60 s backoff,
+//! reset after a healthy minute), a spec-change poll (model/port/mode differs
+//! from what the child was spawned with), a one-job model-override change (absent
+//! for preview2), an explicit `whisper_restart` notify (the Doctor's "Fix", the
+//! only path that heals a hung server), and shutdown. The crash backoff itself
+//! is cancellable by restart/shutdown, so a Doctor fix is never lost to a
+//! sleeping supervisor.
 //!
 //! Invariants owned here:
 //! - **Effective ports** — the configured port is a preference. A pre-flight
@@ -215,6 +220,389 @@ fn choose_listen_port(preferred: u16, exclude: &[u16]) -> u16 {
     preferred
 }
 
+/// Per-role log strings. Behavior is identical across the four supervisors;
+/// only the wording in the traces differs (which server, "preview", "2nd
+/// preview", "dictation"), so factor those out as constants and keep one loop.
+struct RoleLabels {
+    binary_not_found: &'static str,
+    model_missing: &'static str,
+    spawn_failed: &'static str,
+    spawned: &'static str,
+    exited: &'static str,
+    wait_failed: &'static str,
+    restart_requested: &'static str,
+    override_changed: &'static str,
+    config_changed: &'static str,
+    shutdown_kill: &'static str,
+    /// `{0}` = preferred port, `{1}` = chosen fallback port.
+    probe_warn: fn(u16, u16) -> String,
+}
+
+static MAIN_LABELS: RoleLabels = RoleLabels {
+    binary_not_found: "whisper-server binary not found, waiting...",
+    model_missing: "whisper model file is empty or missing, waiting for download...",
+    spawn_failed: "failed to spawn whisper-server",
+    spawned: "whisper-server spawned",
+    exited: "whisper-server exited",
+    wait_failed: "wait on whisper-server failed",
+    restart_requested: "whisper-server restart requested; bouncing",
+    override_changed: "whisper-server model override changed; restarting",
+    config_changed: "whisper-server config changed; restarting",
+    shutdown_kill: "shutdown — killing whisper-server",
+    probe_warn: |preferred, port| {
+        format!("preferred port {preferred} in use by another app — whisper-server starting on {port}")
+    },
+};
+
+static PREVIEW_LABELS: RoleLabels = RoleLabels {
+    binary_not_found: "preview: whisper-server binary not found, waiting...",
+    model_missing: "preview model_path empty or missing, waiting for download...",
+    spawn_failed: "failed to spawn preview whisper-server",
+    spawned: "preview whisper-server spawned",
+    exited: "preview whisper-server exited",
+    wait_failed: "wait on preview whisper-server failed",
+    restart_requested: "preview whisper-server restart requested; bouncing",
+    override_changed: "preview whisper-server model override changed; restarting",
+    config_changed: "preview whisper-server config changed; restarting",
+    shutdown_kill: "shutdown — killing preview whisper-server",
+    probe_warn: |preferred, port| {
+        format!("preferred port {preferred} in use by another app — preview whisper-server starting on {port}")
+    },
+};
+
+static PREVIEW2_LABELS: RoleLabels = RoleLabels {
+    binary_not_found: "preview2: whisper-server binary not found, waiting...",
+    model_missing: "preview2 model_path empty or missing, waiting for download...",
+    spawn_failed: "failed to spawn 2nd preview whisper-server",
+    spawned: "2nd preview whisper-server spawned",
+    exited: "2nd preview whisper-server exited",
+    wait_failed: "wait on 2nd preview whisper-server failed",
+    restart_requested: "2nd preview whisper-server restart requested; bouncing",
+    // preview2 has no model-override arm (no preview2_model_override slot — it
+    // reuses the preview model), so this string is never logged.
+    override_changed: "2nd preview whisper-server model override changed; restarting",
+    config_changed: "2nd preview whisper-server config changed; restarting",
+    shutdown_kill: "shutdown — killing 2nd preview whisper-server",
+    probe_warn: |preferred, port| {
+        format!("preferred port {preferred} in use by another app — 2nd preview whisper-server starting on {port}")
+    },
+};
+
+static DICTATION_LABELS: RoleLabels = RoleLabels {
+    binary_not_found: "dictation: whisper-server binary not found, waiting...",
+    model_missing: "dictation model_path empty or missing, waiting for download...",
+    spawn_failed: "failed to spawn dictation whisper-server",
+    spawned: "dictation whisper-server spawned",
+    exited: "dictation whisper-server exited",
+    wait_failed: "wait on dictation whisper-server failed",
+    restart_requested: "dictation whisper-server restart requested; bouncing",
+    override_changed: "dictation whisper-server model override changed; restarting",
+    config_changed: "dictation whisper-server config changed; restarting",
+    shutdown_kill: "shutdown — killing dictation whisper-server",
+    probe_warn: |preferred, port| {
+        format!("preferred port {preferred} in use by another app — dictation whisper-server starting on {port}")
+    },
+};
+
+/// What [`prepare`] decided for one supervisor iteration: spawn now, idle
+/// (shutdown-aware 5 s poll), or idle on a plain 5 s sleep.
+enum Prepared {
+    /// The role is needed and its model is on disk — spawn with this provider
+    /// spec. `args` is already thread-capped where the role caps it.
+    Spawn {
+        model_to_run: String,
+        preferred_port: u16,
+        args: Vec<String>,
+    },
+    /// The role isn't needed (or its model is missing): the port was already
+    /// cleared. Poll again in 5 s, but wake early on shutdown.
+    IdleSelect,
+    /// Same, but a plain 5 s sleep with no shutdown wake — the `Some(provider)`
+    /// "can't happen" arm the preview/preview2/dictation loops use after their
+    /// needs-own-server gate has already passed.
+    IdlePlain,
+}
+
+/// The four supervised roles. Each `pub async fn run*` is a one-line wrapper
+/// that hands its role to the single [`supervise`] loop; the role drives the
+/// handful of per-role differences (which port slot, model-override slot, spec
+/// comparison, self-stop, thread cap) without forking the loop.
+#[derive(Clone, Copy)]
+enum Role {
+    Main,
+    Preview,
+    Preview2,
+    Dictation,
+}
+
+impl Role {
+    fn server_role(self) -> WhisperServerRole {
+        match self {
+            Role::Main => WhisperServerRole::Main,
+            Role::Preview => WhisperServerRole::Preview,
+            Role::Preview2 => WhisperServerRole::Preview2,
+            Role::Dictation => WhisperServerRole::InPlace,
+        }
+    }
+
+    fn labels(self) -> &'static RoleLabels {
+        match self {
+            Role::Main => &MAIN_LABELS,
+            Role::Preview => &PREVIEW_LABELS,
+            Role::Preview2 => &PREVIEW2_LABELS,
+            Role::Dictation => &DICTATION_LABELS,
+        }
+    }
+
+    /// Clear this role's published live port (server down / idling).
+    fn clear_port(self, state: &AppState) {
+        match self {
+            Role::Main => state.whisper_ports.set_main(None),
+            Role::Preview => state.whisper_ports.set_preview(None),
+            Role::Preview2 => state.whisper_ports.set_preview2(None),
+            Role::Dictation => state.whisper_ports.set_dictation(None),
+        }
+    }
+
+    /// Publish this role's chosen live port (before the spawn, so a sibling's
+    /// probe excludes it even while this server is still coming up).
+    fn publish_port(self, state: &AppState, port: u16) {
+        match self {
+            Role::Main => state.whisper_ports.set_main(Some(port)),
+            Role::Preview => state.whisper_ports.set_preview(Some(port)),
+            Role::Preview2 => state.whisper_ports.set_preview2(Some(port)),
+            Role::Dictation => state.whisper_ports.set_dictation(Some(port)),
+        }
+    }
+
+    /// This role's one-job model-override slot, or `None` for preview2 (which
+    /// has no override slot by design — it reuses the preview model).
+    fn override_slot(self, state: &AppState) -> Option<&crate::app_state::WhisperModelOverride> {
+        match self {
+            Role::Main => Some(state.whisper_model_override.as_ref()),
+            Role::Preview => Some(state.preview_model_override.as_ref()),
+            Role::Dictation => Some(state.dictation_model_override.as_ref()),
+            Role::Preview2 => None,
+        }
+    }
+
+    /// True when this role should stop its server because the config no longer
+    /// asks for it. The main server never self-stops here (External mode is
+    /// handled by the idle gate, not a running-server poll).
+    fn should_self_stop(self, cfg: &Config) -> bool {
+        match self {
+            Role::Main => false,
+            Role::Preview => !cfg.preview_needs_own_server(),
+            Role::Preview2 => !cfg.second_preview_needs_own_server(),
+            Role::Dictation => !cfg.in_place_needs_own_server(),
+        }
+    }
+}
+
+/// Idle gate + provider extraction for one iteration. Decides whether the role
+/// runs right now and, if so, the exact model/port/args to spawn with —
+/// clearing the port for an idling role exactly where the four hand-rolled
+/// loops did.
+fn prepare(role: Role, state: &AppState, cfg: &Config) -> Prepared {
+    match role {
+        Role::Main => {
+            if cfg.whisper.mode == WhisperMode::External {
+                // External mode: we don't manage a bundled server. Clear the
+                // port and re-check on the poll.
+                state.whisper_ports.set_main(None);
+                return Prepared::IdleSelect;
+            }
+            // EFFECTIVE model: a one-job override if a model-override
+            // re-transcription requested one, else the configured model. Read
+            // here (not merged into the global config) so previews and other
+            // jobs keep seeing the configured model.
+            let spawned_override = state.whisper_model_override.get();
+            let model_to_run =
+                effective_model_path(&cfg.whisper.model_path, spawned_override.as_deref());
+            Prepared::Spawn {
+                model_to_run,
+                preferred_port: cfg.whisper.bundled_server_port,
+                args: cfg.whisper.bundled_server_args.clone(),
+            }
+        }
+        Role::Preview => {
+            if !cfg.preview_needs_own_server() {
+                state.whisper_ports.set_preview(None);
+                return Prepared::IdleSelect;
+            }
+            // Safe: preview_needs_own_server() implies preview_whisper is Some.
+            let Some(pv) = cfg.preview_whisper.as_ref() else {
+                state.whisper_ports.set_preview(None);
+                return Prepared::IdlePlain;
+            };
+            // EFFECTIVE preview model: a one-job override (an in-place dictation
+            // routed through the preview server, published by
+            // `transcribe_polish_type` to `preview_model_override`) wins over the
+            // configured `[preview_whisper]` model, mirroring the main loop.
+            let spawned_override = state.preview_model_override.get();
+            let model_to_run = effective_model_path(&pv.model_path, spawned_override.as_deref());
+            Prepared::Spawn {
+                model_to_run,
+                preferred_port: pv.bundled_server_port,
+                args: thread_capped(&pv.bundled_server_args),
+            }
+        }
+        Role::Preview2 => {
+            if !cfg.second_preview_needs_own_server() {
+                state.whisper_ports.set_preview2(None);
+                return Prepared::IdleSelect;
+            }
+            // Safe: second_preview_needs_own_server() implies preview_whisper is Some.
+            let Some(pv) = cfg.preview_whisper.as_ref() else {
+                state.whisper_ports.set_preview2(None);
+                return Prepared::IdlePlain;
+            };
+            // No model override by design — the 2nd meeting-track server reuses
+            // the configured preview model.
+            Prepared::Spawn {
+                model_to_run: pv.model_path.clone(),
+                preferred_port: cfg.preview2_port(),
+                args: thread_capped(&pv.bundled_server_args),
+            }
+        }
+        Role::Dictation => {
+            if !cfg.in_place_needs_own_server() {
+                state.whisper_ports.set_dictation(None);
+                return Prepared::IdleSelect;
+            }
+            // Safe: in_place_needs_own_server() implies in_place.stt is Some.
+            let Some(stt) = cfg.in_place.stt.as_ref() else {
+                state.whisper_ports.set_dictation(None);
+                return Prepared::IdlePlain;
+            };
+            // EFFECTIVE dictation model: a one-job override (an in-place
+            // dictation routed through its own server, published to
+            // `dictation_model_override`) wins over the configured
+            // `[in_place].stt` model, mirroring the main loop.
+            let spawned_override = state.dictation_model_override.get();
+            let model_to_run = effective_model_path(&stt.model_path, spawned_override.as_deref());
+            Prepared::Spawn {
+                model_to_run,
+                preferred_port: stt.bundled_server_port,
+                args: thread_capped(&stt.bundled_server_args),
+            }
+        }
+    }
+}
+
+/// Append `-t <cap>` to a copy of the configured args unless the user already
+/// pinned a thread count — the preview/preview2/dictation servers cap threads
+/// so they can't starve the final transcription. The main server doesn't cap.
+fn thread_capped(configured: &[String]) -> Vec<String> {
+    let mut args = configured.to_vec();
+    if !args.iter().any(|a| a == "-t" || a == "--threads") {
+        args.push("-t".into());
+        args.push(preview_thread_cap().to_string());
+    }
+    args
+}
+
+/// Whether this role's spec (model / port / mode, plus the one-job override
+/// where the role has one) differs from what the running child was spawned
+/// with. Comparing the EFFECTIVE model — config layered with the override — is
+/// what keeps a model-override re-transcription to one restart-to-override and
+/// one restore (#49) instead of a config-mutation thrash. `raw` is the
+/// unexpanded snapshot the preview/preview2/dictation roles diff against;
+/// `cfg_snapshot` is the expanded snapshot the main role diffs its port/mode
+/// against.
+fn spec_changed(
+    role: Role,
+    state: &AppState,
+    raw: &Config,
+    cfg_snapshot: &Config,
+    child_model: &str,
+) -> bool {
+    match role {
+        Role::Main => {
+            let current_cfg = state.config.load();
+            let current_override = state.whisper_model_override.get();
+            let current_model =
+                effective_model_path(&current_cfg.whisper.model_path, current_override.as_deref());
+            current_model != child_model
+                || current_cfg.whisper.bundled_server_port
+                    != cfg_snapshot.whisper.bundled_server_port
+                || current_cfg.whisper.mode != cfg_snapshot.whisper.mode
+        }
+        Role::Preview => {
+            let cur = state.config.load();
+            let watch = raw.preview_whisper.as_ref();
+            let config_changed = match (cur.preview_whisper.as_ref(), watch) {
+                (Some(c), Some(w)) => {
+                    c.model_path != w.model_path
+                        || c.bundled_server_port != w.bundled_server_port
+                        || c.mode != w.mode
+                }
+                _ => true,
+            };
+            // The override layers over the (expanded) configured preview model,
+            // mirroring the spawn.
+            let configured = cur
+                .preview_whisper
+                .as_ref()
+                .map(|p| p.model_path.clone())
+                .unwrap_or_default();
+            let current_override = state.preview_model_override.get();
+            let current_model = effective_model_path(&configured, current_override.as_deref());
+            config_changed || current_model != child_model
+        }
+        Role::Preview2 => {
+            // No override slot — pure config diff against the unexpanded snapshot.
+            let cur = state.config.load();
+            let watch = raw.preview_whisper.as_ref();
+            match (cur.preview_whisper.as_ref(), watch) {
+                (Some(c), Some(w)) => {
+                    c.model_path != w.model_path
+                        || c.bundled_server_port != w.bundled_server_port
+                        || c.mode != w.mode
+                }
+                _ => true,
+            }
+        }
+        Role::Dictation => {
+            let cur = state.config.load();
+            let watch = raw.in_place.stt.as_ref();
+            // Compare by direct field read (not PartialEq) so a pure
+            // use_own_bundled_server / model / port / mode change is caught, and
+            // self-stop when the opt-in flips off.
+            let config_changed = match (cur.in_place.stt.as_ref(), watch) {
+                (Some(c), Some(w)) => {
+                    c.model_path != w.model_path
+                        || c.bundled_server_port != w.bundled_server_port
+                        || c.mode != w.mode
+                        || c.use_own_bundled_server != w.use_own_bundled_server
+                }
+                _ => true,
+            };
+            // The override layers over the (expanded) configured dictation model,
+            // mirroring the spawn.
+            let configured = cur
+                .in_place
+                .stt
+                .as_ref()
+                .map(|s| s.model_path.clone())
+                .unwrap_or_default();
+            let current_override = state.dictation_model_override.get();
+            let current_model = effective_model_path(&configured, current_override.as_deref());
+            config_changed || current_model != child_model
+        }
+    }
+}
+
+/// Await this role's model-override `changed` notify, or wait forever when the
+/// role has no override slot (preview2) — equivalent to omitting that select arm
+/// for that role.
+async fn override_changed(slot: Option<&crate::app_state::WhisperModelOverride>) {
+    match slot {
+        Some(o) => o.changed.notified().await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
 pub async fn run(state: AppState, shutdown: ShutdownSignal) -> anyhow::Result<()> {
     run_with(state, None, shutdown).await
 }
@@ -223,8 +611,23 @@ pub async fn run(state: AppState, shutdown: ShutdownSignal) -> anyhow::Result<()
 pub async fn run_with(
     state: AppState,
     binary_override: Option<PathBuf>,
+    shutdown: ShutdownSignal,
+) -> anyhow::Result<()> {
+    supervise(Role::Main, state, binary_override, shutdown).await
+}
+
+/// The single supervisor loop behind all four roles. Spawn → monitor (child
+/// exit / spec poll / model-override / Doctor restart / shutdown) → crash
+/// backoff, exactly as the four hand-rolled loops did; the [`Role`] supplies the
+/// per-role port slot, override slot, spec comparison, self-stop, thread cap,
+/// and log strings. Behavior is identical to the per-role loops it replaced.
+async fn supervise(
+    role: Role,
+    state: AppState,
+    binary_override: Option<PathBuf>,
     mut shutdown: ShutdownSignal,
 ) -> anyhow::Result<()> {
+    let labels = role.labels();
     let mut backoff = RESTART_BACKOFF_INITIAL;
 
     loop {
@@ -243,28 +646,38 @@ pub async fn run_with(
         tokio::pin!(restart_fut);
         restart_fut.as_mut().enable();
 
-        let cfg = state
-            .config
-            .load()
-            .expanded()
-            .unwrap_or_else(|_| (**state.config.load()).clone());
+        // Unexpanded snapshot for stable change-detection; expanded copy for the
+        // actual paths we spawn with (so `~`/`%APPDATA%` model paths resolve).
+        let raw = state.config.load();
+        let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
 
-        if cfg.whisper.mode == WhisperMode::External {
-            // In external mode, we don't manage a bundled server. Just wait a bit and re-check.
-            state.whisper_ports.set_main(None);
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                _ = shutdown.wait() => return Ok(()),
+        // Idle gate + provider extraction. Clears (or leaves cleared) the port
+        // for an idling role; otherwise hands back the model/port/args to spawn.
+        let (model_to_run, preferred_port, args) = match prepare(role, &state, &cfg) {
+            Prepared::Spawn {
+                model_to_run,
+                preferred_port,
+                args,
+            } => (model_to_run, preferred_port, args),
+            Prepared::IdleSelect => {
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                    _ = shutdown.wait() => return Ok(()),
+                }
             }
-        }
+            Prepared::IdlePlain => {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
         let server_path = match binary_override.clone() {
             Some(p) => p,
             None => match locate_bundled_server() {
                 Ok(p) => p,
                 Err(e) => {
-                    state.whisper_ports.set_main(None);
-                    tracing::error!(error = %e, "whisper-server binary not found, waiting...");
+                    role.clear_port(&state);
+                    tracing::error!(error = %e, "{}", labels.binary_not_found);
                     tokio::select! {
                         _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
                         _ = shutdown.wait() => return Ok(()),
@@ -273,17 +686,9 @@ pub async fn run_with(
             },
         };
 
-        // Spawn with the EFFECTIVE model: a one-job override if a model-override
-        // re-transcription has requested one, else the configured model. The
-        // override is read here (not merged into the global config) so previews
-        // and other jobs keep seeing the configured model.
-        let spawned_override = state.whisper_model_override.get();
-        let model_to_run =
-            effective_model_path(&cfg.whisper.model_path, spawned_override.as_deref());
-
         if model_to_run.is_empty() || !std::path::Path::new(&model_to_run).exists() {
-            state.whisper_ports.set_main(None);
-            tracing::info!("whisper model file is empty or missing, waiting for download...");
+            role.clear_port(&state);
+            tracing::info!("{}", labels.model_missing);
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
                 _ = shutdown.wait() => return Ok(()),
@@ -291,21 +696,18 @@ pub async fn run_with(
         }
 
         // Pre-flight port probe: the configured port is a preference. When a
-        // foreign app holds it, route around it with a free OS-assigned port
-        // and publish the choice so consumers dial the right server. The
-        // preview's published + configured ports are excluded so the two
-        // servers can never choose the same one.
-        let preferred_port = cfg.whisper.bundled_server_port;
-        let exclude = exclude_other_server_ports(WhisperServerRole::Main, &state, &cfg);
+        // foreign app holds it, route around it with a free OS-assigned port and
+        // publish the choice so consumers dial the right server. Every sibling's
+        // published + configured port is excluded so the servers can never
+        // collide.
+        let exclude = exclude_other_server_ports(role.server_role(), &state, &cfg);
         let port = choose_listen_port(preferred_port, &exclude);
         if port != preferred_port {
-            tracing::warn!(
-                "preferred port {preferred_port} in use by another app — whisper-server starting on {port}"
-            );
+            tracing::warn!("{}", (labels.probe_warn)(preferred_port, port));
         }
-        // Published BEFORE the spawn so the preview's probe excludes it even
-        // while whisper-server is still coming up.
-        state.whisper_ports.set_main(Some(port));
+        // Published BEFORE the spawn so a sibling's probe excludes it even while
+        // this server is still coming up.
+        role.publish_port(&state, port);
 
         let mut command = Command::new(&server_path);
         command
@@ -331,15 +733,15 @@ pub async fn run_with(
             command.creation_flags(CREATE_NO_WINDOW);
         }
 
-        for extra in &cfg.whisper.bundled_server_args {
+        for extra in &args {
             command.arg(extra);
         }
 
         let mut child = match command.spawn() {
             Ok(c) => c,
             Err(e) => {
-                state.whisper_ports.set_main(None);
-                tracing::error!(error = %e, "failed to spawn whisper-server");
+                role.clear_port(&state);
+                tracing::error!(error = %e, "{}", labels.spawn_failed);
                 match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
                     BackoffWake::Shutdown => return Ok(()),
                     BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
@@ -349,45 +751,24 @@ pub async fn run_with(
             }
         };
         assign_to_daemon_job(&state, &child);
-        tracing::info!(
-            pid = child.id().unwrap_or(0),
-            port,
-            "whisper-server spawned"
-        );
+        tracing::info!(pid = child.id().unwrap_or(0), port, "{}", labels.spawned);
         let spawned_at = Instant::now();
         let mut check_interval = tokio::time::interval(Duration::from_secs(1));
         check_interval.tick().await; // consume first tick
-
-        // Restart iff the effective spec (configured model plus one-job
-        // override), the port, or the mode differs from what this child was
-        // spawned with. Comparing the effective model rather than the raw config
-        // is what makes a model-override re-transcription produce exactly one
-        // restart-to-override and one restore (when the pipeline clears the
-        // override). Mutating the config and reloading instead would double
-        // restart and thrash the server (#49).
-        let spec_changed = |child_model: &str| -> bool {
-            let current_cfg = state.config.load();
-            let current_override = state.whisper_model_override.get();
-            let current_model =
-                effective_model_path(&current_cfg.whisper.model_path, current_override.as_deref());
-            current_model != child_model
-                || current_cfg.whisper.bundled_server_port != cfg.whisper.bundled_server_port
-                || current_cfg.whisper.mode != cfg.whisper.mode
-        };
 
         let mut exited = false;
         loop {
             tokio::select! {
                 wait = child.wait() => {
                     match wait {
-                        Ok(status) => tracing::warn!(?status, "whisper-server exited"),
-                        Err(e) => tracing::warn!(error = %e, "wait on whisper-server failed"),
+                        Ok(status) => tracing::warn!(?status, "{}", labels.exited),
+                        Err(e) => tracing::warn!(error = %e, "{}", labels.wait_failed),
                     }
                     // Down for at least the backoff pause (taken below, after
                     // this inner loop, where it can also hear a Doctor restart)
                     // — consumers fall back to the configured port until the
                     // respawn publishes a fresh choice.
-                    state.whisper_ports.set_main(None);
+                    role.clear_port(&state);
                     if spawned_at.elapsed() >= Duration::from_secs(60) {
                         backoff = RESTART_BACKOFF_INITIAL;
                     }
@@ -400,33 +781,37 @@ pub async fn run_with(
                 // own. Uses the pre-enabled future so a Fix fired during the
                 // spawn/probe window above isn't dropped.
                 _ = &mut restart_fut => {
-                    tracing::info!("whisper-server restart requested; bouncing");
+                    tracing::info!("{}", labels.restart_requested);
                     let _ = kill_gracefully(&mut child).await;
                     backoff = RESTART_BACKOFF_INITIAL;
                     break;
                 }
                 // React promptly to a set/clear of the one-job model override so
                 // the override job doesn't wait out the 1s poll for its model.
-                _ = state.whisper_model_override.changed.notified() => {
-                    if spec_changed(&model_to_run) {
-                        tracing::info!("whisper-server model override changed; restarting");
+                // For preview2 (no override slot) this future never resolves, so
+                // the arm is effectively absent.
+                _ = override_changed(role.override_slot(&state)) => {
+                    if spec_changed(role, &state, &raw, &cfg, &model_to_run) {
+                        tracing::info!("{}", labels.override_changed);
                         let _ = kill_gracefully(&mut child).await;
                         backoff = RESTART_BACKOFF_INITIAL;
                         break;
                     }
                 }
                 _ = check_interval.tick() => {
-                    if spec_changed(&model_to_run) {
-                        tracing::info!("whisper-server config changed; restarting");
+                    if spec_changed(role, &state, &raw, &cfg, &model_to_run)
+                        || role.should_self_stop(&state.config.load())
+                    {
+                        tracing::info!("{}", labels.config_changed);
                         let _ = kill_gracefully(&mut child).await;
                         backoff = RESTART_BACKOFF_INITIAL;
                         break;
                     }
                 }
                 _ = shutdown.wait() => {
-                    tracing::info!("shutdown — killing whisper-server");
+                    tracing::info!("{}", labels.shutdown_kill);
                     let _ = kill_gracefully(&mut child).await;
-                    state.whisper_ports.set_main(None);
+                    role.clear_port(&state);
                     return Ok(());
                 }
             }
@@ -458,236 +843,11 @@ fn preview_thread_cap() -> usize {
 /// own port (see [`phoneme_core::Config::preview_needs_own_server`]). Otherwise
 /// (preview reuses the main provider, uses a cloud API, or is off) this idles.
 ///
-/// Kept entirely separate from [`run`]/[`run_with`] so the critical
-/// final-transcription server path is never affected. Mirrors the main loop's
-/// spawn/monitor/restart/backoff behavior, plus a thread cap.
-pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyhow::Result<()> {
-    let mut backoff = RESTART_BACKOFF_INITIAL;
-
-    loop {
-        if shutdown.is_shutting_down() {
-            return Ok(());
-        }
-
-        // Arm the restart edge before the spawn/probe window (see the main
-        // supervisor) so a Doctor "Fix" fired mid-spawn isn't dropped.
-        let restart_fut = state.whisper_restart.notified();
-        tokio::pin!(restart_fut);
-        restart_fut.as_mut().enable();
-
-        // Unexpanded snapshot for stable change-detection; expanded copy for the
-        // actual paths we spawn with.
-        let raw = state.config.load();
-        let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
-
-        if !cfg.preview_needs_own_server() {
-            state.whisper_ports.set_preview(None);
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                _ = shutdown.wait() => return Ok(()),
-            }
-        }
-        // Safe: preview_needs_own_server() implies preview_whisper is Some.
-        let Some(pv) = cfg.preview_whisper.as_ref() else {
-            state.whisper_ports.set_preview(None);
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            continue;
-        };
-
-        let server_path = match locate_bundled_server() {
-            Ok(p) => p,
-            Err(e) => {
-                state.whisper_ports.set_preview(None);
-                tracing::error!(error = %e, "preview: whisper-server binary not found, waiting...");
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                    _ = shutdown.wait() => return Ok(()),
-                }
-            }
-        };
-
-        // Spawn with the EFFECTIVE preview model: a one-job override (an in-place
-        // dictation routed through the preview server, published by
-        // `transcribe_polish_type` to `preview_model_override`) wins over the
-        // configured `[preview_whisper]` model, mirroring the main supervisor's
-        // `whisper_model_override` handling. Read here (not merged into the global
-        // config) so other jobs keep seeing the configured preview model.
-        let spawned_override = state.preview_model_override.get();
-        let model_to_run = effective_model_path(&pv.model_path, spawned_override.as_deref());
-
-        if model_to_run.is_empty() || !std::path::Path::new(&model_to_run).exists() {
-            state.whisper_ports.set_preview(None);
-            tracing::info!("preview model_path empty or missing, waiting for download...");
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                _ = shutdown.wait() => return Ok(()),
-            }
-        }
-
-        // Pre-flight port probe, mirroring the main supervisor's — steering
-        // around every sibling server's published + configured port so the
-        // preview can never land on (or race for) another server's choice.
-        let preferred_port = pv.bundled_server_port;
-        let exclude = exclude_other_server_ports(WhisperServerRole::Preview, &state, &cfg);
-        let port = choose_listen_port(preferred_port, &exclude);
-        if port != preferred_port {
-            tracing::warn!(
-                "preferred port {preferred_port} in use by another app — preview whisper-server starting on {port}"
-            );
-        }
-        state.whisper_ports.set_preview(Some(port));
-
-        let mut command = Command::new(&server_path);
-        command
-            .arg("-m")
-            .arg(&model_to_run)
-            .arg("--port")
-            .arg(port.to_string())
-            .arg("--host")
-            .arg("127.0.0.1")
-            .arg("--inference-path")
-            .arg("/v1/audio/transcriptions")
-            // Discard the whisper-server's stdout/stderr: we never read them, and
-            // a piped-but-undrained child blocks once the OS pipe buffer (~64 KB)
-            // fills — which hangs transcription / live preview until the daemon is
-            // restarted. The preview server hits this fast (it re-transcribes every
-            // ~1-2s), so the live preview is what breaks first.
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-        #[cfg(windows)]
-        {
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        // Cap threads unless the user explicitly set one in the preview args.
-        let mut args = pv.bundled_server_args.clone();
-        if !args.iter().any(|a| a == "-t" || a == "--threads") {
-            args.push("-t".into());
-            args.push(preview_thread_cap().to_string());
-        }
-        for extra in &args {
-            command.arg(extra);
-        }
-
-        let mut child = match command.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                state.whisper_ports.set_preview(None);
-                tracing::error!(error = %e, "failed to spawn preview whisper-server");
-                match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
-                    BackoffWake::Shutdown => return Ok(()),
-                    BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
-                    BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
-                }
-                continue;
-            }
-        };
-        assign_to_daemon_job(&state, &child);
-        tracing::info!(
-            pid = child.id().unwrap_or(0),
-            port,
-            "preview whisper-server spawned"
-        );
-        let spawned_at = Instant::now();
-        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
-        check_interval.tick().await;
-
-        // Watch the (unexpanded) preview fields for changes.
-        let watch = raw.preview_whisper.clone();
-
-        // Restart iff the configured preview spec changed OR the one-job preview
-        // model override differs from the effective model this child was spawned
-        // with. Comparing the effective model (config + override) — the same shape
-        // the main supervisor uses — is what makes an in-place override routed
-        // through the preview server produce exactly one restart-to-override and
-        // one restore when the override is cleared.
-        let spec_changed = |child_model: &str| -> bool {
-            let cur = state.config.load();
-            let config_changed = match (cur.preview_whisper.as_ref(), watch.as_ref()) {
-                (Some(c), Some(w)) => {
-                    c.model_path != w.model_path
-                        || c.bundled_server_port != w.bundled_server_port
-                        || c.mode != w.mode
-                }
-                _ => true,
-            };
-            // The override layers over the (expanded) configured preview model,
-            // mirroring the spawn above.
-            let configured = cur
-                .preview_whisper
-                .as_ref()
-                .map(|p| p.model_path.clone())
-                .unwrap_or_default();
-            let current_override = state.preview_model_override.get();
-            let current_model = effective_model_path(&configured, current_override.as_deref());
-            config_changed || current_model != child_model
-        };
-
-        let mut exited = false;
-        loop {
-            tokio::select! {
-                wait = child.wait() => {
-                    match wait {
-                        Ok(status) => tracing::warn!(?status, "preview whisper-server exited"),
-                        Err(e) => tracing::warn!(error = %e, "wait on preview whisper-server failed"),
-                    }
-                    state.whisper_ports.set_preview(None);
-                    if spawned_at.elapsed() >= Duration::from_secs(60) {
-                        backoff = RESTART_BACKOFF_INITIAL;
-                    }
-                    exited = true;
-                    break;
-                }
-                // Explicit restart (the Doctor's "Fix") — same semantics as the
-                // main supervisor's arm above, pre-enabled so a Fix during the
-                // spawn/probe window isn't dropped.
-                _ = &mut restart_fut => {
-                    tracing::info!("preview whisper-server restart requested; bouncing");
-                    let _ = kill_gracefully(&mut child).await;
-                    backoff = RESTART_BACKOFF_INITIAL;
-                    break;
-                }
-                // React promptly to a set/clear of the one-job preview model
-                // override so the override job doesn't wait out the 1s poll for
-                // its model — parallels the main supervisor's override arm.
-                _ = state.preview_model_override.changed.notified() => {
-                    if spec_changed(&model_to_run) {
-                        tracing::info!("preview whisper-server model override changed; restarting");
-                        let _ = kill_gracefully(&mut child).await;
-                        backoff = RESTART_BACKOFF_INITIAL;
-                        break;
-                    }
-                }
-                _ = check_interval.tick() => {
-                    let cur = state.config.load();
-                    if spec_changed(&model_to_run) || !cur.preview_needs_own_server() {
-                        tracing::info!("preview whisper-server config changed; restarting");
-                        let _ = kill_gracefully(&mut child).await;
-                        backoff = RESTART_BACKOFF_INITIAL;
-                        break;
-                    }
-                }
-                _ = shutdown.wait() => {
-                    tracing::info!("shutdown — killing preview whisper-server");
-                    let _ = kill_gracefully(&mut child).await;
-                    state.whisper_ports.set_preview(None);
-                    return Ok(());
-                }
-            }
-        }
-        if exited {
-            // Crash backoff outside the select — cancellable by a Doctor
-            // restart or shutdown, mirroring the main supervisor loop.
-            match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
-                BackoffWake::Shutdown => return Ok(()),
-                BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
-                BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
-            }
-            continue;
-        }
-    }
+/// A separate supervisor task from [`run`] so the critical final-transcription
+/// server path is never affected, but it shares the one [`supervise`] loop via
+/// [`Role::Preview`] — same spawn/monitor/restart/backoff, plus a thread cap.
+pub async fn run_preview(state: AppState, shutdown: ShutdownSignal) -> anyhow::Result<()> {
+    supervise(Role::Preview, state, None, shutdown).await
 }
 
 /// Supervises an optional second live-preview server — used only for meeting
@@ -699,193 +859,16 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
 /// alternating on one server. Otherwise (single recordings, "toggle" mode, the
 /// opt-in off, or no dedicated preview server) this idles.
 ///
-/// A faithful sibling of [`run_preview`]/[`run_dictation`]: the same self-polling
-/// idle gate, spec poll, crash backoff, and Doctor-restart handling, so add/
-/// remove on a config toggle works through the same 5 s poll with no new wiring.
-/// Kept separate so neither the final server, the preview, nor dictation is ever
-/// bounced by a "both"-mode change.
-pub async fn run_preview2(state: AppState, mut shutdown: ShutdownSignal) -> anyhow::Result<()> {
-    let mut backoff = RESTART_BACKOFF_INITIAL;
-
-    loop {
-        if shutdown.is_shutting_down() {
-            return Ok(());
-        }
-
-        // Arm the restart edge before the spawn/probe window (see the main
-        // supervisor) so a Doctor "Fix" fired mid-spawn isn't dropped.
-        let restart_fut = state.whisper_restart.notified();
-        tokio::pin!(restart_fut);
-        restart_fut.as_mut().enable();
-
-        let raw = state.config.load();
-        let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
-
-        // Idle gate: the 2nd preview server runs only for opted-in meeting
-        // "both" mode with a dedicated local preview model. When the flag flips
-        // off (or the mode/source changes), the next poll clears the port and
-        // idles.
-        if !cfg.second_preview_needs_own_server() {
-            state.whisper_ports.set_preview2(None);
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                _ = shutdown.wait() => return Ok(()),
-            }
-        }
-        // Safe: second_preview_needs_own_server() implies preview_whisper is Some.
-        let Some(pv) = cfg.preview_whisper.as_ref() else {
-            state.whisper_ports.set_preview2(None);
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            continue;
-        };
-
-        let server_path = match locate_bundled_server() {
-            Ok(p) => p,
-            Err(e) => {
-                state.whisper_ports.set_preview2(None);
-                tracing::error!(error = %e, "preview2: whisper-server binary not found, waiting...");
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                    _ = shutdown.wait() => return Ok(()),
-                }
-            }
-        };
-
-        if pv.model_path.is_empty() || !std::path::Path::new(&pv.model_path).exists() {
-            state.whisper_ports.set_preview2(None);
-            tracing::info!("preview2 model_path empty or missing, waiting for download...");
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                _ = shutdown.wait() => return Ok(()),
-            }
-        }
-
-        // Pre-flight port probe — the conventional 2nd-preview port (preview + 2),
-        // steering around every sibling's published + configured port.
-        let preferred_port = cfg.preview2_port();
-        let exclude = exclude_other_server_ports(WhisperServerRole::Preview2, &state, &cfg);
-        let port = choose_listen_port(preferred_port, &exclude);
-        if port != preferred_port {
-            tracing::warn!(
-                "preferred port {preferred_port} in use by another app — 2nd preview whisper-server starting on {port}"
-            );
-        }
-        state.whisper_ports.set_preview2(Some(port));
-
-        let mut command = Command::new(&server_path);
-        command
-            .arg("-m")
-            .arg(&pv.model_path)
-            .arg("--port")
-            .arg(port.to_string())
-            .arg("--host")
-            .arg("127.0.0.1")
-            .arg("--inference-path")
-            .arg("/v1/audio/transcriptions")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-        #[cfg(windows)]
-        {
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        // Cap threads unless the user explicitly set one in the preview args.
-        let mut args = pv.bundled_server_args.clone();
-        if !args.iter().any(|a| a == "-t" || a == "--threads") {
-            args.push("-t".into());
-            args.push(preview_thread_cap().to_string());
-        }
-        for extra in &args {
-            command.arg(extra);
-        }
-
-        let mut child = match command.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                state.whisper_ports.set_preview2(None);
-                tracing::error!(error = %e, "failed to spawn 2nd preview whisper-server");
-                match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
-                    BackoffWake::Shutdown => return Ok(()),
-                    BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
-                    BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
-                }
-                continue;
-            }
-        };
-        assign_to_daemon_job(&state, &child);
-        tracing::info!(
-            pid = child.id().unwrap_or(0),
-            port,
-            "2nd preview whisper-server spawned"
-        );
-        let spawned_at = Instant::now();
-        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
-        check_interval.tick().await;
-
-        // Watch the (unexpanded) preview fields — the 2nd server reuses them, and
-        // a preview port change shifts preview2_port too, so a model/port/mode
-        // change must respawn this server.
-        let watch = raw.preview_whisper.clone();
-
-        let mut exited = false;
-        loop {
-            tokio::select! {
-                wait = child.wait() => {
-                    match wait {
-                        Ok(status) => tracing::warn!(?status, "2nd preview whisper-server exited"),
-                        Err(e) => tracing::warn!(error = %e, "wait on 2nd preview whisper-server failed"),
-                    }
-                    state.whisper_ports.set_preview2(None);
-                    if spawned_at.elapsed() >= Duration::from_secs(60) {
-                        backoff = RESTART_BACKOFF_INITIAL;
-                    }
-                    exited = true;
-                    break;
-                }
-                // Explicit restart (the Doctor's "Fix") — pre-enabled so a Fix
-                // during the spawn/probe window isn't dropped.
-                _ = &mut restart_fut => {
-                    tracing::info!("2nd preview whisper-server restart requested; bouncing");
-                    let _ = kill_gracefully(&mut child).await;
-                    backoff = RESTART_BACKOFF_INITIAL;
-                    break;
-                }
-                _ = check_interval.tick() => {
-                    let cur = state.config.load();
-                    let spec_changed = match (cur.preview_whisper.as_ref(), watch.as_ref()) {
-                        (Some(c), Some(w)) => {
-                            c.model_path != w.model_path
-                                || c.bundled_server_port != w.bundled_server_port
-                                || c.mode != w.mode
-                        }
-                        _ => true,
-                    };
-                    if spec_changed || !cur.second_preview_needs_own_server() {
-                        tracing::info!("2nd preview whisper-server config changed; restarting");
-                        let _ = kill_gracefully(&mut child).await;
-                        backoff = RESTART_BACKOFF_INITIAL;
-                        break;
-                    }
-                }
-                _ = shutdown.wait() => {
-                    tracing::info!("shutdown — killing 2nd preview whisper-server");
-                    let _ = kill_gracefully(&mut child).await;
-                    state.whisper_ports.set_preview2(None);
-                    return Ok(());
-                }
-            }
-        }
-        if exited {
-            match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
-                BackoffWake::Shutdown => return Ok(()),
-                BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
-                BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
-            }
-            continue;
-        }
-    }
+/// A separate supervisor task that shares the one [`supervise`] loop via
+/// [`Role::Preview2`]: the same self-polling idle gate, spec poll, crash backoff,
+/// and Doctor-restart handling, so add/remove on a config toggle works through
+/// the same 5 s poll with no new wiring. Its own task so neither the final
+/// server, the preview, nor dictation is ever bounced by a "both"-mode change.
+/// Unlike the other roles it has no model-override slot (it reuses the preview
+/// model), so [`Role::override_slot`] returns `None` and that select arm is
+/// effectively absent.
+pub async fn run_preview2(state: AppState, shutdown: ShutdownSignal) -> anyhow::Result<()> {
+    supervise(Role::Preview2, state, None, shutdown).await
 }
 
 /// Supervises an optional third whisper-server dedicated to in-place dictation,
@@ -895,242 +878,14 @@ pub async fn run_preview2(state: AppState, mut shutdown: ShutdownSignal) -> anyh
 /// and every weak-box config) this idles and dictation reuses the main or
 /// preview server.
 ///
-/// A faithful sibling of [`run_preview`]: the same self-polling idle gate, spec
-/// poll, crash backoff, and Doctor-restart handling, so add/remove on a config
-/// toggle works through the same 1 s poll, with no new ReloadConfig wiring. Kept
-/// separate from [`run`]/[`run_preview`] so neither the critical final server
-/// nor the preview is ever bounced by a dictation change.
-pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> anyhow::Result<()> {
-    let mut backoff = RESTART_BACKOFF_INITIAL;
-
-    loop {
-        if shutdown.is_shutting_down() {
-            return Ok(());
-        }
-
-        // Arm the restart edge before the spawn/probe window (see the main
-        // supervisor) so a Doctor "Fix" fired mid-spawn isn't dropped.
-        let restart_fut = state.whisper_restart.notified();
-        tokio::pin!(restart_fut);
-        restart_fut.as_mut().enable();
-
-        // Unexpanded snapshot for stable change-detection; expanded copy for the
-        // actual paths we spawn with (so `~`/`%APPDATA%` model paths resolve).
-        let raw = state.config.load();
-        let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
-
-        // Idle gate: the dedicated dictation server runs only when the user has
-        // opted in. When the flag flips off (or the stt block clears), the next
-        // poll clears the port and idles — the same add/remove-on-poll the
-        // preview supervisor uses.
-        if !cfg.in_place_needs_own_server() {
-            state.whisper_ports.set_dictation(None);
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                _ = shutdown.wait() => return Ok(()),
-            }
-        }
-        // Safe: in_place_needs_own_server() implies in_place.stt is Some.
-        let Some(stt) = cfg.in_place.stt.as_ref() else {
-            state.whisper_ports.set_dictation(None);
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            continue;
-        };
-
-        let server_path = match locate_bundled_server() {
-            Ok(p) => p,
-            Err(e) => {
-                state.whisper_ports.set_dictation(None);
-                tracing::error!(error = %e, "dictation: whisper-server binary not found, waiting...");
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                    _ = shutdown.wait() => return Ok(()),
-                }
-            }
-        };
-
-        // Spawn with the EFFECTIVE dictation model: a one-job override (an
-        // in-place dictation routed through its own server, published by
-        // `transcribe_polish_type` to `dictation_model_override`) wins over the
-        // configured `[in_place].stt` model, mirroring the main supervisor's
-        // `whisper_model_override` handling. Read here (not merged into the global
-        // config) so other jobs keep seeing the configured dictation model.
-        let spawned_override = state.dictation_model_override.get();
-        let model_to_run = effective_model_path(&stt.model_path, spawned_override.as_deref());
-
-        if model_to_run.is_empty() || !std::path::Path::new(&model_to_run).exists() {
-            state.whisper_ports.set_dictation(None);
-            tracing::info!("dictation model_path empty or missing, waiting for download...");
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
-                _ = shutdown.wait() => return Ok(()),
-            }
-        }
-
-        // Pre-flight port probe — exclude every sibling's published + configured
-        // port so the servers can never collide.
-        let preferred_port = stt.bundled_server_port;
-        let exclude = exclude_other_server_ports(WhisperServerRole::InPlace, &state, &cfg);
-        let port = choose_listen_port(preferred_port, &exclude);
-        if port != preferred_port {
-            tracing::warn!(
-                "preferred port {preferred_port} in use by another app — dictation whisper-server starting on {port}"
-            );
-        }
-        state.whisper_ports.set_dictation(Some(port));
-
-        let mut command = Command::new(&server_path);
-        command
-            .arg("-m")
-            .arg(&model_to_run)
-            .arg("--port")
-            .arg(port.to_string())
-            .arg("--host")
-            .arg("127.0.0.1")
-            .arg("--inference-path")
-            .arg("/v1/audio/transcriptions")
-            // Discard stdout/stderr — a piped-but-undrained child wedges once the
-            // OS pipe buffer fills, same as the other servers.
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-        #[cfg(windows)]
-        {
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        // Cap threads unless the user explicitly set one — dictation is a fast
-        // model and must not starve the final transcription.
-        let mut args = stt.bundled_server_args.clone();
-        if !args.iter().any(|a| a == "-t" || a == "--threads") {
-            args.push("-t".into());
-            args.push(preview_thread_cap().to_string());
-        }
-        for extra in &args {
-            command.arg(extra);
-        }
-
-        let mut child = match command.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                state.whisper_ports.set_dictation(None);
-                tracing::error!(error = %e, "failed to spawn dictation whisper-server");
-                match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
-                    BackoffWake::Shutdown => return Ok(()),
-                    BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
-                    BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
-                }
-                continue;
-            }
-        };
-        assign_to_daemon_job(&state, &child);
-        tracing::info!(
-            pid = child.id().unwrap_or(0),
-            port,
-            "dictation whisper-server spawned"
-        );
-        let spawned_at = Instant::now();
-        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
-        check_interval.tick().await;
-
-        // Watch the (unexpanded) in_place.stt fields for changes.
-        let watch = raw.in_place.stt.clone();
-
-        // Restart iff the configured dictation spec changed OR the one-job
-        // dictation model override differs from the effective model this child was
-        // spawned with. Comparing the effective model (config + override) — the
-        // same shape the main supervisor uses — is what makes an in-place override
-        // routed through the dictation server produce exactly one
-        // restart-to-override and one restore when the override is cleared.
-        let spec_changed = |child_model: &str| -> bool {
-            let cur = state.config.load();
-            // Compare by direct field read (not PartialEq) so a pure
-            // use_own_bundled_server / model / port / mode change is caught, and
-            // self-stop when the opt-in flips off.
-            let config_changed = match (cur.in_place.stt.as_ref(), watch.as_ref()) {
-                (Some(c), Some(w)) => {
-                    c.model_path != w.model_path
-                        || c.bundled_server_port != w.bundled_server_port
-                        || c.mode != w.mode
-                        || c.use_own_bundled_server != w.use_own_bundled_server
-                }
-                _ => true,
-            };
-            // The override layers over the (expanded) configured dictation model,
-            // mirroring the spawn above.
-            let configured = cur
-                .in_place
-                .stt
-                .as_ref()
-                .map(|s| s.model_path.clone())
-                .unwrap_or_default();
-            let current_override = state.dictation_model_override.get();
-            let current_model = effective_model_path(&configured, current_override.as_deref());
-            config_changed || current_model != child_model
-        };
-
-        let mut exited = false;
-        loop {
-            tokio::select! {
-                wait = child.wait() => {
-                    match wait {
-                        Ok(status) => tracing::warn!(?status, "dictation whisper-server exited"),
-                        Err(e) => tracing::warn!(error = %e, "wait on dictation whisper-server failed"),
-                    }
-                    state.whisper_ports.set_dictation(None);
-                    if spawned_at.elapsed() >= Duration::from_secs(60) {
-                        backoff = RESTART_BACKOFF_INITIAL;
-                    }
-                    exited = true;
-                    break;
-                }
-                // Explicit restart (the Doctor's "Fix") — same semantics as the
-                // other supervisors, pre-enabled so a Fix during the spawn/probe
-                // window isn't dropped.
-                _ = &mut restart_fut => {
-                    tracing::info!("dictation whisper-server restart requested; bouncing");
-                    let _ = kill_gracefully(&mut child).await;
-                    backoff = RESTART_BACKOFF_INITIAL;
-                    break;
-                }
-                // React promptly to a set/clear of the one-job dictation model
-                // override so the override job doesn't wait out the 1s poll for
-                // its model — parallels the main supervisor's override arm.
-                _ = state.dictation_model_override.changed.notified() => {
-                    if spec_changed(&model_to_run) {
-                        tracing::info!("dictation whisper-server model override changed; restarting");
-                        let _ = kill_gracefully(&mut child).await;
-                        backoff = RESTART_BACKOFF_INITIAL;
-                        break;
-                    }
-                }
-                _ = check_interval.tick() => {
-                    let cur = state.config.load();
-                    if spec_changed(&model_to_run) || !cur.in_place_needs_own_server() {
-                        tracing::info!("dictation whisper-server config changed; restarting");
-                        let _ = kill_gracefully(&mut child).await;
-                        backoff = RESTART_BACKOFF_INITIAL;
-                        break;
-                    }
-                }
-                _ = shutdown.wait() => {
-                    tracing::info!("shutdown — killing dictation whisper-server");
-                    let _ = kill_gracefully(&mut child).await;
-                    state.whisper_ports.set_dictation(None);
-                    return Ok(());
-                }
-            }
-        }
-        if exited {
-            match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
-                BackoffWake::Shutdown => return Ok(()),
-                BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
-                BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
-            }
-            continue;
-        }
-    }
+/// A separate supervisor task that shares the one [`supervise`] loop via
+/// [`Role::Dictation`]: the same self-polling idle gate, spec poll, crash
+/// backoff, and Doctor-restart handling, so add/remove on a config toggle works
+/// through the same poll with no new ReloadConfig wiring. Its own task so neither
+/// the critical final server nor the preview is ever bounced by a dictation
+/// change.
+pub async fn run_dictation(state: AppState, shutdown: ShutdownSignal) -> anyhow::Result<()> {
+    supervise(Role::Dictation, state, None, shutdown).await
 }
 
 /// The command-line marker every whisper-server we spawn carries (see the

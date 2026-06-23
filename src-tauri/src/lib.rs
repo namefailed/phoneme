@@ -36,6 +36,7 @@ mod auto_spawn;
 mod bridge;
 mod checksums;
 mod commands;
+mod config_cache;
 mod config_io;
 mod doctor;
 mod events;
@@ -84,7 +85,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let config = phoneme_core::Config::read_or_default();
+                let config = config_cache::get();
                 if config.tray.minimize_to_tray {
                     let _ = window.hide();
                     api.prevent_close();
@@ -136,8 +137,11 @@ pub fn run() {
                         });
                     }
                     if let Some(bridge) = slot.current() {
-                        // Read live config so toggle/combo changes apply immediately.
-                        let current_config = phoneme_core::Config::read_or_default();
+                        // Read the cached config so toggle/combo changes apply
+                        // immediately without disk I/O on every keypress. The
+                        // cache is refreshed wherever config is saved/switched
+                        // (see config_cache + commands::apply_config).
+                        let current_config = config_cache::get();
 
                         // If the fired shortcut is the (enabled) meeting hotkey,
                         // toggle a meeting on press and we're done. Meetings are
@@ -425,6 +429,12 @@ pub fn run() {
             // pref, the startup window, the global hotkeys, or the overlay.
             let startup_cfg = phoneme_core::Config::read_or_default();
 
+            // Prime the process-wide config cache so the hot paths (global-shortcut
+            // handler, window-close, exit hook) read an in-memory snapshot instead
+            // of re-loading config.toml from disk on every event. apply_config and
+            // switch_profile refresh it on every later save/profile switch.
+            config_cache::set(&startup_cfg);
+
             if startup_cfg.interface.strip_titlebar {
                 use tauri::Manager;
                 if let Some(window) = app.handle().get_webview_window("main") {
@@ -495,6 +505,7 @@ pub fn run() {
             commands::get_segments,
             commands::get_words,
             commands::get_chapters,
+            commands::get_entities,
             commands::list_transcript_versions,
             commands::revert_to_version,
             commands::delete_recording,
@@ -566,6 +577,7 @@ pub fn run() {
             commands::delete_task,
             commands::reorder_tasks,
             commands::list_all_tasks,
+            commands::task_counts,
             commands::add_entity,
             commands::update_entity,
             commands::delete_entity,
@@ -643,7 +655,7 @@ pub fn run() {
             // deliberately outlives every tray exit (headless setups). Peek
             // without connecting, since there's no point dialing a daemon just to
             // tell it to shut down.
-            let cfg = phoneme_core::Config::read_or_default();
+            let cfg = config_cache::get();
             if tray::should_stop_daemon_on_exit(
                 cfg.interface.quit_stops_daemon,
                 tray::daemon_stop_done(),

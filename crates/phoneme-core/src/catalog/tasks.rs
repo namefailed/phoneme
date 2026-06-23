@@ -209,6 +209,24 @@ impl Catalog {
             .collect()
     }
 
+    /// Library-wide task counts: open (not done) and total. The cheap badge
+    /// counterpart of [`Catalog::list_all_tasks`] — computed in one SQL pass so
+    /// the sidebar's Tasks badges don't fetch every row just to count them.
+    pub async fn task_counts(&self) -> Result<crate::types::TaskCounts> {
+        let row = sqlx::query(
+            "SELECT
+                COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN done = 0 THEN 1 ELSE 0 END), 0) AS open
+             FROM tasks",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(crate::types::TaskCounts {
+            open: row.try_get("open")?,
+            total: row.try_get("total")?,
+        })
+    }
+
     /// Add a user-created ('manual') task to a recording. Manual tasks survive
     /// re-extraction — [`Catalog::set_tasks`] only replaces the 'llm' rows.
     /// Appended after the current tasks (`sort_order = max + 1`). Returns the new id.

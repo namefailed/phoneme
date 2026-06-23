@@ -33,6 +33,10 @@ pub async fn run(args: SummarizeArgs, cfg: &Config, json: bool) -> ExitCode {
             id,
             model: args.model,
             prompt: args.prompt,
+            // The CLI uses the configured summary connection (no per-run override).
+            provider: None,
+            api_url: None,
+            api_key: None,
         })
         .await
     {

@@ -604,6 +604,19 @@ pub enum Request {
         /// One-time summary prompt override (never persisted).
         #[serde(default)]
         prompt: Option<String>,
+        /// One-time provider override for this run only — falls back to the
+        /// configured summary / `[llm_post_process]` provider when `None`, and is
+        /// never written to config. Mirrors [`Request::RerunCleanup`]; a non-empty
+        /// value also forces a usable provider for the run.
+        #[serde(default)]
+        provider: Option<String>,
+        /// One-time endpoint override. An explicit empty string is meaningful
+        /// ("use the provider default"), unlike the other fields.
+        #[serde(default)]
+        api_url: Option<String>,
+        /// One-time API-key override (blank = keep the configured key).
+        #[serde(default)]
+        api_key: Option<String>,
     },
     /// Generate (or regenerate) the whole-meeting digest: one LLM synthesis
     /// across ALL tracks of a meeting (mic + system together), distinct from
@@ -634,6 +647,17 @@ pub enum Request {
         /// non-meeting-scope id falls back to the built-in digest, never an error.
         #[serde(default)]
         recipe_id: Option<String>,
+        /// One-time provider override for this run only (never persisted), mirroring
+        /// [`Request::RerunSummary`]. `None` keeps the configured summary provider.
+        #[serde(default)]
+        provider: Option<String>,
+        /// One-time endpoint override. An explicit empty string means "use the
+        /// provider default".
+        #[serde(default)]
+        api_url: Option<String>,
+        /// One-time API-key override (blank = keep the configured key).
+        #[serde(default)]
+        api_key: Option<String>,
     },
     /// Generate (or regenerate) a **period digest**: one LLM rollup across EVERY
     /// recording in a date window (what was discussed, decisions reached,
@@ -662,6 +686,17 @@ pub enum Request {
         /// One-time summary model override (never persisted).
         #[serde(default)]
         model: Option<String>,
+        /// One-time provider override for this run only (never persisted), mirroring
+        /// [`Request::RerunSummary`]. `None` keeps the configured summary provider.
+        #[serde(default)]
+        provider: Option<String>,
+        /// One-time endpoint override. An explicit empty string means "use the
+        /// provider default".
+        #[serde(default)]
+        api_url: Option<String>,
+        /// One-time API-key override (blank = keep the configured key).
+        #[serde(default)]
+        api_key: Option<String>,
     },
 
     // ── Library: transcript & metadata edits ────────────────────────────
@@ -840,6 +875,17 @@ pub enum Request {
     /// powering the Chapters detail view and `phoneme show --chapters`.
     GetChapters {
         /// The recording whose chapters to fetch.
+        id: RecordingId,
+    },
+    /// Fetch one recording's structured entities (person / org / topic / term),
+    /// kind- then value-sorted. Ok = JSON array (possibly empty) of `Entity`
+    /// objects `{"kind":…,"value":…}`. The per-recording read the detail pane's
+    /// entity chips use instead of pulling the whole `GetRecording` row just for
+    /// its `entities`; an unknown id yields an empty list, mirroring
+    /// [`Request::GetChapters`]. The cross-recording facet lives in
+    /// [`Request::ListAllEntities`]. GUI entity chips.
+    GetEntities {
+        /// The recording whose entities to fetch.
         id: RecordingId,
     },
     /// Run the LLM task-extraction step for one recording on demand (regardless
@@ -1393,6 +1439,12 @@ pub enum Request {
         #[serde(default)]
         only_open: bool,
     },
+    /// Library-wide task counts: how many tasks are open (not done) and how many
+    /// exist in total. Ok = a JSON object `{"open":n,"total":n}` (see
+    /// [`phoneme_core::types::TaskCounts`]). The cheap counts the GUI sidebar's
+    /// Tasks badges need, so they don't pull the full [`Request::ListAllTasks`]
+    /// list just to count it. The full list still backs the "View all" task view.
+    TaskCounts,
     /// Merge one tag into another: re-point all recordings, then delete
     /// `from_id`. Ok `null`; emits [`DaemonEvent::TagDeleted`] for the
     /// source tag (consumers refresh on it). GUI Tag Manager merge,
@@ -2206,5 +2258,77 @@ mod ask_wire_tests {
         let value = serde_json::json!({ "type": "totally_unknown_request", "x": 1 });
         let decoded: ServerRequest = serde_json::from_value(value).unwrap();
         assert!(matches!(decoded, ServerRequest::Unknown { .. }));
+    }
+}
+
+#[cfg(test)]
+mod rerun_parity_wire_tests {
+    use super::*;
+
+    #[test]
+    fn rerun_summary_round_trips_with_provider_overrides() {
+        let req = Request::RerunSummary {
+            id: RecordingId::new(),
+            model: Some("phi3:mini".into()),
+            prompt: Some("be terse".into()),
+            provider: Some("openai".into()),
+            api_url: Some(String::new()), // explicit "" = provider default
+            api_key: Some("sk-test".into()),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["type"], "rerun_summary");
+        assert_eq!(json["provider"], "openai");
+        let back: Request = serde_json::from_value(json).unwrap();
+        assert_eq!(back, req);
+    }
+
+    #[test]
+    fn rerun_summary_defaults_provider_fields_for_an_older_client() {
+        // A client that omits the new fields must still decode — they serde-default
+        // to None, so the daemon falls back to the configured summary provider.
+        let value = serde_json::json!({
+            "type": "rerun_summary", "id": RecordingId::new(),
+        });
+        match serde_json::from_value::<Request>(value).unwrap() {
+            Request::RerunSummary {
+                model,
+                prompt,
+                provider,
+                api_url,
+                api_key,
+                ..
+            } => {
+                assert!(model.is_none() && prompt.is_none());
+                assert!(provider.is_none() && api_url.is_none() && api_key.is_none());
+            }
+            other => panic!("expected RerunSummary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rerun_meeting_and_period_digest_round_trip_with_provider_overrides() {
+        let mtg = Request::RerunMeetingDigest {
+            meeting_id: "m-1".into(),
+            model: None,
+            recipe_id: Some("digest".into()),
+            provider: Some("groq".into()),
+            api_url: None,
+            api_key: Some("gk-test".into()),
+        };
+        let back: Request = serde_json::from_value(serde_json::to_value(&mtg).unwrap()).unwrap();
+        assert_eq!(back, mtg);
+
+        let now = Local::now();
+        let period = Request::RerunPeriodDigest {
+            since: now,
+            until: now,
+            label: "today".into(),
+            model: None,
+            provider: Some("anthropic".into()),
+            api_url: Some("https://example/v1".into()),
+            api_key: None,
+        };
+        let back: Request = serde_json::from_value(serde_json::to_value(&period).unwrap()).unwrap();
+        assert_eq!(back, period);
     }
 }
