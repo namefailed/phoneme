@@ -36,148 +36,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { setHeaderHidden } from "./headerBar";
 import { setStepNotifications } from "./notifications";
 import { closeModalOverlay } from "../utils/modalAnim";
-
-type HelpItem = { combo: string; label: string };
-type HelpGroup = { title: string; items: HelpItem[] };
+import { helpGroups } from "./keyboardHelp";
+import { renderStatusOverlay, removeStatusOverlay } from "./keyboardStatusOverlay";
+import {
+  topmostModalOverlay,
+  handleModalNav,
+  seedModalCursor,
+  trapModalTab,
+} from "./keyboardModalNav";
 
 /** The bundled default UI font stack (mirrors reset.css). A user-chosen font is
  *  prepended to this so an uninstalled choice still falls back cleanly. */
 const UI_FONT_FALLBACK = `"Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
-
-const BASE_HELP_GROUPS: HelpGroup[] = [
-  {
-    title: "Global",
-    items: [
-      { combo: "/", label: "Focus search" },
-      { combo: "?", label: "Show this help" },
-      { combo: "g then l", label: "Go to Library" },
-      { combo: "g then s", label: "Go to Settings" },
-      { combo: "g then d", label: "Keyboard into the open recording" },
-      { combo: "g then D", label: "Go to Doctor" },
-      { combo: "g then A", label: "Toggle the AI-activity panel" },
-      { combo: "g then /", label: "Highlight the search bar" },
-      { combo: "g then b", label: "Go to / reveal the sidebar" },
-      { combo: "g then 1 / 2", label: "Jump to the left / right split pane" },
-      { combo: "g then T", label: "Open the Tag Manager" },
-      { combo: "g then P", label: "Managers → Profiles" },
-      { combo: "g then S", label: "Settings → Search" },
-      { combo: "g then H", label: "Settings → Dictation history" },
-      { combo: "Ctrl + ,", label: "Open Settings" },
-      { combo: "Ctrl + B", label: "Toggle the sidebar" },
-      { combo: "Ctrl + \\ / Ctrl + D", label: "Toggle the detail pane" },
-      { combo: "Ctrl + /", label: "Hide / show the top bar" },
-      { combo: "Ctrl + = / − / 0", label: "Zoom the list bigger / smaller / reset" },
-      { combo: "Ctrl + Shift + = / −", label: "Bump the global UI text size" },
-      { combo: "Ctrl + scroll", label: "Zoom the list (over the list pane)" },
-      { combo: "Tab / Shift+Tab", label: "Move between controls / panes" },
-      { combo: "Esc", label: "Close popups · leave search · leave Settings" },
-    ],
-  },
-  {
-    title: "Recordings list (when focused)",
-    items: [
-      { combo: "↑  ↓", label: "Move between recordings" },
-      { combo: "Enter", label: "Open recording · fold/unfold a meeting" },
-      { combo: "Shift + Enter", label: "Meeting title → open the merged view" },
-      { combo: "Space", label: "Multi-select (on a meeting title: all tracks)" },
-      { combo: "Shift + ↑ / ↓", label: "Extend the selection" },
-      { combo: "Delete", label: "Delete the selection — all selected, else the open one (with Undo)" },
-      { combo: "\\", label: "Split: cursor row (or two selected) beside the open one; on a meeting -> dual timeline" },
-      { combo: "Esc", label: "Clear the multi-selection" },
-    ],
-  },
-  {
-    title: "Bulk actions bar (recordings selected)",
-    items: [
-      { combo: "Shift + Enter", label: "Hand the keyboard to the bar" },
-      { combo: "h   l", label: "Move across the bar's buttons" },
-      { combo: "Enter / Space", label: "Press the highlighted button" },
-      { combo: "j · k · Esc", label: "Leave the bar" },
-      { combo: "Ctrl+Shift+click ⠿", label: "Reset the bar's position" },
-    ],
-  },
-  {
-    title: "Open recording",
-    items: [
-      { combo: "p", label: "Play / pause" },
-      { combo: "c", label: "Copy transcript" },
-      { combo: "e", label: "Export transcript" },
-      { combo: "r", label: "Re-run with chosen models (Models modal)" },
-      { combo: "f", label: "Zen: full-window recording — or the list when nothing's open" },
-      { combo: "t", label: "Add a tag (j/k browse · Enter adds)" },
-      { combo: "Shift + t", label: "Open the Tag Manager" },
-      { combo: "Ctrl + S", label: "Save the focused editor" },
-      { combo: ":w  :wq  :q", label: "Save / save-and-leave / leave (vim editors)" },
-      { combo: "Shift + Esc", label: "Leave the transcript / notes editor" },
-    ],
-  },
-  {
-    title: "Modals & popups (Re-run · Doctor · Tag Manager · confirmations)",
-    items: [
-      { combo: "Tab / Shift+Tab", label: "Move between the dialog's controls — always works, no nav layer needed" },
-      { combo: "h l j k / arrows", label: "Rove the cursor over the controls (with vim or arrow nav on)" },
-      { combo: "Enter / Space", label: "Activate the highlighted control (button fires · field opens to type)" },
-      { combo: "Esc", label: "Close the dialog" },
-    ],
-  },
-];
-
-/** Shown in the help sheet only while `interface.vim_nav` is enabled. */
-const VIM_HELP_GROUP: HelpGroup = {
-  title: "Vim navigation (enabled)",
-  items: [
-    { combo: "h   l", label: "Move focus between sidebar / list / detail" },
-    { combo: "j   k", label: "Move down / up (list · sidebar · detail rows)" },
-    { combo: "k / ↑ at top", label: "Up into the search bar (↓ to come back)" },
-    { combo: "h  l (header)", label: "Move across the header controls (wraps around)" },
-    { combo: "Enter (header)", label: "Open the status / Record / Settings dropdown" },
-    { combo: "j  k (in menu)", label: "Choose an option — Enter selects, Esc closes" },
-    { combo: "g g", label: "Jump to the top (list · sidebar · detail)" },
-    { combo: "G", label: "Jump to the bottom (list · sidebar · detail)" },
-    { combo: "z z", label: "Center the list on the cursor row" },
-    { combo: "x b   x /", label: "Toggle the sidebar / top bar (vim twins of Ctrl+B / Ctrl+/)" },
-    { combo: "Enter", label: "Open recording · apply sidebar filter" },
-    { combo: "j  k (sidebar)", label: "Filters · section headers · the queue's items" },
-    { combo: "h  l (sidebar)", label: "Across a queue row's buttons (l past the end → list)" },
-    { combo: "j  k (queue ▲▼)", label: "On a queue item's move pair: pick move-up / move-down" },
-    { combo: "Enter (sidebar)", label: "Apply filter · fold a section · press a queue button" },
-    { combo: "l (into detail)", label: "Enter the open recording, on the transcript" },
-    { combo: "j  k (detail)", label: "Top row · actions · tags · transcript · views · notes" },
-    { combo: "h  l (detail)", label: "Across a row's buttons (h at the start → list)" },
-    { combo: "Enter (detail)", label: "Edit the box / press the button / open a dropdown" },
-    { combo: "j k · Enter · Esc", label: "Drive a detail dropdown (Speed/Export/Views/Pipeline)" },
-    { combo: "Enter (waveform)", label: "Scrub mode: h/l ±1s, H/L ±5s, Space play, Esc leaves" },
-    { combo: "Enter (tag suggestion)", label: "Enter the chip: h/l pick ✓ apply / × dismiss, Enter acts, Esc backs out" },
-    { combo: "h  l (split view)", label: "Cross between the two panes (at a row's edge)" },
-    { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
-    { combo: "i", label: "Edit the transcript directly" },
-    { combo: "d d", label: "Delete the selection — all selected, else the focused one (with Undo)" },
-    { combo: "Esc", label: "Step back out a level" },
-  ],
-};
-
-/** Shown in the help sheet only while `interface.arrow_nav` is enabled — the
- *  non-vim "normal" navigation layer driven entirely by the arrow keys. */
-const ARROW_HELP_GROUP: HelpGroup = {
-  title: "Arrow-key navigation (enabled)",
-  items: [
-    { combo: "← →", label: "Move focus between sidebar / list / detail panes" },
-    { combo: "↑ ↓", label: "Move within the list · sidebar filters · detail rows" },
-    { combo: "↑ at list top", label: "Rise into the header controls (↓ to come back)" },
-    { combo: "← → (header)", label: "Move across the header controls" },
-    { combo: "Enter", label: "Open / activate the focused row, button, or dropdown" },
-    { combo: "Esc", label: "Step back out a level" },
-  ],
-};
-
-function helpGroups(): HelpGroup[] {
-  // Surface the active nav layer(s) right after "Global" so they're the first
-  // thing the user sees; hide them entirely when off, since the keys are inert.
-  const layers: HelpGroup[] = [];
-  if (arrowNav) layers.push(ARROW_HELP_GROUP);
-  if (vimNav) layers.push(VIM_HELP_GROUP);
-  return [BASE_HELP_GROUPS[0], ...layers, ...BASE_HELP_GROUPS.slice(1)];
-}
 
 let helpOpen = false;
 let helpOverlay: HTMLElement | null = null;
@@ -195,6 +65,9 @@ let vimNav = false;
 /** Whether arrow-key navigation is active (`interface.arrow_nav`) — drives the
  *  same pane/grid cursor as vim, but via the arrow keys, for non-vim users. */
 let arrowNav = false;
+/** Is either nav layer on? Passed to the modal-nav module so it reads the live
+ *  flags without importing them (which would cycle). */
+const navActive = () => vimNav || arrowNav;
 
 /** When the detail pane has "captured" the keys for an open dropdown ("sub"), the
  *  waveform scrub mode ("wave"), or a tag-suggestion chip's ✓/× sub-step
@@ -324,34 +197,6 @@ function closeHeaderSub(closeMenu: boolean) {
   document.querySelectorAll("[role='menu'] .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
 }
 
-/** A native <select>'s option list can't be popped open from JS, so while you
- *  cycle it with j/k we render our own little list beside it, highlighting the
- *  current option, so you can see the choices, their order, and where you are. */
-let statusOverlay: HTMLElement | null = null;
-function renderStatusOverlay(sel: HTMLSelectElement) {
-  if (!statusOverlay) {
-    statusOverlay = document.createElement("div");
-    statusOverlay.className = "hb-select-cycle-pop";
-    document.body.appendChild(statusOverlay);
-  }
-  const r = sel.getBoundingClientRect();
-  statusOverlay.style.cssText =
-    `position:fixed; top:${Math.round(r.bottom + 4)}px; left:${Math.round(r.left)}px; min-width:${Math.round(r.width)}px;`;
-  statusOverlay.replaceChildren(
-    ...[...sel.options].map((o, i) => {
-      const d = document.createElement("div");
-      d.className = "hb-select-cycle-item" + (i === sel.selectedIndex ? " active" : "");
-      d.textContent = o.textContent ?? "";
-      return d;
-    }),
-  );
-  statusOverlay.querySelector(".hb-select-cycle-item.active")?.scrollIntoView({ block: "nearest" });
-}
-function removeStatusOverlay() {
-  statusOverlay?.remove();
-  statusOverlay = null;
-}
-
 /** The header control the cursor currently sits on, tracked by identity rather
  *  than index so we can re-find it after the header re-renders — starting a
  *  recording reveals Pause/Cancel and relabels Record, which shifts the index. */
@@ -470,7 +315,7 @@ function openHelp() {
     <div class="modal-dialog kbd-help-dialog" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
       <div class="modal-header"><h3 class="modal-title">⌨ Keyboard shortcuts</h3></div>
       <div class="kbd-help-body">
-        ${helpGroups()
+        ${helpGroups(arrowNav, vimNav)
           .map(
             (g) => `
           <div class="kbd-help-group">
@@ -1025,220 +870,6 @@ function handleVimNav(e: KeyboardEvent): boolean {
   return false;
 }
 
-// ── Generic modal / popup keyboard navigation ──────────────────────────────
-// A modal makes the background nav layer stand down (onKeyDown returns), but with
-// vim_nav or arrow_nav on we drive a roving cursor over the modal's own controls
-// — the same `.kbd-cursor` idiom used in the detail grid, header, and tag popover
-// — so every modal is keyboard-drivable the same way, with no per-modal wiring.
-
-/** The topmost open overlay, matching the `.modal-overlay` convention plus the
- *  `*-modal-overlay` variants (the compare / speakers overlays). Later in the DOM
- *  means on top, since openers append to <body>. null when none is open. */
-function topmostModalOverlay(): HTMLElement | null {
-  const all = document.querySelectorAll<HTMLElement>('[class*="modal-overlay"]');
-  return all.length ? all[all.length - 1] : null;
-}
-
-/** Roving-cursor index within the current modal + the overlay it belongs to, so
- *  the index resets when a different overlay takes over. -1 = not seeded yet
- *  (lazy: the first nav key seeds it, leaving the modal's own initial focus until
- *  the user actually navigates). */
-let modalCursor = -1;
-let modalCursorOverlay: HTMLElement | null = null;
-
-/** Visible, enabled, focusable controls in the overlay's dialog, in DOM order —
- *  the same visibility filter headerControls() uses, so `?hidden` tab panels and
- *  disabled buttons are skipped automatically. Re-queried every keystroke so a
- *  Lit re-render (a Doctor fix, a tab switch) never leaves a stale node list. */
-function modalControls(overlay: HTMLElement): HTMLElement[] {
-  const root = overlay.querySelector<HTMLElement>(".modal-dialog") ?? overlay;
-  const sel =
-    'button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])';
-  return [...root.querySelectorAll<HTMLElement>(sel)].filter((el) => el.offsetParent !== null);
-}
-
-function highlightModalCursor(controls: HTMLElement[]) {
-  document.querySelectorAll('[class*="modal-overlay"] .kbd-cursor').forEach((el) => el.classList.remove("kbd-cursor"));
-  const el = controls[modalCursor];
-  if (el) {
-    el.classList.add("kbd-cursor");
-    el.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }
-}
-
-/** Enter/Space on the cursor control: toggle checkboxes/radios in place, focus
- *  text/select fields so the user can type or pick (the modal then owns typing
- *  until Esc), otherwise click it — re-highlighting next frame since the click
- *  may re-render the modal (a Doctor fix, a ModelPicker tab switch). */
-function activateModalControl(el: HTMLElement, overlay: HTMLElement) {
-  const tag = el.tagName;
-  const type = (el as HTMLInputElement).type;
-  if (tag === "INPUT" && (type === "checkbox" || type === "radio")) {
-    el.click(); // toggle, but keep the cursor here
-    return;
-  }
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
-    el.focus();
-    if (type === "color" || type === "date") {
-      try { (el as HTMLInputElement).showPicker?.(); } catch { /* not allowed in this context */ }
-    }
-    return;
-  }
-  el.click();
-  requestAnimationFrame(() => {
-    if (topmostModalOverlay() !== overlay) return; // the click closed / replaced it
-    const ctrls = modalControls(overlay);
-    if (!ctrls.length) return;
-    // Keep the cursor on the same control across the re-render if it survived
-    // (Lit patches in place, so it usually does); only fall back to a clamped
-    // index when the clicked control is gone (e.g. a Doctor row that got fixed).
-    const i = ctrls.indexOf(el);
-    modalCursor = i >= 0 ? i : Math.min(modalCursor, ctrls.length - 1);
-    highlightModalCursor(ctrls);
-  });
-}
-
-/** Move the modal cursor as a 2-D GRID, not a flat ring: `h`/`l` step to the
- *  nearest control in the same row (left/right), `j`/`k` jump to the row
- *  above/below, landing on the control whose horizontal centre is closest — so a
- *  multi-control modal (Quick model switcher, Tag manager, Doctor with inline
- *  buttons) navigates the way it looks. Falls back to a plain linear ±1 step when
- *  there's no neighbour in that direction (e.g. `h`/`l` in a single-column list,
- *  or `j`/`k` off the last row), so vertical-list modals never feel stuck — a
- *  strict superset of the old flat cycle. Geometry is read fresh each call. */
-function modalGridMove(controls: HTMLElement[], current: number, dir: string): number {
-  const n = controls.length;
-  if (n <= 1) return current;
-  const rects = controls.map((c) => c.getBoundingClientRect());
-  const cur = rects[current];
-  const curX = cur.left + cur.width / 2;
-  const curY = cur.top + cur.height / 2;
-  // Two controls share a "row" when their vertical centres are within this band.
-  const rowTol = Math.max(10, cur.height * 0.6);
-  const midX = (i: number) => rects[i].left + rects[i].width / 2;
-  const midY = (i: number) => rects[i].top + rects[i].height / 2;
-
-  if (dir === "h" || dir === "l") {
-    const sign = dir === "l" ? 1 : -1;
-    let best = -1;
-    let bestDX = Infinity;
-    for (let i = 0; i < n; i++) {
-      if (i === current) continue;
-      if (Math.abs(midY(i) - curY) > rowTol) continue; // different row
-      const dx = (midX(i) - curX) * sign;
-      if (dx > 1 && dx < bestDX) { bestDX = dx; best = i; }
-    }
-    return best >= 0 ? best : (current + sign + n) % n; // fallback: linear
-  }
-
-  // j / k — pick the nearest row in that direction, then the closest column.
-  const sign = dir === "j" ? 1 : -1;
-  const cands: Array<{ i: number; dy: number; dx: number }> = [];
-  for (let i = 0; i < n; i++) {
-    if (i === current) continue;
-    const dy = (midY(i) - curY) * sign;
-    if (dy <= rowTol * 0.5) continue; // not in a further row in this direction
-    cands.push({ i, dy, dx: Math.abs(midX(i) - curX) });
-  }
-  if (!cands.length) return (current + sign + n) % n; // fallback: linear
-  const minDy = Math.min(...cands.map((c) => c.dy));
-  cands.sort((a, b) => a.dx - b.dx);
-  const inNearestRow = cands.filter((c) => c.dy <= minDy + rowTol);
-  return (inNearestRow.length ? inNearestRow : cands).sort((a, b) => a.dx - b.dx)[0].i;
-}
-
-/** Roving keyboard nav inside the topmost modal. Returns true when it consumed
- *  the key. Esc / Tab are left for the modal's own handlers (Esc closes it, Tab
- *  walks native focus). Typing in a focused field never reaches here — onKeyDown's
- *  typing-target return fires first. */
-function handleModalNav(e: KeyboardEvent, overlay: HTMLElement): boolean {
-  if (e.key === "Escape" || e.key === "Tab") return false;
-  const nav = motionToken(e);
-  const isDir = nav === "h" || nav === "j" || nav === "k" || nav === "l";
-  if (!isDir && nav !== "Enter" && nav !== " ") return false; // not a nav key for this layer
-  if (overlay !== modalCursorOverlay) { modalCursorOverlay = overlay; modalCursor = -1; }
-  const controls = modalControls(overlay);
-  if (!controls.length) { e.preventDefault(); return true; }
-  // Lazy seed: start on the control the modal already focused (e.g. ConfirmDelete
-  // focuses Cancel, so Enter can't accidentally Delete), else the first control.
-  if (modalCursor < 0) {
-    const ai = controls.indexOf(document.activeElement as HTMLElement);
-    modalCursor = ai >= 0 ? ai : 0;
-    // Take focus to the dialog container so the roving cursor — not a native focus
-    // ring — is the only highlight, and keys keep routing through onKeyDown.
-    const dialog = overlay.querySelector<HTMLElement>(".modal-dialog") ?? overlay;
-    if (document.activeElement !== dialog) {
-      dialog.setAttribute("tabindex", "-1");
-      dialog.focus({ preventScroll: true });
-    }
-  }
-  // Re-anchor to the still-highlighted element rather than its old index: a
-  // re-render between keystrokes (a Doctor fix disabling buttons, a tab switch
-  // swapping a panel's controls) can shuffle the list under a fixed index, so
-  // follow the element the user actually sees the cursor on. On the very first
-  // seed there's no .kbd-cursor yet, so this is a no-op and the seed index stands.
-  if (modalCursor >= 0) {
-    const marked = overlay.querySelector<HTMLElement>(".kbd-cursor");
-    const mi = marked ? controls.indexOf(marked) : -1;
-    if (mi >= 0) modalCursor = mi;
-  }
-  modalCursor = Math.min(modalCursor, controls.length - 1);
-  if (isDir) {
-    e.preventDefault();
-    modalCursor = modalGridMove(controls, modalCursor, nav);
-    highlightModalCursor(controls);
-    return true;
-  }
-  e.preventDefault(); // Enter / Space
-  activateModalControl(controls[modalCursor], overlay);
-  return true;
-}
-
-/** Drop the roving cursor onto a modal the moment it opens, so the keyboard
- *  cursor (and its glow) is already inside the dialog without needing a first
- *  keypress — e.g. the Re-run / Models picker, Doctor. Prefers the control the
- *  modal itself focused (so a destructive confirm still starts on Cancel), and
- *  bows out for modals that put focus straight into a text field to type. */
-function seedModalCursor(overlay: HTMLElement) {
-  if (!(vimNav || arrowNav)) return;
-  const active = document.activeElement as HTMLElement | null;
-  if (active && overlay.contains(active) && isTypingTarget(active)) return;
-  const controls = modalControls(overlay);
-  if (!controls.length) return;
-  modalCursorOverlay = overlay;
-  const ai = active ? controls.indexOf(active) : -1;
-  modalCursor = ai >= 0 ? ai : 0;
-  const dialog = overlay.querySelector<HTMLElement>(".modal-dialog") ?? overlay;
-  if (document.activeElement !== dialog) {
-    dialog.setAttribute("tabindex", "-1");
-    dialog.focus({ preventScroll: true });
-  }
-  highlightModalCursor(controls);
-}
-
-/** Focus trap: keep Tab / Shift+Tab inside an open dialog. Without it, native Tab
- *  walks focus out to the controls behind the overlay (you could tab out of a
- *  popup). Always preventDefault and move focus to the next/prev focusable within
- *  the overlay, wrapping at the ends, so focus can never leave. Works for
- *  everyone: typing in a field tabs to the next field, buttons cycle, and it
- *  needs no nav layer. When vim/arrow nav is on we also sync the roving cursor so
- *  there's a single highlight, not a native ring fighting the glow. */
-function trapModalTab(e: KeyboardEvent, overlay: HTMLElement): void {
-  e.preventDefault();
-  const controls = modalControls(overlay);
-  if (!controls.length) return; // nothing to land on — focus simply stays put
-  const active = document.activeElement as HTMLElement | null;
-  const idx = active ? controls.indexOf(active) : -1;
-  const step = e.shiftKey ? -1 : 1;
-  const next = idx < 0 ? (e.shiftKey ? controls.length - 1 : 0) : (idx + step + controls.length) % controls.length;
-  controls[next].focus();
-  if (vimNav || arrowNav) {
-    modalCursorOverlay = overlay;
-    modalCursor = next;
-    highlightModalCursor(controls);
-  }
-}
-
 function onKeyDown(e: KeyboardEvent) {
   // When the cheat-sheet is open it owns Esc / "?" and nothing else fires.
   if (helpOpen) {
@@ -1255,7 +886,7 @@ function onKeyDown(e: KeyboardEvent) {
   if (e.key === "Tab") {
     const tabModal = topmostModalOverlay();
     if (tabModal) {
-      trapModalTab(e, tabModal);
+      trapModalTab(e, tabModal, navActive);
       return;
     }
   }
@@ -1281,7 +912,7 @@ function onKeyDown(e: KeyboardEvent) {
   // never runs against the recordings behind an open modal.
   const modalOverlay = topmostModalOverlay();
   if (modalOverlay) {
-    if (vimNav || arrowNav) handleModalNav(e, modalOverlay);
+    if (vimNav || arrowNav) handleModalNav(e, modalOverlay, motionToken);
     return;
   }
 
@@ -1496,7 +1127,7 @@ export function initKeyboard() {
         ) as HTMLElement | null;
         if (overlay) {
           requestAnimationFrame(() => {
-            if (topmostModalOverlay() === overlay) seedModalCursor(overlay);
+            if (topmostModalOverlay() === overlay) seedModalCursor(overlay, navActive, isTypingTarget);
           });
           return;
         }

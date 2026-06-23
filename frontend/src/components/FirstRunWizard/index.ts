@@ -8,50 +8,17 @@ import { CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
 import { CLOUD_STT_PROVIDERS, PREVIEW_STT_PROVIDERS } from "../../services/sttProviders";
 import { curatedTranscriptionModels, curatedCleanupModels, type CuratedModel } from "../../data/curatedModels";
 import { effectivePortFor, type WhisperPortStatus } from "../SettingsView/SectionWhisper";
+import {
+  type WizardStep, type PreviewSource, ALL_STEPS, STEP_LABELS, DEFAULT_SUMMARY_PROMPT,
+  prettyPreviewModel, prettyWhisper,
+} from "./wizardSteps";
+import {
+  applyRecommendedSetup, recommendedPlan, stripScratchKeys, buildPreviewLocal, buildPreviewApi,
+} from "./wizardConfig";
+import { eventToHotkeyCombo } from "./hotkeyCapture";
 import "./styles.css";
 
-/** The dedicated preview source the user picked: reuse the final model, run a
- *  small local model on its own server, or hit a fast cloud API. Mirrors
- *  Settings → Live Preview (SectionPreview) so the two stay in lock-step. */
-type PreviewSource = "same" | "local" | "api";
-
-/** Friendly label for a downloaded whisper model filename (matches SectionPreview). */
-function prettyPreviewModel(path: string): string {
-  const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
-  const map: Record<string, string> = {
-    "ggml-tiny.en.bin": "Tiny (English)",
-    "ggml-base.en.bin": "Base (English)",
-    "ggml-small.en.bin": "Small (English)",
-    "ggml-medium.en.bin": "Medium (English)",
-    "ggml-large-v3.bin": "Large v3",
-    "ggml-large-v3-turbo.bin": "Large v3 Turbo",
-    "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo (q5)",
-  };
-  return map[name] ?? name;
-}
-
-
-/** A wizard page id. Express mode skips most of them; see ALL_STEPS for order. */
-export type WizardStep = "welcome" | "mode" | "configure" | "connect" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "review" | "done";
-const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "connect", "mic", "preview", "summary", "hook", "hotkey", "review", "done"];
-
-/** Short human label per step, shown in the progress stepper. */
-const STEP_LABELS: Record<WizardStep, string> = {
-  welcome: "Welcome",
-  mode: "Features",
-  configure: "Setting up",
-  connect: "Connect AI",
-  mic: "Microphone",
-  preview: "Live Preview",
-  summary: "Auto Summary",
-  hook: "Destination",
-  hotkey: "Hotkeys",
-  review: "Review",
-  done: "Done",
-};
-
-const DEFAULT_SUMMARY_PROMPT =
-  "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.";
+export type { WizardStep } from "./wizardSteps";
 
 /**
  * The first-run setup wizard (the "wizard" route). Auto-entered by App when
@@ -132,7 +99,7 @@ export class FirstRunWizardElement extends LitElement {
       this.portStatus = await invoke<WhisperPortStatus>("daemon_status").catch(() => null);
       // Pre-fill the recommended local setup so the express welcome can show the
       // plan immediately (idempotent; the customize picker reuses these choices).
-      this.applyRecommendedSetup();
+      applyRecommendedSetup(this.config, this.systemRamMb, this.systemVramMb);
       this.requestUpdate();
     } catch (e) {
       console.error("Wizard init error:", e);
@@ -199,14 +166,7 @@ export class FirstRunWizardElement extends LitElement {
       this.downloadedPath("ggml-base.en.bin") ??
       this.downloadedPath("ggml-small.en.bin");
     if (ready) {
-      this.config.preview_whisper = {
-        ...this.config.whisper,
-        provider: "local",
-        mode: "bundled_model",
-        model_path: ready,
-        bundled_server_port: this.mainPreviewPort() + 1,
-        api_key: "",
-      };
+      this.config.preview_whisper = buildPreviewLocal(this.config.whisper, ready, this.mainPreviewPort() + 1);
     }
   }
 
@@ -216,14 +176,7 @@ export class FirstRunWizardElement extends LitElement {
    *  any still-masked key from the on-disk config.) */
   private async persistAndComplete() {
     try {
-      const cleanConfig = { ...this.config };
-      delete cleanConfig._setup_whisper;
-      delete cleanConfig._setup_ollama;
-      delete cleanConfig._setup_diarization;
-      delete cleanConfig._whisper_model_choice;
-      delete cleanConfig._ollama_model_choice;
-      delete cleanConfig._setup_native_streaming;
-      delete cleanConfig._setup_preview;
+      const cleanConfig = stripScratchKeys(this.config);
 
       await invoke("write_config", { config: cleanConfig });
       this.onComplete();
@@ -266,7 +219,7 @@ export class FirstRunWizardElement extends LitElement {
    *  escape hatch to the full per-feature flow. */
   private renderExpressWelcome() {
     const gb = Math.round(this.systemRamMb / 1024);
-    const plan = this.recommendedPlan();
+    const plan = recommendedPlan(this.config);
     return html`
       <div class="wizard-body">
         <h2 class="wizard-title">Welcome to Phoneme</h2>
@@ -319,7 +272,7 @@ export class FirstRunWizardElement extends LitElement {
       <div class="wizard-footer">
         <button class="wizard-btn ghost" @click=${() => { this.express = false; this.requestUpdate(); }}>Customize setup</button>
         <span class="spacer"></span>
-        <button class="wizard-btn primary" @click=${() => { this.applyRecommendedSetup(); this.go("next"); }}>Set it all up automatically →</button>
+        <button class="wizard-btn primary" @click=${() => { applyRecommendedSetup(this.config, this.systemRamMb, this.systemVramMb); this.go("next"); }}>Set it all up automatically →</button>
       </div>
     `;
   }
@@ -391,73 +344,9 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
-  /** Pre-select the locally-recommended features + models for the detected
-   *  hardware (idempotent — only fills choices that aren't already set). Shared
-   *  by the express path and the customize feature picker. */
-  private applyRecommendedSetup() {
-    if (this.config._setup_whisper === undefined) {
-      if (this.systemRamMb >= 16000 || this.systemVramMb >= 6000) {
-        this.config._setup_whisper = true;
-        this.config._setup_ollama = true;
-        this.config.semantic_search = { enabled: true };
-        this.config._setup_diarization = true;
-        this.config._setup_native_streaming = true;
-      } else if (this.systemRamMb >= 8000 || this.systemVramMb >= 4000) {
-        this.config._setup_whisper = true;
-        this.config._setup_ollama = false;
-        this.config.semantic_search = { enabled: true };
-        this.config._setup_diarization = false;
-        this.config._setup_native_streaming = false;
-      } else {
-        this.config._setup_whisper = true;
-        this.config._setup_ollama = false;
-        this.config.semantic_search = { enabled: false };
-        this.config._setup_diarization = false;
-        this.config._setup_native_streaming = false;
-      }
-    }
-    if (!this.config._whisper_model_choice) {
-      if (this.systemRamMb >= 32000 || this.systemVramMb >= 8000) this.config._whisper_model_choice = "ggml-large-v3-turbo-q5_0.bin";
-      else if (this.systemRamMb >= 16000 || this.systemVramMb >= 4000) this.config._whisper_model_choice = "ggml-medium.en.bin";
-      else if (this.systemRamMb >= 8000 || this.systemVramMb >= 2000) this.config._whisper_model_choice = "ggml-small.en.bin";
-      else this.config._whisper_model_choice = "ggml-base.en.bin";
-    }
-    if (!this.config._ollama_model_choice) {
-      if (this.systemRamMb >= 64000 || this.systemVramMb >= 24000) this.config._ollama_model_choice = "llama3.3:70b";
-      else if (this.systemRamMb >= 32000 || this.systemVramMb >= 16000) this.config._ollama_model_choice = "qwen2.5:32b";
-      else if (this.systemRamMb >= 16000 || this.systemVramMb >= 6000) this.config._ollama_model_choice = "llama3.1:8b";
-      else this.config._ollama_model_choice = "llama3.2:3b";
-    }
-  }
-
-  /** Human "what will be installed" plan for the detected hardware, used by the
-   *  express welcome's summary (and as the model labels). */
-  private recommendedPlan(): { icon: string; title: string; detail: string }[] {
-    const WHISPER_LABELS: Record<string, string> = {
-      "ggml-large-v3-turbo-q5_0.bin": "Whisper Large v3 Turbo (~1.1 GB)",
-      "ggml-large-v3.bin": "Whisper Large v3 (~3.1 GB)",
-      "ggml-medium.en.bin": "Whisper Medium (~1.5 GB)",
-      "ggml-small.en.bin": "Whisper Small (~480 MB)",
-      "ggml-base.en.bin": "Whisper Base (~140 MB)",
-    };
-    const plan: { icon: string; title: string; detail: string }[] = [
-      { icon: "🎙️", title: "Speech-to-text engine", detail: `whisper.cpp + ${WHISPER_LABELS[this.config._whisper_model_choice] ?? "a Whisper model"}` },
-    ];
-    if (this.config._setup_ollama) {
-      plan.push({ icon: "✨", title: "Local AI (cleanup + summaries)", detail: `Ollama + ${this.config._ollama_model_choice}` });
-    }
-    if (this.config.semantic_search?.enabled) {
-      plan.push({ icon: "🔍", title: "Semantic search", detail: "all-MiniLM embedding model (~90 MB)" });
-    }
-    if (this.config._setup_diarization) {
-      plan.push({ icon: "🗣️", title: "Speaker labels", detail: "speakrs diarization models (~500 MB)" });
-    }
-    return plan;
-  }
-
   private renderModePicker() {
     // Pre-select recommended features/models for the detected hardware.
-    this.applyRecommendedSetup();
+    applyRecommendedSetup(this.config, this.systemRamMb, this.systemVramMb);
 
     const gb = Math.round(this.systemRamMb / 1024);
     const sw = (id: string, checked: boolean, handler: (e: Event) => void) => html`
@@ -1006,30 +895,13 @@ export class FirstRunWizardElement extends LitElement {
   /** Drive the preview from a dedicated local bundled model on its OWN server.
    *  Build from the main whisper config so every required field is present. */
   private setPreviewLocal(modelPath: string) {
-    this.config.preview_whisper = {
-      ...this.config.whisper,
-      provider: "local",
-      mode: "bundled_model",
-      model_path: modelPath,
-      // Distinct port from the final server so both run concurrently.
-      bundled_server_port: this.mainPreviewPort() + 1,
-      api_key: "",
-    };
+    this.config.preview_whisper = buildPreviewLocal(this.config.whisper, modelPath, this.mainPreviewPort() + 1);
     this.requestUpdate();
   }
 
   /** Drive the preview from a fast cloud API (e.g. Groq) — no second server. */
   private setPreviewApi(provider: string) {
-    const existing = this.config.preview_whisper ?? {};
-    this.config.preview_whisper = {
-      ...this.config.whisper,
-      provider,
-      mode: "external",
-      model_path: "",
-      api_key: existing.api_key ?? "",
-      model: existing.model ?? "",
-      api_url: existing.api_url ?? "",
-    };
+    this.config.preview_whisper = buildPreviewApi(this.config.whisper, provider, this.config.preview_whisper ?? {});
     this.requestUpdate();
   }
 
@@ -1297,22 +1169,8 @@ export class FirstRunWizardElement extends LitElement {
       return;
     }
 
-    const modifiers: string[] = [];
-    if (e.ctrlKey) modifiers.push("Ctrl");
-    if (e.shiftKey) modifiers.push("Shift");
-    if (e.altKey) modifiers.push("Alt");
-    if (e.metaKey) modifiers.push("Super");
-
-    const ignoreKeys = ["Control", "Shift", "Alt", "Meta", "Escape"];
-    if (ignoreKeys.includes(e.key)) return;
-
-    const parts = [...modifiers];
-    const keyName = e.code.startsWith("Key") ? e.code.replace("Key", "") :
-            e.code.startsWith("Digit") ? e.code.replace("Digit", "") :
-            e.key.length === 1 ? e.key.toUpperCase() : e.key;
-    parts.push(keyName);
-
-    const combo = parts.join("+");
+    const combo = eventToHotkeyCombo(e);
+    if (combo === null) return; // bare modifier — keep listening
 
     if (this.capturingHotkeyFor === "general") {
       if (!this.config.hotkey) this.config.hotkey = {};
@@ -1408,22 +1266,10 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
-  private prettyWhisper(file: string): string {
-    const map: Record<string, string> = {
-      "ggml-base.en.bin": "Base",
-      "ggml-small.en.bin": "Small",
-      "ggml-medium.en.bin": "Medium",
-      "ggml-large-v3-turbo.bin": "Large v3 Turbo",
-      "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo (q5)",
-      "ggml-large-v3.bin": "Large v3",
-    };
-    return map[file] ?? file;
-  }
-
   private renderReview() {
     const c = this.config;
     const stt = c._setup_whisper
-      ? `Local · ${this.prettyWhisper(c._whisper_model_choice)}`
+      ? `Local · ${prettyWhisper(c._whisper_model_choice)}`
       : (c.whisper?.provider && c.whisper.provider !== "local"
           ? `Cloud · ${c.whisper.provider}`
           : "Cloud API (set up in Settings)");

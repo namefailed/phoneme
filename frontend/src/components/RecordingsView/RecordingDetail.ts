@@ -17,7 +17,6 @@ import {
   type Recording,
 } from "../../services/ipc";
 import {
-  formatDuration,
   statusToClass,
   statusLabel,
   wordCountSummary,
@@ -44,6 +43,8 @@ import { SyncedTranscript } from "./SyncedTranscript";
 import { ChaptersView } from "./ChaptersView";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { applyLlmActivity, emptyLlmStream, matchesLlmStream, type LlmStreamState } from "./llmStream";
+import { CHEVRON_SVG, CONTRACT_SVG, EXPAND_SVG, formatDate, pipelineHtml } from "./detailMeta";
+import { recordingShellHtml } from "./detailLayout";
 
 /**
  * The right pane: one recording, fully editable. This file owns the detail
@@ -65,11 +66,6 @@ import { applyLlmActivity, emptyLlmStream, matchesLlmStream, type LlmStreamState
  * by RecordingsView, which walks this pane's buttons/editors as grid cells.
  * Dispatches `phoneme:toggle-focus-mode` (⛶) and `phoneme:close-detail` (✕).
  */
-/** The app-wide dropdown chevron (matches the header split buttons), for the
- *  Views/Versions triggers, rather than a stray "▾" glyph. */
-const CHEVRON_SVG =
-  '<svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>';
-
 export class RecordingDetail {
   private container: HTMLElement;
   private recording: Recording | null = null;
@@ -355,89 +351,7 @@ export class RecordingDetail {
     this.openTimelinePeek = null;
     const r = this.recording;
     const stats = wordCountSummary(r.transcript ?? "");
-    // Crisp corner-bracket icons (maximize / minimize) for the focus toggle:
-    // sharper than a font glyph, and they swap to signal the current state.
-    const EXPAND_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>`;
-    const CONTRACT_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>`;
-    // Right-arrow: dismiss the detail pane back to the recordings list (the mouse
-    // equivalent of Esc / clicking away).
-    const CLOSE_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`;
-    this.container.innerHTML = `
-      <div class="detail">
-        <div class="detail-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
-          <div style="min-width: 0; flex: 1;">
-            <div class="detail-title" id="detail-title" style="font-size: 1.2857rem; font-weight: 700; margin-bottom: 6px; cursor: text;" title="Click to edit the title — Enter saves, Esc cancels, empty resets to automatic"><span id="detail-title-text">${escapeHtml(r.title ?? formatDate(r.started_at, this.use24h))}</span></div>
-            <div class="detail-meta" style="display: flex; align-items: center; gap: 8px;">
-              <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
-              <span id="detail-title-date" style="${r.title ? "" : "display: none;"}">${formatDate(r.started_at, this.use24h)}</span>
-              <span>${formatDuration(r.duration_ms)}</span>
-              <span class="rec-source ${r.track === "system" ? "rec-source--system" : "rec-source--mic"}" title="${r.track === "system" ? "System audio" : "Microphone"}"><span class="rec-source-ico">${r.track === "system" ? "🔊" : "🎤"}</span></span>
-              ${r.in_place ? `<span class="detail-inplace-badge" title="Dictation — typed straight in place at your cursor">⌨ in-place</span>` : ""}
-              ${
-                r.detected_language
-                  ? `<span class="detail-lang-badge" title="Spoken language the transcriber detected">🌐 ${escapeHtml(r.detected_language)}</span>`
-                  : ""
-              }
-            </div>
-          </div>
-          <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
-            ${showFavorites() ? `<button class="detail-focus-btn rec-fav-btn ${r.favorite ? "on" : ""}" id="detail-fav" aria-label=${r.favorite ? "Unstar" : "Star"} title=${r.favorite ? "Remove from Favorites" : "Add to Favorites"}>⭐</button>` : ""}
-            ${showPinned() ? `<button class="detail-focus-btn rec-pin-btn ${r.pinned ? "on" : ""}" id="detail-pin" aria-label=${r.pinned ? "Unpin" : "Pin to top"} title=${r.pinned ? "Unpin from the top of the library" : "Pin to the top of the library"}>📌</button>` : ""}
-            <button class="detail-focus-btn" id="detail-similar" aria-label="More like this" title="More like this — fill the list with recordings about similar things"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
-            <span aria-hidden="true" style="width: 1px; align-self: stretch; margin: 2px 2px; background: var(--border-subtle);"></span>
-            <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">${EXPAND_SVG}</button>
-            <button class="detail-focus-btn" id="detail-close" aria-label="Close recording" title="Close — back to the recordings list">${CLOSE_SVG}</button>
-          </div>
-        </div>
-        <div class="waveform" id="wf-${r.id}"><span class="wf-speed-badge" id="wf-speed-${r.id}" title="Playback speed">${readPlaybackSpeed()}×</span></div>
-        <div id="actions"></div>
-        <div id="clip-export"></div>
-        <div id="tags"></div>
-        <div class="transcript-block">
-          <div id="editor" style="flex: 1; display: flex; flex-direction: column; min-height: 0;"></div>
-          <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
-          <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
-          <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
-          <div id="timeline-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 4px;"></div>
-          <div id="synced-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
-          <div id="chapters-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 4px;"></div>
-          <div class="transcript-history">
-            <div class="th-group th-left">
-              <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷️ Speakers</button>
-            </div>
-            <div class="th-group th-right">
-              <span class="th-dropdown">
-                <button class="view-btn th-trigger" id="views-trigger" aria-haspopup="menu" aria-expanded="false" title="Alternate views of this recording — summary, timeline, synced words">Views ${CHEVRON_SVG}</button>
-                <div class="th-menu th-menu--right" id="views-menu" role="menu" hidden>
-                  <button class="view-btn th-menu-item" id="view-summary" title="AI summary of this recording">📝 Summary</button>
-                  <button class="view-btn th-menu-item" id="view-timeline" title="The transcript as a clickable timeline — click a line to jump playback there">🕒 Timeline</button>
-                  <button class="view-btn th-menu-item" id="view-synced" title="The machine transcript as clickable words — click any word to jump playback there; the word under the playhead stays highlighted (read-only)">🔤 Synced</button>
-                  <button class="view-btn th-menu-item" id="view-chapters" title="Topic chapters — click a chapter to jump playback there; the chapter under the playhead stays highlighted">🗂 Chapters</button>
-                </div>
-              </span>
-              <span class="th-dropdown">
-                <button class="view-btn th-trigger" id="versions-trigger" aria-haspopup="menu" aria-expanded="false" title="Other versions of this transcript — compare, raw machine, pre-edit">Versions ${CHEVRON_SVG}</button>
-                <div class="th-menu th-menu--right" id="versions-menu" role="menu" hidden>
-                  <button class="view-btn th-menu-item" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
-                  <button class="view-btn th-menu-item" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
-                  <button class="view-btn th-menu-item" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
-                </div>
-              </span>
-            </div>
-          </div>
-        </div>
-        <div id="entities"></div>
-        <div id="tasks"></div>
-        <div class="notes-block" style="margin-top: 10px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
-          <div id="notes-editor"></div>
-        </div>
-        <div class="detail-footer">
-          <span id="detail-pipeline-host">${pipelineHtml(r)}</span>
-          <span id="detail-stats">${stats}</span>
-          <span class="detail-path" id="detail-reveal-path" role="button" tabindex="0" style="cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px;" title="Reveal in file explorer — ${escapeAttr(r.audio_path)}">${escapeHtml(r.audio_path)}</span>
-        </div>
-      </div>
-    `;
+    this.container.innerHTML = recordingShellHtml(r, this.use24h, stats);
     const wf = this.container.querySelector<HTMLElement>(`#wf-${r.id}`);
     if (wf) {
       this.player.mount(wf, r.audio_path);
@@ -1417,88 +1331,4 @@ export class RecordingDetail {
   saveDirtyEdits(): Promise<void> {
     return this.editor ? this.editor.save() : Promise.resolve();
   }
-}
-
-function formatDate(iso: string, use24h: boolean): string {
-  const d = new Date(iso);
-  const dateObj = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-  const timeObj = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: !use24h });
-  return `${dateObj} at ${timeObj}`;
-}
-
-/** Per-recording pipeline provenance for the detail footer: every stage that
- *  actually touched this recording, in the order the daemon ran them (see
- *  pipeline.rs): capture → transcription (+ diarization) → LLM cleanup →
- *  auto-title → hook → auto-summary → auto-tags. Steps that didn't run are
- *  omitted. Each step names its model when the daemon recorded one per-recording:
- *  transcription, cleanup, and summary always do; diarization/title/tag models
- *  fill in once the daemon persists them, and until then those steps show the
- *  bare action. */
-/** One row in the pipeline-provenance popover: an icon, a plain-English step
- *  name, and its detail (model name, status, or source). `value` may contain
- *  escaped HTML (model names run through escapeHtml); labels/icons are static. */
-type PipelineStep = { icon: string; label: string; value: string };
-
-function modelsSteps(r: Recording): PipelineStep[] {
-  const steps: PipelineStep[] = [];
-
-  // 1. Capture source.
-  if (r.in_place) steps.push({ icon: "⌨️", label: "Source", value: "In-place dictation" });
-  else steps.push({ icon: r.track === "system" ? "🔊" : "🎤", label: "Source", value: r.track === "system" ? "System audio" : "Microphone" });
-
-  // 2. Transcription, with diarization as its own row (model when recorded).
-  if (r.model) {
-    steps.push({ icon: "🗣", label: "Transcribed", value: escapeHtml(r.model) });
-    if (r.diarized) {
-      steps.push({ icon: "🧑‍🤝‍🧑", label: "Diarized", value: r.diarization_model ? escapeHtml(r.diarization_model) : "Speakers labeled" });
-    }
-  }
-
-  // 3. LLM cleanup.
-  if (r.cleanup_model) steps.push({ icon: "✨", label: "Cleaned up", value: escapeHtml(r.cleanup_model) });
-
-  // 4. Auto-title — only a pipeline-generated title counts as a step, not a
-  //    user-set one. Names the model once persisted; otherwise the bare action.
-  if (r.title_model) steps.push({ icon: "🔖", label: "Titled", value: escapeHtml(r.title_model) });
-  else if (r.title_is_auto && r.title) steps.push({ icon: "🔖", label: "Titled", value: "Auto-generated" });
-
-  // 5. Hook, when it ran (exit code recorded).
-  if (r.hook_exit_code != null) {
-    steps.push({ icon: "🪝", label: "Hook", value: r.hook_exit_code === 0 ? "✓ Ran successfully" : `✗ Failed (exit ${r.hook_exit_code})` });
-  }
-
-  // 6. Auto-summary.
-  if (r.summary_model) steps.push({ icon: "📝", label: "Summarized", value: escapeHtml(r.summary_model) });
-
-  // 7. Auto-tagging — names the model once persisted; until then infer the step
-  //    from pending suggestions (the only per-recording signal the tagger ran).
-  if (r.tag_model) steps.push({ icon: "🏷️", label: "Tagged", value: escapeHtml(r.tag_model) });
-  else if (r.tag_suggestions && r.tag_suggestions.length) steps.push({ icon: "🏷️", label: "Tagged", value: "Suggestions pending" });
-
-  // 8. Entity extraction — names the model once persisted.
-  if (r.entities_model) steps.push({ icon: "🔎", label: "Entities", value: escapeHtml(r.entities_model) });
-
-  return steps;
-}
-
-/** The pipeline-provenance footer control (G): a compact "⛓ Pipeline" button
- *  that opens a popover spelling out, in order, each step the recording went
- *  through and the model/detail behind it. Returns "" when no steps ran. Values
- *  are pre-escaped in modelsSteps; labels and icons are static. */
-function pipelineHtml(r: Recording): string {
-  const steps = modelsSteps(r);
-  if (!steps.length) return "";
-  const rows = steps
-    .map(
-      (s) =>
-        `<div class="dp-row"><span class="dp-ico" aria-hidden="true">${s.icon}</span><span class="dp-label">${s.label}</span><span class="dp-value">${s.value}</span></div>`,
-    )
-    .join("");
-  return `<span class="detail-pipeline-wrap">
-    <button class="detail-pipeline-btn" id="detail-pipeline-btn" title="See everything that ran on this recording" aria-haspopup="true" aria-expanded="false">🪈 Pipeline <span class="detail-pipeline-count">${steps.length}</span></button>
-    <div class="detail-pipeline-pop" id="detail-pipeline-pop" role="menu" hidden>
-      <div class="detail-pipeline-title">How this recording was processed</div>
-      ${rows}
-    </div>
-  </span>`;
 }

@@ -52,45 +52,12 @@ import "./EntityManager";
 import "./OpenTasksView";
 import "./styles.css";
 import { type DetailCell, bucketCellsByRow, cellCenterX, nearestColTo } from "./detailGrid";
-
-// Per-device UI layout prefs persisted in localStorage, not config.toml — these
-// are window-layout preferences, like the record-mode dropdown's key.
-const LS_SPLIT = "phoneme.layout.splitPercent";
-const LS_SIDEBAR = "phoneme.layout.sidebarOpen";
-const LS_SIDEBAR_WIDTH = "phoneme.layout.sidebarWidth";
-/** Last-selected recording (or `session:<id>`), restored on a soft reload.
- *  Cleared by "Reset interface preferences" like the other phoneme.* keys. */
-const LS_SELECTED = "phoneme.layout.selectedId";
-/** List-pane zoom factor (Ctrl+scroll / Ctrl+= / Ctrl+-), per device. */
-const LS_LIST_ZOOM = "phoneme.layout.listZoom";
-/** Split-mode pane ratio (left pane %, 20–80), per device. */
-const LS_SPLIT_RATIO = "phoneme.layout.splitRatio";
-
-/** Persisted split-mode ratio, clamped (default 50/50). */
-function readStoredSplitRatio(): number {
-  const n = Number(localStorage.getItem(LS_SPLIT_RATIO));
-  return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 50;
-}
-const SIDEBAR_MIN = 160;
-const SIDEBAR_MAX = 480;
-
-/** Persisted list/detail split % (left/list pane). Default 67 → the detail pane
- *  opens at ~33% of the window. Clamped to a sane range. */
-function readStoredSplit(): number {
-  const n = Number(localStorage.getItem(LS_SPLIT));
-  return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 67;
-}
-
-/** Persisted sidebar width in px, clamped (default 200). */
-function readStoredSidebarWidth(): number {
-  const n = Number(localStorage.getItem(LS_SIDEBAR_WIDTH));
-  return Number.isFinite(n) && n >= SIDEBAR_MIN && n <= SIDEBAR_MAX ? n : 200;
-}
-
-/** Persisted sidebar open state (default open). */
-function readStoredSidebar(): boolean {
-  return localStorage.getItem(LS_SIDEBAR) !== "false";
-}
+import {
+  LS_SPLIT, LS_SIDEBAR, LS_SIDEBAR_WIDTH, LS_SELECTED, LS_LIST_ZOOM, LS_SPLIT_RATIO,
+  SIDEBAR_MIN, SIDEBAR_MAX,
+  readStoredSplit, readStoredSplitRatio, readStoredSidebarWidth, readStoredSidebar,
+} from "./layoutPrefs";
+import { isMeetingDigestEvent, isListRefreshEvent } from "./daemonEventFilter";
 
 /** The home view (see the file-top comment for the full picture). Public
  *  surface: `refresh()` re-queries the list; `toggleSidebar()` /
@@ -2088,41 +2055,14 @@ export class RecordingsView {
       // the meeting on screen, so the digest card repaints (and clears its pending
       // state) the moment the daemon finishes. The id is a meeting_id, not a
       // recording id, so it doesn't ride the recording-keyed refresh path below.
-      if (
-        eventName === "meeting_digest_updated" ||
-        eventName === "meeting_digest_failed"
-      ) {
+      if (isMeetingDigestEvent(eventName)) {
         const mid = (event as { meeting_id?: string }).meeting_id;
         if (mid && this.mergedDetail.meetingId === mid) {
           void this.mergedDetail.reload();
         }
         return;
       }
-      if (
-        eventName === "recording_stopped" ||
-        eventName === "transcription_done" ||
-        eventName === "transcription_failed" ||
-        // Each pipeline step writes its own status (Transcribing → Cleaning Up
-        // → Summarizing → …) — refresh so the Status column tracks it live.
-        eventName === "pipeline_stage_changed" ||
-        eventName === "hook_done" ||
-        eventName === "hook_failed" ||
-        eventName === "recording_deleted" ||
-        eventName === "transcript_updated" ||
-        eventName === "summary_updated" ||
-        // Entity extraction landed — refresh so the detail provenance line
-        // (entities_model) and any list signal update live.
-        eventName === "entities_updated" ||
-        eventName === "speaker_name_updated" ||
-        // Tag mutations change the Tags column — refresh so it updates live
-        // instead of needing a manual reload.
-        eventName === "tag_attached" ||
-        eventName === "all_tag_suggestions_cleared" ||
-        eventName === "tag_detached" ||
-        eventName === "tag_updated" ||
-        eventName === "tag_deleted" ||
-        eventName === "tag_created"
-      ) {
+      if (isListRefreshEvent(eventName)) {
         void this.refresh();
       }
     });

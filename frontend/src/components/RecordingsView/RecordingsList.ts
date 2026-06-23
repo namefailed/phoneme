@@ -18,6 +18,17 @@ import {
 import { groupRecordings } from "./grouping";
 import { getContrastColor, safeTagColor } from "./TagChips";
 import { isLowConfidence, lowConfidenceThreshold, confidencePercent } from "../../utils/confidence";
+import {
+  loadExpandedMeetings,
+  saveExpandedMeetings,
+  loadColWidths,
+  saveColWidths,
+  DEFAULT_MEETING_ICON,
+  MEETING_ICON_CHOICES,
+  meetingIcon,
+  saveMeetingIcon,
+} from "./recordingsListPrefs";
+import { COL_LABELS, COL_DEFAULT_WIDTHS, buildGridGeometry, truncatedError } from "./recordingsListColumns";
 import "../shared/styles.css";
 import "./styles.css";
 
@@ -27,77 +38,6 @@ import "./styles.css";
 type NavRow =
   | { kind: "rec"; rec: Recording }
   | { kind: "header"; meetingId: string; tracks: Recording[]; expanded: boolean };
-
-/** Which meeting groups are expanded — remembered across reloads (per device). */
-const LS_EXPANDED_MEETINGS = "phoneme.expandedMeetings";
-function loadExpandedMeetings(): string[] {
-  try {
-    const raw = localStorage.getItem(LS_EXPANDED_MEETINGS);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr.filter((s): s is string => typeof s === "string") : [];
-  } catch {
-    return [];
-  }
-}
-function saveExpandedMeetings(set: Set<string>): void {
-  try {
-    localStorage.setItem(LS_EXPANDED_MEETINGS, JSON.stringify([...set]));
-  } catch {
-    /* private mode / quota — non-fatal */
-  }
-}
-
-/** Column widths, keyed by column name (per device). Stored here rather than in
- *  the synced config: the config array is positional, so it resets whenever a
- *  column is added, removed, or reordered. A name-keyed map survives all three. */
-const LS_COL_WIDTHS = "phoneme.recordings.colWidths";
-function loadColWidths(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(LS_COL_WIDTHS);
-    const obj = raw ? JSON.parse(raw) : {};
-    return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {};
-  } catch {
-    return {};
-  }
-}
-function saveColWidths(map: Record<string, string>): void {
-  try {
-    localStorage.setItem(LS_COL_WIDTHS, JSON.stringify(map));
-  } catch {
-    /* private mode / quota — non-fatal */
-  }
-}
-
-/** Per-meeting display icon (a cosmetic per-device pref, like the meeting name
- *  is in the catalog). Keyed by meeting id. */
-const LS_MEETING_ICONS = "phoneme.meetingIcons";
-const DEFAULT_MEETING_ICON = "👥";
-/** Emoji choices offered in the meeting icon picker. */
-const MEETING_ICON_CHOICES = [
-  "👥", "🎙️", "📞", "💼", "🧑‍🏫", "🎧", "🗣️", "📅", "🤝", "🎬", "📋", "💡",
-  "📝", "🧠", "⭐", "🔥", "🎯", "🚀", "🐞", "🔧", "💬", "📣", "🎓", "🩺",
-];
-function loadMeetingIcons(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(LS_MEETING_ICONS);
-    const obj = raw ? JSON.parse(raw) : {};
-    return obj && typeof obj === "object" ? obj : {};
-  } catch {
-    return {};
-  }
-}
-function meetingIcon(meetingId: string): string {
-  return loadMeetingIcons()[meetingId] || DEFAULT_MEETING_ICON;
-}
-function saveMeetingIcon(meetingId: string, icon: string): void {
-  try {
-    const all = loadMeetingIcons();
-    all[meetingId] = icon;
-    localStorage.setItem(LS_MEETING_ICONS, JSON.stringify(all));
-  } catch {
-    /* private mode — non-fatal */
-  }
-}
 
 /** The list state, held in a Store that RecordingsView owns (not this element)
  *  so the view and its other panes share one source of truth for what's loaded
@@ -879,101 +819,21 @@ export class RecordingsListElement extends LitElement {
     }
     let activeWidths = this.currentWidths;
     if (!activeWidths || activeWidths.length !== visibleCols.length) {
-      // Sensible per-column defaults sized to what each typically holds: a star,
-      // a date/time, a short duration, a status pill (up to "Hook Running"), a
-      // title, a couple of tag chips, model names (e.g. whisper-large-v3-turbo),
-      // boolean badges, a source label. Transcript takes the rest (1fr).
-      const defaults: Record<string, string> = {
-        pinned: "40px",
-        favorite: "40px",
-        day: "96px",
-        time: "96px",
-        duration: "88px",
-        status: "128px",
-        title: "220px",
-        tags: "140px",
-        model: "150px",
-        cleanup_model: "150px",
-        summary_model: "150px",
-        title_model: "150px",
-        tag_model: "150px",
-        diarization_model: "150px",
-        diarized: "64px",
-        user_edited: "72px",
-        source: "84px",
-        transcript: "1fr",
-      };
       // Widths are keyed by column name (localStorage), so each column keeps its
       // size across add/remove/reorder; fall back to the per-column default.
       const saved = loadColWidths();
-      activeWidths = visibleCols.map((c) => saved[c] || defaults[c] || "auto");
+      activeWidths = visibleCols.map((c) => saved[c] || COL_DEFAULT_WIDTHS[c] || "auto");
       this.currentWidths = activeWidths;
     }
 
-    const checkboxColWidth = "28px";
-    // The transcript "read more by scrolling" behavior applies only when
-    // transcript is the last column: there it sizes to its content
-    // (`max-content`, capped at 1200px via `.transcript-tail .rec-preview`) so the
-    // row grows past the pane and you scroll to read more. Anywhere else (when
-    // rearranged in Appearance settings) it's a normal, resizable, fixed-width
-    // column like the rest, never ballooning mid-row. A cell-less `minmax(0,1fr)`
-    // filler is appended only when no column is already flexible, so the row
-    // always fills the pane to the splitter.
-    const transcriptIsLast = visibleCols[visibleCols.length - 1] === "transcript";
-    const parsePx = (w: string) => {
-      const m = /([\d.]+)px/.exec(w);
-      return m ? parseFloat(m[1]) : 0;
-    };
-    const widthsForGrid = activeWidths!.map((w, i) => {
-      if (visibleCols[i] !== "transcript") return w;
-      const px = w.trim().endsWith("px") ? w.trim() : null;
-      if (transcriptIsLast) return `minmax(${px ?? "160px"}, max-content)`;
-      return px ?? "300px"; // not last → a normal, resizable fixed-width column
-    });
-    const hasFlexTrack = widthsForGrid.some((t) => t.includes("fr"));
-    const gridTemplate = [
-      checkboxColWidth,
-      ...widthsForGrid,
-      ...(hasFlexTrack ? [] : ["minmax(0, 1fr)"]),
-    ].join(" ");
-    // Row min-width (used only when transcript is not the tail) so a row's
-    // background/selection extends the full scrolled width when the fixed columns
-    // overflow the pane, instead of stopping at the pane edge.
-    const gridMinWidth =
-      28 +
-      activeWidths!.reduce((sum, w, i) => {
-        const px = parsePx(w);
-        if (visibleCols[i] === "transcript") return sum + (px || (transcriptIsLast ? 160 : 300));
-        return sum + (px || 120);
-      }, 0);
+    const { transcriptIsLast, gridTemplate, gridMinWidth } = buildGridGeometry(visibleCols, activeWidths!);
 
     const allSelected = recs.length > 0 && recs.every((r) => this.multiSelected.has(r.id));
     const someSelected = this.multiSelected.size > 0 && !allSelected;
 
-    const colLabels: Record<string, string> = {
-      pinned: "📌",
-      favorite: "⭐",
-      day: "Day",
-      time: "Time",
-      duration: "Duration",
-      status: "Status",
-      title: "Title",
-      tags: "Tags",
-      model: "Transcript Model",
-      cleanup_model: "Post-Process Model",
-      summary_model: "Summary Model",
-      title_model: "Title Model",
-      tag_model: "Auto-Tag Model",
-      diarization_model: "Diarization Model",
-      diarized: "Diarized",
-      user_edited: "Edited",
-      source: "Source",
-      transcript: "Transcript",
-    };
-
     const headSpans = visibleCols.map((c, i) => html`
       <span class="col-head" data-col="${i + 1}">
-        ${colLabels[c] || c}
+        ${COL_LABELS[c] || c}
         ${i < visibleCols.length - 1 ? html`<div class="resizer" data-col="${i + 1}" @mousedown=${(e: MouseEvent) => this.startResize(e, i, visibleCols)}></div>` : nothing}
       </span>
     `);
@@ -1285,14 +1145,6 @@ export class RecordingsListElement extends LitElement {
       </div>
     `;
   }
-}
-
-function truncatedError(r: Recording): string {
-  if (r.error_message) return `(${r.error_message})`;
-  if (r.status === "transcribe_failed") return "(transcription failed)";
-  if (r.status === "hook_failed") return "(hook failed)";
-  if (r.status === "cancelled") return "(cancelled)";
-  return "(processing…)";
 }
 
 /** Plain-class mount wrapper for `<ph-recordings-list>`, so `index.ts` can use
