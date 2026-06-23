@@ -144,8 +144,8 @@ pub use transcription::{
 };
 pub use types::{
     Chapter, ConfidenceAggregate, DictationHistoryEntry, Entity, EntityFacet, HookMetadata,
-    HookPayload, ListFilter, ListKind, MeetingDigest, MeetingTrack, PeriodDigest, RecordMode,
-    Recording, RecordingStatus, SavedSearch, SavedSearchFilter, SavedSearchKind,
+    HookPayload, ListFilter, ListKind, MeetingDigest, MeetingTrack, NamedVoice, PeriodDigest,
+    RecordMode, Recording, RecordingStatus, SavedSearch, SavedSearchFilter, SavedSearchKind,
     SavedSearchTagState, SpeakerName, Task, TaskCounts, TaskWithRecording, TranscriptSegment,
     TranscriptWord,
 };

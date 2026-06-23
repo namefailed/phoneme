@@ -88,6 +88,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
         Command::FindReplace(args) => commands::find_replace::run(args, cfg, cli.json).await,
         Command::Clip(args) => commands::clip::run(args, cfg, cli.json).await,
         Command::Speaker(args) => commands::speaker::run(args, cfg, cli.json).await,
+        Command::Voice(args) => commands::voice::run(args, cfg, cli.json).await,
         Command::Search(args) => commands::search::run(args, cfg, cli.json).await,
         Command::Ask(args) => commands::ask::run(args, cfg, cli.json).await,
         Command::Reembed => commands::reembed::run(cfg, cli.json).await,

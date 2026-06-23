@@ -599,6 +599,27 @@ with two or more captures — and reports `not enough labelled data` below that.
 phoneme speaker calibrate
 ```
 
+### 🗣️ `phoneme voice`
+
+Manage the **named-voice library** — the cross-recording identities a recognized
+speaker is matched against (#9). Distinct from `phoneme speaker`, which names the
+diarized labels *within one recording*; `voice` manages the library those names
+come from (the CLI face of the GUI Speaker Library manager).
+
+```bash
+phoneme voice list                         # name · sample count · id (also: bare `phoneme voice`)
+phoneme voice rename <ID> "Sarah Chen"     # rename a named voice
+phoneme voice forget <ID>                  # reversibly forget a voice (undo below)
+phoneme voice restore <ID>                 # undo a forget
+phoneme voice merge <FROM_ID> <INTO_ID>    # fold FROM into INTO (FROM removed)
+```
+
+`list` is observe-only (won't spawn a daemon), like `phoneme entities`. `forget`
+soft-deletes the library entry (it leaves recognition; the raw per-recording
+voiceprints stay) and is undone by `restore`. `forget` / `restore` / `merge`
+exit non-zero when nothing changed (unknown id), so scripts can detect a no-op;
+add `--json` for the raw `{removed|restored|merged: bool}` reply.
+
 ### 🔎 `phoneme search <QUERY>`
 
 Semantic (embedding) search over transcripts. Requires semantic search to be

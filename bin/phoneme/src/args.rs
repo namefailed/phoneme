@@ -69,6 +69,9 @@ pub enum Command {
     Clip(ClipArgs),
     /// Rename or clear a recording's diarized speaker labels.
     Speaker(SpeakerArgs),
+    /// Manage the named-voice library (list / rename / forget / merge) — the
+    /// cross-recording identities recognized speakers are matched against.
+    Voice(VoiceArgs),
     /// Semantic (embedding) search over transcripts.
     Search(SearchArgs),
     /// Ask a question answered from your own transcripts, with citations
@@ -406,6 +409,45 @@ pub struct SuggestTasksArgs {
 pub struct SpeakerArgs {
     #[command(subcommand)]
     pub action: SpeakerAction,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct VoiceArgs {
+    /// Defaults to `list` when omitted.
+    #[command(subcommand)]
+    pub action: Option<VoiceAction>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum VoiceAction {
+    /// List the named-voice library (name, sample count, id).
+    List,
+    /// Rename a named voice.
+    Rename {
+        /// The named-voice id (from `phoneme voice list`).
+        id: String,
+        /// The new display name.
+        name: String,
+    },
+    /// Forget a named voice — reversibly. It vanishes from the library and
+    /// recognition (its raw per-recording voiceprints stay); undo with `restore`.
+    Forget {
+        /// The named-voice id to forget.
+        id: String,
+    },
+    /// Restore a forgotten named voice (undo a `forget`).
+    Restore {
+        /// The named-voice id to restore.
+        id: String,
+    },
+    /// Merge one named voice into another — FROM's samples move onto INTO and
+    /// FROM is removed.
+    Merge {
+        /// The voice to merge from (removed on success).
+        from_id: String,
+        /// The voice to merge into (kept).
+        into_id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]

@@ -11,6 +11,11 @@ trust boundary.*
 
 ### Library & organization
 
+- [x] **`phoneme voice` CLI** — manage the named-voice library from the terminal,
+  matching the GUI Speaker Library manager: `voice list` (observe-only, like
+  `entities`), `voice rename <id> <name>`, `voice forget <id>` (reversible),
+  `voice restore <id>`, and `voice merge <from> <into>`. The bool-returning ops
+  exit non-zero on a no-op (unknown id) and take `--json` for the raw reply.
 - [x] **Pinned recordings** — pin a recording so it sorts to the **top of the
   library**, independent of favorites. A 📌 toggle in the list row and the detail
   header, a **Pinned** Library sidebar filter (with its own count badge), and a

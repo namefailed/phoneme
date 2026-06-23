@@ -41,6 +41,7 @@ pub mod suggest_tasks;
 pub mod summarize;
 pub mod tag;
 pub mod tasks;
+pub mod voice;
 pub mod watch;
 
 #[cfg(test)]
