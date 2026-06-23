@@ -361,6 +361,8 @@ export class TranscriptEditorElement extends LitElement {
           align-items: center;
           margin-bottom: 8px;
           flex: 0 0 auto;
+          /* Match the Copy button's right:6px inset so the ⋯ menu lines up over it. */
+          padding-right: 6px;
         }
         /* Spacer pushes the Edited/Save actions to the right of the title. */
         ph-transcript-editor .header-spacer { flex: 1; }
