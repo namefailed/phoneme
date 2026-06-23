@@ -3135,6 +3135,41 @@ fn entry_config_for_target_resolves_summary_and_tags_entries() {
     );
 }
 
+/// `ondemand_connection` decides which LLM an ON-DEMAND enrichment (Extract /
+/// Ask / Re-run) actually runs on. When the step's resolved entry pins
+/// `provider = "none"` (that step is off in the auto-pipeline) it falls back to
+/// the global `[llm_post_process]` connection so the action isn't dead; when the
+/// entry already yields a usable provider the entry's connection is kept. Pure
+/// logic — `LlmPostProcessor::new()` only builds an HTTP client and `provider()`
+/// only inspects the config, so no network call happens.
+#[test]
+fn ondemand_connection_falls_back_to_global_for_none_entry() {
+    use phoneme_core::LlmPostProcessor;
+
+    let llm = LlmPostProcessor::new().expect("build post-processor");
+    let mut cfg = Config::default();
+    cfg.llm_post_process.provider = "ollama".into();
+
+    // A "none" entry yields no provider → fall back to the global connection.
+    let mut none_entry = cfg.llm_post_process.clone();
+    none_entry.provider = "none".into();
+    let resolved = super::ondemand_connection(&llm, &cfg, none_entry);
+    assert_eq!(
+        resolved.provider, "ollama",
+        "a `none` entry falls back to the global [llm_post_process] provider"
+    );
+
+    // A usable entry connection is kept unchanged (no fallback).
+    let mut openai_entry = cfg.llm_post_process.clone();
+    openai_entry.provider = "openai".into();
+    let resolved = super::ondemand_connection(&llm, &cfg, openai_entry);
+    assert_eq!(
+        resolved.provider, "openai",
+        "an entry with a usable provider is kept as-is"
+    );
+    assert!(resolved.enabled, "the returned connection is force-enabled");
+}
+
 /// The rerun_summary resolution seam: the base (model, prompt) comes from the
 /// migrated `summary` entry, and the Re-run modal's one-shot model/prompt
 /// overrides layer on top and still win. Exercises the real production layering

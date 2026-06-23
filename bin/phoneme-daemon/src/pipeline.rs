@@ -1443,15 +1443,9 @@ pub async fn suggest_tags(
     // `[auto_tag]` section. The recipe executor calls `suggest_tags_with`
     // instead, passing the resolved `auto_tag` Playbook entry. The `max_tags` /
     // `auto_accept_existing` behavior knobs stay in `[auto_tag]` either way.
-    suggest_tags_with(
-        state,
-        cfg,
-        id,
-        transcript,
-        auto_tag_llm_config(cfg),
-        &cfg.auto_tag.prompt,
-    )
-    .await
+    // On-demand: fall back to the global LLM when the `tags` entry is "none".
+    let llm_cfg = ondemand_connection(&state.llm, cfg, auto_tag_llm_config(cfg));
+    suggest_tags_with(state, cfg, id, transcript, llm_cfg, &cfg.auto_tag.prompt).await
 }
 
 /// The tag-suggester's core, parameterized by an already-resolved LLM config +
@@ -1871,6 +1865,8 @@ pub async fn extract_entities(
         Some(pair) => pair,
         None => (entities_llm_config(cfg), DEFAULT_ENTITY_PROMPT.to_string()),
     };
+    // On-demand: fall back to the global LLM when the `entities` entry is "none".
+    let llm_cfg = ondemand_connection(&state.llm, cfg, llm_cfg);
     extract_entities_with(state, id, transcript, llm_cfg, &prompt).await
 }
 
@@ -2316,6 +2312,8 @@ pub async fn extract_chapters(
             DEFAULT_CHAPTERS_PROMPT.to_string(),
         ),
     };
+    // On-demand: fall back to the global LLM when the `chapters` entry is "none".
+    let llm_cfg = ondemand_connection(&state.llm, cfg, llm_cfg);
     extract_chapters_with(state, id, transcript, llm_cfg, &prompt).await
 }
 
@@ -2464,6 +2462,8 @@ pub async fn extract_tasks(
         Some(pair) => pair,
         None => (tasks_llm_config(cfg), DEFAULT_TASK_PROMPT.to_string()),
     };
+    // On-demand: fall back to the global LLM when the `tasks` entry is "none".
+    let llm_cfg = ondemand_connection(&state.llm, cfg, llm_cfg);
     extract_tasks_with(state, id, transcript, llm_cfg, &prompt).await
 }
 
@@ -2835,6 +2835,26 @@ pub(crate) fn cleanup_entry_config(cfg: &Config) -> (LlmPostProcessConfig, Strin
             let prompt = llm.prompt.clone();
             (llm, prompt)
         })
+}
+
+/// The LLM connection to actually use for an ON-DEMAND enrichment (the user
+/// clicked Extract / Ask / Re-run): `resolved` if it yields a usable provider,
+/// otherwise the global `[llm_post_process]` connection (force-enabled). Lets an
+/// on-demand action run on the app's configured LLM even when the step's Playbook
+/// entry pins `provider = "none"` (that step is off in the auto-pipeline). The
+/// auto-pipeline must NOT call this — it keeps treating a "none" entry as "skip".
+pub(crate) fn ondemand_connection(
+    llm: &phoneme_core::LlmPostProcessor,
+    cfg: &Config,
+    mut resolved: LlmPostProcessConfig,
+) -> LlmPostProcessConfig {
+    resolved.enabled = true;
+    if llm.provider(&resolved).is_some() {
+        return resolved;
+    }
+    let mut global = cfg.llm_post_process.clone();
+    global.enabled = true;
+    global
 }
 
 /// Layer a Re-run modal's one-shot `model` / `prompt` overrides on top of a base

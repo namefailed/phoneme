@@ -573,26 +573,17 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             };
 
             // 2. LLM provider gate. Reuse the cleanup connection's provider, but
-            //    FORCE-ENABLE the config before the probe: `cleanup_entry_config`
-            //    can fall back to a `[llm_post_process]` whose `enabled` is false
-            //    when the cleanup STEP is toggled off, and `provider()` returns
-            //    None when `!enabled` — which would wrongly report "no provider"
-            //    even with a perfectly good provider configured. Ask only borrows
+            //    route it through `ondemand_connection`: the cleanup ENTRY can pin
+            //    its own connection to `none` (the user doesn't want auto-cleanup),
+            //    and the legacy fallback's `enabled` can be false when the cleanup
+            //    STEP is toggled off — either way `provider()` returns None. Ask is
+            //    a separate on-demand feature, so the helper force-enables and falls
+            //    back to the global `[llm_post_process]` connection. Ask only borrows
             //    the provider/model/endpoint/key; its own grounded prompt is built
             //    in `ask.rs`, so the resolved prompt here is discarded.
             let cfg = state.config.load();
-            let (mut llm_cfg, _cleanup_prompt) = crate::pipeline::cleanup_entry_config(&cfg);
-            llm_cfg.enabled = true; // probe the provider, not the cleanup on/off gate
-            // The cleanup ENTRY can pin its own connection to `none` (the user
-            // doesn't want auto-cleanup) even though a perfectly good global LLM is
-            // configured. Ask is a separate feature, so fall back to the global
-            // `[llm_post_process]` connection when the cleanup entry resolves to no
-            // usable provider — Ask should use the app's configured LLM, not be
-            // disabled just because the cleanup step is off.
-            if state.llm.provider(&llm_cfg).is_none() {
-                llm_cfg = cfg.llm_post_process.clone();
-                llm_cfg.enabled = true;
-            }
+            let (llm_cfg, _cleanup_prompt) = crate::pipeline::cleanup_entry_config(&cfg);
+            let llm_cfg = crate::pipeline::ondemand_connection(&state.llm, &cfg, llm_cfg);
             if state.llm.provider(&llm_cfg).is_none() {
                 return Response::Err(IpcError {
                     kind: IpcErrorKind::InvalidConfig,
@@ -1044,6 +1035,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             Some((c, _)) => c,
                             None => crate::pipeline::entities_llm_config(&cfg),
                         };
+                        // Match what the extractor will use: a "none" entry falls
+                        // back to the global LLM for this on-demand action.
+                        let probe = crate::pipeline::ondemand_connection(&state.llm, &cfg, probe);
                         if state.llm.provider(&probe).is_none() {
                             no_provider_response(&probe.provider)
                         } else {
@@ -1082,6 +1076,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             Some((c, _)) => c,
                             None => crate::pipeline::chapters_llm_config(&cfg),
                         };
+                        // Match what the extractor will use: a "none" entry falls
+                        // back to the global LLM for this on-demand action.
+                        let probe = crate::pipeline::ondemand_connection(&state.llm, &cfg, probe);
                         if state.llm.provider(&probe).is_none() {
                             no_provider_response(&probe.provider)
                         } else {
@@ -1115,6 +1112,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             Some((c, _)) => c,
                             None => crate::pipeline::tasks_llm_config(&cfg),
                         };
+                        // Match what the extractor will use: a "none" entry falls
+                        // back to the global LLM for this on-demand action.
+                        let probe = crate::pipeline::ondemand_connection(&state.llm, &cfg, probe);
                         if state.llm.provider(&probe).is_none() {
                             no_provider_response(&probe.provider)
                         } else {
@@ -2880,6 +2880,17 @@ async fn rerun_summary(
             // explicit (even empty) URL is honored. `LlmPostProcessConfig` is the
             // same connection shape `apply_to` writes onto `[summary]`, so reuse it.
             conn.apply_to_llm(&mut llm_cfg);
+            // On-demand: a `summary` entry that pins `provider = "none"` falls back
+            // to the global `[llm_post_process]` connection so a Re-run isn't blocked
+            // just because the auto-summary step is off. The helper is a no-op when
+            // the entry already resolves to a usable provider, so the common case
+            // (entry inherits a working connection) keeps the entry's model/url/key.
+            let mut llm_cfg = crate::pipeline::ondemand_connection(&state.llm, &cfg, llm_cfg);
+            // A one-shot `--model` must still win even when we fell back to the
+            // global connection above (which carries the global's own model).
+            if let Some(m) = model.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+                llm_cfg.model = m.to_string();
+            }
             // Name the endpoint in any real-error message (a stale per-step URL
             // is the classic cause and invisible in a generic message).
             let endpoint_hint = {
@@ -2913,9 +2924,14 @@ async fn rerun_summary(
 
     // Require a usable LLM provider up front so the user gets a clear error
     // rather than a silent no-op. The summary generators re-check defensively.
+    // The Entry connection already routed through `ondemand_connection` above; the
+    // Legacy path's `summary_llm_config` inherits `[summary]→[llm_post_process]`, so
+    // the helper here only adds the final fallback when even that yields no provider.
     let probe = match &resolution {
         Resolution::Entry { llm_cfg, .. } => llm_cfg.clone(),
-        Resolution::Legacy { cfg } => crate::pipeline::summary_llm_config(cfg),
+        Resolution::Legacy { cfg } => {
+            crate::pipeline::ondemand_connection(&state.llm, cfg, crate::pipeline::summary_llm_config(cfg))
+        }
     };
     if state.llm.provider(&probe).is_none() {
         return Response::Err(IpcError {
@@ -3048,13 +3064,24 @@ async fn rerun_meeting_digest(
     // `rerun_summary` — `summary_llm_config` then resolves it for the digest run.
     conn.apply_to(&mut cfg.summary);
 
+    // On-demand: the digest reuses the summary connection, which can pin
+    // `provider = "none"` (auto-summary off) even with a working global LLM. Route
+    // it through `ondemand_connection`; when it falls back to the global, write that
+    // connection (provider/url/key) onto `[summary]` so both the gate below and the
+    // executor's digest step (which re-resolves from `[summary]`) run on it. The
+    // one-shot `--model` already on `cfg.summary.model` is left untouched so it
+    // still wins; a no-op when the summary connection already yields a provider.
+    let resolved = crate::pipeline::summary_llm_config(&cfg);
+    let effective = crate::pipeline::ondemand_connection(&state.llm, &cfg, resolved.clone());
+    if effective.provider != resolved.provider {
+        cfg.summary.provider = effective.provider.clone();
+        cfg.summary.api_url = effective.api_url.clone();
+        cfg.summary.set_api_key(effective.api_key_str().to_string());
+    }
+
     // Require a usable LLM provider up front so the user gets a clear error rather
     // than a silent failure inside the spawned task.
-    if state
-        .llm
-        .provider(&crate::pipeline::summary_llm_config(&cfg))
-        .is_none()
-    {
+    if state.llm.provider(&effective).is_none() {
         return Response::Err(IpcError {
             kind: IpcErrorKind::InvalidConfig,
             message: "no LLM provider configured for summaries (set a summary or [llm_post_process] provider)".into(),
