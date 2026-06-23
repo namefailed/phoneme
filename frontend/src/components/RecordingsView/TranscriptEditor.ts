@@ -4,6 +4,7 @@ import { customElement, property, state, query } from 'lit/decorators.js';
 import { updateTranscript } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { applyVimrc, defineVimWrite, editorOwnsFocus, VIM_SAVE_EVENT } from "../../utils/vimrc";
+import { openEditorMenu } from "./editorMenu";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -298,6 +299,21 @@ export class TranscriptEditorElement extends LitElement {
     }
   }
 
+  /** The ⋯ overflow menu in the header — Find & Replace (with room to grow),
+   *  replacing the standalone Find/Replace button that used to crowd the action
+   *  row. The modal is imported lazily so it isn't in the editor's initial load. */
+  private openOverflowMenu = (e: Event) => {
+    openEditorMenu(e.currentTarget as HTMLElement, [
+      {
+        label: "Find & Replace…",
+        onSelect: async () => {
+          const { openFindReplace } = await import("../FindReplace");
+          await openFindReplace(this.recordingId);
+        },
+      },
+    ]);
+  };
+
   /** Copy the transcript (with the host's transform — speaker names — applied)
    *  and flash a ✓. The button is only shown when clean, so this never fights
    *  the Save Changes button. */
@@ -442,6 +458,14 @@ export class TranscriptEditorElement extends LitElement {
         <div class="header-actions">
           ${this.userEdited ? html`<span class="edited-badge" title="This transcript has been manually edited">✓ Edited</span>` : ""}
           <button class="btn-save" style="display: ${this.isDirty() ? 'inline-flex' : 'none'};" @click=${this.save}>Save Changes</button>
+          <button
+            class="editor-overflow-btn"
+            title="More transcript actions"
+            aria-label="More transcript actions"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            @click=${this.openOverflowMenu}
+          >⋯</button>
         </div>
       </div>
       <div class="editor-wrap">

@@ -69,6 +69,11 @@ export class DetailGridController {
    *  that row. row -1 = not in detail nav. */
   private detailRow = -1;
   private detailCol = 0;
+  /** True only while handling a mouse click that moves the cursor (onPaneClick).
+   *  A mouse click lands on something already on screen, so highlightDetail skips
+   *  its scroll-into-view — the abrupt scroll on click is the "harsh focus pull".
+   *  Keyboard nav leaves this false, so j/k/l keep scrolling the cursor into view. */
+  private fromPointer = false;
   /** The horizontal anchor (viewport px) for sticky-column vertical nav: j/k land
    *  on the item nearest this x in the next row instead of always the first one.
    *  Seeded from the current cell on the first vertical move of a run and kept
@@ -196,21 +201,31 @@ export class DetailGridController {
     if (!pane || !this.panesInOrder().includes(pane)) return;
     const crossPane = pane !== this.focusedPane;
 
-    if (pane === "list") {
-      // The list sets its own focusedIndex on the row click (RecordingsList) — so
-      // it already follows the click; just take pane focus when arriving fresh.
-      if (crossPane) this.focusPaneImpl("list");
-      return;
-    }
-    // sidebar / detail / detail2: take pane focus when arriving (so keys route
-    // here), then snap the grid cursor onto the precise cell that was clicked.
-    if (crossPane) this.focusPaneImpl(pane);
-    if (pane === "sidebar") {
-      const pos = this.sidebarCellAt(target);
-      if (pos) { this.sidebarRow = pos.row; this.sidebarCol = pos.col; this.highlightSidebar(); }
-    } else {
-      const pos = this.detailCellAt(target);
-      if (pos) { this.detailRow = pos.row; this.detailCol = pos.col; this.detailDesiredX = null; this.highlightDetail(); }
+    // A mouse click moves the cursor onto what was clicked — already on screen —
+    // so suppress highlightDetail's scroll-into-view for the whole handler (the
+    // abrupt scroll/recenter on click is the "harsh focus pull" the user hits when
+    // clicking into the transcript). Keyboard nav runs outside this flag and still
+    // scrolls the cursor into view.
+    this.fromPointer = true;
+    try {
+      if (pane === "list") {
+        // The list sets its own focusedIndex on the row click (RecordingsList) — so
+        // it already follows the click; just take pane focus when arriving fresh.
+        if (crossPane) this.focusPaneImpl("list");
+        return;
+      }
+      // sidebar / detail / detail2: take pane focus when arriving (so keys route
+      // here), then snap the grid cursor onto the precise cell that was clicked.
+      if (crossPane) this.focusPaneImpl(pane);
+      if (pane === "sidebar") {
+        const pos = this.sidebarCellAt(target);
+        if (pos) { this.sidebarRow = pos.row; this.sidebarCol = pos.col; this.highlightSidebar(); }
+      } else {
+        const pos = this.detailCellAt(target);
+        if (pos) { this.detailRow = pos.row; this.detailCol = pos.col; this.detailDesiredX = null; this.highlightDetail(); }
+      }
+    } finally {
+      this.fromPointer = false;
     }
   }
 
@@ -719,13 +734,18 @@ export class DetailGridController {
       // On the first/last row, scroll the pane all the way to the top/bottom (not
       // just the cell into view) so reaching the ends reveals the title's top
       // margin / the footer + any slack beneath it — landing flush at the edge.
-      const scroller = cell.el.closest<HTMLElement>(".detail");
-      if (scroller && this.detailRow === 0) {
-        scroller.scrollTo({ top: 0 });
-      } else if (scroller && this.detailRow === grid.length - 1) {
-        scroller.scrollTo({ top: scroller.scrollHeight });
-      } else {
-        cell.el.scrollIntoView({ block: "nearest" });
+      // Skip all scrolling on a mouse click (fromPointer): the clicked element is
+      // already on screen, so scroll-yanking it is the jarring "focus pull" the
+      // user hits when clicking into the transcript. Keyboard nav still scrolls.
+      if (!this.fromPointer) {
+        const scroller = cell.el.closest<HTMLElement>(".detail");
+        if (scroller && this.detailRow === 0) {
+          scroller.scrollTo({ top: 0 });
+        } else if (scroller && this.detailRow === grid.length - 1) {
+          scroller.scrollTo({ top: scroller.scrollHeight });
+        } else {
+          cell.el.scrollIntoView({ block: "nearest" });
+        }
       }
     }
   }

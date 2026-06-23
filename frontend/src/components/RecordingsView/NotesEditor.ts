@@ -2,6 +2,7 @@ import { errText } from "../../utils/error";
 import { updateNotes } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { applyVimrc, defineVimWrite, editorOwnsFocus, VIM_SAVE_EVENT } from "../../utils/vimrc";
+import { openEditorMenu } from "./editorMenu";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
@@ -123,6 +124,7 @@ export class NotesEditor {
         }
         <span style="flex: 1;"></span>
         <button id="notes-save-btn" style="display: none; background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.7857rem; cursor: pointer; font-weight: bold;">Save Changes</button>
+        <button id="notes-overflow-btn" class="editor-overflow-btn" title="More notes actions" aria-label="More notes actions" aria-haspopup="menu" aria-expanded="false">⋯</button>
       </div>
       <div class="notes-editor-wrap">
         <button id="notes-copy-btn" class="notes-copy-overlay" title="Copy the notes to the clipboard" aria-label="Copy notes">${COPY_SVG}</button>
@@ -138,6 +140,18 @@ export class NotesEditor {
     this.saveBtn?.addEventListener("click", () => void this.save());
     this.copyBtn = this.container.querySelector<HTMLButtonElement>("#notes-copy-btn");
     this.copyBtn?.addEventListener("click", () => void this.copyNotes());
+    const overflowBtn = this.container.querySelector<HTMLButtonElement>("#notes-overflow-btn");
+    overflowBtn?.addEventListener("click", () => {
+      openEditorMenu(overflowBtn, [
+        {
+          label: "Find & Replace…",
+          onSelect: async () => {
+            const { openFindReplace } = await import("../FindReplace");
+            await openFindReplace(this.id);
+          },
+        },
+      ]);
+    });
 
     const theme = EditorView.theme({
       "&": {

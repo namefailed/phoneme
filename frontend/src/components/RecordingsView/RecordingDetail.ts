@@ -668,17 +668,20 @@ export class RecordingDetail {
         if (wasHidden) {
           menu.removeAttribute("hidden");
           trigger.setAttribute("aria-expanded", "true");
-          // Position as a fixed popover anchored under the trigger. These
-          // triggers sit at the bottom of the transcript pane, whose
-          // `overflow-y:auto` would clip a normal absolute menu; `fixed` escapes
-          // every overflow ancestor and overlays the app, opening downward. Clamp
-          // to the viewport so the rightmost (Versions) menu can't spill off the
-          // right edge.
+          // Position as a fixed popover anchored ABOVE the trigger (drop-up).
+          // These triggers sit at the bottom of the transcript pane, so a
+          // downward menu opens toward the pane's bottom edge — awkward to reach,
+          // especially when focus is in the transcript. Opening upward puts the
+          // options right where the eye/cursor already is. `fixed` escapes the
+          // pane's `overflow-y:auto` clip; clamp to the viewport so the rightmost
+          // (Versions) menu can't spill off the right edge, and so a tall menu
+          // never runs off the top.
           const r = trigger.getBoundingClientRect();
           const w = menu.offsetWidth || 160;
+          const h = menu.offsetHeight || 0;
           const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
           menu.style.position = "fixed";
-          menu.style.top = `${Math.round(r.bottom + 4)}px`;
+          menu.style.top = `${Math.round(Math.max(8, r.top - h - 4))}px`;
           menu.style.left = `${Math.round(left)}px`;
           menu.style.right = "auto";
           document.addEventListener("click", onDocClick, true);
