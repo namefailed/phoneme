@@ -583,11 +583,21 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             let cfg = state.config.load();
             let (mut llm_cfg, _cleanup_prompt) = crate::pipeline::cleanup_entry_config(&cfg);
             llm_cfg.enabled = true; // probe the provider, not the cleanup on/off gate
+            // The cleanup ENTRY can pin its own connection to `none` (the user
+            // doesn't want auto-cleanup) even though a perfectly good global LLM is
+            // configured. Ask is a separate feature, so fall back to the global
+            // `[llm_post_process]` connection when the cleanup entry resolves to no
+            // usable provider — Ask should use the app's configured LLM, not be
+            // disabled just because the cleanup step is off.
+            if state.llm.provider(&llm_cfg).is_none() {
+                llm_cfg = cfg.llm_post_process.clone();
+                llm_cfg.enabled = true;
+            }
             if state.llm.provider(&llm_cfg).is_none() {
                 return Response::Err(IpcError {
                     kind: IpcErrorKind::InvalidConfig,
                     message:
-                        "no LLM provider configured for Ask (set an [llm_post_process] provider)"
+                        "no LLM provider configured for Ask — set a provider in Settings → Post-Processing"
                             .into(),
                 });
             }
