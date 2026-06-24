@@ -425,8 +425,8 @@ export class FirstRunWizardElement extends LitElement {
             ${sw("setup-diarization", this.config._setup_diarization, (e) => { this.config._setup_diarization = (e.target as HTMLInputElement).checked; this.requestUpdate(); })}
           </div>
           ${this.config._setup_diarization
-            ? html`<div class="wizard-feature-note warn">⚠️ Downloads a ~500 MB speakrs model. Best with 16 GB+ RAM for stable transcription.</div>`
-            : html`<div class="wizard-feature-note">Off — labels who-spoke-when in meetings. Can be enabled later.</div>`}
+            ? html`<div class="wizard-feature-note warn">⚠️ One-time ~500 MB model download, then runs fully on your device. Best with 16 GB+ RAM.</div>`
+            : html`<div class="wizard-feature-note">Off — identifies who spoke when (speaker labels). Can be enabled later.</div>`}
         </div>
 
         <div class="wizard-feature ${this.config.semantic_search?.enabled ? "on" : ""}">
@@ -657,11 +657,10 @@ export class FirstRunWizardElement extends LitElement {
 
   private async doDiarization() {
     this.downloadTitle = "Diarization Setup";
-    this.downloadSubtitle = "Fetching the speakrs ONNX models (~500MB)...";
+    this.downloadSubtitle = "Downloading the speaker model (~500 MB, one-time)...";
     this.progressValue = null;
     this.downloadStatus = "Starting download...";
 
-    // We'll add the new tauri command wizard_download_diarization_model shortly
     const unlisten = await listen<{ downloaded: number; total: number | null }>("diarization_download_progress", (e) => {
       if (e.payload.total) {
         this.progressMax = e.payload.total;
