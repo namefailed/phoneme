@@ -87,6 +87,24 @@ export class NotesEditor {
     }
   }
 
+  /** CodeMirror traps the wheel — when its own content fits (or you're already at
+   *  a scroll boundary) the detail pane wouldn't scroll and you'd be stuck hovering
+   *  the notes box. Forward the wheel to the detail pane in exactly those cases, so
+   *  scrolling anywhere over the notes always scrolls the pane; let CM scroll its
+   *  own content natively whenever it actually can. Mirrors the transcript editor. */
+  private onNotesWheel = (e: WheelEvent) => {
+    const detail = this.container.closest<HTMLElement>(".detail");
+    if (!detail || detail.scrollHeight <= detail.clientHeight + 1) return;
+    const sc = this.container.querySelector<HTMLElement>(".cm-scroller");
+    if (sc && sc.scrollHeight > sc.clientHeight + 1 && sc.contains(e.target as Node)) {
+      const atTop = sc.scrollTop <= 0;
+      const atBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1;
+      if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) return;
+    }
+    detail.scrollTop += e.deltaY;
+    e.preventDefault();
+  };
+
   private async init() {
     let vimrc = "";
     let vimrcPath = "";
@@ -253,6 +271,13 @@ export class NotesEditor {
     });
 
     document.addEventListener(VIM_SAVE_EVENT, this.vimSaveHandler);
+
+    // Forward the wheel to the detail pane when CM would otherwise trap it (its
+    // content fits, or you're at a scroll boundary) — so hovering the notes box
+    // never blocks scrolling the pane. Attached to the wrap so the overlaid Copy
+    // button is covered too. Mirrors the transcript editor.
+    this.container.querySelector<HTMLElement>(".notes-editor-wrap")
+      ?.addEventListener("wheel", this.onNotesWheel, { passive: false });
 
     // Drive the badge from the editor's own mode-change events — the actual vim
     // mode, not a keystroke heuristic. (No-op when vim mode is off.)
