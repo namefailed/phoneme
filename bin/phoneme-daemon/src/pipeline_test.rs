@@ -781,7 +781,7 @@ fn rerun_overrides_apply_to_a_clone_only() {
     let base = Config::default();
 
     // Empty override = identity (the plain-retranscribe path).
-    let same = super::apply_rerun_overrides(base.clone(), PendingRerun::default());
+    let same = super::apply_rerun_overrides(base.clone(), PendingRerun::default(), "");
     assert_eq!(same.llm_post_process.enabled, base.llm_post_process.enabled);
     assert_eq!(same.summary.auto, base.summary.auto);
 
@@ -805,6 +805,7 @@ fn rerun_overrides_apply_to_a_clone_only() {
             post_process: Some(false),
             ..Default::default()
         },
+        "",
     );
     assert!(!raw.llm_post_process.enabled);
     assert!(
@@ -841,6 +842,7 @@ fn rerun_overrides_apply_to_a_clone_only() {
             }),
             ..Default::default()
         },
+        "",
     );
     assert!(all.llm_post_process.enabled);
     assert_eq!(all.llm_post_process.model, "llama3.2:3b");
@@ -912,6 +914,7 @@ fn rerun_all_restores_missing_steps_into_the_recipe_clone() {
             }),
             ..Default::default()
         },
+        "",
     );
 
     let steps: &[String] = &all

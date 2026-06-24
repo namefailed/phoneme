@@ -245,10 +245,32 @@ pub(crate) async fn apply_model_override_for_role(
 /// — so `run` builds a private config for the job and the process-global config is
 /// never mutated. Mutating the global here would race a concurrent `ReloadConfig`
 /// and could leak the forced-on pipeline onto another queued job.
+///
+/// The opt-out and the forced-on cleanup/title/summary steps target `recipe_id` —
+/// the recipe this job will actually run (a Re-run "Run with recipe" choice or a
+/// custom-hotkey binding) — not always the default. An empty or unknown id degrades
+/// to the default recipe, matching `resolve_recipe`. (Before this, the steps were
+/// forced onto the default recipe, so an "All" override on a non-default recipe
+/// silently did nothing.)
 fn apply_rerun_overrides(
     mut cfg: phoneme_core::Config,
     rerun: crate::app_state::PendingRerun,
+    recipe_id: &str,
 ) -> phoneme_core::Config {
+    // Resolve the recipe these overrides target to an id that exists (unknown /
+    // deleted → default), so the forced-on steps land on the recipe that runs.
+    let target_recipe = {
+        let want = if recipe_id.trim().is_empty() {
+            DEFAULT_RECIPE_ID
+        } else {
+            recipe_id.trim()
+        };
+        if cfg.recipes.iter().any(|r| r.id == want) {
+            want.to_string()
+        } else {
+            DEFAULT_RECIPE_ID.to_string()
+        }
+    };
     if let Some(rh) = rerun.run_hooks {
         cfg.hook.run_on_transcribe = rh;
     }
@@ -260,7 +282,7 @@ fn apply_rerun_overrides(
     // to the clone — the persisted recipe is never touched.)
     if rerun.post_process == Some(false) {
         cfg.llm_post_process.enabled = false;
-        if let Some(recipe) = cfg.recipes.iter_mut().find(|r| r.id == DEFAULT_RECIPE_ID) {
+        if let Some(recipe) = cfg.recipes.iter_mut().find(|r| r.id == target_recipe) {
             recipe.steps.retain(|s| s != "cleanup");
         }
     }
@@ -334,7 +356,7 @@ fn apply_rerun_overrides(
         // membership is left as-is: legacy "All" never forced auto-tagging on (it
         // only set `summary.auto`/`title.enabled`/cleanup), so tags still run only
         // if they were already a member. Confined to the clone.
-        ensure_default_recipe_steps(&mut cfg, &["cleanup", "title", "summary"]);
+        ensure_recipe_steps(&mut cfg, &target_recipe, &["cleanup", "title", "summary"]);
     }
     cfg
 }
@@ -410,12 +432,13 @@ impl PerStepLlmSection for phoneme_core::config::TitleConfig {
     }
 }
 
-/// Ensure each id in `want` is a member of the per-job clone's default recipe,
+/// Ensure each id in `want` is a member of the per-job clone's `recipe_id` recipe,
 /// inserting any missing one at its canonical position (cleanup → title →
 /// summary → auto_tag). A no-op for ids already present; never reorders or
-/// duplicates. Used only by the Re-run "All" path, on the config clone.
-fn ensure_default_recipe_steps(cfg: &mut phoneme_core::Config, want: &[&str]) {
-    let Some(recipe) = cfg.recipes.iter_mut().find(|r| r.id == DEFAULT_RECIPE_ID) else {
+/// duplicates. Used only by the Re-run "All" path, on the config clone. `recipe_id`
+/// is the already-resolved target (see `apply_rerun_overrides`).
+fn ensure_recipe_steps(cfg: &mut phoneme_core::Config, recipe_id: &str, want: &[&str]) {
+    let Some(recipe) = cfg.recipes.iter_mut().find(|r| r.id == recipe_id) else {
         return;
     };
     for id in want {
@@ -435,6 +458,113 @@ fn ensure_default_recipe_steps(cfg: &mut phoneme_core::Config, want: &[&str]) {
             })
             .unwrap_or(recipe.steps.len());
         recipe.steps.insert(at, (*id).to_string());
+    }
+}
+
+#[cfg(test)]
+mod rerun_override_tests {
+    use super::*;
+    use crate::app_state::PendingRerun;
+    use phoneme_core::config::{PlaybookRecipe, RecipeScope};
+    use phoneme_ipc::RerunAllOverrides;
+
+    fn cfg_with_recipes() -> phoneme_core::Config {
+        let mut recipes = phoneme_core::config::default_recipes();
+        // A custom Recording-scope recipe with NO post-processing steps, so an
+        // "All" force-on has something to add.
+        recipes.push(PlaybookRecipe {
+            id: "custom".into(),
+            name: "Custom".into(),
+            description: String::new(),
+            builtin: false,
+            scope: RecipeScope::Recording,
+            steps: Vec::new(),
+        });
+        phoneme_core::Config {
+            playbook: phoneme_core::config::default_playbook(),
+            recipes,
+            ..Default::default()
+        }
+    }
+
+    fn all_with_cleanup_model(model: &str) -> PendingRerun {
+        PendingRerun {
+            run_hooks: None,
+            post_process: None,
+            all_overrides: Some(RerunAllOverrides {
+                cleanup_provider: None,
+                cleanup_model: Some(model.into()),
+                cleanup_prompt: None,
+                cleanup_api_url: None,
+                summary_model: None,
+                summary_prompt: None,
+                title_model: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn rerun_all_targets_the_chosen_non_default_recipe() {
+        // Regression: a Re-run "All" (cleanup-model override) on a NON-default recipe
+        // must force cleanup/title/summary onto THAT recipe and mirror the model onto
+        // the cleanup entry. It used to silently force them onto the default recipe.
+        let out = apply_rerun_overrides(
+            cfg_with_recipes(),
+            all_with_cleanup_model("big-model"),
+            "custom",
+        );
+
+        let custom = out
+            .recipes
+            .iter()
+            .find(|r| r.id == "custom")
+            .expect("custom recipe present");
+        for step in ["cleanup", "title", "summary"] {
+            assert!(
+                custom.steps.iter().any(|s| s == step),
+                "{step} should be forced onto the chosen recipe"
+            );
+        }
+        let cleanup = out
+            .playbook
+            .iter()
+            .find(|e| e.id == "cleanup")
+            .expect("cleanup entry present");
+        assert_eq!(
+            cleanup.llm.model, "big-model",
+            "cleanup model override should be mirrored onto the entry"
+        );
+    }
+
+    #[test]
+    fn rerun_all_empty_recipe_id_falls_back_to_default() {
+        // No recipe chosen → the default recipe is the target (back-compat).
+        let out = apply_rerun_overrides(cfg_with_recipes(), all_with_cleanup_model("m"), "");
+        let default = out
+            .recipes
+            .iter()
+            .find(|r| r.id == DEFAULT_RECIPE_ID)
+            .expect("default recipe present");
+        assert!(default.steps.iter().any(|s| s == "cleanup"));
+    }
+
+    #[test]
+    fn rerun_all_unknown_recipe_id_falls_back_to_default() {
+        // A deleted/unknown id degrades to default (matching resolve_recipe), so the
+        // override lands on a recipe that runs rather than vanishing — and the unknown
+        // id is never materialized as a new recipe.
+        let out = apply_rerun_overrides(
+            cfg_with_recipes(),
+            all_with_cleanup_model("m"),
+            "does-not-exist",
+        );
+        let default = out
+            .recipes
+            .iter()
+            .find(|r| r.id == DEFAULT_RECIPE_ID)
+            .expect("default recipe present");
+        assert!(default.steps.iter().any(|s| s == "cleanup"));
+        assert!(!out.recipes.iter().any(|r| r.id == "does-not-exist"));
     }
 }
 
@@ -2209,6 +2339,19 @@ pub async fn run(
     // forced-on pipeline onto another queued job. Claimed (removed) here so a
     // daemon restart drops them. No override → run with the loaded config as-is
     // (no clone).
+    // Claim this recording's one-time recipe override (Re-run "Run with recipe" /
+    // a custom-hotkey binding) BEFORE applying the "All" overrides — the latter
+    // force cleanup/title/summary onto the recipe that will actually run, so they
+    // must know which recipe that is. Claimed (removed) early, before transcription,
+    // so a transcribe failure / cancel can't leave a stale entry keyed by a dead id
+    // (the `resolve_recipe` call is much later, past the failure paths). Empty / a
+    // deleted id degrades to the `default` recipe in both places.
+    let requested_recipe_id = state
+        .pending_recipe
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
+
     let cfg_owned;
     let cfg: &phoneme_core::Config = match state
         .pending_all_overrides
@@ -2217,7 +2360,11 @@ pub async fn run(
         .remove(&id)
     {
         Some(rerun) => {
-            cfg_owned = apply_rerun_overrides(cfg_guard.as_ref().clone(), rerun);
+            cfg_owned = apply_rerun_overrides(
+                cfg_guard.as_ref().clone(),
+                rerun,
+                requested_recipe_id.as_deref().unwrap_or(""),
+            );
             &cfg_owned
         }
         None => cfg_guard.as_ref(),
@@ -2255,16 +2402,8 @@ pub async fn run(
     let has_binding_model_override = requested_override
         .as_deref()
         .is_some_and(|m| !m.trim().is_empty());
-    // Claim this recording's custom-hotkey recipe override (if any) at the same
-    // early point as the model/all-overrides removals — before transcription — so
-    // a transcribe failure / cancel can't leave a stale entry keyed by a dead id
-    // (the `resolve_recipe` call is much later, past the failure paths). Empty /
-    // a deleted id degrades to the `default` recipe inside `resolve_recipe`.
-    let requested_recipe_id = state
-        .pending_recipe
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(&id);
+    // (The custom-hotkey / Re-run recipe override was already claimed above, before
+    // the "All" overrides, so they could target the recipe that will run.)
     // Claim this recording's focused-app override (if any) at the same early point
     // — before transcription — so a transcribe failure / cancel can't leave a
     // stale entry keyed by a dead id (the end-of-run typing is much later, past
