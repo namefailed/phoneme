@@ -1,8 +1,8 @@
 /**
- * Shared Re-run payload + apply helper. The robust Re-run form (`ph-rerun-form`)
- * emits one of these payloads; both the single-recording detail panel
- * (ActionRow) and the multi-select bulk bar apply it — to one id or to each
- * selected id — so the two surfaces stay identical.
+ * Shared Re-run payload + apply helper. The Re-run modal (`ph-model-picker` in
+ * its "Just this run" scope) emits one of these payloads; both the single-recording
+ * detail panel (ActionRow) and the multi-select bulk bar apply it — to one id or to
+ * each selected id — so the two surfaces stay identical.
  */
 import { retranscribeRecording, rerunCleanup, rerunSummary, refireHook } from "../../services/ipc";
 

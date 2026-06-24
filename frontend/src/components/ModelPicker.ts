@@ -79,6 +79,9 @@ export class ModelPickerElement extends LitElement {
   /** Multiple targets (the bulk bar's selection). Takes precedence over the
    *  single `recordingId` when non-empty so "Run once" re-runs each one. */
   @property({ type: Array }) recordingIds: string[] = [];
+  /** Set by the low-confidence "Improve" entry: preselect the next-larger local
+   *  whisper model so the re-run actually upgrades quality (was a no-op before). */
+  @property({ type: Boolean }) bumpModel = false;
 
   /** The recordings "Run once" will act on. Bulk selection wins; otherwise the
    *  single recording id (which openModelPicker seeds from the open recording
@@ -89,11 +92,19 @@ export class ModelPickerElement extends LitElement {
   }
 
   @state() private activeTab: MpTab = "transcription";
-  /** Playbook recipes available to a "Run once" re-run (id + display name). */
-  @state() private recipes: { id: string; name: string }[] = [];
+  /** Playbook recipes available to a "Run once" re-run (id + name + scope + steps).
+   *  `scope`/`steps` drive the Recording-only filter and the step preview line. */
+  @state() private recipes: { id: string; name: string; scope?: string; steps?: string[] }[] = [];
   /** Recipe chosen for this Re-run; "" = the global default pipeline. Only used
    *  in "oneshot" mode (a Re-run); the Quick Switcher's defaults mode ignores it. */
   @state() private recipeId = "";
+  /** Re-run ("Just this run") scope only: whether the "override step models"
+   *  disclosure is expanded. Collapsed by default so the common case stays simple. */
+  @state() private advancedOpen = false;
+  /** Re-run scope only: when on, the chosen models are also persisted as the new
+   *  defaults after the run (the "I liked that run, keep it" path) — additive, so
+   *  the primary action stays "Run once" and there's no competing Save button. */
+  @state() private alsoSaveDefaults = false;
   @state() private downloadedModels: string[] = [];
   @state() private sttRealProvider = "local";
   @state() private sttUrl = "";
@@ -363,7 +374,7 @@ export class ModelPickerElement extends LitElement {
   private initFromConfig() {
     if (!this.config) return;
     this.recipes = Array.isArray(this.config.recipes)
-      ? (this.config.recipes as { id: string; name: string }[])
+      ? (this.config.recipes as { id: string; name: string; scope?: string; steps?: string[] }[])
       : [];
     const w = this.config.whisper || {};
     const l = this.config.llm_post_process || {};
@@ -425,9 +436,19 @@ export class ModelPickerElement extends LitElement {
       // is a distilled large model — faster than Large v3 — so it sits just
       // before it (Tiny < Base < Small < Medium < Turbo < Large v3).
       this.downloadedModels = [...models].sort((a, b) => whisperRank(a) - whisperRank(b));
+      if (this.bumpModel && this.sttRealProvider === "local") this.applyModelBump();
     } catch {
       this.downloadedModels = [];
     }
+  }
+
+  /** "Improve" upgrade: preselect the smallest downloaded local model strictly
+   *  larger (higher whisperRank) than the current one. No-op when nothing larger
+   *  is downloaded — the honest case where Improve can't help without a download. */
+  private applyModelBump() {
+    const curRank = whisperRank(this.sttLocalModel);
+    const bigger = this.downloadedModels.find((p) => whisperRank(p) > curRank);
+    if (bigger) this.sttLocalModel = bigger;
   }
 
   /** Open the local-Ollama model manager (list / pull / delete). Lazily loaded
@@ -447,8 +468,8 @@ export class ModelPickerElement extends LitElement {
     this.dispatchEvent(new CustomEvent('resolved', { detail: saved }));
   }
 
-  private async save() {
-    if (!this.config) return;
+  private async persistDefaults(): Promise<boolean> {
+    if (!this.config) return false;
     if (!this.config.whisper) this.config.whisper = {};
     if (!this.config.llm_post_process) this.config.llm_post_process = {};
 
@@ -519,10 +540,16 @@ export class ModelPickerElement extends LitElement {
       await invoke("write_config", { config: this.config });
       window.dispatchEvent(new CustomEvent("config:saved", { detail: this.config }));
       showToast("Models saved", "success");
-      this.close(true);
+      return true;
     } catch (e) {
       showToast(`Save failed: ${errText(e)}`, "error");
+      return false;
     }
+  }
+
+  /** "Save defaults" footer action (defaults scope): persist, then close. */
+  private async save() {
+    if (await this.persistDefaults()) this.close(true);
   }
 
   /** "Run once": re-run the open recording's whole pipeline (transcribe →
@@ -560,27 +587,98 @@ export class ModelPickerElement extends LitElement {
     for (const id of targets) {
       try { await applyRerun(id, payload); ok++; } catch { failed++; }
     }
+    // Optional "also save as my defaults": persist the same chosen models so a
+    // good one-off can become the new default without a separate trip to Settings.
+    if (this.alsoSaveDefaults) await this.persistDefaults();
     if (failed === 0) showToast(rerunToastMessage(payload, ok), "info");
     else showToast(`${ok} ok, ${failed} failed`, "error");
     this.close(false);
   }
 
-  /** "Run once" — applies the chosen models to the target recording(s) as a
-   *  one-time re-run. Disabled (but always shown) when there's no target. */
-  private renderRunOnceBtn() {
-    const n = this.targets.length;
-    const has = n > 0;
-    return html`<button class="modal-btn ${this.activeMode === "oneshot" ? "modal-btn-primary" : ""}"
-      ?disabled=${!has}
-      title=${has ? "Re-run with these models once — not saved to your config" : "Open a recording (or select some) to run these once"}
-      @click=${this.runOnce}>↻ Run once${n > 1 ? ` · ${n}` : ""}</button>`;
+  /** Which model panels are visible, by scope. Run ("oneshot") shows transcription
+   *  on the face and cleanup/title/summary only under the Advanced disclosure;
+   *  defaults scope is the full tab strip. Every host div stays mounted regardless —
+   *  visibility is CSS-only — so the imperative field mounts (see `updated`) never
+   *  churn when scope/tab changes. */
+  private panelVisible(tab: MpTab): boolean {
+    if (this.activeMode === "oneshot") {
+      if (tab === "transcription") return true;
+      if (tab === "postprocessing" || tab === "title" || tab === "summary") return this.advancedOpen;
+      return false; // auto-tag / live preview / semantic don't apply to a re-run
+    }
+    return this.activeTab === tab;
   }
 
-  /** "Save as default" — persists the chosen models to config. */
-  private renderSaveBtn() {
-    return html`<button id="mp-save" class="modal-btn ${this.activeMode === "default" ? "modal-btn-primary" : ""}"
-      title="Save these models as your defaults"
-      @click=${this.save}>💾 Save as default</button>`;
+  /** Switch scope, resetting the per-scope view state so the body never shows a
+   *  stale tab/disclosure carried over from the other scope. */
+  private setScope(mode: "default" | "oneshot") {
+    if (mode === "oneshot" && !this.targets.length) return;
+    this.activeMode = mode;
+    this.activeTab = "transcription";
+    this.advancedOpen = false;
+  }
+
+  /** The scope segmented control + a one-line, plain-language consequence note —
+   *  the first thing the user sets, so "save vs run once" is never ambiguous. */
+  private renderScope() {
+    const n = this.targets.length;
+    const has = n > 0;
+    const target = n > 1 ? `${n} recordings` : "this recording";
+    return html`
+      <div class="mp-scope" role="tablist" aria-label="What these models change">
+        <button class="mp-scope-btn ${this.activeMode === "oneshot" ? "active" : ""}" role="tab"
+          ?disabled=${!has}
+          title=${has ? `Apply once to ${target} — your defaults stay as they are` : "Open a recording (or select some) to re-run them"}
+          @click=${() => this.setScope("oneshot")}>Just this run</button>
+        <button class="mp-scope-btn ${this.activeMode === "default" ? "active" : ""}" role="tab"
+          title="Change the models used for every new recording from now on"
+          @click=${() => this.setScope("default")}>My defaults</button>
+      </div>
+      <p class="mp-scope-hint">${
+        this.activeMode === "oneshot"
+          ? html`Runs once on <b>${target}</b> — your defaults aren't changed; re-running replaces the transcript.`
+          : html`Saved as your <b>defaults</b> for every new recording.`
+      }</p>`;
+  }
+
+  /** A compact preview of the chosen recipe's steps, so the user sees what the
+   *  run will do before running. Empty recipe id = the default pipeline. */
+  private renderRecipeSteps() {
+    const id = this.recipeId.trim() || "default";
+    const steps = this.recipes.find((r) => r.id === id)?.steps ?? [];
+    if (!steps.length) return html`<p class="mp-recipe-steps">Transcribe only — no post-processing steps.</p>`;
+    const labels: Record<string, string> = {
+      cleanup: "Cleanup", title: "Title", summary: "Summary",
+      tags: "Tags", auto_tag: "Tags", entities: "Entities", chapters: "Chapters",
+    };
+    return html`<p class="mp-recipe-steps">${steps.map((s) => labels[s] ?? s).join(" → ")}</p>`;
+  }
+
+  /** Exactly one scope-bound primary action — never Run and Save side by side. */
+  private renderFooter() {
+    if (this.activeMode === "oneshot") {
+      const n = this.targets.length;
+      const has = n > 0;
+      return html`
+        <label class="mp-also-save" title="Also keep these models as your defaults going forward">
+          <input type="checkbox" class="toggle-switch" .checked=${this.alsoSaveDefaults}
+            @change=${(e: Event) => (this.alsoSaveDefaults = (e.target as HTMLInputElement).checked)} />
+          Also save these as my defaults
+        </label>
+        <div class="modal-actions">
+          <button id="mp-cancel" class="modal-btn" @click=${() => this.close(false)}>Cancel</button>
+          <button class="modal-btn modal-btn-primary" ?disabled=${!has}
+            title=${has ? "Re-run with these models once" : "No recording selected"}
+            @click=${this.runOnce}>↻ Run once${n > 1 ? ` · ${n}` : ""}</button>
+        </div>`;
+    }
+    return html`
+      <div class="modal-actions">
+        <button id="mp-cancel" class="modal-btn" @click=${() => this.close(false)}>Cancel</button>
+        <button id="mp-save" class="modal-btn modal-btn-primary"
+          title="Save these models as your defaults"
+          @click=${this.save}>💾 Save defaults</button>
+      </div>`;
   }
 
   render() {
@@ -605,21 +703,25 @@ export class ModelPickerElement extends LitElement {
             }</h3>
           </div>
 
+          ${this.renderScope()}
+
           ${this.activeMode === "oneshot"
             ? html`
-              <div class="mp-recipe-bar" style="padding: 4px 4px 10px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 8px;">
-                <label class="mp-label" for="mp-recipe">Recipe to run</label>
+              <div class="mp-recipe-bar">
+                <label class="mp-label" for="mp-recipe">Run through</label>
                 <select id="mp-recipe" class="mp-input" .value=${this.recipeId}
-                  @change=${(e: Event) => this.recipeId = (e.target as HTMLSelectElement).value}>
+                  @change=${(e: Event) => (this.recipeId = (e.target as HTMLSelectElement).value)}>
                   <option value="" ?selected=${this.recipeId === ""}>Default pipeline</option>
                   ${this.recipes
-                    .filter((r) => r.id !== "default")
+                    .filter((r) => r.id !== "default" && (r.scope ?? "recording") !== "meeting")
                     .map((r) => html`<option value=${r.id} ?selected=${r.id === this.recipeId}>${r.name || r.id}</option>`)}
                 </select>
-                <p class="mp-hint">The Playbook chain this re-run applies (cleanup, title, summary, tags, hooks). <b>Default pipeline</b> = whatever normal recordings run. The model tabs below layer one-time overrides on top of whichever recipe you pick. Build chains in <b>Settings → Playbook</b>.</p>
+                ${this.renderRecipeSteps()}
+                <p class="mp-hint">The Playbook chain this run applies. <b>Default pipeline</b> = what normal recordings run. Build chains in <b>Settings → Playbook</b>.</p>
               </div>`
             : ""}
 
+          ${this.activeMode === "default" ? html`
           <div class="mp-tabs" role="tablist">
             <button class="mp-tab ${this.activeTab === 'transcription' ? 'active' : ''}" @click=${() => this.activeTab = 'transcription'} role="tab">Transcription</button>
             <button class="mp-tab ${this.activeTab === 'postprocessing' ? 'active' : ''}" @click=${() => this.activeTab = 'postprocessing'} role="tab">Post-processing</button>
@@ -628,9 +730,9 @@ export class ModelPickerElement extends LitElement {
             <button class="mp-tab ${this.activeTab === 'autotag' ? 'active' : ''}" @click=${() => this.activeTab = 'autotag'} role="tab">Auto-tag</button>
             <button class="mp-tab ${this.activeTab === 'preview' ? 'active' : ''}" @click=${() => this.activeTab = 'preview'} role="tab">Live preview</button>
             <button class="mp-tab ${this.activeTab === 'semantic' ? 'active' : ''}" @click=${() => this.activeTab = 'semantic'} role="tab">Semantic</button>
-          </div>
+          </div>` : ""}
 
-          <div class="mp-panel" ?hidden=${this.activeTab !== 'transcription'}>
+          <div class="mp-panel" ?hidden=${!this.panelVisible('transcription')}>
             <label class="mp-label">Provider</label>
             <div class="mp-conn-host" id="mp-stt-conn-host"></div>
 
@@ -648,18 +750,27 @@ export class ModelPickerElement extends LitElement {
               <div class="mp-model-host" id="mp-stt-model-host"></div>
             </div>
 
+            ${this.activeMode === "default" ? html`
             <div class="mp-row">
               <label class="mp-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input type="checkbox" class="toggle-switch" .checked=${this.diarizationEnabled} @change=${(e: Event) => this.diarizationEnabled = (e.target as HTMLInputElement).checked} />
                 Enable speaker diarization
               </label>
               <p class="mp-hint">Identifies who spoke when (e.g., [Speaker 0], [Speaker 1]). Requires additional model download in Settings if not already configured.</p>
-            </div>
+            </div>` : ""}
 
             <p class="mp-hint">Where your audio is transcribed. <b>Local</b> stays on your machine and uses the bundled model from full Settings; cloud options upload audio to a third-party API.</p>
           </div>
 
-          <div class="mp-panel" ?hidden=${this.activeTab !== 'postprocessing'}>
+          ${this.activeMode === "oneshot"
+            ? html`<button type="button" class="mp-advanced-toggle" aria-expanded=${this.advancedOpen}
+                @click=${() => (this.advancedOpen = !this.advancedOpen)}>
+                <span class="mp-adv-caret ${this.advancedOpen ? "open" : ""}">▸</span>
+                Advanced — override individual step models for this run
+              </button>`
+            : ""}
+
+          <div class="mp-panel" ?hidden=${!this.panelVisible('postprocessing')}>
             <label class="mp-label">Provider</label>
             <div class="mp-conn-host" id="mp-llm-conn-host"></div>
 
@@ -674,7 +785,7 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Ollama</b> keeps everything offline.</p>
           </div>
 
-          <div class="mp-panel" ?hidden=${this.activeTab !== 'title'}>
+          <div class="mp-panel" ?hidden=${!this.panelVisible('title')}>
             <label class="mp-label">Provider</label>
             <div class="mp-conn-host" id="mp-tit-conn-host"></div>
 
@@ -685,7 +796,7 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">Model for auto-generating recording titles. <b>Same as post-processing</b> reuses your cleanup connection. Turn auto-titles + the AI-title option on/off in <b>Settings → Post-Processing</b>.</p>
           </div>
 
-          <div class="mp-panel" ?hidden=${this.activeTab !== 'summary'}>
+          <div class="mp-panel" ?hidden=${!this.panelVisible('summary')}>
             <label class="mp-label">Provider</label>
             <div class="mp-conn-host" id="mp-sum-conn-host"></div>
 
@@ -696,7 +807,7 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">Model for the auto-summary. <b>Same as post-processing</b> reuses your cleanup connection. Turn the auto-summary itself on/off in <b>Settings → Post-Processing</b>.</p>
           </div>
 
-          <div class="mp-panel" ?hidden=${this.activeTab !== 'autotag'}>
+          <div class="mp-panel" ?hidden=${!this.panelVisible('autotag')}>
             <label class="mp-label">Provider</label>
             <div class="mp-conn-host" id="mp-at-conn-host"></div>
 
@@ -707,7 +818,7 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">Model used to <b>suggest tags</b> for each transcript (you approve before they apply). <b>Same as post-processing</b> reuses your cleanup connection. Turn auto-tagging on/off in <b>Settings → Post-Processing</b>.</p>
           </div>
 
-          <div class="mp-panel" ?hidden=${this.activeTab !== 'preview'}>
+          <div class="mp-panel" ?hidden=${!this.panelVisible('preview')}>
             <label class="mp-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="checkbox" class="toggle-switch" .checked=${this.prevDedicated} @change=${(e: Event) => this.prevDedicated = (e.target as HTMLInputElement).checked} />
               Use a dedicated live-preview model
@@ -733,7 +844,7 @@ export class ModelPickerElement extends LitElement {
             </div>
           </div>
 
-          <div class="mp-panel" ?hidden=${this.activeTab !== 'semantic'}>
+          <div class="mp-panel" ?hidden=${!this.panelVisible('semantic')}>
             <label class="mp-label" for="mp-sem-dir">Embedding model folder</label>
             <input id="mp-sem-dir" class="mp-input" type="text" .value=${this.semModelDir}
               placeholder="Folder containing model.onnx + tokenizer.json"
@@ -741,15 +852,7 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">The local ONNX model that powers <b>semantic search</b> (✨). Point this at any folder with a sentence-embedding model (<code>model.onnx</code> + <code>tokenizer.json</code>). Download/manage models — and tune chunking — in <b>Settings → System → Semantic Search</b>. Changing the model re-indexes new recordings; existing ones re-embed on their next transcript change.</p>
           </div>
 
-          <div class="modal-actions">
-            <button id="mp-cancel" class="modal-btn" @click=${() => this.close(false)}>Cancel</button>
-            <!-- Both modes show both buttons; the primary (rightmost) one flips
-                 with the mode: Run once for a Re-run, Save as default for the
-                 Quick Switcher. -->
-            ${this.activeMode === "oneshot"
-              ? html`${this.renderSaveBtn()}${this.renderRunOnceBtn()}`
-              : html`${this.renderRunOnceBtn()}${this.renderSaveBtn()}`}
-          </div>
+          ${this.renderFooter()}
         </div>
       </div>
     `;
@@ -767,7 +870,7 @@ export class ModelPickerElement extends LitElement {
 export async function openModelPicker(
   initialTab: MpTab = "transcription",
   anchor?: HTMLElement,
-  opts?: { mode?: "default" | "oneshot"; recordingId?: string; recordingIds?: string[] },
+  opts?: { mode?: "default" | "oneshot"; recordingId?: string; recordingIds?: string[]; bumpModel?: boolean },
 ): Promise<boolean> {
   let config: any;
   try {
@@ -786,6 +889,7 @@ export async function openModelPicker(
     if (anchor) el.anchor = anchor;
     el.config = config;
     el.activeMode = opts?.mode ?? "default";
+    el.bumpModel = opts?.bumpModel ?? false;
     el.recordingIds = opts?.recordingIds ?? [];
     // With no explicit target, fall back to whatever recording the detail pane
     // is showing, so the header's Quick Switcher can still "Run once" on it.

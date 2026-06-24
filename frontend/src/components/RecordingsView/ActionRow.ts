@@ -140,6 +140,14 @@ export class ActionRowElement extends LitElement {
     this.cbs.onRefresh();
   }
 
+  /** Low-confidence "Improve": same Re-run modal, but pre-aimed at a larger local
+   *  whisper model (`bumpModel`) so it actually upgrades the transcript. */
+  private async openImprove() {
+    const { openModelPicker } = await import("../ModelPicker");
+    await openModelPicker("transcription", undefined, { mode: "oneshot", recordingId: this.recordingId, bumpModel: true });
+    this.cbs.onRefresh();
+  }
+
   /** The transcript with any custom speaker names applied, for copy/export. */
   private transcriptForExport(): string {
     return applySpeakerNames(this.cbs.getTranscript(), this.cbs.getSpeakerNames?.());
@@ -287,7 +295,7 @@ export class ActionRowElement extends LitElement {
           </div>
         </span>
         ${this.lowConfidence
-          ? html`<button class="lowconf-improve" title="This transcript came back low confidence — re-transcribe it (optionally with a larger model) to improve it" @click=${this.openRerun}>! Improve…</button>`
+          ? html`<button class="lowconf-improve" title="This transcript came back low confidence — re-transcribe it with a larger model to improve it" @click=${this.openImprove}>! Improve…</button>`
           : null}
         <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
         <span class="export-trigger-wrap" style="position: relative; display: inline-block;">

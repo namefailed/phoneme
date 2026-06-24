@@ -23,7 +23,7 @@ const POS_LS = "phoneme.bulkBarPos";
 
 /**
  * The floating bar that appears while recordings are multi-selected (Space /
- * Shift+↑↓ in the list). Buttons: Re-run… (the shared RerunForm in a modal,
+ * Shift+↑↓ in the list). Buttons: Re-run… (the shared Re-run modal in a modal,
  * applied to every selected id), Tag (attach one tag to all), Export
  * (txt/json/csv via a save dialog), Side-by-side (exactly two selected —
  * dispatches `phoneme:open-split`), Delete (`phoneme:request-delete`, the

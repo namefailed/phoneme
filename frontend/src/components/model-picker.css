@@ -121,3 +121,86 @@
   color: var(--accent-fg);
   opacity: 0.88;
 }
+
+/* Scope switch — the first, explicit choice: one-time run vs. saving defaults. */
+.mp-scope {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin: 2px 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-inset, var(--bg-surface));
+}
+.mp-scope-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 0.875rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ui-motion-fast, 0.12s) ease, color var(--ui-motion-fast, 0.12s) ease;
+}
+.mp-scope-btn:hover:not(:disabled) { color: var(--fg-default); }
+.mp-scope-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.mp-scope-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.mp-scope-hint {
+  font-size: 0.7857rem;
+  color: var(--fg-faded);
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+
+/* Recipe bar (Re-run scope): the recipe is the noun; models are adjectives. */
+.mp-recipe-bar {
+  padding: 4px 4px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 8px;
+}
+.mp-recipe-steps {
+  font-size: 0.7857rem;
+  color: var(--fg-muted);
+  margin: 6px 0 0;
+  letter-spacing: 0.01em;
+}
+
+/* "Advanced — override step models" disclosure (Re-run scope). */
+.mp-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px 2px;
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.mp-advanced-toggle:hover { color: var(--fg-default); }
+.mp-adv-caret {
+  display: inline-block;
+  transition: transform var(--ui-motion-fast, 0.12s) ease;
+}
+.mp-adv-caret.open { transform: rotate(90deg); }
+
+/* "Also save these as my defaults" — additive, never a competing primary button. */
+.mp-also-save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  margin: 4px 2px 8px;
+}
