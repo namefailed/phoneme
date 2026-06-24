@@ -53,6 +53,10 @@ pub enum Command {
     SuggestEntities(SuggestEntitiesArgs),
     /// Generate a recording's topic chapters (or view stored ones with --show).
     Chapters(ChaptersArgs),
+    /// List a recording's transcript-version chain (raw ASR → each pipeline step →
+    /// live) for side-by-side comparison. A cross-platform alternative to the
+    /// daemon named pipe, which is the only other surface that exposes versions.
+    Versions(IdArgs),
     /// Generate (or view) a period digest — one LLM rollup across every recording
     /// in a date window (what was discussed, decisions, open items). Distinct from
     /// the per-recording `summarize` and the meeting-scoped `meeting digest`.

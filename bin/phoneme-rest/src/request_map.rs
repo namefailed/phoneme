@@ -91,6 +91,37 @@ pub fn get_chapters(id: RecordingId) -> Request {
     Request::GetChapters { id }
 }
 
+/// `GET /api/recordings/:id/versions` → [`Request::ListTranscriptVersions`]. The
+/// compounding-transcript chain (raw ASR → each step → live) for side-by-side
+/// compare; an HTTP alternative to the pipe-only access a client would otherwise
+/// need (cross-platform, no named-pipe path).
+pub fn transcript_versions(id: RecordingId) -> Request {
+    Request::ListTranscriptVersions { id }
+}
+
+/// JSON body for `POST /api/recordings/:id/clip`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ClipBody {
+    /// Start of the range, in milliseconds from the recording's start.
+    pub start_ms: i64,
+    /// End of the range, in milliseconds (exclusive; clamped to the duration).
+    pub end_ms: i64,
+    /// Absolute output path for the new WAV; absent/empty = next to the source
+    /// with a `_clip_<start>-<end>` suffix.
+    #[serde(default)]
+    pub out_path: Option<String>,
+}
+
+/// `POST /api/recordings/:id/clip` → [`Request::ExportClip`].
+pub fn export_clip(id: RecordingId, body: &ClipBody) -> Request {
+    Request::ExportClip {
+        id,
+        start_ms: body.start_ms,
+        end_ms: body.end_ms,
+        out_path: body.out_path.clone(),
+    }
+}
+
 /// `GET /api/search` → [`Request::SemanticSearch`].
 pub fn search(q: &SearchQuery) -> Request {
     Request::SemanticSearch {

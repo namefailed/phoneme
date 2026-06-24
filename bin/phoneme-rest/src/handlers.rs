@@ -15,7 +15,8 @@ use phoneme_ipc::Request;
 use crate::daemon;
 use crate::error::RestError;
 use crate::request_map::{
-    self, AttachTagBody, FavoriteBody, ListQuery, PinnedBody, SearchQuery, SimilarQuery, TitleBody,
+    self, AttachTagBody, ClipBody, FavoriteBody, ListQuery, PinnedBody, SearchQuery, SimilarQuery,
+    TitleBody,
 };
 use crate::server::AppState;
 
@@ -78,6 +79,28 @@ pub async fn get_chapters(
 ) -> Result<Json<serde_json::Value>, RestError> {
     let id = require_id(&id)?;
     forward(&state, request_map::get_chapters(id)).await
+}
+
+/// `GET /api/recordings/:id/versions` — the compounding transcript-version chain
+/// (raw ASR → each step → live) for side-by-side compare. A cross-platform HTTP
+/// alternative to the pipe-only access (no named-pipe path needed).
+pub async fn get_versions(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, RestError> {
+    let id = require_id(&id)?;
+    forward(&state, request_map::transcript_versions(id)).await
+}
+
+/// `POST /api/recordings/:id/clip` — export a WAV slice of the recording for a
+/// `{start_ms,end_ms[,out_path]}` range; returns `{"path": "…"}`.
+pub async fn export_clip(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<ClipBody>,
+) -> Result<Json<serde_json::Value>, RestError> {
+    let id = require_id(&id)?;
+    forward(&state, request_map::export_clip(id, &body)).await
 }
 
 /// `GET /api/recordings/:id/similar?limit=` — "more like this" using the

@@ -101,6 +101,8 @@ pub struct AppState {
 /// | GET    | `/api/recordings/{id}/segments` | `GetSegments`   |
 /// | GET    | `/api/recordings/{id}/words`  | `GetWords`        |
 /// | GET    | `/api/recordings/{id}/chapters` | `GetChapters`   |
+/// | GET    | `/api/recordings/{id}/versions` | `ListTranscriptVersions` |
+/// | POST   | `/api/recordings/{id}/clip`   | `ExportClip`      |
 /// | GET    | `/api/recordings/{id}/similar` | `MoreLikeThis`   |
 /// | GET    | `/api/recordings/{id}/tags`   | `TagsFor`         |
 /// | POST   | `/api/recordings/{id}/tags`   | `AttachTag`       |
@@ -127,6 +129,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/recordings/{id}/segments", get(handlers::get_segments))
         .route("/api/recordings/{id}/words", get(handlers::get_words))
         .route("/api/recordings/{id}/chapters", get(handlers::get_chapters))
+        .route("/api/recordings/{id}/versions", get(handlers::get_versions))
+        .route("/api/recordings/{id}/clip", post(handlers::export_clip))
         .route(
             "/api/recordings/{id}/similar",
             get(handlers::more_like_this),

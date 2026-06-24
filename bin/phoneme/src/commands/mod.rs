@@ -38,6 +38,7 @@ pub mod speaker;
 pub mod suggest_entities;
 pub mod suggest_tags;
 pub mod suggest_tasks;
+pub mod versions;
 pub mod summarize;
 pub mod tag;
 pub mod tasks;

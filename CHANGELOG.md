@@ -400,6 +400,13 @@ trust boundary.*
 
 ### Internals & refactors
 
+- [x] **Integration surfaces for companion apps** — Phoneme is a local backend other
+  local-first apps (e.g. youtube-note-thing) delegate to. New cross-platform reach for two
+  previously named-pipe-only features: a CLI **`phoneme versions <id>`** and a REST
+  **`GET /api/recordings/{id}/versions`** (the transcript-version chain), plus a REST
+  **`POST /api/recordings/{id}/clip`** (`{start_ms,end_ms[,out_path]}` → `{path}`). `GET /api/status`
+  already reports the daemon `version` for compat checks. Documented the full contract in
+  `docs/dev/integration-api.md`. (Still pipe/CLI-only, tracked: `POST /api/import {url}` and RAG `Ask`.)
 - [x] **Slimmer bundled Playbook defaults** — a fresh config now seeds just the
   built-in steps (cleanup, title, summary, auto-tag, the entities/chapters/tasks
   enrichments, and the meeting-digest templates) plus a single **copy-to-clipboard**

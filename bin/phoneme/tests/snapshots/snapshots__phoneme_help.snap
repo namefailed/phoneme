@@ -18,6 +18,7 @@ Commands:
   suggest-tags      Re-run the LLM tag-suggestion step on a recording on demand
   suggest-entities  Re-run the LLM entity-extraction step on a recording on demand
   chapters          Generate a recording's topic chapters (or view stored ones with --show)
+  versions          List a recording's transcript-version chain (raw ASR → each pipeline step → live) for side-by-side comparison. A cross-platform alternative to the daemon named pipe, which is the only other surface that exposes versions
   digest            Generate (or view) a period digest — one LLM rollup across every recording in a date window (what was discussed, decisions, open items). Distinct from the per-recording `summarize` and the meeting-scoped `meeting digest`
   suggest-tasks     Re-run the LLM task-extraction step on a recording on demand
   notes             Get or set a recording's free-form notes
@@ -25,6 +26,7 @@ Commands:
   find-replace      Find-and-replace literal text across a recording's transcript
   clip              Export a time range of a recording's audio to a new WAV
   speaker           Rename or clear a recording's diarized speaker labels
+  voice             Manage the named-voice library (list / rename / forget / merge) — the cross-recording identities recognized speakers are matched against
   search            Semantic (embedding) search over transcripts
   ask               Ask a question answered from your own transcripts, with citations (local RAG over the same hybrid retriever as `search`)
   reembed           Clear all embeddings and re-embed the whole library with the current model
