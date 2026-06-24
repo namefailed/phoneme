@@ -194,6 +194,25 @@
 }
 .mp-adv-caret.open { transform: rotate(90deg); }
 
+/* Per-step Advanced label: inherits the recipe's model, or overrides it this run. */
+.mp-ovr-row {
+  margin: 0 0 8px;
+}
+.mp-ovr {
+  display: inline-block;
+  font-size: 0.7143rem;
+  color: var(--fg-faded);
+  background: var(--bg-inset, var(--bg-surface));
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+.mp-ovr--on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 /* "Also save these as my defaults" — additive, never a competing primary button. */
 .mp-also-save {
   display: flex;

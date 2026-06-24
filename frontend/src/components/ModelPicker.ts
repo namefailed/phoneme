@@ -105,6 +105,12 @@ export class ModelPickerElement extends LitElement {
    *  defaults after the run (the "I liked that run, keep it" path) — additive, so
    *  the primary action stays "Run once" and there's no competing Save button. */
   @state() private alsoSaveDefaults = false;
+  /** The recipe/config baseline model for each overridable step, captured at load,
+   *  so the Advanced rows can show "inherits recipe (value)" vs "overrides this
+   *  run". Plain fields (not reactive) — they never change after init. */
+  private baseLlmModel = "";
+  private baseSumModel = "";
+  private baseTitModel = "";
   @state() private downloadedModels: string[] = [];
   @state() private sttRealProvider = "local";
   @state() private sttUrl = "";
@@ -405,6 +411,12 @@ export class ModelPickerElement extends LitElement {
     this.titModel = String(tit.model ?? "");
     this.titKey = String(tit.api_key ?? "");
 
+    // Baselines for the Advanced inherit/override labels (the cleanup/summary/title
+    // models a re-run would use if left untouched).
+    this.baseLlmModel = this.llmModel;
+    this.baseSumModel = this.sumModel;
+    this.baseTitModel = this.titModel;
+
     const at = this.config.auto_tag || {};
     this.atProvider = String(at.provider ?? "");
     this.atUrl = String(at.api_url ?? "");
@@ -603,10 +615,39 @@ export class ModelPickerElement extends LitElement {
   private panelVisible(tab: MpTab): boolean {
     if (this.activeMode === "oneshot") {
       if (tab === "transcription") return true;
-      if (tab === "postprocessing" || tab === "title" || tab === "summary") return this.advancedOpen;
+      // Advanced shows an override row only for a step the chosen recipe actually
+      // runs (and only while the disclosure is open).
+      if (tab === "postprocessing") return this.advancedOpen && this.recipeRunsStep("cleanup");
+      if (tab === "title") return this.advancedOpen && this.recipeRunsStep("title");
+      if (tab === "summary") return this.advancedOpen && this.recipeRunsStep("summary");
       return false; // auto-tag / live preview / semantic don't apply to a re-run
     }
     return this.activeTab === tab;
+  }
+
+  /** Whether the chosen re-run recipe (or the default pipeline) actually runs a
+   *  given built-in step — so Advanced only offers overrides that will apply. Keyed
+   *  on the built-in entry ids the daemon's override path matches. A recipe with no
+   *  step list (older config) shows all rows rather than hiding capability. */
+  private recipeRunsStep(step: "cleanup" | "title" | "summary"): boolean {
+    const id = this.recipeId.trim() || "default";
+    const steps = this.recipes.find((r) => r.id === id)?.steps;
+    return !steps || steps.includes(step);
+  }
+
+  /** True when the chosen recipe runs at least one overridable step — gates the
+   *  whole "Advanced" disclosure so an empty one never shows. */
+  private get hasOverridableSteps(): boolean {
+    return this.recipeRunsStep("cleanup") || this.recipeRunsStep("title") || this.recipeRunsStep("summary");
+  }
+
+  /** Per-step Advanced label: inherits the recipe's model for this step (with its
+   *  value) or overrides it for this run. */
+  private overrideBadge(stepLabel: string, current: string, base: string) {
+    const b = base.trim() || "provider default";
+    return current.trim() && current.trim() !== base.trim()
+      ? html`<span class="mp-ovr mp-ovr--on">${stepLabel} · overrides this run</span>`
+      : html`<span class="mp-ovr">${stepLabel} · inherits recipe (${b})</span>`;
   }
 
   /** Switch scope, resetting the per-scope view state so the body never shows a
@@ -762,15 +803,16 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">Where your audio is transcribed. <b>Local</b> stays on your machine and uses the bundled model from full Settings; cloud options upload audio to a third-party API.</p>
           </div>
 
-          ${this.activeMode === "oneshot"
+          ${this.activeMode === "oneshot" && this.hasOverridableSteps
             ? html`<button type="button" class="mp-advanced-toggle" aria-expanded=${this.advancedOpen}
                 @click=${() => (this.advancedOpen = !this.advancedOpen)}>
                 <span class="mp-adv-caret ${this.advancedOpen ? "open" : ""}">▸</span>
-                Advanced — override individual step models for this run
+                Advanced — override step models for this run
               </button>`
             : ""}
 
           <div class="mp-panel" ?hidden=${!this.panelVisible('postprocessing')}>
+            ${this.activeMode === "oneshot" ? html`<p class="mp-ovr-row">${this.overrideBadge("Cleanup", this.llmModel, this.baseLlmModel)}</p>` : ""}
             <label class="mp-label">Provider</label>
             <div class="mp-conn-host" id="mp-llm-conn-host"></div>
 
@@ -786,6 +828,7 @@ export class ModelPickerElement extends LitElement {
           </div>
 
           <div class="mp-panel" ?hidden=${!this.panelVisible('title')}>
+            ${this.activeMode === "oneshot" ? html`<p class="mp-ovr-row">${this.overrideBadge("Title", this.titModel, this.baseTitModel)}</p>` : ""}
             <label class="mp-label">Provider</label>
             <div class="mp-conn-host" id="mp-tit-conn-host"></div>
 
@@ -797,6 +840,7 @@ export class ModelPickerElement extends LitElement {
           </div>
 
           <div class="mp-panel" ?hidden=${!this.panelVisible('summary')}>
+            ${this.activeMode === "oneshot" ? html`<p class="mp-ovr-row">${this.overrideBadge("Summary", this.sumModel, this.baseSumModel)}</p>` : ""}
             <label class="mp-label">Provider</label>
             <div class="mp-conn-host" id="mp-sum-conn-host"></div>
 
