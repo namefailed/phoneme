@@ -8,6 +8,34 @@
 export type WizardStep = "welcome" | "mode" | "configure" | "connect" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "review" | "done";
 export const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "connect", "mic", "preview", "summary", "hook", "hotkey", "review", "done"];
 
+/** The 5 grouped phases the redesigned stepper shows. The customize flow renders
+ *  one composed page per phase (several old steps stacked); the progress stepper
+ *  maps any step to its phase via {@link STEP_PHASE}. */
+export type WizardPhase = "welcome" | "transcription" | "capture" | "output" | "done";
+export const PHASE_ORDER: WizardPhase[] = ["welcome", "transcription", "capture", "output", "done"];
+export const PHASE_LABELS: Record<WizardPhase, string> = {
+  welcome: "Welcome",
+  transcription: "Transcription & AI",
+  capture: "Capture",
+  output: "Output",
+  done: "Done",
+};
+/** Which phase each step belongs to — drives the 5-dot stepper for both the
+ *  express and customize paths. */
+export const STEP_PHASE: Record<WizardStep, WizardPhase> = {
+  welcome: "welcome",
+  mode: "transcription",
+  configure: "transcription",
+  connect: "transcription",
+  mic: "capture",
+  preview: "capture",
+  hotkey: "capture",
+  summary: "output",
+  hook: "output",
+  review: "done",
+  done: "done",
+};
+
 /** Short human label per step, shown in the progress stepper. */
 export const STEP_LABELS: Record<WizardStep, string> = {
   welcome: "Welcome",

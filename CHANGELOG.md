@@ -1117,12 +1117,13 @@ trust boundary.*
 
 ### Appearance & themes
 
-- [x] **First-run wizard — modern hero welcome** — the express welcome now leads with
-  a real hero: a mauve brand-mark tile with a soft accent halo, a bold headline, a
-  privacy reassurance line, and a crisper **Recommended local setup** card (green
-  spec pill, hairline-divided plan rows + accent border). The header gains a logo-mark
-  tile and the progress dots an active ring. (First stage of a staged wizard redesign —
-  flow grouping to follow.)
+- [x] **First-run wizard redesign** — a modern hero welcome (mauve brand-mark tile with a
+  soft accent halo, a bold headline, a privacy reassurance line, and a sharpened
+  **Recommended local setup** card — green spec pill, hairline-divided plan rows, accent
+  border; header logo-mark tile + active-ring stepper dots). The **Customize** flow is
+  collapsed from 11 click-through steps into **5 grouped phases** — Welcome ·
+  Transcription &amp; AI · Capture · Output · Done — each a single scrolling page, with a
+  5-phase progress stepper. Model installs now run when you leave the Transcription phase.
 - [x] **Show/hide the Tags, Tasks & Entities sidebar sections** — a new **Sidebar
   sections** block under Settings → Appearance toggles each of the three movable
   sidebar sections on or off entirely (separate from collapsing them). Per-device,

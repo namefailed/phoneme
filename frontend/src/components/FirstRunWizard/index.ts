@@ -9,8 +9,9 @@ import { CLOUD_STT_PROVIDERS, PREVIEW_STT_PROVIDERS } from "../../services/sttPr
 import { curatedTranscriptionModels, curatedCleanupModels, type CuratedModel } from "../../data/curatedModels";
 import { effectivePortFor, type WhisperPortStatus } from "../SettingsView/SectionWhisper";
 import {
-  type WizardStep, type PreviewSource, ALL_STEPS, STEP_LABELS, DEFAULT_SUMMARY_PROMPT,
+  type WizardStep, type PreviewSource, DEFAULT_SUMMARY_PROMPT,
   prettyPreviewModel, prettyWhisper,
+  PHASE_ORDER, PHASE_LABELS, STEP_PHASE,
 } from "./wizardSteps";
 import {
   applyRecommendedSetup, recommendedPlan, stripScratchKeys, buildPreviewLocal, buildPreviewApi,
@@ -111,7 +112,10 @@ export class FirstRunWizardElement extends LitElement {
   private steps(): WizardStep[] {
     return this.express
       ? ["welcome", "configure", "mic", "hotkey", "review", "done"]
-      : ALL_STEPS;
+      // Customize: one anchor step per phase — each renders a composed phase page.
+      // Transcription's model installs fire from its Continue, not a configure step,
+      // so "configure" is not in the sequence here.
+      : ["welcome", "mode", "mic", "summary", "review", "done"];
   }
 
   /** True when a step has nothing for the user to do, so navigation should pass
@@ -144,10 +148,11 @@ export class FirstRunWizardElement extends LitElement {
     if (direction === "next" && this.step === "configure") {
       this.runConfigureStep();
     }
-    // Seed the live-preview defaults on first FORWARD entry only — never from
-    // render(), so merely viewing the step (or a back-nav) can't silently turn
-    // preview on in the persisted config.
-    if (direction === "next" && this.step === "preview") {
+    // Seed the live-preview defaults on first FORWARD entry to the Capture phase
+    // (customize composes the preview there) — never from render(), so merely
+    // viewing it (or a back-nav) can't silently turn preview on in the config.
+    // Express has no preview UI, so it never seeds.
+    if (direction === "next" && !this.express && this.step === "mic") {
       this.seedPreviewDefaults();
     }
   }
@@ -189,19 +194,23 @@ export class FirstRunWizardElement extends LitElement {
   private finish = () => this.persistAndComplete();
 
   private renderProgress() {
-    const seq = this.steps();
-    const idx = seq.indexOf(this.step);
-    const pct = seq.length > 1 ? (idx / (seq.length - 1)) * 100 : 0;
+    // Always five grouped phases, whichever path (express/customize) is active —
+    // the current step maps to its phase via STEP_PHASE.
+    const phase = STEP_PHASE[this.step];
+    const idx = PHASE_ORDER.indexOf(phase);
+    const pct = (idx / (PHASE_ORDER.length - 1)) * 100;
     return html`
       <div class="wizard-header-top">
         <span class="wizard-brand"><span class="wizard-brand-mark">🎙</span>Phoneme — Setup</span>
-        <span class="wizard-steplabel">Step <b>${idx + 1}</b> of ${seq.length} · <b>${STEP_LABELS[this.step]}</b></span>
+        <span class="wizard-steplabel">Phase <b>${idx + 1}</b> of ${PHASE_ORDER.length} · <b>${PHASE_LABELS[phase]}</b></span>
       </div>
       <div class="wizard-progress"><div class="wizard-progress-fill" style="width: ${pct}%"></div></div>
-      <div class="wizard-dots">
-        ${seq.map((s, i) => {
+      <div class="wizard-phases">
+        ${PHASE_ORDER.map((p, i) => {
           const klass = i < idx ? "done" : i === idx ? "active" : "";
-          return html`<span class="wizard-dot ${klass}" title="${STEP_LABELS[s]}"></span>`;
+          return html`<span class="wizard-phase ${klass}" title=${PHASE_LABELS[p]}>
+            <span class="wizard-dot ${klass}"></span><span class="wizard-phase-label">${PHASE_LABELS[p]}</span>
+          </span>`;
         })}
       </div>
     `;
@@ -348,7 +357,9 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
-  private renderModePicker() {
+  /** Body of the Transcription & AI phase's feature picker (no wrapper/footer —
+   *  composed into renderTranscriptionPhase). */
+  private renderModeBody() {
     // Pre-select recommended features/models for the detected hardware.
     applyRecommendedSetup(this.config, this.systemRamMb, this.systemVramMb);
 
@@ -359,7 +370,6 @@ export class FirstRunWizardElement extends LitElement {
         <span class="track"></span><span class="thumb"></span>
       </label>`;
     return html`
-      <div class="wizard-body">
         <h2 class="wizard-title">Choose your features</h2>
         <p class="wizard-subtitle">
           We detected <b>${gb}GB</b> of RAM${this.systemVramMb > 0 ? html` and <b>${Math.round(this.systemVramMb / 1024)}GB</b> of VRAM` : ""}
@@ -428,14 +438,6 @@ export class FirstRunWizardElement extends LitElement {
             ? html`<div class="wizard-feature-note">Downloads a ~90 MB embedding model so you can search transcripts by meaning, not just keywords.</div>`
             : html`<div class="wizard-feature-note">Off — search falls back to plain keyword matching.</div>`}
         </div>
-
-      </div>
-      <div class="wizard-footer">
-        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
-        <span class="spacer"></span>
-        <button class="wizard-btn ghost" @click=${this.skip}>Skip setup</button>
-        <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
-      </div>
     `;
   }
 
@@ -731,18 +733,17 @@ export class FirstRunWizardElement extends LitElement {
    * summaries (no local Ollama). Each uses the shared provider catalog so a
    * non-technical user just picks a name and pastes a key. Fully skippable.
    */
-  private renderConnect() {
+  /** Body of the cloud-provider connect section — empty when every chosen feature
+   *  is local. Composed into renderTranscriptionPhase. */
+  private renderConnectBody() {
     const c = this.config;
     if (!c.whisper) c.whisper = {};
     if (!c.llm_post_process) c.llm_post_process = {};
     const needsStt = !c._setup_whisper;
     const offerCleanup = !c._setup_ollama;
 
-    // Nothing cloud to set up — everything is local. go() skips this step during
-    // navigation now, so this is just a quiet placeholder (no re-navigation).
-    if (!needsStt && !offerCleanup) {
-      return html`<div class="wizard-body"><p class="wizard-subtitle">All local — no API keys needed.</p></div>`;
-    }
+    // Everything local — no cloud keys needed, so this section contributes nothing.
+    if (!needsStt && !offerCleanup) return html``;
 
     const inputStyle =
       "width:100%; padding:9px 12px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default); font-size: 0.9286rem;";
@@ -752,7 +753,7 @@ export class FirstRunWizardElement extends LitElement {
       : "";
 
     return html`
-      <div class="wizard-body">
+        <div class="wizard-section-sep"></div>
         <h2 class="wizard-title">Connect your AI providers</h2>
         <p class="wizard-subtitle">
           These features will use a cloud API. Paste your keys now — or skip and add them anytime in
@@ -818,20 +819,24 @@ export class FirstRunWizardElement extends LitElement {
               ` : html`<span class="wizard-feature-note">Skip to keep transcripts raw. You can connect a provider later in Settings.</span>`}
             </div>
           </div>` : ""}
-      </div>
+    `;
+  }
+
+  /** Standard Back / Skip / Continue footer used by the express single-step pages
+   *  and the composed customize phases. */
+  private renderStepFooter() {
+    return html`
       <div class="wizard-footer">
         <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
         <span class="spacer"></span>
         <button class="wizard-btn ghost" @click=${this.skip}>Skip setup</button>
         <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
-      </div>
-    `;
+      </div>`;
   }
 
-  private renderMic() {
+  private renderMicBody() {
     if (!this.config.recording) this.config.recording = {};
     return html`
-      <div class="wizard-body">
         <h2 class="wizard-title">Microphone</h2>
         <p class="wizard-subtitle">Pick the input device Phoneme should record from.</p>
         <div class="wizard-field">
@@ -841,14 +846,11 @@ export class FirstRunWizardElement extends LitElement {
             ${this.devices.map(d => html`<option value=${d}>${d}</option>`)}
           </select>
         </div>
-      </div>
-      <div class="wizard-footer">
-        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
-        <span class="spacer"></span>
-        <button class="wizard-btn" @click=${this.skip}>Skip setup</button>
-        <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
-      </div>
     `;
+  }
+  /** Express single-step Microphone page (customize composes the body into Capture). */
+  private renderMic() {
+    return html`<div class="wizard-body">${this.renderMicBody()}</div>${this.renderStepFooter()}`;
   }
 
   /** Which preview source is active, from the current config (mirrors SectionPreview). */
@@ -953,7 +955,8 @@ export class FirstRunWizardElement extends LitElement {
     }
   }
 
-  private renderPreview() {
+  /** Body of the Live Preview section (composed into the Capture phase). */
+  private renderPreviewBody() {
     if (!this.config.recording) this.config.recording = {};
     if (!this.config.interface) this.config.interface = {};
     // Defaults are seeded once on forward entry (seedPreviewDefaults via go()),
@@ -971,7 +974,7 @@ export class FirstRunWizardElement extends LitElement {
       </label>`;
 
     return html`
-      <div class="wizard-body">
+        <div class="wizard-section-sep"></div>
         <h2 class="wizard-title">Live Preview <span class="beta-pill">BETA</span></h2>
         <p class="wizard-subtitle">
           Watch words appear as you speak. Give the preview its own fast model or
@@ -1027,13 +1030,6 @@ export class FirstRunWizardElement extends LitElement {
             </div>
           </div>
         ` : ""}
-      </div>
-      <div class="wizard-footer">
-        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
-        <span class="spacer"></span>
-        <button class="wizard-btn" @click=${this.skip}>Skip setup</button>
-        <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
-      </div>
     `;
   }
 
@@ -1091,7 +1087,8 @@ export class FirstRunWizardElement extends LitElement {
       </div>`;
   }
 
-  private renderSummary() {
+  /** Body of the Auto-Summary section (composed into the Output phase). */
+  private renderSummaryBody() {
     if (!this.config.summary) {
       this.config.summary = { auto: false, provider: "", api_key: "", api_url: "", model: "", prompt: DEFAULT_SUMMARY_PROMPT };
     }
@@ -1101,7 +1098,6 @@ export class FirstRunWizardElement extends LitElement {
     // post-processing provider is already enabled.
     const hasLlm = !!this.config._setup_ollama || !!this.config.llm_post_process?.enabled;
     return html`
-      <div class="wizard-body">
         <h2 class="wizard-title">Auto Summary</h2>
         <p class="wizard-subtitle">
           Optionally generate a short AI summary of every recording as the final step of the
@@ -1127,21 +1123,15 @@ export class FirstRunWizardElement extends LitElement {
             ⚠️ You haven't set up a local LLM. Add a provider in Settings → AI Post-Processing for
             summaries to actually run.
           </p>` : ""}
-      </div>
-      <div class="wizard-footer">
-        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
-        <span class="spacer"></span>
-        <button class="wizard-btn" @click=${this.skip}>Skip setup</button>
-        <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
-      </div>
     `;
   }
 
-  private renderHook() {
+  /** Body of the Destination section (composed into the Output phase). */
+  private renderHookBody() {
     if (!this.config.hook) this.config.hook = {};
     if (!this.config.hook.commands) this.config.hook.commands = [];
     return html`
-      <div class="wizard-body">
+        <div class="wizard-section-sep"></div>
         <h2 class="wizard-title">Destination (Apps & Scripts)</h2>
         <p class="wizard-subtitle">Where should Phoneme send your text? We can automatically pass your transcripts to other apps, save them to files, or copy them. The default simply displays it here.</p>
         <div class="wizard-field">
@@ -1152,13 +1142,6 @@ export class FirstRunWizardElement extends LitElement {
           <label>Timeout (seconds)</label>
           <input type="number" id="to" .value=${this.config.hook.timeout_secs || 5} @input=${(e: Event) => this.config.hook.timeout_secs = Number((e.target as HTMLInputElement).value)} />
         </div>
-      </div>
-      <div class="wizard-footer">
-        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
-        <span class="spacer"></span>
-        <button class="wizard-btn" @click=${this.skip}>Skip setup</button>
-        <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
-      </div>
     `;
   }
 
@@ -1209,7 +1192,8 @@ export class FirstRunWizardElement extends LitElement {
     document.removeEventListener("keydown", this.keydownHandler, { capture: true });
   }
 
-  private renderHotkey() {
+  /** Body of the Global Hotkeys section (composed into the Capture phase). */
+  private renderHotkeyBody() {
     if (!this.config.hotkey) this.config.hotkey = {};
     if (!this.config.meeting_hotkey) this.config.meeting_hotkey = {};
     if (!this.config.in_place_hotkey) this.config.in_place_hotkey = {};
@@ -1220,7 +1204,7 @@ export class FirstRunWizardElement extends LitElement {
     if (this.config.in_place_hotkey.enabled === undefined) this.config.in_place_hotkey.enabled = true;
 
     return html`
-      <div class="wizard-body">
+        <div class="wizard-section-sep"></div>
         <h2 class="wizard-title">Global Hotkeys</h2>
         <p class="wizard-subtitle">Press these combos from anywhere to start recording your voice note.</p>
 
@@ -1260,14 +1244,11 @@ export class FirstRunWizardElement extends LitElement {
           </div>
 
         </div>
-      </div>
-      <div class="wizard-footer">
-        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
-        <span class="spacer"></span>
-        <button class="wizard-btn" @click=${this.skip}>Skip setup</button>
-        <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
-      </div>
     `;
+  }
+  /** Express single-step Hotkeys page (customize composes the body into Capture). */
+  private renderHotkey() {
+    return html`<div class="wizard-body">${this.renderHotkeyBody()}</div>${this.renderStepFooter()}`;
   }
 
   private renderReview() {
@@ -1393,6 +1374,49 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
+  // ── Customize-path phases: each composes several step bodies onto one page ──
+  /** Transcription & AI: feature picker + (when needed) cloud-provider connect.
+   *  Continue runs the model installs, then advances to Capture. */
+  private renderTranscriptionPhase() {
+    return html`
+      <div class="wizard-body">
+        ${this.renderModeBody()}
+        ${this.renderConnectBody()}
+      </div>
+      <div class="wizard-footer">
+        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
+        <span class="spacer"></span>
+        <button class="wizard-btn ghost" @click=${this.skip}>Skip setup</button>
+        <button class="wizard-btn primary" @click=${() => this.goFromTranscription()}>Continue →</button>
+      </div>
+    `;
+  }
+
+  /** Capture: microphone + live preview + global hotkeys. */
+  private renderCapturePhase() {
+    return html`<div class="wizard-body">
+        ${this.renderMicBody()}
+        ${this.renderPreviewBody()}
+        ${this.renderHotkeyBody()}
+      </div>${this.renderStepFooter()}`;
+  }
+
+  /** Output: auto-summary + destination (apps & scripts). */
+  private renderOutputPhase() {
+    return html`<div class="wizard-body">
+        ${this.renderSummaryBody()}
+        ${this.renderHookBody()}
+      </div>${this.renderStepFooter()}`;
+  }
+
+  /** Leaving the Transcription phase: install the chosen models (the download
+   *  screen takes over), then advance — or skip straight ahead if nothing local
+   *  was selected. */
+  private goFromTranscription() {
+    if (this.isEmptyStep("configure")) { this.go("next"); return; }
+    this.runConfigureStep();
+  }
+
   render() {
     if (!this.config) return html`<div class="wizard-shell">Loading...</div>`;
 
@@ -1401,19 +1425,27 @@ export class FirstRunWizardElement extends LitElement {
         <div class="wizard-header">
           ${this.renderProgress()}
         </div>
-        ${this.step === 'welcome' ? (this.express ? this.renderExpressWelcome() : this.renderWelcome()) : ''}
-        ${this.step === 'mode' ? this.renderModePicker() : ''}
-        ${this.step === 'configure' ? this.renderConfigure() : ''}
-        ${this.step === 'connect' ? this.renderConnect() : ''}
-        ${this.step === 'mic' ? this.renderMic() : ''}
-        ${this.step === 'preview' ? this.renderPreview() : ''}
-        ${this.step === 'summary' ? this.renderSummary() : ''}
-        ${this.step === 'hook' ? this.renderHook() : ''}
-        ${this.step === 'hotkey' ? this.renderHotkey() : ''}
-        ${this.step === 'review' ? this.renderReview() : ''}
-        ${this.step === 'done' ? this.renderDone() : ''}
+        ${this.renderStepContent()}
       </div>
     `;
+  }
+
+  /** Dispatch the current step/phase. A running (or errored) install takes over
+   *  the screen; otherwise express renders one step per page and customize
+   *  renders one composed phase per page. */
+  private renderStepContent() {
+    if (this.isDownloading || this.configError) return this.renderConfigure();
+    switch (this.step) {
+      case "welcome": return this.express ? this.renderExpressWelcome() : this.renderWelcome();
+      case "configure": return this.renderConfigure();
+      case "mic": return this.express ? this.renderMic() : this.renderCapturePhase();
+      case "hotkey": return this.renderHotkey();
+      case "mode": return this.renderTranscriptionPhase();
+      case "summary": return this.renderOutputPhase();
+      case "review": return this.renderReview();
+      case "done": return this.renderDone();
+      default: return html``;
+    }
   }
 }
 

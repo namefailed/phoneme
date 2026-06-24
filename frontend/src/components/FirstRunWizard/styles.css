@@ -92,6 +92,34 @@
   background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
+/* The 5 grouped phases under the progress bar — a labelled dot per phase. */
+.wizard-phases {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wizard-phase {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.7143rem;
+  letter-spacing: 0.1px;
+  color: var(--fg-faded);
+  white-space: nowrap;
+  overflow: hidden;
+  transition: color var(--ui-motion) ease;
+}
+.wizard-phase.active { color: var(--accent); font-weight: 600; }
+.wizard-phase.done { color: var(--fg-muted); }
+.wizard-phase-label { overflow: hidden; text-overflow: ellipsis; }
+/* Hairline divider between stacked sections within one composed phase page. */
+.wizard-section-sep {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 28px 0 2px;
+}
+
 /* ── Body ──────────────────────────────────────────────────────────────────── */
 .wizard-body {
   flex: 1;
