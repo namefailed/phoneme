@@ -33,6 +33,22 @@
   font-weight: 600;
   font-size: 1rem;
   letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+/* Small accent tile holding the mic glyph — reads as a logo mark in the chrome. */
+.wizard-brand-mark {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  background: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .wizard-steplabel {
   margin-left: auto;
@@ -70,6 +86,7 @@
 .wizard-dot.active {
   background: var(--accent);
   transform: scale(1.25);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .wizard-dot.done {
   background: color-mix(in srgb, var(--accent) 55%, transparent);
@@ -119,6 +136,43 @@
   margin: 0 0 24px;
   font-size: 1rem;
   line-height: 1.55;
+}
+
+/* ── Hero (express welcome) ──────────────────────────────────────────────────
+   A centered first impression: a mauve brand tile with a soft (static) accent
+   halo, the headline, a calm value line, and a privacy reassurance. The halo is
+   a fixed box-shadow, not a pulse — the cursor-animation rule says keep wizard
+   motion subtle; the per-step fade-in is the only movement here. */
+.wizard-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.wizard-hero-mark {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 27px;
+  margin-bottom: 14px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border-subtle));
+  box-shadow: 0 6px 26px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.wizard-hero .wizard-subtitle {
+  margin: 8px 0 0;
+  max-width: 440px;
+}
+.wizard-privacy {
+  margin: 12px 0 0;
+  font-size: 0.7857rem;
+  color: var(--fg-faded);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .wizard-bullets {
   color: var(--fg-default);
@@ -467,8 +521,8 @@ progress {
   margin-top: 1.25rem;
   padding: 1rem 1.1rem;
   border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-surface));
 }
 .wizard-express-head {
   display: flex;
@@ -484,7 +538,13 @@ progress {
 }
 .wizard-express-specs {
   font-size: 0.7857rem;
-  color: var(--fg-faded);
+  font-weight: 600;
+  color: var(--ok);
+  white-space: nowrap;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
 }
 .wizard-express-sub {
   margin: 6px 0 12px;
@@ -494,16 +554,19 @@ progress {
 }
 .wizard-express-plan {
   list-style: none;
-  margin: 0;
+  margin: 8px 0 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 .wizard-express-plan li {
   display: flex;
-  align-items: flex-start;
-  gap: 11px;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+}
+.wizard-express-plan li:first-child {
+  border-top: none;
+  padding-top: 2px;
 }
 .wizard-express-ico {
   font-size: 1.2857rem;

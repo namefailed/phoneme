@@ -1117,6 +1117,12 @@ trust boundary.*
 
 ### Appearance & themes
 
+- [x] **First-run wizard — modern hero welcome** — the express welcome now leads with
+  a real hero: a mauve brand-mark tile with a soft accent halo, a bold headline, a
+  privacy reassurance line, and a crisper **Recommended local setup** card (green
+  spec pill, hairline-divided plan rows + accent border). The header gains a logo-mark
+  tile and the progress dots an active ring. (First stage of a staged wizard redesign —
+  flow grouping to follow.)
 - [x] **Show/hide the Tags, Tasks & Entities sidebar sections** — a new **Sidebar
   sections** block under Settings → Appearance toggles each of the three movable
   sidebar sections on or off entirely (separate from collapsing them). Per-device,

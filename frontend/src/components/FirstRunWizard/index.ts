@@ -194,7 +194,7 @@ export class FirstRunWizardElement extends LitElement {
     const pct = seq.length > 1 ? (idx / (seq.length - 1)) * 100 : 0;
     return html`
       <div class="wizard-header-top">
-        <span class="wizard-brand">🎙 Phoneme — Setup</span>
+        <span class="wizard-brand"><span class="wizard-brand-mark">🎙</span>Phoneme — Setup</span>
         <span class="wizard-steplabel">Step <b>${idx + 1}</b> of ${seq.length} · <b>${STEP_LABELS[this.step]}</b></span>
       </div>
       <div class="wizard-progress"><div class="wizard-progress-fill" style="width: ${pct}%"></div></div>
@@ -222,8 +222,12 @@ export class FirstRunWizardElement extends LitElement {
     const plan = recommendedPlan(this.config);
     return html`
       <div class="wizard-body">
-        <h2 class="wizard-title">Welcome to Phoneme</h2>
-        <p class="wizard-subtitle">Local-first voice notes — press a hotkey, speak, get a transcript, all on your machine. Let's get you fully set up.</p>
+        <div class="wizard-hero">
+          <div class="wizard-hero-mark">🎙</div>
+          <h2 class="wizard-title">Your voice, captured privately</h2>
+          <p class="wizard-subtitle">A keyboard-driven voice-notes studio that transcribes and cleans up everything locally on your machine. Set it up in one click — tweak anything later.</p>
+          <p class="wizard-privacy">🔒 Everything stays on your machine — no account, no cloud.</p>
+        </div>
 
         <div class="wizard-express-card">
           <div class="wizard-express-head">
