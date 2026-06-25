@@ -385,10 +385,6 @@ Detection requires a provider that **reports** the language: the local `whisper.
 |-----|---------|-------------|
 | `schema_version` | `0` | One-time-migration version (top-level integer). Records how many config migrations have already run on this file, so Phoneme runs each migration **exactly once**. On load it runs every staged migration whose version step is newer than the stored value, in order, then writes the current version back; reloading an already-migrated config does nothing. Version steps: `0 → 1` = the Playbook reconcile (copies your LIVE `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` values into the matching built-in `[[playbook]]` entries and rebuilds the `default` recipe from the legacy enable flags); `1 → 2` = the hooks cutover (folds the legacy `[hook]` `commands` / `keyword_rules` / `webhook_url` into Hook `[[playbook]]` entries on the `default` recipe and clears the `[hook]` fields, so a hook fires once per transcribe — never twice). Idempotent — leave it alone. |
 
-### Deprecated: `playbook_migrated` · `hooks_migrated`
-
-These two top-level booleans were the old per-feature migration latches. They are **superseded by `schema_version`** and are now **deprecated**: an existing config that still has them keeps loading (Phoneme reads them **once** to infer the correct starting `schema_version` — `playbook_migrated && hooks_migrated` → already current; `playbook_migrated` only → version 1; neither → version 0), but Phoneme no longer writes them. They disappear from your `config.toml` the next time it is saved, replaced by `schema_version`. Nothing to do — the migration is automatic and runs no migration twice.
-
 ---
 
 ## `[[hotkeys]]`

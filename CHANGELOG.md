@@ -6,6 +6,16 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 
 ## Unreleased
 
+### Internal
+
+- [x] **Dropped the deprecated config-migration latches** — removed the legacy
+  deserialize-only `playbook_migrated` / `hooks_migrated` booleans and the
+  `infer_schema_version_from_legacy` inference that recovered a pre-versioning
+  config's version from them. Every config now carries an explicit
+  `schema_version`, so the latch-inference path was dead. The one-time Playbook /
+  hooks migrations themselves are unchanged (they still reconcile the Playbook on
+  load). Config-only — no database or transcript change.
+
 ### Integration & CLI
 
 - [x] **Per-import Playbook recipe** — `phoneme import <file-or-url> --recipe
