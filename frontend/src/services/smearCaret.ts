@@ -14,7 +14,8 @@
  *
  * Tied to the same `interface.cursor_animation` setting as the app-wide cursor
  * glow: "off" leaves CM's caret untouched; "glide" is a short follow, "smear" the
- * plugin's defaults, "trail" a longer streak. Honors prefers-reduced-motion. A
+ * plugin's defaults, "trail" a longer streak. Being opt-in, it takes precedence
+ * over the OS "reduce motion" flag (set the mode to "off" to follow it). A
  * single SVG overlay + a spring rAF that only runs WHILE the caret is moving
  * (kicked by `selectionchange`), so it idles at zero cost between keystrokes.
  */
@@ -41,16 +42,11 @@ const head = { x: 0, y: 0 };
 const tail = { x: 0, y: 0 };
 let installed = false;
 
-function prefersReducedMotion(): boolean {
-  try {
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  } catch {
-    return false;
-  }
-}
-
 function activeMode(): Exclude<Mode, "off"> | null {
-  return mode !== "off" && !prefersReducedMotion() ? mode : null;
+  // Same rule as the cursor glow: the setting is opt-in (default "off"), so a
+  // non-off value is a deliberate choice that wins over the OS "reduce motion"
+  // flag. Set cursor_animation back to "off" to follow reduce-motion.
+  return mode !== "off" ? mode : null;
 }
 
 function ensureSvg() {

@@ -713,6 +713,22 @@ export class DetailGridController {
     // Footer: Pipeline provenance button + the clickable reveal path.
     add(q1(`${root} #detail-pipeline-btn`), "button");
     add(q1(`${root} #detail-reveal-path`), "button");
+    // Insights card (Tasks + Entities). Without these the whole card was skipped by
+    // j/k/h/l, so there was no keyboard path to tasks or entities at all. Collected
+    // flat; the geometry pass buckets them into rows by where they sit. Everything
+    // is "button" (Enter = click): a click focuses the add inputs / opens the kind
+    // select, toggles a task's done checkbox, or fires Extract · Hide done · Add ·
+    // Manage · edit · delete. Collapsed sections render only their header, so the
+    // body selectors naturally drop out of the grid until you expand them.
+    add(q1(`${root} .insights-head`), "button");
+    addAll(
+      `${root} .insights-card .enrich-toggle, ${root} .insights-card .enrich-actions button, ` +
+        `${root} .insights-card .enrich-empty-cta, ${root} .insights-card .task-check, ` +
+        `${root} .insights-card .task-row-btn, ${root} .insights-card .task-add-input, ` +
+        `${root} .insights-card .task-add-btn, ${root} .insights-card .ent-del, ` +
+        `${root} .insights-card .entity-add-kind, ${root} .insights-card .entity-add-input`,
+      "button",
+    );
 
     return bucketCellsByRow(cells);
   }

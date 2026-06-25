@@ -6,6 +6,22 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 
 ## Unreleased
 
+### Fixed
+
+- [x] **Keyboard nav reaches Tasks & Entities** — the detail-pane grid never
+  collected the Insights card, so `j`/`k`/`h`/`l` skipped straight past Tasks and
+  Entities to the notes/footer. The card header, both section collapse toggles,
+  every Extract / Hide-done / Add / Manage button, the empty-state CTAs, each
+  task's done-toggle + edit + delete, the entity chips' delete, and the add
+  fields are now navigable cells (bucketed into rows by on-screen position like
+  the rest of the grid).
+- [x] **Cursor animation honors your explicit choice over OS "reduce motion"** —
+  the roving-cursor glow and the smear caret are opt-in (default `off`), so a
+  non-off `cursor_animation` is now respected even when the OS "reduce motion"
+  flag is set (e.g. Windows "animation effects" turned off). Previously the OS
+  flag silently disabled the glow you'd deliberately enabled. Leave it `off` to
+  follow the OS.
+
 ### Internal
 
 - [x] **Dropped the deprecated config-migration latches** — removed the legacy

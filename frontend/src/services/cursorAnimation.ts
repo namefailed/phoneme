@@ -12,9 +12,11 @@
  *   - "glide" — the glow slides + resizes to the new control (mini.animate-style).
  *   - "smear" — glide, plus a brief streak on bigger jumps (a nod to smear-cursor).
  *   - "trail" — glide, plus a stronger streak on every move.
- * `prefers-reduced-motion` forces it off regardless, and it's opt-in via Settings
- * → Appearance, so only users who want it pay any cost. A single ghost element +
- * an rAF-coalesced MutationObserver keep it light on weak machines.
+ * It's opt-in via Settings → Appearance (default "off"), so only users who chose
+ * it pay any cost — and because turning it on is a deliberate choice, that choice
+ * wins over the OS "reduce motion" flag (which governs the default for people who
+ * never set it). A single ghost element + an rAF-coalesced MutationObserver keep
+ * it light on weak machines.
  */
 
 type Mode = "off" | "glide" | "smear" | "trail";
@@ -102,17 +104,14 @@ function isEditing(t: EventTarget | null): boolean {
 /** Per-mode glide/streak duration (ms). */
 const DUR: Record<Exclude<Mode, "off">, number> = { glide: 130, smear: 170, trail: 220 };
 
-function prefersReducedMotion(): boolean {
-  try {
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  } catch {
-    return false;
-  }
-}
-
 function effective(): Exclude<Mode, "off"> | null {
-  if (mode === "off" || prefersReducedMotion()) return null;
-  return mode;
+  // `cursor_animation` defaults to "off", so any other value is a deliberate
+  // opt-in made in Settings → that explicit choice wins over the OS "reduce
+  // motion" flag (which only governs the default, conservative behaviour for
+  // people who never touch the setting). A user who turned the glow on clearly
+  // wants it; honouring reduce-motion "regardless" silently defeated them. Set
+  // the mode back to "off" to follow reduce-motion.
+  return mode === "off" ? null : mode;
 }
 
 function ensureEls() {

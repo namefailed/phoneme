@@ -2955,7 +2955,9 @@ pub struct InterfaceConfig {
     /// highlight): `"off"` (default), `"glide"` (a translucent accent glow slides
     /// to the new control), `"smear"` (glide plus a brief streak on bigger jumps),
     /// or `"trail"` (a stronger streak on every move). Purely cosmetic and
-    /// frontend-only; honors the OS "reduce motion" setting regardless.
+    /// frontend-only. Defaults to `"off"`, so any other value is a deliberate
+    /// opt-in that takes precedence over the OS "reduce motion" flag (which only
+    /// governs the default for users who never set this).
     #[serde(default = "default_cursor_animation")]
     pub cursor_animation: String,
     /// Base UI font family for the whole interface — a single CSS family name
