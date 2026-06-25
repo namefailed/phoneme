@@ -84,8 +84,7 @@ export function recordingShellHtml(r: Recording, use24h: boolean, stats: string)
             </div>
           </div>
         </div>
-        <div id="entities"></div>
-        <div id="tasks"></div>
+        <div id="insights"></div>
         <div class="notes-block" style="margin-top: 10px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
           <div id="notes-editor"></div>
         </div>

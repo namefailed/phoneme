@@ -32,9 +32,8 @@ import { ActionRow, readPlaybackSpeed } from "./ActionRow";
 import { ClipExport } from "./ClipExport";
 import { isLowConfidence, lowConfidenceThreshold } from "../../utils/confidence";
 import { TagChips } from "./TagChips";
-import { EntityChips } from "./EntityChips";
-import { TaskChips } from "./TaskChips";
-import { DISPLAY_PREFS_EVENT } from "./columnPrefs";
+import { InsightsCard } from "./InsightsCard";
+import { DISPLAY_PREFS_EVENT, showInsightsCard } from "./columnPrefs";
 import { TranscriptDiff } from "./TranscriptDiff";
 import { TranscriptEditor } from "./TranscriptEditor";
 import { NotesEditor } from "./NotesEditor";
@@ -387,11 +386,11 @@ export class RecordingDetail {
     const tagsRoot = this.container.querySelector<HTMLElement>("#tags");
     if (tagsRoot) new TagChips(tagsRoot, r.id);
 
-    const entitiesRoot = this.container.querySelector<HTMLElement>("#entities");
-    if (entitiesRoot) new EntityChips(entitiesRoot, r.id);
-
-    const tasksRoot = this.container.querySelector<HTMLElement>("#tasks");
-    if (tasksRoot) new TaskChips(tasksRoot, r.id);
+    // Tasks + Entities live together in the one "Insights" card. The whole card
+    // can be turned off in Settings → Interface (per device) for people who never
+    // use enrichment; re-rendered live on DISPLAY_PREFS_EVENT.
+    const insightsRoot = this.container.querySelector<HTMLElement>("#insights");
+    if (insightsRoot && showInsightsCard()) new InsightsCard(insightsRoot, r.id);
 
     this.wirePipeline();
 

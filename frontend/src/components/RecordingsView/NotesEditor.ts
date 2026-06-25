@@ -3,19 +3,18 @@ import { updateNotes } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { applyVimrc, defineVimWrite, editorOwnsFocus, VIM_SAVE_EVENT } from "../../utils/vimrc";
 import { openEditorMenu } from "./editorMenu";
+import { loadCollapsed, saveCollapsed } from "./enrichSection";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
 import { vim, Vim, getCM } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
 
-/** Monochrome copy / check glyphs (currentColor) — shared shape with the
- *  transcript editor's Copy button. Inline SVG, never the tofu-prone clipboard
- *  emoji. */
-const COPY_SVG =
-  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-const CHECK_SVG =
-  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+/** Right-pointing disclosure chevron (matches the Insights card + sidebar); the
+ *  `.open` class rotates it to "down". An HTML string — NotesEditor renders via
+ *  innerHTML, not Lit. */
+const CHEVRON_SVG =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"></polyline></svg>';
 
 /**
  * A CodeMirror-backed editor for the per-recording Notes field.
@@ -39,9 +38,10 @@ export class NotesEditor {
   private vimCurrentMode = "NORMAL";
   private vimBadgeElement: HTMLElement | null = null;
   private saveBtn: HTMLButtonElement | null = null;
-  /** Copy button — a sibling of Save in the header row, shown only when clean
-   *  (so it's never beside / overlapping Save Changes). */
-  private copyBtn: HTMLButtonElement | null = null;
+  /** Section collapsed (remembered across reloads + recording switches), matching
+   *  the Insights card's collapse pattern — only the editor folds; the bordered
+   *  notes card keeps its header bar. */
+  private collapsed = loadCollapsed("notes");
   private onDirtyChange?: (dirty: boolean) => void;
   private vimSaveHandler = () => {
     // Save when focus is in the content or this editor's `:` dialog (the dialog
@@ -69,22 +69,30 @@ export class NotesEditor {
     return this.current;
   }
 
-  /** Copy the notes to the clipboard and flash a ✓ on the Copy button. */
+  /** Copy the notes to the clipboard (from the ⋯ menu). */
   private async copyNotes(): Promise<void> {
     try {
       await navigator.clipboard.writeText(this.current);
-      if (this.copyBtn) {
-        this.copyBtn.classList.add("copied");
-        this.copyBtn.innerHTML = CHECK_SVG;
-        window.setTimeout(() => {
-          if (!this.copyBtn) return;
-          this.copyBtn.classList.remove("copied");
-          this.copyBtn.innerHTML = COPY_SVG;
-        }, 1500);
-      }
+      showToast("Notes copied", "success");
     } catch (e) {
       showToast(`Clipboard copy failed: ${errText(e)}`, "error");
     }
+  }
+
+  /** Collapse / expand the notes editor (only the editor folds; the bordered
+   *  notes card keeps its header bar — same pattern as the Insights card).
+   *  Persisted per device. */
+  private toggleCollapsed(btn: HTMLElement): void {
+    this.collapsed = !this.collapsed;
+    saveCollapsed("notes", this.collapsed);
+    const wrap = this.container.querySelector<HTMLElement>(".notes-editor-wrap");
+    if (wrap) wrap.style.display = this.collapsed ? "none" : "";
+    btn.querySelector(".enrich-chevron")?.classList.toggle("open", !this.collapsed);
+    btn.setAttribute("aria-expanded", String(!this.collapsed));
+    btn.title = this.collapsed ? "Expand notes" : "Collapse notes";
+    // CodeMirror measures zero height while hidden; re-measure on expand so the
+    // text isn't clipped or misaligned on first show.
+    if (!this.collapsed) this.view?.requestMeasure();
   }
 
   /** CodeMirror traps the wheel — when its own content fits (or you're already at
@@ -134,7 +142,10 @@ export class NotesEditor {
   private render(vimMode: boolean, vimrc: string) {
     this.container.innerHTML = `
       <div style="display: flex; align-items: center; margin-bottom: 4px; gap: 6px;">
-        <label style="font-size: 0.7857rem; color: var(--fg-muted); font-weight: bold; text-transform: uppercase;">Notes</label>
+        <button id="notes-collapse-btn" class="enrich-toggle" aria-expanded="${!this.collapsed}" title="${this.collapsed ? "Expand notes" : "Collapse notes"}">
+          <span class="enrich-chevron ${this.collapsed ? "" : "open"}">${CHEVRON_SVG}</span>
+          <span class="enrich-label" style="font-weight: bold; color: var(--fg-muted);">Notes</span>
+        </button>
         ${
           vimMode
             ? `<span id="notes-vim-badge" style="color: var(--accent); font-size: 0.6429rem; border: 1px solid var(--accent); padding: 1px 4px; border-radius: 4px;">NORMAL</span>`
@@ -144,8 +155,7 @@ export class NotesEditor {
         <button id="notes-save-btn" style="display: none; background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.7857rem; cursor: pointer; font-weight: bold;">Save Changes</button>
         <button id="notes-overflow-btn" class="editor-overflow-btn" title="More notes actions" aria-label="More notes actions" aria-haspopup="menu" aria-expanded="false">⋯</button>
       </div>
-      <div class="notes-editor-wrap">
-        <button id="notes-copy-btn" class="notes-copy-overlay" title="Copy the notes to the clipboard" aria-label="Copy notes">${COPY_SVG}</button>
+      <div class="notes-editor-wrap" ${this.collapsed ? 'style="display: none;"' : ""}>
         <div id="notes-cm-root" class="notes-cm-root"></div>
       </div>
     `;
@@ -156,11 +166,15 @@ export class NotesEditor {
     this.vimBadgeElement = this.container.querySelector<HTMLElement>("#notes-vim-badge");
     this.saveBtn = this.container.querySelector<HTMLButtonElement>("#notes-save-btn");
     this.saveBtn?.addEventListener("click", () => void this.save());
-    this.copyBtn = this.container.querySelector<HTMLButtonElement>("#notes-copy-btn");
-    this.copyBtn?.addEventListener("click", () => void this.copyNotes());
+    const collapseBtn = this.container.querySelector<HTMLButtonElement>("#notes-collapse-btn");
+    collapseBtn?.addEventListener("click", () => this.toggleCollapsed(collapseBtn));
     const overflowBtn = this.container.querySelector<HTMLButtonElement>("#notes-overflow-btn");
     overflowBtn?.addEventListener("click", () => {
       openEditorMenu(overflowBtn, [
+        {
+          label: "Copy notes",
+          onSelect: () => void this.copyNotes(),
+        },
         {
           label: "Find & Replace…",
           onSelect: async () => {
@@ -291,12 +305,10 @@ export class NotesEditor {
     }
   }
 
-  /** Show "Save Changes" only when there are unsaved edits; the Copy button is
-   *  its inverse — visible only when clean, so the two never sit side by side. */
+  /** Show "Save Changes" only when there are unsaved edits. */
   private updateSaveBtn() {
     const dirty = this.current !== this.lastSaved;
     if (this.saveBtn) this.saveBtn.style.display = dirty ? "" : "none";
-    if (this.copyBtn) this.copyBtn.style.display = dirty ? "none" : "inline-flex";
   }
 
   async save() {

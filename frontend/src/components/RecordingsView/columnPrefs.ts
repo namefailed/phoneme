@@ -63,3 +63,11 @@ export const showSidebarEntities = (): boolean => readOn(SEC_ENTITIES_KEY);
 export const setShowSidebarTags = (on: boolean): void => write(SEC_TAGS_KEY, on);
 export const setShowSidebarTasks = (on: boolean): void => write(SEC_TASKS_KEY, on);
 export const setShowSidebarEntities = (on: boolean): void => write(SEC_ENTITIES_KEY, on);
+
+const INSIGHTS_CARD_KEY = "phoneme.showInsightsCard";
+
+/** Whether the detail-pane Insights card (Tasks + Entities) is shown (default
+ *  true). A hard off for people who never use enrichment — distinct from the
+ *  per-recording collapse, which only folds the card to a one-line bar. */
+export const showInsightsCard = (): boolean => readOn(INSIGHTS_CARD_KEY);
+export const setShowInsightsCard = (on: boolean): void => write(INSIGHTS_CARD_KEY, on);
