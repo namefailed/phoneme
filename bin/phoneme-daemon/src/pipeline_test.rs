@@ -333,9 +333,9 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
     );
 
     // The machine segment timeline is persisted alongside the transcript
-    // (ms-converted, trimmed, unlabeled — diarization is off here). Like
-    // `original_transcript` it describes the raw whisper output, not the
-    // LLM-cleaned text.
+    // (ms-converted, trimmed, unlabeled — diarization is off here). This provider
+    // returns no per-word timings, so there is nothing to re-split on and the
+    // provider's own segments are kept verbatim.
     let segments = state.catalog.segments_for(&id).await.unwrap();
     assert_eq!(segments.len(), 2, "both whisper segments should persist");
     assert_eq!(segments[0].start_ms, 0);
