@@ -303,6 +303,28 @@ pub fn record_stop() -> Request {
     Request::RecordStop
 }
 
+/// JSON body for `POST /api/import`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ImportBody {
+    /// Absolute path to a local audio file (`.wav/.mp3/.m4a/.flac`). The daemon
+    /// resolves it on its side, so a relative path from another process won't
+    /// survive — send an absolute path. URL import (yt-dlp) is CLI-only.
+    pub path: String,
+    /// Optional one-time Playbook recipe override for this import (id or, the
+    /// daemon's contract, an exact recipe id). Absent/empty ⇒ the `default`
+    /// pipeline. A `scope = meeting` recipe is rejected by the daemon.
+    #[serde(default)]
+    pub recipe_id: Option<String>,
+}
+
+/// `POST /api/import` → [`Request::ImportRecording`].
+pub fn import_recording(body: &ImportBody) -> Request {
+    Request::ImportRecording {
+        path: body.path.clone(),
+        recipe_id: body.recipe_id.clone(),
+    }
+}
+
 /// `GET /api/status` → [`Request::DaemonStatus`].
 pub fn daemon_status() -> Request {
     Request::DaemonStatus
@@ -581,5 +603,27 @@ mod tests {
     fn meeting_start_stop_map_to_their_variants() {
         assert_eq!(meeting_start(), Request::StartMeeting);
         assert_eq!(meeting_stop(), Request::StopMeeting);
+    }
+
+    #[test]
+    fn import_carries_path_and_recipe() {
+        match import_recording(&ImportBody {
+            path: "C:/audio/talk.m4a".into(),
+            recipe_id: Some("lecture".into()),
+        }) {
+            Request::ImportRecording { path, recipe_id } => {
+                assert_eq!(path, "C:/audio/talk.m4a");
+                assert_eq!(recipe_id.as_deref(), Some("lecture"));
+            }
+            other => panic!("expected ImportRecording, got {other:?}"),
+        }
+        // No recipe ⇒ default pipeline (recipe_id None).
+        match import_recording(&ImportBody {
+            path: "/tmp/a.wav".into(),
+            recipe_id: None,
+        }) {
+            Request::ImportRecording { recipe_id, .. } => assert!(recipe_id.is_none()),
+            other => panic!("expected ImportRecording, got {other:?}"),
+        }
     }
 }

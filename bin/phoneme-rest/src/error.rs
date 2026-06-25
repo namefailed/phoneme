@@ -32,6 +32,9 @@ pub enum RestError {
     /// A path/query parameter was malformed before any request was sent
     /// (e.g. a non-canonical recording id) (→ 400). Carries the message.
     BadRequest(String),
+    /// A local failure in the bridge itself, before/without a daemon round-trip
+    /// (e.g. reading config for `GET /api/recipes`) (→ 500). Carries the message.
+    Internal(String),
 }
 
 impl From<IpcTransportError> for RestError {
@@ -80,6 +83,7 @@ impl RestError {
             RestError::Transport(_) => StatusCode::SERVICE_UNAVAILABLE,
             RestError::Daemon(e) => status_for_kind(e.kind),
             RestError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            RestError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -89,6 +93,7 @@ impl RestError {
             RestError::Transport(e) => format!("daemon not reachable: {e}"),
             RestError::Daemon(e) => e.message.clone(),
             RestError::BadRequest(m) => m.clone(),
+            RestError::Internal(m) => m.clone(),
         }
     }
 }
