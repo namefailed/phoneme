@@ -624,6 +624,15 @@ pub struct Recording {
     /// older rows and detection-less providers degrade silently.
     #[serde(default)]
     pub detected_language: Option<String>,
+    /// Caller-supplied external-reference key for idempotent import. A client
+    /// (e.g. the youtube-note sister project) sets this to its own stable id for
+    /// the source it imported; a later `import` carrying the same `ext_ref` is a
+    /// no-op that returns this recording, so the client can reconcile against the
+    /// library (this field rides `list`/`get` JSON) without its own dedup
+    /// bookkeeping. `None` for normal recordings and anything imported without a
+    /// key. Set once at import; never touched by the pipeline.
+    #[serde(default)]
+    pub ext_ref: Option<String>,
     /// Tags attached to this recording. Populated by `Catalog::list`/`get`;
     /// not a column on the recordings table (joined from `recording_tags`).
     #[serde(default)]

@@ -25,6 +25,15 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
   spawning the CLI. `GET /api/recipes` returns the recipe list; `POST /api/import`
   takes `{"path","recipe_id"}` and queues a local file (URL/yt-dlp import stays
   CLI-only, where the downloader lives).
+- [x] **Idempotent import (`--ext-ref`)** — `phoneme import <file> --ext-ref <key>`
+  tags the recording with a caller-supplied external-reference key (e.g. a video
+  id). A later import carrying the same key is a no-op that returns the existing
+  recording (`{"id":…,"reused":true}`) instead of importing a duplicate, so a
+  client can fire-and-forget and reconcile against `phoneme list --json` (each
+  recording now carries `ext_ref`). Plumbed through the `ImportRecording` IPC,
+  `POST /api/import`, and the `recordings.ext_ref` column (additive migration —
+  existing rows get NULL). Omitting `--ext-ref` is exactly today's behaviour.
+  (Requested by the youtube-note sister project for its import reconcile.)
 
 ### Models
 

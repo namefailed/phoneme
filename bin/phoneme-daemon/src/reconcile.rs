@@ -135,6 +135,7 @@ mod tests {
             diarization_model: None,
             mean_confidence: None,
             detected_language: None,
+            ext_ref: None,
             tags: vec![],
             entities: vec![],
             tasks: vec![],

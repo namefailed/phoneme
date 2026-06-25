@@ -181,12 +181,16 @@ phoneme import --format flac "https://youtu.be/VIDEO_ID"
 # Transcribe the import through a specific Playbook recipe (by id or name)
 # instead of the default pipeline — one pass, no import-then-retranscribe.
 phoneme import "https://youtu.be/VIDEO_ID" --recipe lecture-clean
+
+# Idempotent import: tag with your own key; a re-run with the same key is a no-op.
+phoneme import "https://youtu.be/VIDEO_ID" --ext-ref "yt:VIDEO_ID"
 ```
 
 | Flag | Default | Notes |
 | --- | --- | --- |
 | `--format <m4a\|mp3\|flac\|wav>` | `m4a` | Audio format yt-dlp extracts to (URL imports only). m4a/mp3 are lossy but transparent for speech; flac/wav avoid a re-encode. |
 | `--recipe <ID\|NAME>` | default pipeline | Run this import through a chosen Playbook recipe, the same picker `record`/`retranscribe` use. Resolved (id first, then name) and rejected if it names a meeting template — **before** any download, so a typo or wrong scope fails fast. Omit for the default pipeline. Use `phoneme recipes` to list the choices. |
+| `--ext-ref <KEY>` | _(none)_ | Caller-supplied external-reference key for idempotent import (e.g. a video id). If a recording already carries this key, the import is a no-op that returns it (`already imported … (matched --ext-ref)`; `{"id":…,"reused":true}` with `--json`) instead of importing a duplicate. The key rides `phoneme list --json` as `ext_ref` so a caller can reconcile what's already imported. Omit for a normal import that always creates a new recording. |
 
 URL import requires **yt-dlp** and **ffmpeg** on PATH (`python -m pip install -U
 yt-dlp`). The download lands in a temp folder and is removed after import —

@@ -315,6 +315,11 @@ pub struct ImportBody {
     /// pipeline. A `scope = meeting` recipe is rejected by the daemon.
     #[serde(default)]
     pub recipe_id: Option<String>,
+    /// Optional external-reference key for idempotent import: if a recording
+    /// already carries it, the daemon returns that one (`{"id":…,"reused":true}`)
+    /// instead of importing a duplicate. Absent ⇒ always a fresh import.
+    #[serde(default)]
+    pub ext_ref: Option<String>,
 }
 
 /// `POST /api/import` → [`Request::ImportRecording`].
@@ -322,6 +327,7 @@ pub fn import_recording(body: &ImportBody) -> Request {
     Request::ImportRecording {
         path: body.path.clone(),
         recipe_id: body.recipe_id.clone(),
+        ext_ref: body.ext_ref.clone(),
     }
 }
 
@@ -606,23 +612,35 @@ mod tests {
     }
 
     #[test]
-    fn import_carries_path_and_recipe() {
+    fn import_carries_path_recipe_and_ext_ref() {
         match import_recording(&ImportBody {
             path: "C:/audio/talk.m4a".into(),
             recipe_id: Some("lecture".into()),
+            ext_ref: Some("video-1".into()),
         }) {
-            Request::ImportRecording { path, recipe_id } => {
+            Request::ImportRecording {
+                path,
+                recipe_id,
+                ext_ref,
+            } => {
                 assert_eq!(path, "C:/audio/talk.m4a");
                 assert_eq!(recipe_id.as_deref(), Some("lecture"));
+                assert_eq!(ext_ref.as_deref(), Some("video-1"));
             }
             other => panic!("expected ImportRecording, got {other:?}"),
         }
-        // No recipe ⇒ default pipeline (recipe_id None).
+        // No recipe / no key ⇒ default pipeline, fresh import.
         match import_recording(&ImportBody {
             path: "/tmp/a.wav".into(),
             recipe_id: None,
+            ext_ref: None,
         }) {
-            Request::ImportRecording { recipe_id, .. } => assert!(recipe_id.is_none()),
+            Request::ImportRecording {
+                recipe_id, ext_ref, ..
+            } => {
+                assert!(recipe_id.is_none());
+                assert!(ext_ref.is_none());
+            }
             other => panic!("expected ImportRecording, got {other:?}"),
         }
     }

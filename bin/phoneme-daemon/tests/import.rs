@@ -29,6 +29,7 @@ async fn import_recording_creates_row_and_transcribes() {
         .request(Request::ImportRecording {
             path: src.to_string_lossy().into_owned(),
             recipe_id: None,
+            ext_ref: None,
         })
         .await
         .unwrap();
@@ -84,6 +85,64 @@ async fn import_recording_creates_row_and_transcribes() {
     );
 }
 
+/// A second import carrying the same `--ext-ref` key is a no-op: it returns the
+/// existing recording (`reused: true`, same id) and creates no second row.
+#[tokio::test]
+async fn import_with_ext_ref_is_idempotent() {
+    let mut h = DaemonHarness::start().await;
+
+    let src = h.temp.path().join("dedup-me.wav");
+    write_canonical_wav(&src);
+    let req = |p: &std::path::Path| Request::ImportRecording {
+        path: p.to_string_lossy().into_owned(),
+        recipe_id: None,
+        ext_ref: Some("video-abc-123".to_string()),
+    };
+
+    // First import: a fresh recording, no `reused` flag.
+    let first = h.client.request(req(&src)).await.unwrap();
+    let id1 = match first {
+        Response::Ok(v) => {
+            assert!(
+                !v["reused"].as_bool().unwrap_or(false),
+                "first import is not a reuse"
+            );
+            v["id"].as_str().expect("id").to_string()
+        }
+        Response::Err(e) => panic!("expected ok, got err: {e:?}"),
+    };
+
+    // Second import with the SAME ext_ref (even a different file path): deduped to
+    // the existing recording.
+    let other = h.temp.path().join("dedup-me-again.wav");
+    write_canonical_wav(&other);
+    let second = h.client.request(req(&other)).await.unwrap();
+    match second {
+        Response::Ok(v) => {
+            assert_eq!(v["id"].as_str(), Some(id1.as_str()), "returns the same id");
+            assert_eq!(v["reused"].as_bool(), Some(true), "flagged as reused");
+        }
+        Response::Err(e) => panic!("expected ok, got err: {e:?}"),
+    }
+
+    // Only one row exists despite two import calls.
+    let list = h
+        .client
+        .request(Request::ListRecordings {
+            filter: ListFilter::default(),
+        })
+        .await
+        .unwrap();
+    match list {
+        Response::Ok(v) => assert_eq!(
+            v.as_array().map(|a| a.len()),
+            Some(1),
+            "ext_ref dedup must not create a second row"
+        ),
+        Response::Err(e) => panic!("expected ok, got err: {e:?}"),
+    }
+}
+
 #[tokio::test]
 async fn import_nonexistent_path_errors_and_creates_no_row() {
     let mut h = DaemonHarness::start().await;
@@ -94,6 +153,7 @@ async fn import_nonexistent_path_errors_and_creates_no_row() {
         .request(Request::ImportRecording {
             path: missing.to_string_lossy().into_owned(),
             recipe_id: None,
+            ext_ref: None,
         })
         .await
         .unwrap();
@@ -117,6 +177,7 @@ async fn import_unsupported_extension_errors_and_creates_no_row() {
         .request(Request::ImportRecording {
             path: txt.to_string_lossy().into_owned(),
             recipe_id: None,
+            ext_ref: None,
         })
         .await
         .unwrap();

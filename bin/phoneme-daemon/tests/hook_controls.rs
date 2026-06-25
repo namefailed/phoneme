@@ -36,6 +36,7 @@ async fn import_wav(h: &mut DaemonHarness) -> String {
         .request(Request::ImportRecording {
             path: src.to_string_lossy().into_owned(),
             recipe_id: None,
+            ext_ref: None,
         })
         .await
         .unwrap()

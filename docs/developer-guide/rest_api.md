@@ -122,7 +122,7 @@ guard is uniform, not POST-only). All id-bearing routes reject a malformed
 | `POST`   | `/api/record/stop` | `RecordStop` | No body. Stops and finalizes the active recording. |
 | `POST`   | `/api/meeting/start` | `StartMeeting` | No body. Starts a dual-track meeting recording. |
 | `POST`   | `/api/meeting/stop` | `StopMeeting` | No body. Stops and finalizes the active meeting. |
-| `POST`   | `/api/import` | `ImportRecording` | `{"path":"<absolute local file>"}`, optional `"recipe_id"` for a one-time Playbook recipe (a `scope = meeting` recipe is rejected). The daemon resolves the path on its side. URL/yt-dlp import is **CLI-only** (`phoneme import <url>`), where the downloader lives. |
+| `POST`   | `/api/import` | `ImportRecording` | `{"path":"<absolute local file>"}`, optional `"recipe_id"` for a one-time Playbook recipe (a `scope = meeting` recipe is rejected), optional `"ext_ref"` for an idempotency key — if a recording already carries it, returns that one (`{"id":…,"reused":true}`) instead of importing a duplicate. The daemon resolves the path on its side. URL/yt-dlp import is **CLI-only** (`phoneme import <url>`), where the downloader lives. |
 | `POST`   | `/api/recordings/{id}/title` | `SetRecordingTitle` | `{"title":"…"}` to set; `{}` or `{"title":null}` to clear back to auto. |
 | `POST`   | `/api/recordings/{id}/favorite` | `SetFavorite` | `{"favorite":true|false}`. |
 | `POST`   | `/api/recordings/{id}/pinned` | `SetPinned` | `{"pinned":true|false}`. Pinned recordings sort to the top of the library. |

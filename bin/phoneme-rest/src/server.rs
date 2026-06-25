@@ -813,9 +813,14 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
 
         match &mock.received()[0] {
-            IpcRequest::ImportRecording { path, recipe_id } => {
+            IpcRequest::ImportRecording {
+                path,
+                recipe_id,
+                ext_ref,
+            } => {
                 assert_eq!(path, "C:/audio/talk.m4a");
                 assert_eq!(recipe_id.as_deref(), Some("lecture"));
+                assert_eq!(ext_ref.as_deref(), None);
             }
             other => panic!("expected ImportRecording, got {other:?}"),
         }

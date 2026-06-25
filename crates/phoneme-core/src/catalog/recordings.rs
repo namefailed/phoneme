@@ -31,8 +31,8 @@ impl Catalog {
                  id, started_at, duration_ms, audio_path, transcript, model, status,
                  error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
                  transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
-                 cleanup_model, diarized
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 cleanup_model, diarized, ext_ref
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -55,6 +55,8 @@ impl Catalog {
         .bind(r.in_place)
         .bind(r.cleanup_model.as_deref())
         .bind(r.diarized)
+        // `None` for mic/meeting recordings; set only by an `import --ext-ref`.
+        .bind(r.ext_ref.as_deref())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -87,8 +89,8 @@ impl Catalog {
                  transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
                  cleanup_model, diarized, user_edited, favorite, pinned, tag_suggestions, summary,
                  summary_model, entities_model, tasks_model, title, title_is_auto, title_model, tag_model,
-                 diarization_model, mean_confidence, detected_language
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 diarization_model, mean_confidence, detected_language, ext_ref
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -126,9 +128,29 @@ impl Catalog {
         .bind(r.diarization_model.as_deref())
         .bind(r.mean_confidence)
         .bind(r.detected_language.as_deref())
+        .bind(r.ext_ref.as_deref())
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// The id of an existing recording that carries this external-reference key,
+    /// if any. Backs idempotent import: an `import --ext-ref <key>` first looks
+    /// here and, on a hit, returns the existing recording instead of importing a
+    /// duplicate. Keys are matched exactly (no trimming — the caller normalizes).
+    /// `None` means no recording has that key yet.
+    pub async fn find_id_by_ext_ref(&self, ext_ref: &str) -> Result<Option<RecordingId>> {
+        let row = sqlx::query("SELECT id FROM recordings WHERE ext_ref = ? LIMIT 1")
+            .bind(ext_ref)
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(row) => {
+                let id: String = row.try_get("id")?;
+                Ok(RecordingId::parse(&id))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Set (or clear) the detected spoken language for a recording.
@@ -503,7 +525,10 @@ impl Catalog {
             };
 
             let (count, new_text) = if case_sensitive {
-                (current.matches(find).count(), current.replace(find, replace))
+                (
+                    current.matches(find).count(),
+                    current.replace(find, replace),
+                )
             } else {
                 replace_ignore_case(&current, find, replace)
             };
@@ -1002,8 +1027,7 @@ impl Catalog {
         &self,
         ids: &[String],
     ) -> Result<std::collections::HashMap<String, Vec<Tag>>> {
-        let mut map: std::collections::HashMap<String, Vec<Tag>> =
-            std::collections::HashMap::new();
+        let mut map: std::collections::HashMap<String, Vec<Tag>> = std::collections::HashMap::new();
         for chunk in ids.chunks(IN_CHUNK) {
             if chunk.is_empty() {
                 continue;

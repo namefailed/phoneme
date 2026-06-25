@@ -684,6 +684,13 @@ pub struct ImportArgs {
     /// fails fast. Avoids the import-then-`retranscribe --recipe` double pass.
     #[arg(long)]
     pub recipe: Option<String>,
+    /// External-reference key for idempotent import. Pass your own stable id for
+    /// the source (e.g. a video id); if a recording already carries this key the
+    /// import is a no-op that returns it (`{"id":…,"reused":true}` with --json)
+    /// instead of importing a duplicate. The key rides `phoneme list --json`'s
+    /// `ext_ref` so a caller can reconcile what's already imported.
+    #[arg(long = "ext-ref")]
+    pub ext_ref: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]

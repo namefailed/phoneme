@@ -71,6 +71,21 @@ The recipe is checked **before** any download, so a typo (or a meeting template,
 which can't apply to a single recording) fails fast. Already imported? Change its
 recipe with `phoneme retranscribe <id> --recipe <name>`.
 
+### Import once, idempotently (`--ext-ref`)
+
+Scripting bulk imports? Tag each import with your own stable key for the source
+and a re-run won't duplicate it:
+
+```bash
+phoneme import "https://youtu.be/VIDEO_ID" --ext-ref "yt:VIDEO_ID"
+```
+
+If a recording already carries that `--ext-ref` key, the import is a **no-op** that
+returns the existing one (`already imported … (matched --ext-ref)`, or
+`{"id":…,"reused":true}` with `--json`) instead of importing a second copy. The
+key rides `phoneme list --json` as `ext_ref`, so a caller can reconcile what's
+already in the library and fire-and-forget the rest.
+
 > [!NOTE]
 > URL import requires **yt-dlp** and **ffmpeg** on your PATH. Install yt-dlp with
 > `python -m pip install -U yt-dlp` (ffmpeg via your package manager, e.g.
