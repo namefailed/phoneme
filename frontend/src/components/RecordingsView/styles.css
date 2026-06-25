@@ -809,6 +809,23 @@ mark.search-hit {
   text-transform: uppercase;
   white-space: nowrap;
 }
+/* Section-title flair: the short accent tick from the Settings → Playbook group
+   labels (.pb-group-label), applied to the detail pane's Transcript / Insights /
+   Notes headers so they read as real subheaders. Tick only (no trailing rule —
+   these header rows already carry controls on the right). */
+.detail-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.detail-section-title::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--accent);
+}
 .insights-summary {
   margin-left: auto;
   display: inline-flex;

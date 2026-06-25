@@ -406,7 +406,7 @@ export class TranscriptEditorElement extends LitElement {
         }
       </style>
       <div class="header">
-        <span class="title">
+        <span class="title detail-section-title">
           Transcript ${this.vimMode ? html`<span class="vim-badge">${this.vimCurrentMode}</span>` : ""}
         </span>
         <span class="header-spacer"></span>
