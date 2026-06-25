@@ -144,7 +144,7 @@ export class NotesEditor {
       <div style="display: flex; align-items: center; margin-bottom: 4px; gap: 6px;">
         <button id="notes-collapse-btn" class="enrich-toggle" aria-expanded="${!this.collapsed}" title="${this.collapsed ? "Expand notes" : "Collapse notes"}">
           <span class="enrich-chevron ${this.collapsed ? "" : "open"}">${CHEVRON_SVG}</span>
-          <span class="enrich-label" style="font-weight: bold; color: var(--fg-muted);">Notes</span>
+          <span class="enrich-label detail-section-title" style="font-weight: bold; color: var(--fg-muted);">Notes</span>
         </button>
         ${
           vimMode

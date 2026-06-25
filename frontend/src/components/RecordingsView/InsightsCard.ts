@@ -125,7 +125,7 @@ export class InsightsCardElement extends LitElement {
           @click=${this.toggle}
         >
           <span class="enrich-chevron ${this.collapsed ? "" : "open"}">${ENRICH_CHEVRON}</span>
-          <span class="insights-title">Insights</span>
+          <span class="insights-title detail-section-title">Insights</span>
           <span class="insights-summary">${this.renderSummary()}</span>
         </button>
         ${this.collapsed
