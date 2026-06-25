@@ -14,6 +14,16 @@ import { html, type TemplateResult } from "lit";
  *  exactly like `.sidebar-chevron`. */
 export const ENRICH_CHEVRON = html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"></polyline></svg>`;
 
+/**
+ * A tinted square identity badge for a section (Tasks = green check, Entities =
+ * blue search). The glyph is an inline SVG so it inherits the section's `--tint`
+ * cleanly across every theme — unlike the old emoji baked into the label string.
+ * `tint` is a token name (e.g. `--ok`); `glyph` is the SVG inner markup.
+ */
+export function enrichBadge(tint: string, glyph: TemplateResult): TemplateResult {
+  return html`<span class="enrich-badge" style="--tint: var(${tint});">${glyph}</span>`;
+}
+
 const key = (name: string) => `phoneme.enrich.${name}.collapsed`;
 
 /** Whether the named section was last left collapsed (default expanded). */
@@ -46,6 +56,7 @@ export function enrichHead(opts: {
   onToggle: () => void;
   count?: TemplateResult | string;
   action?: TemplateResult;
+  badge?: TemplateResult;
 }): TemplateResult {
   return html`
     <div class="enrich-head">
@@ -56,6 +67,7 @@ export function enrichHead(opts: {
         @click=${opts.onToggle}
       >
         <span class="enrich-chevron ${opts.collapsed ? "" : "open"}">${ENRICH_CHEVRON}</span>
+        ${opts.badge ?? ""}
         <span class="enrich-label">${opts.label}</span>
         ${opts.count != null ? html`<span class="enrich-count">${opts.count}</span>` : ""}
       </button>

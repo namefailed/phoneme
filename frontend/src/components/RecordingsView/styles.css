@@ -764,11 +764,122 @@ mark.search-hit {
    The AI-extracted entity chips and the checkable task list. They share the
    action row's 18px gutter and the app's chip/button language so they read as
    one family with the Tags row above them; a hairline rule separates each. */
-.detail-enrich {
-  padding: 12px 18px 14px;
-  margin-top: 10px;
-  border-top: 1px solid var(--border-subtle);
+/* ── Insights card ──────────────────────────────────────────────────────────
+   One bordered card (cloning the notes / transcript recipe) that hosts the Tasks
+   + Entities sub-sections, so transcript → insights → notes read as one rhythmic
+   stack of equal-width cards instead of loose full-bleed dividers. */
+.insights-card {
+  margin: 0 18px 9px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color var(--ui-motion-fast) ease;
 }
+.insights-card:focus-within { border-color: var(--kbd-cursor); }
+/* Card header = the whole-card collapse toggle (chevron + "Insights" label) on
+   the left, the live summary cluster pushed right. When expanded it carries the
+   one card-width hairline; collapsed, it's the entire card (a one-line bar). */
+.insights-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: var(--fg-muted);
+  text-align: left;
+  transition: color var(--ui-motion-fast) ease-out;
+}
+.insights-head:hover,
+.insights-head:hover .enrich-chevron { color: var(--accent); }
+.insights-card:not(.is-collapsed) .insights-head {
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.insights-title {
+  font-size: 0.7857rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.insights-summary {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.insights-body { display: flex; flex-direction: column; }
+/* Summary pills (in the collapsed bar AND the expanded header): the closed card's
+   information scent — open/total tasks + per-kind tinted entity counts. */
+.insights-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-elevated);
+  border-radius: 9px;
+  padding: 2px 8px;
+  font-size: 0.7143rem;
+  font-weight: 600;
+  color: var(--fg-faded);
+}
+.insights-pill .ip-glyph { display: inline-flex; }
+.insights-pill .ip-glyph svg { width: 12px; height: 12px; }
+.insights-pill .ip-kind { display: inline-flex; align-items: center; gap: 2px; }
+.insights-pill .ip-kind + .ip-kind { margin-left: 5px; }
+.insights-pill .ip-emoji { font-size: 0.85em; }
+/* A sub-section inside the card (Tasks / Entities); the inner separator between
+   them is a child-scoped inset rule, not a second card-width border. */
+.insights-body .enrich-sub:first-child { margin-top: 12px; }
+.enrich-sep { margin: 12px 0; border-top: 1px solid var(--border-subtle); }
+/* Section identity badge — a tinted square holding the section's SVG glyph, tinted
+   via --tint so it inherits the section colour across every theme (replaces the
+   emoji once baked into the label). */
+.enrich-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--tint) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tint) 26%, transparent);
+  color: var(--tint);
+}
+.enrich-badge svg { width: 14px; height: 14px; }
+/* Centered empty state for an expanded-but-empty sub-section: dimmed glyph, a
+   one-line prompt, and a single tinted Extract call-to-action. */
+.enrich-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 8px 6px;
+  text-align: center;
+}
+.enrich-empty-ico { color: var(--tint); opacity: 0.4; }
+.enrich-empty-ico svg { width: 26px; height: 26px; }
+.enrich-empty-msg { font-size: 0.7857rem; color: var(--fg-muted); }
+.enrich-empty-cta {
+  background: color-mix(in srgb, var(--tint) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tint) 45%, transparent);
+  color: var(--tint);
+  border-radius: 7px;
+  padding: 4px 14px;
+  font-size: 0.7857rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--ui-motion-fast) ease-out;
+}
+.enrich-empty-cta:hover:not(:disabled) { background: color-mix(in srgb, var(--tint) 24%, transparent); }
+.enrich-empty-cta:disabled { opacity: 0.55; cursor: default; }
 .enrich-head {
   display: flex;
   align-items: center;
@@ -802,7 +913,8 @@ mark.search-hit {
 .enrich-label {
   font-size: 0.7857rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 .enrich-count {
@@ -1166,7 +1278,9 @@ mark.search-hit {
   border-radius: 6px;
   transition: background var(--ui-motion-fast) ease-out;
 }
-.task-row:hover { background: var(--bg-surface); }
+/* A faint accent wash on hover — the row now sits inside a --bg-surface card, so
+   the old `background: var(--bg-surface)` hover was invisible flat-on-flat. */
+.task-row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .task-check {
   flex-shrink: 0;
   width: 15px;
@@ -1175,6 +1289,8 @@ mark.search-hit {
   accent-color: var(--accent);
   cursor: pointer;
 }
+/* A completed task reads as good/green, not accent. */
+.task-row.done .task-check { accent-color: var(--ok); }
 .task-text {
   font-size: 0.8571rem;
   color: var(--fg-default);
@@ -1362,52 +1478,6 @@ mark.search-hit {
 .transcript-block:focus-within,
 .notes-block:focus-within {
   border-color: var(--kbd-cursor);
-}
-/* Notes Copy — same web-page-style icon overlay as the transcript box: a bare,
-   very-faded glyph at the text's top-right that lifts on hover/focus. */
-.notes-editor-wrap { position: relative; }
-/* Clean SVG icon button (matches the transcript Copy button): hidden until the
-   notes box is hovered, a subtle accent pill on direct hover, green check on
-   copy. Hidden while editing unless hovered. */
-.notes-copy-overlay {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--fg-faded);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--ui-motion-fast) ease, background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease,
-    border-color var(--ui-motion-fast) ease;
-}
-.notes-copy-overlay svg { display: block; }
-.notes-editor-wrap:hover .notes-copy-overlay { opacity: 1; }
-.notes-editor-wrap:focus-within:not(:hover) .notes-copy-overlay { opacity: 0; }
-.notes-editor-wrap .notes-copy-overlay:hover {
-  opacity: 1;
-  background: var(--bg-elevated);
-  border-color: var(--border);
-  color: var(--accent);
-}
-.notes-editor-wrap .notes-copy-overlay:focus-visible {
-  opacity: 1;
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.notes-copy-overlay.copied {
-  opacity: 1;
-  color: var(--ok);
-  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
-  background: color-mix(in srgb, var(--ok) 12%, var(--bg-elevated));
 }
 /* Speakers panel — one renamable row per diarized [Speaker N] label. Matches
    the transcript/notes boxes so it reads as part of the same stack. */
@@ -2043,15 +2113,6 @@ mark.search-hit {
   border-radius: 6px;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent),
     0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
-/* Notes Copy button: faded by default (inline style), lights up on hover.
-   !important beats the element's inline base style for the hover state. */
-#notes-copy-btn:hover {
-  opacity: 1 !important;
-  color: var(--accent) !important;
-  border-color: var(--accent) !important;
-  background: var(--bg-elevated) !important;
 }
 
 /* Three stacked rows: applied chips / controls / suggestions (I). Each row

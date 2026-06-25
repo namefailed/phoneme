@@ -11,6 +11,8 @@ import {
   setShowSidebarTags,
   setShowSidebarTasks,
   setShowSidebarEntities,
+  showInsightsCard,
+  setShowInsightsCard,
 } from "../RecordingsView/columnPrefs";
 
 /** Default visible columns, used by the reset action. */
@@ -463,6 +465,25 @@ export class SectionInterface {
           </div>
         </div>
       </div>
+
+      <div class="settings-section">
+        <h3>Detail pane</h3>
+
+        <div class="settings-field" style="align-items: flex-start; border-bottom: none;">
+          <label style="margin-top: 8px;">Sections</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
+            <label class="col-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+              <input type="checkbox" id="show-insights-card" class="toggle-switch" ${showInsightsCard() ? "checked" : ""} />
+              <span>Insights card (Tasks &amp; Entities)</span>
+            </label>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
+              The Tasks + Entities card under the transcript. Turn it off to hide it from the detail
+              pane entirely (your tasks and entities are kept — re-enable here); or just collapse it
+              per recording with its chevron. Applies instantly (per device).
+            </span>
+          </div>
+        </div>
+      </div>
     `;
     bindFieldEvents(this.container, config);
 
@@ -483,6 +504,11 @@ export class SectionInterface {
     secTasksCb?.addEventListener("change", () => setShowSidebarTasks(secTasksCb.checked));
     const secEntitiesCb = this.container.querySelector<HTMLInputElement>("#show-sec-entities");
     secEntitiesCb?.addEventListener("change", () => setShowSidebarEntities(secEntitiesCb.checked));
+
+    // Detail-pane Insights card: per-device, fires phoneme:display-prefs-changed
+    // so the open recording shows/hides the card live (RecordingDetail re-renders).
+    const insightsCb = this.container.querySelector<HTMLInputElement>("#show-insights-card");
+    insightsCb?.addEventListener("change", () => setShowInsightsCard(insightsCb.checked));
 
     this.container
       .querySelector<HTMLSelectElement>("#anim-speed")

@@ -44,8 +44,6 @@ export class TranscriptEditorElement extends LitElement {
   @state() private currentText = "";
   @state() private vimMode = false;
   @state() private vimCurrentMode = "NORMAL";
-  /** Brief ✓ flash on the Copy button right after a successful copy. */
-  @state() private copied = false;
 
   @query('#cm-editor-root') editorRoot!: HTMLElement;
 
@@ -305,6 +303,10 @@ export class TranscriptEditorElement extends LitElement {
   private openOverflowMenu = (e: Event) => {
     openEditorMenu(e.currentTarget as HTMLElement, [
       {
+        label: "Copy transcript",
+        onSelect: () => void this.requestCopy(),
+      },
+      {
         label: "Find & Replace…",
         onSelect: async () => {
           const { openFindReplace } = await import("../FindReplace");
@@ -314,15 +316,13 @@ export class TranscriptEditorElement extends LitElement {
     ]);
   };
 
-  /** Copy the transcript (with the host's transform — speaker names — applied)
-   *  and flash a ✓. The button is only shown when clean, so this never fights
-   *  the Save Changes button. */
+  /** Copy the transcript (with the host's transform — speaker names — applied) to
+   *  the clipboard, from the ⋯ menu. */
   private async requestCopy() {
     const text = this.copyTransform ? this.copyTransform(this.currentText) : this.currentText;
     try {
       await navigator.clipboard.writeText(text);
-      this.copied = true;
-      window.setTimeout(() => { this.copied = false; }, 1500);
+      showToast("Transcript copied", "success");
     } catch (e) {
       showToast(`Clipboard copy failed: ${errText(e)}`, "error");
     }
@@ -346,9 +346,7 @@ export class TranscriptEditorElement extends LitElement {
         ph-transcript-editor #cm-editor-root .cm-editor {
           flex: 1;
         }
-        /* Relative wrapper so the Copy button can overlay the text top-right. */
         ph-transcript-editor .editor-wrap {
-          position: relative;
           flex: 1;
           display: flex;
           flex-direction: column;
@@ -395,51 +393,6 @@ export class TranscriptEditorElement extends LitElement {
           cursor: pointer;
           font-weight: bold;
         }
-        /* Clean SVG icon button at the text's top-right, web-page style: HIDDEN
-           until you hover the transcript, then a crisp icon with a subtle pill on
-           direct hover (accent). Hidden while actively editing (focused) unless
-           you're hovering it. Goes to a green check briefly on copy. */
-        ph-transcript-editor .btn-copy {
-          position: absolute;
-          top: 6px;
-          right: 6px;
-          z-index: 5;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 26px;
-          height: 26px;
-          padding: 0;
-          border-radius: 6px;
-          border: 1px solid transparent;
-          background: transparent;
-          color: var(--fg-faded);
-          cursor: pointer;
-          opacity: 0;
-          transition: opacity var(--ui-motion-fast) ease, background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease,
-            border-color var(--ui-motion-fast) ease;
-        }
-        ph-transcript-editor .btn-copy svg { display: block; }
-        ph-transcript-editor .editor-wrap:hover .btn-copy { opacity: 1; }
-        ph-transcript-editor .editor-wrap:focus-within:not(:hover) .btn-copy { opacity: 0; }
-        ph-transcript-editor .editor-wrap .btn-copy:hover {
-          opacity: 1;
-          background: var(--bg-elevated);
-          border-color: var(--border);
-          color: var(--accent);
-        }
-        ph-transcript-editor .editor-wrap .btn-copy:focus-visible {
-          opacity: 1;
-          outline: 2px solid var(--accent);
-          outline-offset: 1px;
-        }
-        ph-transcript-editor .editor-wrap .btn-copy.kbd-cursor { opacity: 1; }
-        ph-transcript-editor .btn-copy.copied {
-          opacity: 1;
-          color: var(--ok);
-          border-color: color-mix(in srgb, var(--ok) 45%, transparent);
-          background: color-mix(in srgb, var(--ok) 12%, var(--bg-elevated));
-        }
         /* "Edited" status badge — same footprint as Save, but a non-interactive
            accent-tinted pill so it reads as a marker, not an action. */
         ph-transcript-editor .edited-badge {
@@ -471,15 +424,6 @@ export class TranscriptEditorElement extends LitElement {
         </div>
       </div>
       <div class="editor-wrap">
-        <button
-          class="btn-copy ${this.copied ? "copied" : ""}"
-          title="Copy the transcript to the clipboard"
-          aria-label="Copy transcript"
-          @click=${this.requestCopy}
-        >${this.copied
-          ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`
-          : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
-        }</button>
         <div id="cm-editor-root" @keydown=${this.handleKeydown}></div>
       </div>
     `;

@@ -13,7 +13,11 @@ import {
 } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { showToast } from "../../utils/toast";
-import { enrichHead, loadCollapsed, saveCollapsed } from "./enrichSection";
+import { enrichHead, enrichBadge, loadCollapsed, saveCollapsed } from "./enrichSection";
+
+/** The Tasks identity glyph (a checked box) — tinted with --ok via the badge.
+ *  No width/height so the badge / empty-state CSS sizes it. */
+const TASK_GLYPH = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
 
 /**
  * The detail pane's tasks surface: the recording's action items as a full task
@@ -253,25 +257,35 @@ export class TaskChipsElement extends LitElement {
     const openCount = this.tasks.filter((t) => !t.done).length;
     const visible = this.hideDone ? this.tasks.filter((t) => !t.done) : this.tasks;
     return html`
-      <div class="detail-enrich tasks ${this.collapsed ? "is-collapsed" : ""}">
+      <div class="enrich-sub tasks ${this.collapsed ? "is-collapsed" : ""}" style="--tint: var(--ok);">
         ${enrichHead({
-          label: "✅ Tasks",
+          label: "Tasks",
+          badge: enrichBadge("--ok", TASK_GLYPH),
           collapsed: this.collapsed,
           onToggle: this.toggleCollapsed,
           count: total ? html`<span title="${openCount} open of ${total}">${openCount}/${total}</span>` : undefined,
-          action: html`${total
-              ? html`<button class="tag-manage task-hidedone ${this.hideDone ? "on" : ""}"
+          // When empty, the centered empty-state owns the single Extract CTA — so
+          // the header carries no actions until there's content to manage.
+          action: total
+            ? html`<button class="tag-manage task-hidedone ${this.hideDone ? "on" : ""}"
                   title=${this.hideDone ? "Show completed tasks" : "Hide completed tasks"}
-                  @click=${this.toggleHideDone}>${this.hideDone ? "Show done" : "Hide done"}</button>`
-              : nothing}
-            <button class="tag-manage task-extract"
-              title="Ask the AI to pull concrete action items / to-dos from this recording. Re-running replaces the AI list but keeps any task you added or checked off."
-              ?disabled=${this.extracting} @click=${() => void this.runExtract()}>${this.extracting ? "✅ Extracting…" : "✅ Extract"}</button>`,
+                  @click=${this.toggleHideDone}>${this.hideDone ? "Show done" : "Hide done"}</button>
+              <button class="tag-manage task-extract"
+                title="Ask the AI to pull concrete action items / to-dos from this recording. Re-running replaces the AI list but keeps any task you added or checked off."
+                ?disabled=${this.extracting} @click=${() => void this.runExtract()}>${this.extracting ? "✅ Extracting…" : "✅ Extract"}</button>`
+            : undefined,
         })}
         ${this.collapsed
           ? ""
           : html`<div class="enrich-body tasks-list">
-              ${visible.map((t) => this.renderRow(t))}
+              ${total === 0
+                ? html`<div class="enrich-empty-state">
+                    <span class="enrich-empty-ico">${TASK_GLYPH}</span>
+                    <span class="enrich-empty-msg">No tasks yet</span>
+                    <button class="enrich-empty-cta" title="Ask the AI to pull action items from this recording"
+                      ?disabled=${this.extracting} @click=${() => void this.runExtract()}>${this.extracting ? "Extracting…" : "Extract"}</button>
+                  </div>`
+                : visible.map((t) => this.renderRow(t))}
               <div class="task-add-row">
                 <span class="task-add-plus" aria-hidden="true">+</span>
                 <input
