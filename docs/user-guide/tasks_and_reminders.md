@@ -7,8 +7,10 @@ the result is a **list you tick off** rather than chips you approve.
 
 ## The Tasks list (detail pane)
 
-Open any recording and look for the **✅ Tasks** section below the transcript
-(beside [Entities](entities.md)):
+Open any recording and look for the **✅ Tasks** section inside the **Insights**
+card below the transcript (it shares the card with [Entities](entities.md)). The
+whole card collapses if you don't use it, and you can hide it entirely from
+**Settings → Interface → Detail pane → Insights card**:
 
 - Each action item is a row with a **checkbox**. Tick it to mark the task done —
   done tasks dim and strike through, and sort below the open ones.

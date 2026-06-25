@@ -20,6 +20,32 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
   config the daemon reads (no daemon required). `phoneme --json recipes` emits a
   machine-readable array (`id, name, description, builtin, scope, steps`) so a
   client can build a recipe picker — filtering `scope == "recording"` for import.
+- [x] **REST `GET /api/recipes` and `POST /api/import`** — the same two surfaces
+  over the (opt-in, loopback-only) HTTP bridge, for clients that prefer HTTP to
+  spawning the CLI. `GET /api/recipes` returns the recipe list; `POST /api/import`
+  takes `{"path","recipe_id"}` and queues a local file (URL/yt-dlp import stays
+  CLI-only, where the downloader lives).
+
+### Models
+
+- [x] **Ultra-light local cleanup tier** — the curated Ollama cleanup list gains
+  a sub-3B tier (Qwen 2.5 0.5B, Llama 3.2 1B, Gemma 2 2B) below the existing 3B
+  floor, for genuinely weak / no-GPU machines. Each entry notes its RAM and that
+  the smallest are too small for the JSON enrichment steps (entities/tasks/
+  chapters); experimental ternary models (Bonsai-class) can be typed in via the
+  "Other…" escape hatch.
+
+### Detail pane
+
+- [x] **Unified Insights card** — the per-recording **Tasks** and **Entities**
+  sections are now one collapsible "Insights" card styled to match the rest of the
+  detail pane (surface card, tinted identity badges, empty sections that invite
+  Extract), with an Appearance toggle to hide it for users who don't want it.
+- [x] **Collapsible Notes + tidier editor menus** — the Notes section collapses
+  and expands like the transcript; the standalone **Copy** buttons on the
+  transcript and notes were folded into their ⋯ overflow menus, and the
+  transcript / Insights / Notes section titles share the Playbook's accent-tick
+  styling.
 
 ---
 
