@@ -213,6 +213,31 @@
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+/* Read-only rows for the recipe's remaining (non-overridable) steps in Advanced. */
+.mp-extra-steps {
+  margin: 4px 0 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.mp-extra-step {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 2px;
+  font-size: 0.8125rem;
+}
+.mp-extra-step-name {
+  color: var(--fg-default);
+}
+.mp-extra-step-model {
+  color: var(--fg-muted);
+  font-size: 0.7857rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* "Also save these as my defaults" — additive, never a competing primary button. */
 .mp-also-save {
   display: flex;

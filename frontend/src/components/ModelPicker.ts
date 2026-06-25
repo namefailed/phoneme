@@ -650,6 +650,33 @@ export class ModelPickerElement extends LitElement {
       : html`<span class="mp-ovr">${stepLabel} · inherits recipe (${b})</span>`;
   }
 
+  /** Read-only rows for the chosen recipe's remaining steps — everything past the
+   *  three overridable model steps (tags, chapters, entities, hooks, custom) — so
+   *  Advanced shows the recipe's FULL pipeline, not just what you can override.
+   *  They run with their configured model; there's no one-time override for them. */
+  private renderRecipeExtraSteps() {
+    const id = this.recipeId.trim() || "default";
+    const steps = this.recipes.find((r) => r.id === id)?.steps ?? [];
+    const overridable = new Set(["cleanup", "title", "summary"]);
+    const rest = steps.filter((s) => !overridable.has(s));
+    if (!rest.length) return "";
+    const entries: any[] = Array.isArray(this.config?.playbook) ? this.config.playbook : [];
+    const names: Record<string, string> = { tags: "Tags", auto_tag: "Tags", entities: "Entities", chapters: "Chapters" };
+    return html`
+      <div class="mp-extra-steps">
+        <p class="mp-hint">Also in this recipe — each runs with its configured model (no one-time override):</p>
+        ${rest.map((sid) => {
+          const e = entries.find((p) => p.id === sid);
+          const label = names[sid] ?? (typeof e?.name === "string" && e.name.trim() ? e.name : sid);
+          const model = String(e?.llm?.model ?? "").trim();
+          return html`<div class="mp-extra-step">
+            <span class="mp-extra-step-name">${label}</span>
+            <span class="mp-extra-step-model">${model || "—"}</span>
+          </div>`;
+        })}
+      </div>`;
+  }
+
   /** Switch scope, resetting the per-scope view state so the body never shows a
    *  stale tab/disclosure carried over from the other scope. */
   private setScope(mode: "default" | "oneshot") {
@@ -850,6 +877,8 @@ export class ModelPickerElement extends LitElement {
             </div>
             <p class="mp-hint">Model for the auto-summary. <b>Same as post-processing</b> reuses your cleanup connection. Turn the auto-summary itself on/off in <b>Settings → Post-Processing</b>.</p>
           </div>
+
+          ${this.activeMode === "oneshot" && this.advancedOpen ? this.renderRecipeExtraSteps() : ""}
 
           <div class="mp-panel" ?hidden=${!this.panelVisible('autotag')}>
             <label class="mp-label">Provider</label>
