@@ -62,8 +62,9 @@ etc.).
 
 | Capability | GUI | CLI | IPC | REST | MCP | Notes |
 |---|---|---|---|---|---|---|
-| Import audio file | yes (`importRecording`, file picker) | yes (`import <file>`) | yes (`ImportRecording`, path only) | no | no | Core import on GUI/CLI/IPC; absent on REST/MCP. |
-| Import from URL (yt-dlp) | no | yes (`import <url>`) | no | no | no | CLI-only: yt-dlp download then path import; IPC takes a local path only. |
+| Import audio file | yes (`importRecording`, file picker; no recipe) | yes (`import <file> [--recipe]`) | yes (`ImportRecording` + `recipe_id`) | no | no | Core import on GUI/CLI/IPC; absent on REST/MCP. CLI/IPC take a one-time `--recipe`/`recipe_id` (resolved like `record`'s; meeting templates rejected); the GUI file picker has no recipe field yet. |
+| Import from URL (yt-dlp) | no | yes (`import <url> [--recipe]`) | no | no | no | CLI-only: yt-dlp download then path import — with an optional `--recipe`, one pass instead of import-then-`retranscribe --recipe`; IPC takes a local path only. |
+| List Playbook recipes | yes (recipe pickers) | yes (`recipes`, `--json`) | no (reads config) | no | no | The `--recipe` choices. CLI reads the same config the daemon does (no daemon needed) and emits JSON for clients; the GUI surfaces them in the record/Re-run recipe pickers; no dedicated IPC/REST/MCP list verb. |
 | List recordings (filter/paginate) | yes (`listRecordings`) | yes (`list`) | yes (`ListRecordings`) | yes (`GET /api/recordings`) | yes (`list_recent`) | REST exposes limit/offset/kind; MCP `list_recent` is newest-first only. |
 | Show one recording | yes (`getRecording`) | yes (`show`) | yes (`GetRecording`) | yes (`GET /api/recordings/{id}`) | yes (`get_transcript` / via search) | MCP `get_transcript` returns transcript text only. |
 | Get transcript segments | yes (`getSegments`) | yes (`show --segments`) | yes (`GetSegments`) | yes (`GET .../segments`) | yes (`get_segments`) | REST/MCP always request the default variant (no cleaned). |

@@ -1485,7 +1485,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::UndoForgetNamedVoice { id } => {
             catalog_call!(state.catalog.undo_forget(&id).await => json "restored")
         }
-        Request::ImportRecording { path } => import_recording(state, path).await,
+        Request::ImportRecording { path, recipe_id } => {
+            import_recording(state, path, recipe_id).await
+        }
         Request::ExportClip {
             id,
             start_ms,
@@ -2362,6 +2364,32 @@ const MAX_SEARCH_RESULTS: usize = 1000;
 /// so a permanently-failed recording leaves nothing, and `DaemonRecorder::cancel`
 /// removes both in its single-recording arm so a recording canceled mid-capture
 /// (which never reaches `pipeline::run`) leaves nothing either.
+/// Validate + normalize a one-time import recipe id. A `scope = Meeting` recipe is
+/// rejected (a single import is not a meeting); `None`/empty is fine (the global
+/// default), and an unknown id is left to `resolve_recipe`'s lenient fallback
+/// (→ default), matching record/retranscribe. Returns the trimmed id to stash, or
+/// a user-facing error message.
+fn validate_import_recipe(
+    cfg: &phoneme_core::Config,
+    recipe_id: Option<String>,
+) -> Result<Option<String>, String> {
+    let rid = recipe_id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(ref id) = rid {
+        if cfg
+            .recipes
+            .iter()
+            .any(|r| &r.id == id && matches!(r.scope, phoneme_core::config::RecipeScope::Meeting))
+        {
+            return Err(format!(
+                "recipe '{id}' is a meeting template (scope = Meeting); import a single recording with a recording-scope recipe"
+            ));
+        }
+    }
+    Ok(rid)
+}
+
 fn stash_hotkey_overrides(
     state: &AppState,
     id: &phoneme_core::RecordingId,
@@ -3266,7 +3294,26 @@ async fn rerun_period_digest(
 /// pipeline. Mirrors `DaemonRecorder::stop` (catalog row at `Transcribing` +
 /// `inbox.enqueue`) so an imported file is processed exactly like a mic
 /// recording — the only difference is where the WAV came from.
-async fn import_recording(state: &AppState, path: String) -> Response {
+async fn import_recording(
+    state: &AppState,
+    path: String,
+    recipe_id: Option<String>,
+) -> Response {
+    // One-time Playbook recipe for this import (mirrors RecordStart). Validate it
+    // up front — before the (potentially slow) decode — so a meeting template is
+    // rejected immediately rather than after the work. None/empty ⇒ the global
+    // default; an unknown id is left to `resolve_recipe`'s lenient fallback
+    // (→ default), matching record/retranscribe.
+    let recipe_id = match validate_import_recipe(&state.config.load(), recipe_id) {
+        Ok(rid) => rid,
+        Err(message) => {
+            return Response::Err(IpcError {
+                kind: IpcErrorKind::InvalidConfig,
+                message,
+            })
+        }
+    };
+
     let requested = std::path::PathBuf::from(&path);
 
     // Canonicalize so the path we open is a fully-resolved, real filesystem
@@ -3403,6 +3450,12 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         return err_response(&e);
     }
 
+    // Stash the one-time recipe against this id so `pipeline::run` resolves that
+    // chain instead of the global default — the same per-job ledger custom hotkeys
+    // and retranscribe use. Consumed-and-removed by the pipeline; must be in place
+    // before the enqueue, since the queue worker can claim the job immediately.
+    stash_hotkey_overrides(state, &id, recipe_id, None);
+
     let payload = HookPayload {
         id: id.clone(),
         timestamp: started_at,
@@ -3415,9 +3468,15 @@ async fn import_recording(state: &AppState, path: String) -> Response {
     if let Err(e) = state.inbox.enqueue(&payload).await {
         // No queue entry means this import would never be processed — roll the
         // catalog row and the canonical WAV back so it can't sit in the list
-        // stuck on Queued forever. The caller can simply retry.
+        // stuck on Queued forever. The caller can simply retry. Also drop the
+        // recipe we just stashed so the never-processed id leaves nothing behind.
         let _ = state.catalog.delete(&id).await;
         let _ = tokio::fs::remove_file(&audio_path).await;
+        state
+            .pending_recipe
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
         return err_response(&e);
     }
 
@@ -3565,7 +3624,7 @@ async fn edit_recording(
                 })
             }
         }
-        let resp = import_recording(state, tmp.to_string_lossy().into_owned()).await;
+        let resp = import_recording(state, tmp.to_string_lossy().into_owned(), None).await;
         let _ = tokio::fs::remove_file(&tmp).await; // import copied it in; drop the temp
         return resp;
     }
@@ -4098,6 +4157,30 @@ fn serialize_response<T: serde::Serialize>(val: T) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_recipe_validation() {
+        // The seeded config has `default` (recording) + `meeting_digest`/`standup`/
+        // `interview` (meeting) recipes.
+        let cfg = phoneme_core::Config::default();
+        // None / empty / whitespace → no override (the global default).
+        assert_eq!(validate_import_recipe(&cfg, None).unwrap(), None);
+        assert_eq!(validate_import_recipe(&cfg, Some("   ".into())).unwrap(), None);
+        // A recording-scope recipe passes through (trimmed).
+        assert_eq!(
+            validate_import_recipe(&cfg, Some(" default ".into())).unwrap(),
+            Some("default".into())
+        );
+        // An unknown id is lenient (pipeline falls back to default), not an error.
+        assert_eq!(
+            validate_import_recipe(&cfg, Some("nope".into())).unwrap(),
+            Some("nope".into())
+        );
+        // A meeting template is rejected — a single import is not a meeting.
+        let err = validate_import_recipe(&cfg, Some("meeting_digest".into())).unwrap_err();
+        assert!(err.contains("meeting_digest"), "names the recipe: {err}");
+        assert!(err.contains("scope = Meeting"), "explains why: {err}");
+    }
 
     #[test]
     fn reimport_id_from_path_parts_round_trips() {

@@ -543,6 +543,7 @@ mod tests {
         // Mutation: a re-send could double-execute it — single attempt only.
         assert!(!is_retry_safe(&Request::ImportRecording {
             path: "C:/audio/take1.wav".to_string(),
+            recipe_id: None,
         }));
         // A few more non-idempotent guards so the boundary can't quietly drift.
         assert!(!is_retry_safe(&Request::RecordStart {
