@@ -98,7 +98,7 @@ frontend/src/
 │   ├── DoctorModal.ts / DoctorView/   # health checks: quick modal + routed full page
 │   ├── doctorChecks.ts     # shared Doctor logic (categories, Fix All plan, tallies)
 │   ├── TagManager.ts       # quick modal shell around SectionTags (bare mode)
-│   ├── SavedSearches.ts    # header 🔖 dropdown
+│   ├── SavedSearches.ts    # header 🗃️ dropdown
 │   ├── FirstRunWizard/     # guided setup (express + custom flows)
 │   ├── RecordingsView/     # THE home view: index.ts (layout/keyboard/events) + panes
 │   │   ├── RecordingsList.ts, RecordingDetail.ts, MergedConversationDetail.ts

@@ -23,24 +23,18 @@ Phoneme runs **100% offline** by default. No cloud required, no subscriptions, n
 | Principle | What It Means |
 |-----------|---------------|
 | **🔒 Privacy First** | Voice never leaves your machine. No forced updates, no tracking. |
-| **⚡ Flexible** | Local Whisper + Ollama for privacy, or cloud APIs (OpenAI, Anthropic, Groq, Gemini, Deepgram, and more) for speed. Each step picks its own provider. |
+| **⚡ Flexible** | Transcription and the LLM steps are chosen independently. Transcribe locally (whisper.cpp) or on a cloud STT API (OpenAI, Groq, Deepgram, AssemblyAI, ElevenLabs); run cleanup/summary/title on local Ollama or a cloud LLM (OpenAI, Anthropic, Groq, Gemini, …). Each step picks its own provider. |
 | **🔌 Extensible** | JSON output → your scripts. Obsidian, Notion, Jira, Discord, Python—wherever you want. |
 
 ## 🎯 Why Voice?
 
-You think faster than you type. The average person speaks at **150 words per minute** but types at only **40**. That gap is where ideas die.
+Most people speak faster than they type, so voice is a good fit for a few kinds of work:
 
-**Capture thoughts before they evaporate.** Voice lets you seize ideas in their natural habitat—while walking, showering, driving, cooking. No app to open, no cursor to find. Just hit a hotkey and think out loud.
-
-**Speak to AI like a human.** When you dictate a prompt, you give cleaner context—natural pauses, emphasis, clarifications that you'd never type out. The models understand *you* better when you sound like yourself.
-
-**Accessibility is for everyone.** RSI, carpal tunnel, vision strain, dyslexia, tremors—typing isn't universal. Voice removes barriers. But even without disabilities, your wrists will thank you after your 10,000th daily keystroke.
-
-**No punctuation, no spelling, no backspace.** Just pure thought flow. The AI cleans it up. You focus on *what* to say, not how to format it.
-
-**Multitasking is real.** Record a meeting while taking notes. Capture a shower thought while soaping. Dictate a bug fix while compiling. Voice doesn't steal your eyes or hands from the task at hand.
-
-**Mobile-first life.** Your phone is always there. Typing on glass at 20 WPM isn't. Voice makes your pocket computer actually useful for more than consumption.
+- **Capturing ideas hands-free** — while walking, driving, or away from the keyboard. Hit a hotkey and talk.
+- **Dictating prompts to an LLM** — speaking a prompt often gives more context (pauses, asides, clarifications) than you'd bother typing.
+- **Accessibility** — for RSI, vision strain, dyslexia, or tremors, voice is an alternative to the keyboard.
+- **Rough drafts** — you say it once and let the cleanup step fix punctuation and formatting, instead of editing as you go.
+- **Meetings** — record the call and keep participating instead of stopping to take notes.
 
 ---
 
@@ -81,7 +75,11 @@ flowchart TD
 - **⌨️ Transcribe-in-Place (`Ctrl+Alt+I`)**: Speak with a global hotkey and Phoneme types (or pastes) your dictated words into the focused application (Word, Slack, Chrome, VS Code). A zero-latency fast lane skips the queue entirely so text lands the moment you stop talking.
 - **✨ Smart Cleanup, AI Summary & Auto-Titles**: Pipe raw transcripts through an LLM to fix stutters, reformat, or translate — and optionally generate a per-recording summary, on demand or automatically. Every recording gets a readable auto-title (a free heuristic, or an optional LLM title). Three transcript layers (raw → cleaned → edited) are kept so nothing is lost.
 - **🔍 Keyword + Semantic Search**: Manage thousands of recordings with SQLite FTS5 full-text search, or search by *meaning* with an offline, **chunked hybrid** index — per-passage ONNX embeddings fused with keyword ranking (RRF), cached in memory for fast recall, so a query finds the recording whether you remember the gist or the one distinctive word. **More-like-this** finds a recording's neighbours from its stored vectors (no re-embedding). Bring your own embedding model.
-- **🏷️ Organize at scale**: Tags with a full manager, ⭐ favorites, saved searches that snapshot every filter, AI **auto-tag suggestions** you approve before they apply, and a side-by-side view for any two transcripts.
+- **🏷️ Organize at scale**: Tags with a full manager, ⭐ favorites, 📌 pinned recordings that sort to the top, saved searches that snapshot every filter, AI **auto-tag suggestions** you approve before they apply, and a side-by-side view for any two transcripts.
+- **💬 Ask your archive (local RAG)**: Ask a plain-language question and get an answer drawn only from your own recordings, with a citation per claim. It reuses the same hybrid retriever as search; nothing leaves your machine beyond the LLM call you already use for cleanup.
+- **🔎 Entities & ✅ tasks from voice**: Optional LLM enrichment pulls **structured entities** (people / orgs / topics / terms) and **task-shaped action items** out of a transcript. Browse the library by entity (the entity counterpart of the tag facet), and check off, edit, or hand-add tasks — with a cross-recording "all tasks" view.
+- **🕮 Topic timelines & digests**: Split a long recording into **time-ranged chapters**, generate a **whole-meeting digest** across both meeting tracks, or roll up every recording in a date window into a **daily/weekly digest**.
+- **⌨️ Dictation that fits the app**: Text **snippets** (trigger → expansion), editable voice commands, and **per-app tone** — dictation picks its cleanup recipe by the focused app, so an email client gets a formal register and an editor gets a terse one.
 - **📤 Import & export anything**: Import `.wav` / `.mp3` / `.m4a` / `.flac` straight into the pipeline; export the whole library as a portable zip, or any recording as **SRT / WebVTT captions**.
 - **⌨️ Keyboard everything**: Opt-in vim-style navigation drives all three panes (and the queue) — the detail pane is a 2D grid you walk with `h`/`j`/`k`/`l`, the waveform has an Enter-to-scrub mode (`h`/`l` ±1s, Space to play), `g`-chords jump anywhere, the list zooms with `Ctrl+=`/`-`, and `?` shows the full cheat sheet.
 - **🩺 Provider-aware Self-healing**: A header health pill + Doctor watch the local servers and follow the *effective* connection each feature uses (cloud keys included); one click (or `phoneme doctor --fix`) sweeps a hung/orphaned whisper-server and respawns it from config.

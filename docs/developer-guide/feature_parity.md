@@ -13,7 +13,7 @@ asymmetries are.
 | **GUI** | The Tauri desktop app. Calls the daemon over IPC through `src-tauri` Tauri commands; reads/writes `config.toml` directly for config. | Full — the reference surface. |
 | **CLI** (`phoneme`) | `bin/phoneme/src/args.rs` is the authoritative command surface; dispatch lives in `bin/phoneme/src/commands/*`. Connects to the daemon over IPC, or runs in-process for local-file ops. | Full — headless parity with the GUI is a standing goal. |
 | **IPC** | The daemon wire contract: the `Request` enum in `crates/phoneme-ipc/src/schema.rs`. One JSON object per line over the named pipe (default `\\.\pipe\phoneme-daemon`), each answered by one `Response`. Both the GUI and CLI are IPC clients. | Full — every daemon capability is an IPC variant (a handful of GUI/CLI things are local-file ops with no IPC verb). |
-| **REST** (`phoneme-rest`) | An optional loopback-only (`127.0.0.1`) HTTP+SSE bridge. **Off by default** (`[rest_api].enabled = false`, default port `3737`). Each route maps one HTTP call to exactly one IPC `Request` and returns the daemon's JSON verbatim. See [rest_api.md](rest_api.md). | **Curated, not full parity.** Read + light-mutate. ~24 routes. |
+| **REST** (`phoneme-rest`) | An optional loopback-only (`127.0.0.1`) HTTP+SSE bridge. **Off by default** (`[rest_api].enabled = false`, default port `3737`). Each route maps one HTTP call to exactly one IPC `Request` and returns the daemon's JSON verbatim. See [rest_api.md](rest_api.md). | **Curated, not full parity.** Read + light-mutate. ~25 routes. |
 | **MCP** (`phoneme-mcp`) | The agent surface: a Model Context Protocol server over the same daemon. A hand-picked set of agent-relevant tools, also a thin one-call-per-tool bridge. See [mcp_server.md](mcp_server.md). | **Curated, not full parity.** ~30 task-shaped tools. |
 
 REST and MCP being thin is a design choice, not a backlog. Both are one-call-per-
@@ -70,8 +70,8 @@ etc.).
 | Get per-word layer | yes (`getWords`) | n/a | yes (`GetWords`) | yes (`GET .../words`) | yes (`get_words`) | Word timings for views/captions; no CLI verb. |
 | Get original/unedited transcript | yes (via compare/views) | yes (`show --original` / `--unedited`) | yes (`GetOriginalTranscript` / `GetCleanTranscript`) | no | no | Preserved-copy reads. |
 | Edit/update transcript | yes (`updateTranscript`, editor) | yes (`edit`) | yes (`UpdateTranscript`) | no | no | Hand edit of the live transcript. |
-| Find/replace in one recording | no | yes (`find-replace <id>`) | yes (`FindReplace`) | no | no | `bridge.rs` allowlists it but no GUI/Tauri call wires it up. |
-| Find/replace library-wide | no | yes (`find-replace --library`) | yes (`FindReplaceLibrary`) | no | no | Same — CLI + IPC only. |
+| Find/replace in one recording | yes (editor ⋯ → Find/Replace) | yes (`find-replace <id>`) | yes (`FindReplace`) | no | no | GUI runs it from the transcript editor's ⋯ menu; no REST/MCP route. |
+| Find/replace library-wide | yes (Find/Replace modal, "Whole library" scope) | yes (`find-replace --library`) | yes (`FindReplaceLibrary`) | no | no | GUI/CLI/IPC only. |
 | Get/set notes | yes (`updateNotes`) | yes (`notes`) | yes (`UpdateNotes`) | no | no | Free-form notes. |
 | Set/clear title | yes (`setRecordingTitle`) | yes (`edit --title` / `--clear-title`) | yes (`SetRecordingTitle`) | yes (`POST .../title`) | yes (`set_title`) | Full parity. |
 | Favorite/unfavorite | yes (`setFavorite`) | yes (`edit --favorite`) | yes (`SetFavorite`) | yes (`POST .../favorite`) | yes (`set_favorite`) | Full parity. |
@@ -82,9 +82,9 @@ etc.).
 
 | Capability | GUI | CLI | IPC | REST | MCP | Notes |
 |---|---|---|---|---|---|---|
-| List transcript versions | yes (`listTranscriptVersions`) | n/a | yes (`ListTranscriptVersions`) | no | no | Version chain is a GUI compare/diff feature. |
-| Get transcript version | yes (used by compare) | n/a | yes (`GetTranscriptVersion`) | no | no | GUI-side version fetch. |
-| Revert to version | yes (`revertToVersion`) | no | yes (`RevertToVersion`) | no | no | GUI-only revert; CLI has no version commands. |
+| List transcript versions | yes (`listTranscriptVersions`) | yes (`versions`) | yes (`ListTranscriptVersions`) | yes (`GET .../versions`) | no | The version chain (raw ASR → each step → live); REST/CLI expose the read so non-pipe clients can compare. |
+| Get transcript version | yes (used by compare) | n/a | yes (`GetTranscriptVersion`) | no | no | GUI-side single-version fetch (the CLI/REST `versions` read returns the whole chain). |
+| Revert to version | yes (`revertToVersion`) | no | yes (`RevertToVersion`) | no | no | GUI-only revert; CLI/REST list but don't revert. |
 
 ### Re-runs (re-transcribe / post-process)
 
@@ -94,7 +94,7 @@ etc.).
 | Re-run cleanup (post-process) | yes (`rerunCleanup`, full overrides) | yes (`cleanup`) | yes (`RerunCleanup`) | yes (`POST .../cleanup`, no overrides) | yes (`rerun_cleanup`, no overrides) | REST/MCP use the configured provider only; GUI/CLI/IPC expose per-run provider/model/prompt/API overrides. |
 | Summarize (generate/regen) | yes (`rerunSummary`) | yes (`summarize`) | yes (`RerunSummary`) | yes (`POST .../summary`, no overrides) | yes (`summarize`, no overrides) | REST/MCP have no per-run overrides. |
 | Re-fire hook | yes (`refireHook`) | yes (`refire-hook`) | yes (`RefireHook`) | no | no | Re-run post-transcription hook on a stored transcript. |
-| Test hook command | no | yes (`hook test`) | yes (`HookTest`) | no | no | IPC variant exists and `bridge.rs` allowlists it, but no Tauri command/frontend call wires it into the GUI Hook Manager. |
+| Test hook command | yes (Integrations → hook "Test") | yes (`hook test`) | yes (`HookTest`) | no | no | GUI runs a mock-payload test from the Integrations settings; no REST/MCP route. |
 
 ### Recall (search / Q&A / embeddings)
 
@@ -116,11 +116,11 @@ etc.).
 | Calibrate voiceprint threshold | no | yes (`speaker calibrate`) | no | no | no | CLI-only, in-process read-only EER analysis over the catalog; no IPC variant. |
 | Recognize speakers (on demand) | yes (`recognizeSpeakers`) | n/a | yes (`RecognizeSpeakers`) | no | yes (`recognize_speakers`) | Named-speaker suggestions; no CLI verb. |
 | Dismiss speaker suggestion | yes (`dismissSpeakerSuggestion`) | n/a | yes (`DismissSpeakerSuggestion`) | no | no | GUI-side suggestion dismissal. |
-| List named voices | yes (`listNamedVoices`) | n/a | yes (`ListNamedVoices`) | no | yes (`list_named_voices`) | Named-voice library has no CLI surface. |
-| Rename named voice | yes (`renameNamedVoice`) | n/a | yes (`RenameNamedVoice`) | no | yes (`rename_named_voice`) | No CLI named-voice management. |
-| Merge named voices | yes (`mergeNamedVoices`) | n/a | yes (`MergeNamedVoices`) | no | yes (`merge_named_voices`) | No CLI surface. |
-| Forget named voice | yes (`forgetNamedVoice`) | n/a | yes (`ForgetNamedVoice`) | no | yes (`forget_named_voice`) | Reversible soft-delete; no CLI surface. |
-| Undo forget named voice | yes (`undoForgetNamedVoice`) | n/a | yes (`UndoForgetNamedVoice`) | no | no | GUI-only undo; not in MCP. |
+| List named voices | yes (`listNamedVoices`) | yes (`voice list`) | yes (`ListNamedVoices`) | no | yes (`list_named_voices`) | `phoneme voice list` (observe-only). |
+| Rename named voice | yes (`renameNamedVoice`) | yes (`voice rename`) | yes (`RenameNamedVoice`) | no | yes (`rename_named_voice`) | Full parity. |
+| Merge named voices | yes (`mergeNamedVoices`) | yes (`voice merge`) | yes (`MergeNamedVoices`) | no | yes (`merge_named_voices`) | Full parity. |
+| Forget named voice | yes (`forgetNamedVoice`) | yes (`voice forget`) | yes (`ForgetNamedVoice`) | no | yes (`forget_named_voice`) | Reversible soft-delete; `voice restore` undoes it. |
+| Undo forget named voice | yes (`undoForgetNamedVoice`) | yes (`voice restore`) | yes (`UndoForgetNamedVoice`) | no | no | CLI `voice restore`; not in MCP. |
 
 ### Tasks, entities, chapters
 
@@ -173,7 +173,7 @@ etc.).
 
 | Capability | GUI | CLI | IPC | REST | MCP | Notes |
 |---|---|---|---|---|---|---|
-| Export clip (audio range) | yes (`exportClip`, waveform modal) | yes (`clip`) | yes (`ExportClip`) | no | no | Audio slice export. |
+| Export clip (audio range) | yes (`exportClip`, waveform modal) | yes (`clip`) | yes (`ExportClip`) | yes (`POST .../clip`) | no | Audio slice export; REST body is `{start_ms,end_ms[,out_path]}`. |
 | Export captions (srt/vtt) | yes (`exportCaptions`) | yes (`export --captions`) | n/a (built from `GetSegments`/`GetWords`) | no | no (`get_words`/`get_segments` only) | Caption files assembled client-side; no single IPC verb. |
 | Export library zip (backup) | yes (`exportLibraryZip`) | yes (`export <out>`) | n/a (composed of catalog reads) | no | no | Backup zip assembled from multiple reads; no dedicated IPC verb. |
 | Import backup zip (restore) | no | yes (`import-backup`) | n/a (local file ops) | no | no | CLI-only restore; local operation against catalog/audio dir. |
@@ -217,7 +217,7 @@ etc.).
 | Restart whisper server (Doctor fix) | yes (Doctor Fix → `restart_whisper`) | yes (`doctor --fix`) | yes (`RestartWhisper`) | no | no | GUI/CLI/IPC only. |
 | Rebuild catalog (destructive) | no | yes (`doctor --rebuild-catalog`) | yes (`RebuildCatalog`) | no | no | Destructive repair; CLI/IPC only (no GUI button by design). |
 | Reimport from disk (non-destructive) | no | yes (`doctor --reimport`) | yes (`ReimportFromDisk`) | no | no | CLI/IPC only; no GUI button. |
-| Export diagnostics bundle | yes (`export_diagnostics`) | n/a | yes (`ExportDiagnostics`) | no | no | GUI System/Diagnostics button + IPC; no CLI verb yet. |
+| Export diagnostics bundle | yes (`export_diagnostics`) | yes (`doctor --diagnostics`) | yes (`ExportDiagnostics`) | no | no | GUI System/Diagnostics button, `phoneme doctor --diagnostics`, and IPC. |
 | Daemon status | yes (`daemonStatus`) | yes (`daemon status`) | yes (`DaemonStatus`) | yes (`GET /api/status`) | n/a | REST `/api/health` also probes it. |
 | Daemon start/stop | yes (tray + auto-spawn) | yes (`daemon start` / `stop`) | yes (`Shutdown` for stop) | no | no | Start is a process spawn (CLI/tray); IPC only stops. |
 | Reload config | yes (after Settings save) | yes (`config reload`) | yes (`ReloadConfig`) | no | no | GUI reloads after writing config; CLI/IPC explicit. |
@@ -250,25 +250,18 @@ Each gap is one of three kinds:
 
 ### code-gap
 
-- **Test hook command** — missing on GUI/REST/MCP; present on CLI (`hook test`)
-  and IPC (`HookTest`). `src-tauri/src/bridge.rs` explicitly allowlists `HookTest`
-  for forwarding, but no Tauri command or frontend call invokes it, and the Hook
-  Manager UI has no "test this command" button. The plumbing is half-built. A
-  Test button in the Hook Manager closes it. (Task #257.)
-- **Find/replace (single + library)** — missing on GUI/REST/MCP; present on CLI
-  (`find-replace`) and IPC (`FindReplace` / `FindReplaceLibrary`). `bridge.rs`
-  allowlists both for the WebView but nothing calls them. The daemon already does
-  the safe preserve-and-re-flow per recording. Low-effort, high-value GUI add.
-  (Task #256.)
-- **Named-voice library (list/rename/merge/forget)** — missing on CLI; present on
-  GUI, IPC, and (mostly) MCP. The whole cross-recording named-voice library has
-  zero CLI surface — no `phoneme voice ...` command — so a headless user who
-  enrolls voices via dictation/recognition can't manage them from the CLI. A
-  `phoneme voice` command group restores parity. (Task #258.)
-- **Export diagnostics bundle** — missing on CLI; present on GUI and IPC
-  (`ExportDiagnostics`). The daemon fully supports it but a headless/server user
-  can't produce a support bundle from the command line. A `phoneme doctor
-  --diagnostics` (or `phoneme diagnostics`) verb closes it. (Task #259.)
+None outstanding. The four cross-surface gaps this page used to track have all
+shipped:
+
+- **Test hook command** on the GUI — Integrations → a hook's **Test** button runs
+  it against a mock payload (`hook_test` → `HookTest`).
+- **Find/replace (single + library)** on the GUI — the transcript editor's ⋯ menu
+  opens the Find/Replace modal, with a "This recording" and a "Whole library"
+  scope (`find_replace` / `find_replace_library`).
+- **Named-voice library** on the CLI — `phoneme voice list/rename/forget/restore/
+  merge` manages the cross-recording named-voice library headlessly.
+- **Export diagnostics bundle** on the CLI — `phoneme doctor --diagnostics` writes
+  the same local-only sanitized bundle as the GUI Doctor button.
 
 ### intentional
 

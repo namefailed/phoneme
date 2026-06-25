@@ -1,6 +1,6 @@
 # 👥 Meeting Mode (Dual-Track Recording)
 
-Are you tired of taking notes while trying to actively participate in a video call? Phoneme's **Meeting Mode** is designed specifically for this scenario.
+**Meeting Mode** is for video calls where you want to participate instead of taking notes.
 
 Instead of just recording your microphone, Meeting Mode captures *both* your microphone and your computer's system audio (what you hear through your speakers) simultaneously, as two separate but linked tracks.
 
@@ -86,7 +86,7 @@ button in the detail pane's transcript box.
 
 ### 🗣️ Adding Speaker Diarization
 
-If you want to take this to the next level, you can enable **Speaker Diarization** in **Settings → Diarization → Speaker Diarization**. Local diarization (the **speakrs** model) runs entirely on your machine; cloud options are available too. See [Whisper & Diarization](diarization_and_whisper.md) for the backends and how they pair with your transcription provider.
+To separate the voices on the call, enable **Speaker Diarization** in **Settings → Diarization → Speaker Diarization**. Local diarization (the **speakrs** model) runs entirely on your machine; cloud options are available too. See [Whisper & Diarization](diarization_and_whisper.md) for the backends and how they pair with your transcription provider.
 
 By default, the System Track is one long transcript of everyone on the call. With Diarization enabled, Phoneme runs the speakrs model on the System Track to separate the different voices.
 
@@ -154,4 +154,4 @@ backups** (see [Exporting & Backup](exporting_and_backup.md)).
 > **Use Headphones!** If you use speakers, your microphone will pick up the audio coming from your speakers. This causes an "echo" where the other people on the call are transcribed on *both* the System track and your Mic track. Always wear headphones when using Meeting Mode.
 
 > [!TIP]
-> **Combine with Smart Cleanup.** Use the Meeting Summarizer prompt in Smart Cleanup: *"This is a multi-speaker transcript. Provide a concise summary of the decisions made, and list the action items assigned to each speaker."* Phoneme will automatically generate a pristine summary of the entire meeting.
+> **Combine with Smart Cleanup.** Use the Meeting Summarizer prompt in Smart Cleanup: *"This is a multi-speaker transcript. Provide a concise summary of the decisions made, and list the action items assigned to each speaker."* Phoneme then generates a summary of the entire meeting.

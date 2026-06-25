@@ -8,7 +8,11 @@ cloud transcription or LLM providers per step if you want.
 
 ## 🧙‍♂️ The First Run Wizard
 
-When you launch Phoneme for the first time, you are greeted by the First Run Wizard. It inspects your hardware, downloads what you need, and lands you on a working configuration. There are **two paths**, and the welcome screen lets you pick:
+When you launch Phoneme for the first time, the First Run Wizard opens on a hero
+welcome screen — *"Your voice, captured privately"* — with the **Recommended
+local setup** plan for your detected RAM/VRAM laid out in one card. It inspects
+your hardware, downloads what you need, and lands you on a working configuration.
+There are **two paths**, and that welcome screen lets you pick:
 
 - **Express setup (the quick default)** — one button installs and configures the recommended *local* stack for your detected RAM/VRAM, then asks only the few things it can't decide for you.
 - **Customize setup** — click **Customize setup** on the welcome screen to open the full per-feature flow (engine choice, AI cleanup connection, live preview, auto-summary, destination hook).
@@ -31,24 +35,20 @@ The express path is **6 steps**:
 
 ### 🛠️ Customize setup (the full flow)
 
-Choosing **Customize setup** reveals all **11 steps**:
+Choosing **Customize setup** walks the same **5 grouped phases** the progress
+stepper always shows — each phase is one composed page that stacks the relevant
+sub-steps:
 
-| # | Step | What it covers |
-|---|------|----------------|
-| 1 | **Welcome** | Phoneme intro, plus theme and interface preferences (vim navigation, 24-hour time). |
-| 2 | **Features** | Per-feature toggles, pre-selected for your hardware: Speech-to-Text (with model picker + real-time streaming), AI Cleanup & Summaries (Ollama model), Speaker Diarization, and Semantic Search. |
-| 3 | **Setting up** | Downloads whatever you left enabled on the Features step. |
-| 4 | **Connect AI** | Shown only when a chosen feature needs a cloud key — paste a transcription provider key (no local Whisper) and/or an AI cleanup provider key (no local Ollama). Fully skippable. |
-| 5 | **Microphone** | Pick the input device. |
-| 6 | **Live Preview** | Optionally watch words appear while you record, and choose where the live text comes from (a dedicated local model, your final model, or a cloud API) plus the system-wide overlay. |
-| 7 | **Auto Summary** | Choose whether an AI summary is generated for every recording, or on demand only (the recommended default). |
-| 8 | **Destination** | Where finished transcripts go — an integration script/app, with a timeout. The default just shows the text in Phoneme. |
-| 9 | **Hotkeys** | Global record, meeting, and in-place transcription combos. |
-| 10 | **Review** | Confirm your choices, with inline toggles to adjust. |
-| 11 | **Done** | Make your first recording. |
+| Phase | What it covers |
+|-------|----------------|
+| **Welcome** | Phoneme intro, plus theme and interface preferences (arrow / vim navigation). |
+| **Transcription & AI** | Per-feature toggles, pre-selected for your hardware — Speech-to-Text (model picker + real-time streaming), AI Cleanup & Summaries (Ollama model), Speaker Diarization, Semantic Search — then the downloads for whatever you left on, and a **Connect AI** key step shown only when a chosen feature needs a cloud key. |
+| **Capture** | Microphone device; Live Preview (watch words appear as you record, from a dedicated local model, your final model, or a cloud API, plus the overlay); and the global record / meeting / in-place hotkeys. |
+| **Output** | Auto Summary (every recording vs on demand only, the recommended default) and the Destination (where finished transcripts go — an integration script/app, with a timeout; the default just shows the text in Phoneme). |
+| **Done** | Review your choices with inline toggles, then make your first recording. |
 
 > [!NOTE]
-> Steps adapt to your choices. **Connect AI** only appears if you turned a feature off and need a cloud key for it; **Setting up** skips straight through if nothing is left to download.
+> Steps adapt to your choices. The **Connect AI** sub-step only appears if you turned a feature off and need a cloud key for it; the download step skips straight through if nothing is left to fetch.
 
 You can re-run the wizard any time from **Settings → System → Diagnostics**. Screenshots of each settings area live in [Settings Overview](settings_overview.md).
 
@@ -85,7 +85,7 @@ Once the wizard completes, you'll land on the main Recordings View.
 
 By default the transcript appears once the recording stops. If you enable [Live Preview](streaming_preview_and_preroll.md), partial text streams into the UI while you talk (this is a preview — the final transcript is still produced after you stop).
 
-Phoneme finalizes the recording, applies any [Smart Cleanup](smart_cleanup.md) you have configured, optionally generates an [AI summary](smart_cleanup.md#auto-ai-summary), and saves everything to your local SQLite catalog.
+Phoneme finalizes the recording, applies any [Smart Cleanup](smart_cleanup.md) you have configured, optionally generates an [AI summary](smart_cleanup.md#-auto-ai-summary), and saves everything to your local SQLite catalog.
 
 ## The Detail Pane
 
@@ -93,8 +93,9 @@ Clicking on any recording in your list will open the **Detail Pane**.
 
 The detail pane lays out, top to bottom: an **editable title**, an interactive
 waveform player (wavesurfer.js), an action row, the applied **tag chips**, the
-tag input, any **pending tag suggestions**, the transcript editor, the notes
-field, and a **🪈 Pipeline** button.
+tag input, any **pending tag suggestions**, the transcript editor, the
+**Entities** and **Tasks** sections, the notes field, and a **🪈 Pipeline**
+button.
 
 - **Editable title** — click the title (or press Enter on it) to rename the
   recording; a title you set by hand is never overwritten by a re-transcribe.
@@ -104,6 +105,12 @@ field, and a **🪈 Pipeline** button.
 - **Tag chips & suggestions** — applied tags show as colored chips; proposed
   tags appear below the tag input, each with a ✓ to apply and a ✗ to dismiss
   (see [Auto-Tagging](auto_tagging.md)).
+- **Entities** — the recording's structured entities as chips grouped by kind:
+  **People**, **Organizations**, **Topics**, and **Terms**. A 🔎 Extract button
+  fills them in; you can add, fix (double-click), or delete one by hand.
+- **Tasks** — action items pulled from the transcript as a checklist; tick one
+  off and the done-state sticks. Both Entities and Tasks come from optional
+  Playbook steps.
 - **🪈 Pipeline provenance** — click it to open a popover that lists every
   processing step the recording went through and the model behind each one.
 
@@ -115,16 +122,19 @@ Here you can:
 - **Listen Back**: Click the play button on the interactive waveform to hear your original audio.
 - **Edit**: Spot a mistake? Click into the transcript to fix it.
 - **Take Notes**: Use the free-form Notes text area to jot down thoughts related to the recording. This field is yours and is never overwritten by AI or re-transcription.
-- **View summary**: Generate (or view) an AI summary of the recording on demand.
+- **📝 Summary**: open it from the **Views** menu to read the AI summary; its **Regenerate summary** button writes a fresh one from the current transcript.
+- **🗂 Chapters**: open it from the **Views** menu to read the recording as topic chapters — click a chapter to jump playback there. See [Topic timelines & chapters](topic_timelines.md).
+- **✂ Edit…**: open the clip editor to trim the ends or cut out sections against the waveform, then replace the recording's audio or save a copy. (Same as `phoneme clip`.)
 - **View unedited transcript** / **Restore unedited**: see (or restore) the transcript exactly as the pipeline produced it — transcribed and cleaned — *before* your hand edits.
 - **View original transcript** / **Restore raw**: see (or restore) the raw machine transcript, *before* any AI cleanup.
 - **Word-synced transcript**: click **🔤 Synced** in the transcript box to read the machine transcript as a flow of clickable words. **Click any word to jump playback to that exact moment**, and as audio plays the word under the playhead stays highlighted so you can follow along. Words the transcriber wasn't sure about (where the provider reports a low confidence) get a subtle underline squiggle, with the exact percentage in their tooltip — so likely mistranscriptions are easy to spot and double-check against the audio. This is a read-only view — your edits live in the normal transcript editor and are never touched here.
 
 > [!NOTE]
 > Word timings are captured at transcription time, so recordings transcribed
-> before this feature show "no word timings" — hit **Re-run → Transcribe** to
-> backfill them and enable click-to-seek. (The coarser **🕒 Timeline** view —
-> click a whole *line* to seek — works on any recording with segment timing.)
+> before this feature show "no word timings" — open **↻ Re-run…** and
+> re-transcribe to backfill them and enable click-to-seek. (The coarser
+> **🕒 Timeline** view — click a whole *line* to seek — works on any recording
+> with segment timing.)
 
 ### The three transcript layers
 

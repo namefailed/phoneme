@@ -13,18 +13,21 @@
 ## Install + wizard
 
 - [ ] Install the new MSI.
-- [ ] First launch: wizard appears. The full (Customize) flow has 11 steps —
-      `welcome`, `mode` (Features), `configure` (Setting up), `connect` (Connect AI),
-      `mic` (Microphone), `preview` (Live Preview), `summary` (Auto Summary),
-      `hook` (Destination), `hotkey` (Hotkeys), `review`, `done`. Express mode
-      (the default) auto-applies the per-feature screens and short-circuits to
-      `welcome → configure → mic → hotkey → review → done`.
-  - [ ] `mode` (Features) — three cards visible, mode 3 selectable.
-  - [ ] `configure` (Setting up) — the Test/connection step reports success for a working endpoint.
-  - [ ] `mic` (Microphone) — device list populates.
-  - [ ] `hook` (Destination) — default points at `to-stdout.ps1`; `to-clipboard.ps1` listed as an alternative.
-  - [ ] `hotkey` (Hotkeys) — toggle off by default.
-  - [ ] `done` — big Record button visible.
+- [ ] First launch: the first-run wizard appears. The progress stepper shows
+      **5 phases** — Welcome, Transcription & AI, Capture, Output, Done.
+- [ ] **Express setup** (the default path) — the recommended local setup runs:
+      whisper-server + a RAM-appropriate model download, then mic and hotkey.
+  - [ ] Welcome — "Customize setup" is offered alongside the express path.
+  - [ ] Transcription & AI — the model download reports progress and finishes
+        without error (or, with a working endpoint, the connection test passes).
+  - [ ] Capture — the microphone device list populates.
+  - [ ] Capture — the hotkey toggle is off by default.
+  - [ ] Done — big Record button visible.
+- [ ] Re-run the wizard and pick **Customize setup**: the per-feature pages show
+      under their phases — Features (three cards, mode 3 selectable) and Connect
+      AI under Transcription & AI; Microphone and Live Preview under Capture;
+      Auto Summary and Destination under Output. The default destination points
+      at `to-stdout.ps1`, with `to-clipboard.ps1` listed as an alternative.
 - [ ] Finish wizard. Recordings view appears empty.
 
 ## Core flow

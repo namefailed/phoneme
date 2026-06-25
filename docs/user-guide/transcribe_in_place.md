@@ -1,8 +1,8 @@
 # ⌨️ Transcribe-in-Place
 
-Phoneme v1.8 introduces one of the most highly requested features: **Transcribe-in-Place**.
+**Transcribe-in-Place** turns Phoneme into a system-wide dictation engine.
 
-Transcribe-in-Place allows you to use Phoneme as a system-wide dictation engine. Instead of recording a note, letting it transcribe, and then copying the text out of the Phoneme UI, Phoneme will simply simulate the keystrokes to type the transcribed text directly into whatever application or text box you currently have focused.
+Instead of recording a note, letting it transcribe, and then copying the text out of the Phoneme UI, Phoneme simulates the keystrokes to type the transcribed text directly into whatever application or text box you currently have focused.
 
 ## 🚀 How to use it
 

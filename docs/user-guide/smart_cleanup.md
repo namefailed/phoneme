@@ -71,7 +71,7 @@ See [config_reference → `[filler]`](../developer-guide/config_reference.md#fil
 
 ## ☁️ Provider Options
 
-In keeping with Phoneme's philosophy, you have total control over *where* your data is processed. Configure cleanup under **Settings → Post-Processing → AI Post-Processing**.
+You choose where cleanup runs. Configure it under Settings → Post-Processing → AI Post-Processing.
 
 ![Post-processing settings](../screenshots/settings-post-processing.png)
 
@@ -168,7 +168,7 @@ The prompt is what controls the LLM's output. Pick one of the default presets, o
 
 Separately from cleanup, Phoneme can produce a short **AI summary** of each recording.
 
-- **On demand:** click **View summary** in any recording's detail view to generate (or regenerate) a summary.
+- **On demand:** open **📝 Summary** from the detail pane's **Views** menu. The peek generates a summary the first time, and its **Regenerate summary** button writes a fresh one from the current transcript.
 - **Automatic:** enable **Summarize every recording** (`summary.auto`) under Settings → Post-Processing → Auto AI Summary, and a summary is generated as the **last step** of every recording's pipeline.
 
 The summary **streams live** into the peek as it generates — you watch it write itself token by token (with a small spinner) rather than waiting on a "Generating summary…" placeholder, then it settles to the final stored text. The whole-meeting digest card streams the same way.
@@ -188,22 +188,16 @@ Click the title in a recording's detail header to edit it: **Enter** saves, **Es
 
 ## 🔁 Re-running cleanup & summary
 
-You can re-process an existing recording without re-recording, using one-time overrides that are **never** saved to your config:
-
-- **Re-transcribe** — re-runs transcription (optionally with a different model, and optionally skipping cleanup for that run).
-- **Re-run cleanup** — re-runs only the LLM cleanup step against the preserved original transcript, optionally with a one-off provider / model / prompt / endpoint / key. Because it always starts from the raw original, it's idempotent — re-run it as many times as you like.
-- **Regenerate summary** — re-runs the summary with an optional one-off model / prompt.
-
-These live in each recording's **Re-run** menu. See [Providers & Models](providers_and_models.md#one-time-overrides-re-run-menu).
+You can re-process an existing recording without re-recording. The detail pane's **↻ Re-run…** button opens the **Models** modal in **Just this run** scope: the choices apply once and are **never** saved to your config (unless you tick *also save these as my defaults*). Cleanup is idempotent — it always starts from the preserved original transcript, so you can re-run it as many times as you like. See [Providers & Models](providers_and_models.md#one-time-overrides-the-models-modal).
 
 ### Re-running through a different recipe
 
-The **↻ Re-run** modal (the action button in a recording's detail row, and the bulk bar) opens with a **Recipe to run** picker at the top:
+The **Just this run** scope has a **Run through** picker:
 
 - **Default pipeline** *(default)* — re-runs the recording through whatever normal recordings run (your global cleanup → title → summary → tags → hooks chain).
 - **Any other Playbook recipe** — re-runs the recording through that recipe's chain instead, so you can, say, push one note through a "Meeting minutes" recipe and another through a "Quick clean" recipe without touching your defaults. Build and edit chains in the **Playbook** settings section.
 
-The per-step **model tabs** below the picker (Transcription / Post-processing / Title / Summary / Auto-tag) are **one-time overrides layered on top** of whichever recipe you choose — they don't replace the recipe, they tweak the models it uses for this run only. Nothing here is written to your config; the chosen recipe and models apply to that single re-run.
+Below the picker, the transcription model sits on the face. The per-step model overrides (cleanup / title / summary) live behind the **Advanced** disclosure, which lists only the steps the chosen recipe actually runs — each one tweaks the model that step uses for this run only, never the recipe itself. Nothing here is written to your config.
 
 > [!NOTE]
-> The **same modal** opened from the header — the **Quick Model Switcher** in its **Save as default** mode — is the unchanged global-model path: it persists your default models and has **no** recipe picker. Only the Re-run (Run once) mode chooses a recipe.
+> Switch the modal to **My defaults** scope and the per-step model slots become always-on tabs that **persist** your global default models — the unchanged global-model path. There is no recipe picker there; recipes only apply to a one-time **Just this run**.

@@ -100,6 +100,7 @@ Each endpoint still maps one HTTP request to exactly one `phoneme-ipc`
 | `GET`  | `/api/recordings/{id}/segments` | `GetSegments` | Transcript segments in timeline order (may be an empty array — a normal state). |
 | `GET`  | `/api/recordings/{id}/words` | `GetWords` | The per-word layer beneath `segments` (word seek, confidence); may be empty. |
 | `GET`  | `/api/recordings/{id}/chapters` | `GetChapters` | Auto-chapters in chronological order (`start_ms`/`end_ms`, `title`, optional `summary`); may be an empty array — a normal state when the recording has no timing to chapter or the auto-chapter step never ran. |
+| `GET`  | `/api/recordings/{id}/versions` | `ListTranscriptVersions` | The transcript-version chain (raw ASR → each pipeline step → live), in `idx` order, for side-by-side compare. A cross-platform alternative to the pipe-only access. |
 | `GET`  | `/api/recordings/{id}/similar` | `MoreLikeThis` | "More like this" from the recording's stored vectors. Query param: `limit` (usize, default `20`). |
 | `GET`  | `/api/recordings/{id}/tags` | `TagsFor` | The tags attached to one recording. |
 | `GET`  | `/api/tags` | `ListTags` | Tags attached to at least one recording. |
@@ -127,17 +128,18 @@ guard is uniform, not POST-only). All id-bearing routes reject a malformed
 | `DELETE` | `/api/recordings/{id}/tags/{tag_id}` | `DetachTag` | No body. Detach a tag from a recording. |
 | `POST`   | `/api/recordings/{id}/cleanup` | `RerunCleanup` | No body. Re-runs the LLM cleanup step against the stored original transcript (configured provider/model/prompt; the per-run overrides are not exposed over REST). |
 | `POST`   | `/api/recordings/{id}/summary` | `RerunSummary` | No body. Generates/regenerates the LLM summary of the current transcript. |
+| `POST`   | `/api/recordings/{id}/clip` | `ExportClip` | `{"start_ms":<i64>,"end_ms":<i64>}` (`end_ms` exclusive, clamped to the duration); optional `"out_path"` for an absolute target, else a `_clip_<start>-<end>` sibling. Returns `{"path":"…"}`. |
 
 Response bodies are the daemon's JSON values passed straight through (see the
 per-`Request` documentation in `crates/phoneme-ipc/src/schema.rs` for each
 shape). Errors are returned as `{"error":"<message>"}` with the status below.
 
 > **Scope.** The REST surface maps a high-value subset of the daemon's IPC
-> `Request` enum — the read/query, tag, single edit, re-run, and recording/
-> meeting-control variants a local automation client needs. It deliberately does
-> **not** expose every variant (speaker-correction, named-voice management,
-> saved searches, queue reordering, doctor/rebuild, config reload, …). Add a
-> route here — mirroring the handler/error shape — when a REST consumer needs
+> `Request` enum — the read/query, tag, single edit, re-run, clip/version, and
+> recording/meeting-control variants a local automation client needs. It
+> deliberately does **not** expose every variant (speaker-correction, named-voice
+> management, saved searches, queue reordering, doctor/rebuild, config reload, …).
+> Add a route here — mirroring the handler/error shape — when a REST consumer needs
 > one; the mapping is a thin translation in `bin/phoneme-rest/src/request_map.rs`.
 
 ### Error → status mapping
@@ -223,6 +225,9 @@ curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/segments
 curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/words
 curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/chapters
 
+# The transcript-version chain (raw ASR → each step → live)
+curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/versions
+
 # Semantic search, and "more like this" from one recording
 curl -s 'http://127.0.0.1:3737/api/search?q=quarterly%20planning&limit=5'
 curl -s 'http://127.0.0.1:3737/api/recordings/20260519T143500042/similar?limit=5'
@@ -245,6 +250,10 @@ curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/pinned \
 # Re-run cleanup / summary on the stored transcript
 curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/cleanup
 curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/summary
+
+# Export an audio clip (12.5s–30s) → {"path":"…"}
+curl -s -X POST http://127.0.0.1:3737/api/recordings/20260519T143500042/clip \
+  -H 'content-type: application/json' -d '{"start_ms":12500,"end_ms":30000}'
 
 # Inspect the pipeline queue
 curl -s http://127.0.0.1:3737/api/queue

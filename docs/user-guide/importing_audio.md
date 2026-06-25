@@ -1,6 +1,6 @@
 # 📥 Importing Audio
 
-Phoneme isn't just for live dictation and meetings. You can also use Phoneme's powerful transcription and LLM post-processing pipeline on audio you've already recorded elsewhere!
+Phoneme isn't just for live dictation and meetings. You can also run audio you've already recorded elsewhere through Phoneme's transcription and LLM post-processing pipeline.
 
 ## 🎙️ Supported Formats
 
@@ -71,4 +71,4 @@ phoneme import --format flac "https://youtu.be/VIDEO_ID"
 4. **Visibility**: The imported recording will immediately show up in the Phoneme GUI alongside your live recordings!
 
 > [!TIP]
-> Importing is incredibly useful if you record voice memos on your phone while driving or walking, and want to bulk-process them through Phoneme when you get back to your computer. Just drop the files on your PC and run `phoneme import`!
+> Importing helps when you record voice memos on your phone while driving or walking and want to bulk-process them through Phoneme when you get back to your computer. Drop the files on your PC and run `phoneme import`.

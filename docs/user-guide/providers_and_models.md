@@ -280,23 +280,30 @@ its own server, or a fast cloud API (Groq, OpenAI, Deepgram). See
 
 ---
 
-## One-time overrides (Re-run menu)
+## One-time overrides (the Models modal)
 
-You don't have to change your saved config to experiment. From a recording's
-**Re-run** menu you can:
+You don't have to change your saved config to experiment. The **Models** modal
+opens from the detail pane's **↻ Re-run…** button, the low-confidence
+**! Improve…** button, the bulk bar, and the header quick-switch — one modal,
+every entry.
 
-- **Re-transcribe** with a one-off model (and optionally skip cleanup for that run).
-- **Re-run cleanup** with a one-off provider / model / prompt / endpoint / key.
-- **Regenerate summary** with a one-off model / prompt.
+The first control is a **scope** switch:
 
-These overrides apply to that single run only and are never written back to
-`config.toml`. See [Smart Cleanup](smart_cleanup.md) and
-[Search & Organization](search_and_organization.md).
+- **Just this run** — apply the chosen models once to the open recording (or the
+  whole bulk selection) without saving. The footer's only primary button is
+  **↻ Run once**.
+- **My defaults** — change the models every new recording uses from now on. The
+  footer's only primary button is **💾 Save defaults**.
 
-### Picking a recipe in the Re-run modal
+You pick the scope first, so "run once vs save" is never ambiguous — there is no
+Save-and-Run pair to choose between.
 
-The full **↻ Re-run** modal (the action button in a recording's detail row, and
-the bulk bar) adds a **Recipe to run** picker above the model tabs:
+### Just this run
+
+The scope shows a **Run through** picker (the Playbook recipe this run applies,
+filtered to Recording-scope recipes — meeting templates are excluded) with a live
+step preview (`Cleanup → Title → Summary → …`), and the transcription model on
+the face:
 
 - **Default pipeline** *(default)* runs the recording through the same chain
   normal recordings use.
@@ -304,14 +311,30 @@ the bulk bar) adds a **Recipe to run** picker above the model tabs:
   instead — handy for reshaping one recording differently without changing your
   defaults.
 
-The per-step model tabs (Transcription / Post-processing / Title / Summary /
-Auto-tag) are **one-time overrides layered on top** of whichever recipe you
-choose. Nothing — recipe or models — is saved to `config.toml`.
+An **Advanced** disclosure lists only the cleanup / title / summary steps the
+chosen recipe actually runs — each row labelled *inherits recipe (model)* or
+*overrides this run* — plus read-only rows for the recipe's other steps (tags,
+chapters, entities, hooks), which run with their configured model. A quiet
+**also save these as my defaults** checkbox lets a good one-off become the
+default without a second trip.
+
+Nothing — recipe or models — is written to `config.toml` unless you tick that
+checkbox. See [Smart Cleanup](smart_cleanup.md) and
+[Search & Organization](search_and_organization.md).
+
+### My defaults
+
+This scope shows the model slots as tabs — **Transcription**, **Post-processing**
+(cleanup), **Title**, **Summary**, **Auto-tag**, **Live preview**, and
+**Semantic** — each the same connection + model field as the matching Settings
+section. **💾 Save defaults** persists them to `config.toml` for every new
+recording. There is no recipe picker here; recipes only apply to a one-time
+**Just this run**.
 
 > [!NOTE]
-> The header **Quick Model Switcher** is the same modal in its **Save as
-> default** mode: it *persists* your global default models and has **no** recipe
-> picker. Only Re-run (Run once) chooses a recipe.
+> The low-confidence **! Improve…** button opens this modal in **Just this run**
+> scope with the next-larger downloaded whisper model already selected — the
+> usual fix for a shaky transcript.
 
 ---
 

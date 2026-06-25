@@ -1,6 +1,6 @@
 # 🔍 Search & Organization
 
-Phoneme is designed to be your second brain for spoken thought. If you record everything, you need to be able to find everything.
+If you record everything, you need to be able to find everything.
 
 ## ⚡ Full-Text Search (FTS5)
 
@@ -43,7 +43,7 @@ You can manage your entire tag taxonomy from the **Settings → Tags** tab (see 
 
 Here you can:
 - **Rename** tags (this will update all associated recordings instantly).
-- **Recolor** tags (Phoneme provides a beautiful palette of highly legible colors).
+- **Recolor** tags (Phoneme provides a palette of high-contrast, legible colors).
 - **Delete** tags (this removes the tag from all recordings, but *does not* delete the recordings themselves).
 
 ### 🪄 Inline tag chips
@@ -123,8 +123,8 @@ Speaker Library.
 ## 📜 Transcript views in the detail pane
 
 Open a recording and the right pane shows the editable transcript by default.
-The **Views** menu swaps in two read-only, time-coded readings of the same
-recording — both are clickable, and both follow playback.
+The **Views** menu swaps in three read-only, time-coded readings of the same
+recording — all are clickable, and all follow playback.
 
 ### 🔤 Synced view
 
@@ -169,6 +169,14 @@ the offset from the start (`10:05:13 · 0:13`). Meetings transcribed before
 segment capture fall back to a coarse by-source reading instead. See
 [Meeting Mode](meeting_mode.md).
 
+### 🗂 Chapters view
+
+The **🗂 Chapters** view reads the recording as topic chapters — click a chapter
+to jump playback to its start, with the same playhead-follow highlight as the
+Synced and Timeline views. Chapters come from the optional `chapters` Playbook
+step; a recording with none shows nothing here. See
+[Topic timelines & chapters](topic_timelines.md).
+
 ### ✏️ Edited transcripts re-sync automatically
 
 When you edit and save the transcript, Phoneme **re-flows** the per-word and
@@ -192,13 +200,13 @@ edited text — turn off **Settings → Editor → "Re-sync Synced & Timeline vi
 when you edit"** (or search Settings for "resync", or set
 `editor.resync_views_on_edit = false`).
 
-## 🔖 Saved searches
+## 🗃️ Saved searches
 
 A saved search snapshots **everything** the library is filtered by — search
 text, the semantic toggle, library type (including Favorites), tag, status,
 date range, and sort order — and restores it all in one click.
 
-- **Quick popup:** the 🔖 button in the header saves the current filters under
+- **Quick popup:** the 🗃️ button in the header saves the current filters under
   a name and re-applies saved ones.
 - **Full manager:** **Settings → Managers → Saved searches** (or `g` then `S`)
   lists every saved search with its full description, and can apply, rename,
@@ -285,9 +293,9 @@ confidence** — a hint that it's worth a closer look or a re-transcribe:
   preview. Hover it for the mean confidence percent. It's deliberately quiet —
   there's no badge at all when confidence is good (or unknown).
 - **In the detail pane**: an amber **Improve…** button appears in the action row.
-  One click opens the normal [Re-run menu](#-the-re-run-menu) ready to
-  re-transcribe — optionally with a **larger model**, which is the usual fix for a
-  shaky transcript.
+  One click opens the [Re-run modal](#-the-re-run-menu) in **Just this run** scope
+  with the **next-larger downloaded whisper model** already selected — the usual
+  fix for a shaky transcript.
 - **As a filter**: a **Low confidence** row in the sidebar's Library section shows
   only flagged recordings, so you can sweep through and improve them in a batch. It
   combines with the kind, tag, and date filters.
@@ -306,7 +314,16 @@ to `0` to turn flagging off entirely.
 
 ## 🔁 The Re-run menu
 
-Each recording has a **Re-run** menu for reprocessing without re-recording: **Re-transcribe** (optionally a different model, optionally skip cleanup), **Re-run cleanup** (one-off provider/model/prompt), **Regenerate summary**, and **Re-fire hook**. Overrides apply to that single run and are never saved to config. See [Smart Cleanup](smart_cleanup.md) and [Providers & Models](providers_and_models.md#one-time-overrides-re-run-menu).
+Each recording's detail pane has a single **↻ Re-run…** button for reprocessing
+without re-recording. It opens the **Models** modal in **Just this run** scope:
+pick a transcription model, a **Run through** recipe (Default pipeline or any
+Recording-scope Playbook recipe), and — under **Advanced** — one-time model
+overrides for the cleanup / title / summary steps that recipe runs. Click
+**↻ Run once** and that recording re-runs through the chosen chain. Overrides
+apply to that single run and are never saved to config unless you tick *also save
+these as my defaults*. The bulk bar runs the same modal across a selection. See
+[Smart Cleanup](smart_cleanup.md) and
+[Providers & Models](providers_and_models.md#one-time-overrides-the-models-modal).
 
 ## 📦 Bulk actions
 

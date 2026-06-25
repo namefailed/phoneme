@@ -87,7 +87,7 @@ Wire the provider into the factory methods:
 ### Step 4: Map the Frontend Settings UI
 Expose the new provider to the user interface:
 1. Register the provider string key inside the frontend settings list: [`sttProviders.ts`](../../frontend/src/services/sttProviders.ts) or [`llmProviders.ts`](../../frontend/src/services/llmProviders.ts).
-2. Update the **Quick Model Switcher** modal ([`ModelPicker.ts`](../../frontend/src/components/ModelPicker.ts)) to render your new provider options in the tabs.
+2. Update the **Models modal** ([`ModelPicker.ts`](../../frontend/src/components/ModelPicker.ts)) to render your new provider options in its model slots.
 
 ---
 

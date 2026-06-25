@@ -66,9 +66,16 @@ interchangeable front ends:
 | Process | Crate / dir | Owns | Doc |
 | :--- | :--- | :--- | :--- |
 | **Daemon** | [`bin/phoneme-daemon`](../../bin/phoneme-daemon/src/main.rs) | Mic, inbox queue, pipeline, catalog, event bus, child processes | [`main.rs`](../../bin/phoneme-daemon/src/main.rs) |
-| **Tray** | [`src-tauri`](../../src-tauri/src/lib.rs) + [`frontend`](../../frontend/src/App.ts) | Window, tray icon, global hotkeys, preview overlay, settings UI (~9 sections) | [`src-tauri/src/lib.rs`](../../src-tauri/src/lib.rs) |
+| **Tray** | [`src-tauri`](../../src-tauri/src/lib.rs) + [`frontend`](../../frontend/src/App.ts) | Window, tray icon, global hotkeys, preview overlay, settings UI (~14 tabs) | [`src-tauri/src/lib.rs`](../../src-tauri/src/lib.rs) |
 | **CLI** | [`bin/phoneme`](../../bin/phoneme/src/main.rs) | A scriptable peer for every GUI action | [`bin/phoneme/src/main.rs`](../../bin/phoneme/src/main.rs) |
 | **whisper-server** | bundled `whisper.cpp` | Local speech-to-text over HTTP | (external binary) |
+
+Two more clients are **optional** and **off by default**: a loopback-only HTTP+SSE
+bridge ([`bin/phoneme-rest`](../../bin/phoneme-rest/src/main.rs)) and a Model
+Context Protocol bridge ([`bin/phoneme-mcp`](../../bin/phoneme-mcp/src/main.rs)).
+Both front the *same* pipe — one external call maps to one IPC `Request`, returned
+verbatim — and neither carries business logic. What each surface exposes (and the
+asymmetries between them) is mapped in [feature_parity.md](feature_parity.md).
 
 ### The pipe protocol in one paragraph
 
@@ -341,8 +348,9 @@ pipeline.
 the result of `resolve_recipe(cfg, recipe_id)`, which expands a named
 [Playbook](../../crates/phoneme-core/src/config.rs) recipe into ordered steps
 (falling back to the `default` recipe for an empty or unknown id, never a panic).
-A custom hotkey's recipe, a **Re-run → "Recipe to run"** pick, and **per-app
-tone** all reach the pipeline by the *same* path: the id is stashed per-job in the
+A custom hotkey's recipe, the Re-run modal's **Run through** pick (its "Just this
+run" scope), and **per-app tone** all reach the pipeline by the *same* path: the
+id is stashed per-job in the
 `pending_recipe` ledger ([`app_state.rs`](../../bin/phoneme-daemon/src/app_state.rs))
 when the job is created, claimed by `pipeline::run` *before* transcription (so a
 transcribe failure can't strand a stale entry), and never written to global
@@ -353,11 +361,12 @@ and seeds the result into that same `pending_recipe` ledger — so a matched app
 dictation routes off the fast lane (via the existing `has_recipe`/`wants_fast_lane`
 check) and runs its recipe with **no new IPC, request, or event**. A custom
 hotkey's own recipe wins: it is stashed *after* `start()` returns and overwrites
-the per-app seed when non-empty. The
-Re-run modal's per-step model tabs layer one-time overrides *on top of* whichever
-recipe you pick — `apply_rerun_overrides` mutates the matching cleanup / summary /
-title Playbook entries on a per-job config **clone** (the executor reads each
-step's model/prompt from its entry), then the clone is discarded.
+the per-app seed when non-empty. The Re-run modal's **Advanced** disclosure (under
+"Just this run") layers one-time per-step model overrides *on top of* whichever
+recipe you pick — only the cleanup/title/summary steps that recipe actually runs —
+and `apply_rerun_overrides` mutates the matching Playbook entries on a per-job
+config **clone** (the executor reads each step's model/prompt from its entry),
+then the clone is discarded.
 
 ### Catalog & UI refresh
 
@@ -609,8 +618,11 @@ the path for the UI to reveal. The user chooses whether to share the file.
 | [`phoneme-core`](../../crates/phoneme-core/src/lib.rs) | Domain logic & data: config, transcription/LLM/diarization providers, catalog (SQLite + FTS5 + embeddings), chunk/embed/fusion, hook/webhook, doctor, queue, types | [`lib.rs`](../../crates/phoneme-core/src/lib.rs) |
 | [`phoneme-audio`](../../crates/phoneme-audio/src/lib.rs) | Capture & encoding: device enum, recorder state machine, resample, silence/pre-roll, WAV/decode, meeting alignment | [`lib.rs`](../../crates/phoneme-audio/src/lib.rs) |
 | [`phoneme-ipc`](../../crates/phoneme-ipc/src/lib.rs) | The wire contract: schema, NDJSON codec, named-pipe transport | [`schema.rs`](../../crates/phoneme-ipc/src/schema.rs) |
+| [`phoneme-agent-core`](../../crates/phoneme-agent-core/src/lib.rs) | The agent tool seam: the single tool catalog mapping each tool + schema to one IPC `Request` (drives `phoneme-mcp`) | [`lib.rs`](../../crates/phoneme-agent-core/src/lib.rs) |
 | [`phoneme-daemon`](../../bin/phoneme-daemon/src/main.rs) | The brain: IPC server/handler, recorder, inbox worker, pipeline, supervisors, event bus | [`main.rs`](../../bin/phoneme-daemon/src/main.rs) |
 | [`phoneme` (CLI)](../../bin/phoneme/src/main.rs) | Scriptable peer: one module per subcommand | [`main.rs`](../../bin/phoneme/src/main.rs) |
+| [`phoneme-rest`](../../bin/phoneme-rest/src/main.rs) | Optional loopback HTTP+SSE bridge (off by default): one HTTP call → one IPC `Request` | [`main.rs`](../../bin/phoneme-rest/src/main.rs) |
+| [`phoneme-mcp`](../../bin/phoneme-mcp/src/main.rs) | Optional MCP bridge (off by default): JSON-RPC over stdio, tools from `phoneme-agent-core` | [`main.rs`](../../bin/phoneme-mcp/src/main.rs) |
 | [`src-tauri`](../../src-tauri/src/lib.rs) | Tray shell: spawn/bridge the daemon, command forwards, event re-emit, tray/overlay/wizard | [`lib.rs`](../../src-tauri/src/lib.rs) |
 | [`frontend`](../../frontend/src/App.ts) | Lit SPA: views, stores, services, keyboard system | [`App.ts`](../../frontend/src/App.ts) |
 

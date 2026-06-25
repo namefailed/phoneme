@@ -21,7 +21,7 @@ daemon-is-down state is itself the answer for them, so they print
 
 | Behavior | Commands |
 |----------|----------|
-| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `digest` (generate), `suggest-tags`, `suggest-entities`, `suggest-tasks`, `chapters` (generate **and** `--show`), `ask`, `notes`, `edit`, `find-replace`, `clip`, `speaker rename/clear/reassign/merge/split`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed/dismiss-failed`, `tag` (every subcommand — `list/for/usage/suggestions` and the mutating ones), `entities add/edit/delete/merge`, `tasks done/undone/add/edit/delete/reorder`, `dictation regrab/forget/clear`, `profile use`, `hook test`, `export` (zip and `--captions`), `import-backup`, `config reload`, `daemon start` |
+| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `digest` (generate), `suggest-tags`, `suggest-entities`, `suggest-tasks`, `chapters` (generate **and** `--show`), `versions`, `ask`, `notes`, `edit`, `find-replace`, `clip`, `speaker rename/clear/reassign/merge/split`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed/dismiss-failed`, `tag` (every subcommand — `list/for/usage/suggestions` and the mutating ones), `entities add/edit/delete/merge`, `tasks done/undone/add/edit/delete/reorder`, `dictation regrab/forget/clear`, `profile use`, `hook test`, `export` (zip and `--captions`), `import-backup`, `config reload`, `daemon start` |
 | **Observe-only** (fail fast with exit 3 when no daemon) | `list`, `show`, `search`, `watch`, `doctor`, `daemon status`, `queue list/counts/status`, `queue skip`*, `meeting tracks`, `digest --show`, `entities` (list), `tasks` (list, `--open`), `dictation history`, `profile list` |
 | **Purely local** (no daemon involved at all) | `config` (print), `config path`, `config set`, `profile save`, `speaker calibrate`, `completions`, `version` |
 
@@ -279,19 +279,19 @@ phoneme retranscribe 20260519T143500823 --no-run-hooks
 phoneme retranscribe 20260519T143500823 --no-post-process
 
 # Re-run through a specific Playbook recipe (by id or name) instead of the
-# default pipeline — the CLI face of the GUI ↻ Re-run "Recipe to run" picker.
+# default pipeline — the CLI face of the GUI ↻ Re-run modal's "Run through" picker.
 phoneme retranscribe 20260519T143500823 --recipe meeting_notes
 phoneme retranscribe 20260519T143500823 --recipe "Meeting notes"
 ```
 
 > **`--recipe <ID|NAME>`:** re-run the recording through a chosen Playbook
-> recipe, matching the GUI's **↻ Re-run** "Recipe to run" picker. The value is
-> resolved against your configured recipes — by id first, then
-> case-insensitively by name — and the resolved id is sent to the daemon. Omit
-> it for the **`default`** pipeline. A value matching no recipe is an error that
-> lists the available recipes (no silent fallback to default). The `--model`
-> override still applies independently as a one-time transcription-model
-> override.
+> recipe, matching the **Run through** picker in the GUI's **↻ Re-run** modal
+> ("Just this run" scope). The value is resolved against your configured
+> recipes — by id first, then case-insensitively by name — and the resolved id
+> is sent to the daemon. Omit it for the **`default`** pipeline. A value matching
+> no recipe is an error that lists the available recipes (no silent fallback to
+> default). The `--model` override still applies independently as a one-time
+> transcription-model override.
 
 ### ✨ `phoneme cleanup <ID>`
 
@@ -418,6 +418,28 @@ list; errors when there's no transcript to chapter (exit 6) or the id is unknown
 ```bash
 phoneme chapters 20260519T143500823          # generate + print
 phoneme chapters 20260519T143500823 --show   # print stored chapters only
+```
+
+### 🧾 `phoneme versions <ID>`
+
+Print a recording's transcript-version chain — the raw ASR output, then each
+pipeline step that rewrote it (cleanup, your hand edits, …), down to the live
+transcript — for side-by-side comparison. This is the CLI face of the GUI
+Compare-versions view, and a cross-platform alternative to the daemon named pipe
+(the only other surface that exposes versions): the same chain is also a REST read
+at `GET /api/recordings/{id}/versions`.
+
+Sends `ListTranscriptVersions` and prints the chain in `idx` order, one
+`idx  label  (model)` line per version (the model is shown when the step recorded
+one). A recording with nothing beyond the raw transcript prints just that entry;
+one with no stored versions prints `no transcript versions stored for this
+recording`.
+
+```bash
+phoneme versions 20260519T143500823
+
+# Machine-readable: the raw version array (each item carries idx/label/model/text)
+phoneme --json versions 20260519T143500823
 ```
 
 ### ✅ `phoneme suggest-tasks <ID>`

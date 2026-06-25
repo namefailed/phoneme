@@ -100,6 +100,12 @@ before diving into source:
 - **`phoneme-audio`** — capture, decode, WAV, silence, meeting alignment.
 - **`phoneme-ipc`** — the daemon ↔ client wire contract (`schema.rs`).
 
+The workspace also has `crates/phoneme-agent-core` — the compile-time tool
+registry (name + JSON schema → a typed `Request`) that the embedded agent and the
+`bin/phoneme-mcp` MCP server both build their tool list from — plus two thin
+loopback bridges over the same daemon pipe: `bin/phoneme-mcp` (JSON-RPC/stdio for
+AI clients) and `bin/phoneme-rest` (HTTP/SSE).
+
 Build and open it with `cargo doc --workspace --no-deps --open`. The
 [Architecture Wiki](architecture.md) is the prose narrative that ties these
 together — one story from hotkey press to searchable transcript. The

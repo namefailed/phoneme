@@ -24,7 +24,7 @@ All IPC communication happens over a newline-delimited JSON protocol defined in 
 ## Development Environment Setup
 
 ### Prerequisites
-- **Rust**: 1.75+ (installed via `rustup`, which will automatically read our `rust-toolchain.toml`).
+- **Rust**: installed via `rustup`. The repo's `rust-toolchain.toml` pins `channel = "stable"`, so `rustup` fetches the current stable toolchain (plus `rustfmt` and `clippy`) automatically — no manual version to track.
 - **Node.js**: 20+
 - **pnpm**: 9+
 - **Tauri CLI 2**: `cargo install tauri-cli --version "^2.0" --locked`

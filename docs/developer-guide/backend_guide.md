@@ -22,9 +22,12 @@ Generate the HTML locally with `cargo doc --workspace --no-deps --open`.
 
 ## 1. Workspace map
 
-The repository is a Cargo workspace of three library crates and three binaries
-(plus the frontend, which is a separate Vite/TypeScript app — see
-[frontend_guide.md](frontend_guide.md)).
+The repository is a Cargo workspace of four library crates and four binaries
+(plus the Tauri tray shell and the frontend, which is a separate Vite/TypeScript
+app — see [frontend_guide.md](frontend_guide.md)). Two of the binaries —
+`phoneme-rest` and `phoneme-mcp` — are optional, off-by-default bridges that front
+the same daemon pipe; the [feature-parity map](feature_parity.md) is the canonical
+account of what each surface exposes.
 
 ### Library crates (`crates/`)
 
@@ -33,6 +36,7 @@ The repository is a Cargo workspace of three library crates and three binaries
 | [`phoneme-core`](../../crates/phoneme-core/src/lib.rs) | All domain logic & the data layer, knows nothing about IPC/windows/hotkeys | [`config`](../../crates/phoneme-core/src/config.rs), [`transcription`](../../crates/phoneme-core/src/transcription.rs), [`llm`](../../crates/phoneme-core/src/llm.rs), [`diarization`](../../crates/phoneme-core/src/diarization.rs), [`catalog`](../../crates/phoneme-core/src/catalog/mod.rs), [`chunk`](../../crates/phoneme-core/src/chunk.rs)/[`embed`](../../crates/phoneme-core/src/embed.rs)/[`fusion`](../../crates/phoneme-core/src/fusion.rs), [`hook`](../../crates/phoneme-core/src/hook.rs)/[`webhook`](../../crates/phoneme-core/src/webhook.rs), [`doctor`](../../crates/phoneme-core/src/doctor.rs), [`queue`](../../crates/phoneme-core/src/queue.rs), [`types`](../../crates/phoneme-core/src/types.rs) |
 | [`phoneme-audio`](../../crates/phoneme-audio/src/lib.rs) | Capture & encoding to canonical 16 kHz mono i16 | [`recorder`](../../crates/phoneme-audio/src/recorder.rs), [`source`](../../crates/phoneme-audio/src/source.rs), [`convert`](../../crates/phoneme-audio/src/convert.rs), [`silence`](../../crates/phoneme-audio/src/silence.rs), [`preroll`](../../crates/phoneme-audio/src/preroll.rs), [`decode`](../../crates/phoneme-audio/src/decode.rs), [`meeting_align`](../../crates/phoneme-audio/src/meeting_align.rs) |
 | [`phoneme-ipc`](../../crates/phoneme-ipc/src/lib.rs) | The wire contract between daemon and clients | [`schema`](../../crates/phoneme-ipc/src/schema.rs) (the protocol reference), [`codec`](../../crates/phoneme-ipc/src/codec.rs), [`named_pipe`](../../crates/phoneme-ipc/src/named_pipe.rs), [`transport`](../../crates/phoneme-ipc/src/transport.rs) |
+| [`phoneme-agent-core`](../../crates/phoneme-agent-core/src/lib.rs) | The agent **tool seam** — the single source of truth for the tool catalog, mapping each named tool + JSON schema to one typed `phoneme-ipc` `Request` (pure, synchronous; execution is the caller's job). The `phoneme-mcp` server builds its tool list and dispatches calls from this registry. | [`lib`](../../crates/phoneme-agent-core/src/lib.rs) (`Tool`, `ToolError`, the registry) |
 
 ### Binaries (`bin/`) and the tray (`src-tauri/`)
 
@@ -40,6 +44,8 @@ The repository is a Cargo workspace of three library crates and three binaries
 | :--- | :--- | :--- |
 | [`phoneme-daemon`](../../bin/phoneme-daemon/src/main.rs) | The brain — IPC server, recorder glue, inbox worker, pipeline, supervisors, event bus | [`main`](../../bin/phoneme-daemon/src/main.rs), [`app_state`](../../bin/phoneme-daemon/src/app_state.rs), [`recorder`](../../bin/phoneme-daemon/src/recorder/mod.rs), [`queue_worker`](../../bin/phoneme-daemon/src/queue_worker.rs), [`pipeline`](../../bin/phoneme-daemon/src/pipeline.rs), [`in_place`](../../bin/phoneme-daemon/src/in_place.rs), [`whisper_supervisor`](../../bin/phoneme-daemon/src/whisper_supervisor.rs), [`ollama_launcher`](../../bin/phoneme-daemon/src/ollama_launcher.rs), [`event_bus`](../../bin/phoneme-daemon/src/event_bus.rs), [`shutdown`](../../bin/phoneme-daemon/src/shutdown.rs), [`reconcile`](../../bin/phoneme-daemon/src/reconcile.rs), [`retention`](../../bin/phoneme-daemon/src/retention.rs) |
 | [`phoneme`](../../bin/phoneme/src/main.rs) | The CLI — one module per subcommand, translating to IPC requests | [`args`](../../bin/phoneme/src/args.rs) (clap), [`client`](../../bin/phoneme/src/client.rs) (spawn vs observe), [`commands/`](../../bin/phoneme/src/commands/mod.rs) |
+| [`phoneme-rest`](../../bin/phoneme-rest/src/main.rs) | Optional loopback-only HTTP+SSE bridge (off by default) — one HTTP call → one IPC `Request`, returned verbatim. See [rest_api.md](rest_api.md). | [`main`](../../bin/phoneme-rest/src/main.rs), [`server`](../../bin/phoneme-rest/src/server.rs) (router + loopback guard), [`handlers`](../../bin/phoneme-rest/src/handlers.rs), [`request_map`](../../bin/phoneme-rest/src/request_map.rs), [`sse`](../../bin/phoneme-rest/src/sse.rs), [`daemon`](../../bin/phoneme-rest/src/daemon.rs) |
+| [`phoneme-mcp`](../../bin/phoneme-mcp/src/main.rs) | Optional Model Context Protocol bridge (JSON-RPC over stdio) — the agent surface. A translator over the daemon pipe; its tool list comes from `phoneme-agent-core`. See [mcp_server.md](mcp_server.md). | [`main`](../../bin/phoneme-mcp/src/main.rs), [`protocol`](../../bin/phoneme-mcp/src/protocol.rs) (JSON-RPC framing), [`tools`](../../bin/phoneme-mcp/src/tools.rs), [`server`](../../bin/phoneme-mcp/src/server.rs) (method dispatch) |
 | [`src-tauri`](../../src-tauri/src/lib.rs) | The Tauri 2 tray shell — spawn/bridge the daemon, forward commands, re-emit events | [`lib`](../../src-tauri/src/lib.rs), [`auto_spawn`](../../src-tauri/src/auto_spawn.rs), [`bridge`](../../src-tauri/src/bridge.rs), [`commands`](../../src-tauri/src/commands/mod.rs), [`events`](../../src-tauri/src/events.rs), [`tray`](../../src-tauri/src/tray.rs), [`overlay`](../../src-tauri/src/overlay.rs)/[`indicator`](../../src-tauri/src/indicator.rs) (the two overlay windows), [`wizard`](../../src-tauri/src/wizard.rs)/[`checksums`](../../src-tauri/src/checksums.rs) |
 
 **The dependency arrow points one way.** `phoneme-core` is the shared substrate;

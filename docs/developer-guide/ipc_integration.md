@@ -320,7 +320,7 @@ should treat that as success, the way `phoneme daemon stop` does.
 
 ## 🌊 Real-Time Event Streaming
 
-The most powerful feature of the IPC layer is real-time event streaming. By sending the `subscribe_events` request, the daemon will hold the connection open and push live events to your application as they happen.
+The IPC layer's real-time event stream is what lets you build a live UI on top of the daemon. By sending the `subscribe_events` request, the daemon holds the connection open and pushes live events to your application as they happen.
 
 **Send:**
 ```json

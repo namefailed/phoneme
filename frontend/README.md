@@ -1,10 +1,13 @@
 # 🎨 Phoneme Frontend
 
-Vite + TypeScript + Lit frontend for the [Phoneme](../README.md) Tauri shell (`phoneme-tray`). Beautifully styled with the Catppuccin Mocha theme.
+Vite + TypeScript + Lit frontend for the [Phoneme](../README.md) Tauri shell (`phoneme-tray`). Styled with Catppuccin Mocha (the default; the app ships 16 themes).
 
 Full documentation: [docs/README.md](../docs/README.md).
 
 ## 🗂️ Layout
+
+A representative slice — `RecordingsView/` holds ~55 files after the god-file
+split, so only the load-bearing ones are listed:
 
 ```
 src/
@@ -17,16 +20,18 @@ src/
 │   └── store.ts                 # tiny observable store
 ├── styles/
 │   ├── reset.css
-│   └── theme.css                # Catppuccin Mocha CSS variables
+│   └── theme.css                # CSS variables every theme overrides
 └── components/
     ├── HeaderBar.ts             # search + filter pills + settings cog
+    ├── ModelPicker.ts           # the scope-first Re-run / Models modal
     ├── shared/styles.css        # shared bits (pills, dots, status colors)
-    └── RecordingsView/
+    └── RecordingsView/          # the list + detail pane (~55 files; a sample)
         ├── index.ts             # orchestrator: list + detail + splitter + live updates
         ├── RecordingsList.ts    # multi-column table
         ├── RecordingDetail.ts   # right pane (waveform + transcript editor + actions)
-        ├── ActionRow.ts         # play / replay / refire / copy / reveal / delete
-        ├── TranscriptEditor.ts  # autosize textarea with Ctrl+S save
+        ├── ActionRow.ts         # play / speed / re-run / export / captions / delete
+        ├── TranscriptEditor.ts  # CodeMirror 6 editor (optional vim), explicit save
+        ├── ClipExport.ts        # the "Edit audio" trim/cut modal
         ├── WaveformPlayer.ts    # wavesurfer.js wrapper
         ├── Splitter.ts          # drag-to-resize divider
         └── styles.css           # RecordingsView CSS
@@ -69,9 +74,10 @@ pnpm type-check
 
 `tsc --noEmit` runs over `src/` and `vite.config.ts`. CI should gate on this.
 
-## ☕ Catppuccin Mocha
+## ☕ Theming
 
 `styles/theme.css` defines the CSS variables every component uses
 (`--bg-deep`, `--accent`, `--fg-default`, `--ok`/`--warn`/`--err`, etc.).
-The dark palette matches the user's editor and rest of the system theme.
+Themes are variable overrides on top of that base. The app ships 16 (11 dark, 5
+light), picked under Settings → Appearance; Catppuccin Mocha is the default.
 

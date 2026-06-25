@@ -244,7 +244,7 @@ entirely and wraps segments under one `[Speaker 1]` turn via `label_all_as`, and
 `fixed_speaker_applied` flag gates the daemon's if-absent "You" `speaker_names` write
 so a later rename survives a retranscribe.
 
-`transcription.rs:87-133` — `DiarizationTrack`; `diarization.rs:213` — `label_all_as`
+`transcription.rs:87-133` — `DiarizationTrack`; `diarization.rs:241` — `label_all_as`
 
 ---
 
@@ -269,7 +269,7 @@ one winner) and argmaxes via `dominant_column`; columns map to the same stable i
 `label_segments` uses. A graceful fallback to segment-level attribution reproduces the
 old labels exactly when word timings are absent.
 
-`diarization.rs:344-406` — `assign_words`; `diarization.rs:261-291` — `frame_for_time`, `column_label`, `dominant_column`
+`diarization.rs:372` — `assign_words`; `diarization.rs:289` — `frame_for_time`, `column_label`, `dominant_column`
 
 ### Island-smoothing to kill mid-sentence speaker flips
 
@@ -291,7 +291,7 @@ run strictly shorter than both neighbours under a ~24-token ceiling — into the
 surrounding speaker. Per-word attribution is otherwise kept, so a genuine hand-off
 inside a segment still splits.
 
-`diarization.rs:482-485` — thresholds + rationale; `diarization.rs:554` — `smooth_word_speaker_runs`
+`diarization.rs:509-520` — thresholds + rationale; `diarization.rs:597` — `smooth_word_speaker_runs`
 
 ### Voiceprint centroid merge to fix a wrong speaker count
 
@@ -313,7 +313,7 @@ single-linkage-merges any pair with cosine ≥ 0.50 (`SPEAKER_MERGE_COSINE`) via
 union-find, keeping the smallest column index canonical. Activations and segment spans
 are relabelled accordingly.
 
-`diarization.rs:1124-1188` — `SPEAKER_MERGE_COSINE`, `cluster_centroids`, `merge_similar_clusters`
+`diarization.rs:1202` — `SPEAKER_MERGE_COSINE`, `cluster_centroids`, `merge_similar_clusters`
 
 ### A named voice's cached centroid: robust *and* duration-weighted
 
@@ -391,7 +391,7 @@ attaches cleanly), and in `coalesce_subword_tokens` force every non-word-start t
 inherit its host word's speaker. The marker is persisted (a migration) and sent over
 IPC so the Synced view honours it too.
 
-`diarization.rs:52-66` — `WordSpan.leading_space`; `diarization.rs:707` — `coalesce_subword_tokens`
+`diarization.rs:75-90` — `WordSpan.leading_space`; `diarization.rs:755` — `coalesce_subword_tokens`
 
 ---
 
@@ -422,6 +422,33 @@ old per-feature `playbook_migrated` / `hooks_migrated` latches, whose values are
 still read once on load to infer the starting version of a pre-versioning config.
 
 `pipeline.rs` — `apply_rerun_overrides`, `ensure_default_recipe_steps`, `resolve_recipe`, `run_transform_steps` (the recipe executor)
+
+### A Re-run that overrides the recipe the user chose, not always the default
+
+**Problem.** The Re-run modal lets you re-run a recording through a *named* recipe
+(its "Run through" picker) while layering one-time per-step model/prompt overrides
+on top. Under the executor those overrides have to be mirrored into the matching
+Playbook entries, and the "skip cleanup" opt-out has to drop the cleanup step —
+but both were always applied to the **default** recipe, so picking a non-default
+recipe ran it unmodified and the overrides silently went nowhere.
+
+**Why it's subtle.** The mirror still *worked* for the common case (the default
+recipe), so the bug only surfaced when a user both chose a different recipe *and*
+overrode a step — and even then it failed quietly: the run completed, just with the
+recipe's own models instead of the chosen ones. The fix also has to resolve the
+target safely: an unknown or deleted recipe id must fall back to the default rather
+than mutate nothing (or panic), and every mutation must stay on the per-job clone so
+the persisted recipe is never touched.
+
+**Solution.** `apply_rerun_overrides` first resolves a `target_recipe` — the chosen
+id if it exists in `cfg.recipes`, else `DEFAULT_RECIPE_ID` — and applies both the
+cleanup-step drop (post-process opt-out) and the forced-on steps to *that* recipe on
+the clone. The frontend matches the model to one scope-first switch: the Re-run /
+Models modal's first control is "Just this run" vs "My defaults", and the footer
+shows exactly one scope-bound primary button ("↻ Run once" or "💾 Save defaults"),
+so a one-time override and a config write can never be confused for each other.
+
+`pipeline.rs` — `apply_rerun_overrides` (the `target_recipe` resolution); `frontend/src/components/ModelPicker.ts` — the scope switch + single primary action
 
 ### Robustly parsing tags and titles out of chatty LLMs
 

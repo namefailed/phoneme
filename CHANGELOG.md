@@ -4,10 +4,11 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 
 ---
 
-## 🚧 v1.8.x — Recall, Meetings & Hardening (in development)
+## v1.8 — Recall, Meetings & Hardening
 
-*Workspace version `1.8.1`. Closing promise-vs-reality gaps and hardening the
-trust boundary.*
+*Workspace version `1.8.1`. The release that closes the promise-vs-reality gaps and
+hardens the trust boundary: archive recall (Ask, chapters, digests), tasks and
+entities, meeting digests, named-speaker recognition, and a pass over reliability.*
 
 ### Library & organization
 
@@ -108,6 +109,21 @@ trust boundary.*
   modal pre-fills cleanup + summary from the Playbook entries (with the inherit-on-
   blank connection) instead of the legacy sections, and enables its panels from the
   *effective* connection rather than the old global toggle.
+- [x] **Scope-first Re-run / Models modal** — the Re-run and Quick-switch-models
+  surfaces are now one modal whose **first** control is a scope switch: **Just this
+  run** vs **My defaults**. The footer shows exactly one scope-bound primary button —
+  **↻ Run once** (one-time, nothing saved) or **💾 Save defaults** (writes config) —
+  instead of Save and Run side by side. *Just this run* leads with a **Run through**
+  recipe picker (filtered to Recording-scope recipes; meeting templates excluded) and
+  a live step preview, the transcription model on the face, and an **Advanced**
+  disclosure that lists only the cleanup/title/summary steps the chosen recipe
+  actually runs — each labelled *inherits recipe (model)* or *overrides this run* —
+  with read-only rows for the recipe's other steps; a quiet **also save these as my
+  defaults** checkbox promotes a good one-off to the default without a second trip.
+  *My defaults* is the model slots (transcription, cleanup, title, summary, auto-tag,
+  live preview, semantic) as tabs. The low-confidence **! Improve…** button opens
+  this modal and preselects the next-larger downloaded Whisper model
+  (`frontend/src/components/ModelPicker.ts`).
 - [x] **Meeting-template authoring is discoverable** — a **+ Add meeting template**
   button in Settings → Playbook creates the entry (its prompt, Writes to → *Meeting
   digest*) and the meeting-scope recipe together, "Meeting digest" is now a first-
@@ -254,6 +270,15 @@ trust boundary.*
 
 ### Reliability & foundation
 
+- [x] **Re-run "All" overrides target the chosen recipe, not always the default** —
+  a Re-run that ran a recording through a *named* recipe while layering one-time
+  per-step model/prompt overrides applied those overrides (and the "skip cleanup"
+  opt-out) to the **default** recipe's steps regardless of which recipe was picked,
+  so a non-default recipe ran unmodified and the overrides silently went nowhere.
+  `apply_rerun_overrides` now resolves the chosen `recipe_id` to a `target_recipe`
+  (falling back to the default for an unknown/deleted id) and mirrors the overrides
+  and the cleanup-step drop onto *that* recipe's steps — all on the per-job config
+  clone, so the persisted recipe is never touched (`pipeline.rs`).
 - [x] **Local Ollama no longer OOMs on a capped context** — every Ollama AI step
   now sends `options.num_ctx` (new `[llm_post_process] num_ctx`, default `8192`).
   Without it, recent Ollama reserves a KV cache for the model's *full* 128k window,
@@ -528,8 +553,8 @@ trust boundary.*
   (`[Speaker N]` turns from Scribe's per-word `speaker_id`, gated on the new `elevenlabs`
   diarization backend) — previously it surfaced only flat text. Words + language are
   unconditional; diarization rides the Scribe call like Deepgram/AssemblyAI. The
-  word→turn assembly is unit-tested. *(We support everyone we can — no provider left a
-  second-class citizen.)*
+  word→turn assembly is unit-tested. ElevenLabs now returns the same fields as the
+  other providers.
 - [x] **Named-speaker recognition** — the local diarizer now captures a voiceprint
   (centroid embedding) per speaker; naming a speaker enrolls that voice into a
   cross-recording library, and opening a later recording suggests known voices for

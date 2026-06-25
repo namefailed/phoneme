@@ -1,6 +1,6 @@
 # 🔄 Exporting and Backup
 
-Phoneme is built to ensure you always have access to your data. Your data lives in a local SQLite database, and the raw audio files live in a local directory on your machine.
+Your data is yours: a local SQLite database and a local audio folder on your machine.
 
 However, if you want to migrate to a new machine, take an offline backup, or share a bundle of data, Phoneme provides a built-in export tool.
 
@@ -112,27 +112,33 @@ phoneme export --captions 20260519T143500823 -o -
 
 Find a recording's ID in the detail pane or via `phoneme list`.
 
-## ✂️ Exporting an audio clip
+## ✂️ Editing a recording's audio
 
-Need just a slice of a recording's audio — a quotable moment, a single answer
-from a meeting — without the whole file? Export a **time range to a new WAV**.
-The clip is cut on sample-frame boundaries from the source audio, so it's an
-exact, lossless excerpt (not a re-encode).
+Need to trim dead air off the ends, or cut a stretch out of the middle? The
+**Edit audio** tool selects sections to delete; what's left is what you keep.
+Cuts are made on sample-frame boundaries from the source audio, so the result is
+an exact, lossless excerpt (not a re-encode). For pulling a single slice out to
+its own file, the `phoneme clip` command below does that in one step.
 
 ### From the app
 
-Open the recording, then under the waveform click **✂ Clip…**. Type a **Start**
-and **End** time in seconds, or click **⟱ Playhead** beside either field to drop
-in the waveform's current playback position. Press **Export clip** (or Enter in a
-field). Phoneme writes the WAV next to the source — named
-`<recording>_clip_<start_ms>-<end_ms>.wav`, where the bounds are in
-**milliseconds** (so a `12.5 s → 30 s` clip becomes
-`…_clip_12500-30000.wav`) — and shows you the saved path in a toast.
+Open the recording, then on the action row click **✂ Edit…** to open the **Edit
+audio** modal. It mounts its own waveform. Select a section to delete — drag the
+start/end handles over the waveform, or type a **Start** and **End** in seconds
+(**⟱ Playhead** beside either field drops in the current playback position) —
+then **✂ Delete section**. Repeat for as many sections as you want; each shows as
+a cut, and the header tracks how much of the recording you're keeping. **▶ Play**
+previews the audio, and **✕** on any cut undoes it.
 
-The range is validated before anything is sent: the end must be after the start,
-the start must fall within the recording, and the end is clamped to the
-recording's length (so you can set it past the tail and still clip to the end).
-An empty or back-to-front range just shows a hint and doesn't write a file.
+When you're done, **Apply edit…** offers two outcomes:
+
+- **↻ Replace original** — overwrites this recording's audio (the original is
+  backed up first) and re-transcribes the trimmed audio in place.
+- **＋ Save as new** — keeps this recording untouched and saves the edit as a
+  separate new recording, which then transcribes on its own.
+
+Each section is validated like a clip range: the end must be after the start, it
+must fall within the recording, and a cut that removes everything is refused.
 
 ### From the CLI
 

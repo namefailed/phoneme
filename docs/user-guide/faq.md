@@ -68,11 +68,12 @@ Use the wizard's **Recommended** badge. Rule of thumb:
 
 ### Can I re-transcribe with a better model later?
 
-Yes — select a recording → **Re-run** → pick a model. The Re-run modal also has
-a **Recipe to run** picker, so you can push the recording through any Playbook
-recipe (or *Default pipeline* for the normal chain); the per-step model tabs
-apply as one-time overrides on top of it, and nothing is saved to config. The
-original transcript is preserved under "View original".
+Yes — select a recording → **↻ Re-run…** → pick a model. The modal opens in
+**Just this run** scope with a **Run through** picker, so you can push the
+recording through any Playbook recipe (or *Default pipeline* for the normal
+chain); the per-step model overrides under **Advanced** apply for that run only,
+and nothing is saved to config. The original transcript is preserved under
+"View original".
 
 ### Does Phoneme support languages other than English?
 
@@ -106,8 +107,8 @@ never overwritten when you re-transcribe. From the CLI:
 ### What is the AI-activity panel (brain button)?
 
 It's the floating brain button (the FAB at the edge of the window). Toggle it
-with **`g A`**. The panel logs each processing step as it runs — cleanup,
-summary, title, auto-tag, diarization — recording the **prompt** sent and the
+with **`g A`**. The panel logs each AI step as it runs — transcription, then the
+LLM steps: cleanup, summary, and auto-tag — recording the **prompt** sent and the
 **response** received, so you can see exactly how each transcript was shaped.
 The log **persists across restarts**, so you can reopen Phoneme and still
 review what earlier recordings went through. See
