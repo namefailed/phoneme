@@ -352,25 +352,63 @@ pub fn wizard_get_system_info() -> SystemInfo {
 
 #[tauri::command]
 pub async fn wizard_list_downloaded_models() -> Result<Vec<String>, CommandError> {
-    let dirs = directories::ProjectDirs::from("", "", "phoneme")
+    // The canonical filename set lives in phoneme-core so the CLI, this manager,
+    // and doctor never drift (the old inline list silently omitted the q5 turbo).
+    let models_dir = phoneme_core::models::models_dir()
         .ok_or_else(|| "could not resolve project directories".to_string())?;
-    let models_dir = dirs.data_local_dir().join("models");
     let mut downloaded = Vec::new();
-    let models = [
-        "ggml-tiny.en.bin",
-        "ggml-base.en.bin",
-        "ggml-small.en.bin",
-        "ggml-medium.en.bin",
-        "ggml-large-v3.bin",
-        "ggml-large-v3-turbo.bin",
-    ];
-    for model in models {
-        let path = models_dir.join(model);
+    for m in phoneme_core::models::WHISPER_MODELS {
+        let path = models_dir.join(m.file);
         if tokio::fs::metadata(&path).await.is_ok() {
             downloaded.push(path.to_string_lossy().into_owned());
         }
     }
     Ok(downloaded)
+}
+
+/// One downloaded whisper model, for the Settings → Whisper storage manager:
+/// its filename (the delete key), full path, and on-disk size.
+#[derive(serde::Serialize)]
+pub struct DownloadedModelInfo {
+    name: String,
+    path: String,
+    bytes: u64,
+}
+
+#[tauri::command]
+pub async fn wizard_downloaded_model_sizes() -> Result<Vec<DownloadedModelInfo>, CommandError> {
+    // fs metadata is sync; a handful of stats is trivial but stays off the reactor.
+    let models = tokio::task::spawn_blocking(phoneme_core::models::downloaded_models)
+        .await
+        .map_err(|e| format!("spawn_blocking error: {}", e))?;
+    Ok(models
+        .into_iter()
+        .map(|m| DownloadedModelInfo {
+            name: m.name,
+            path: m.path.to_string_lossy().into_owned(),
+            bytes: m.bytes,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn wizard_delete_model(filename: String) -> Result<(), CommandError> {
+    // Allow-list gate: the target must be a known whisper model filename. That
+    // rejects path separators and every non-model file, so a compromised WebView
+    // can never turn this into an arbitrary-delete primitive — it can only ever
+    // remove a model Phoneme itself downloaded (and re-downloads on demand).
+    if !phoneme_core::models::is_known_whisper_model(&filename) {
+        return Err(CommandError::from("Not a known model file"));
+    }
+    let models_dir = phoneme_core::models::models_dir()
+        .ok_or_else(|| "could not resolve project directories".to_string())?;
+    let path = models_dir.join(&filename);
+    match tokio::fs::remove_file(&path).await {
+        Ok(()) => Ok(()),
+        // Already gone is success — the user wanted it not there.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("failed to delete model: {}", e).into()),
+    }
 }
 
 #[tauri::command]

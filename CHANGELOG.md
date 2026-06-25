@@ -6,6 +6,27 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 
 ## Unreleased
 
+### Added
+
+- [x] **Manage downloaded transcription models from inside the app** — downloaded
+  whisper.cpp models accumulate on disk (they're 75 MB–3 GB each and never
+  auto-removed), but until now the only way to reclaim that space was deleting
+  files by hand. Now:
+  - **Settings → Whisper** shows each downloaded model's real on-disk size and a
+    **Remove** button (two-click confirm); the currently-selected model is
+    protected. A removed model re-downloads on demand the next time it's picked.
+  - **`phoneme model`** reaches full parity with the desktop manager so headless
+    setups are self-sufficient: **`ls`** (sizes + total, `[active]` flag),
+    **`get <name>`** (download from the pinned source + SHA-256 verify),
+    **`use <name>`** (select for transcription + reload the daemon), and
+    **`rm <name>`** (delete; refuses an active model without `--force`). The
+    whisper model registry (filename + URL + hash) now lives in one place shared
+    by the CLI, the desktop manager, and `doctor`, with a test that keeps it in
+    lock-step with the pinned checksums.
+  - **`doctor`** gains a **Model storage** line (total size + count) so it's
+    obvious where app-data space went. Deletes are allow-listed to known model
+    filenames, so they can never escape the models directory.
+
 ### Fixed
 
 - [x] **Keyboard nav reaches Tasks & Entities** — the detail-pane grid never

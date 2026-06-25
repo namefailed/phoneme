@@ -24,6 +24,7 @@ pub mod import;
 pub mod import_backup;
 pub mod list;
 pub mod meeting;
+pub mod model;
 pub mod notes;
 pub mod profile_cmd;
 pub mod queue;

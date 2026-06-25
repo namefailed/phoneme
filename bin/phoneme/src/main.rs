@@ -98,6 +98,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
         Command::RefireHook(args) => commands::refire_hook::run(args, cfg, cli.json).await,
         Command::Delete(args) => commands::delete::run(args, cfg).await,
         Command::Doctor(args) => commands::doctor::run(args, cfg, cli.json).await,
+        Command::Model(args) => commands::model::run(args, cfg, cli.json).await,
         Command::Config(args) => commands::config_cmd::run(args, cfg).await,
         Command::Recipes => commands::recipe::list(cfg, cli.json),
         Command::Daemon(args) => commands::daemon_cmd::run(args, cfg, cli.json).await,

@@ -192,6 +192,25 @@ fn verify_file_against(path: &Path, expected: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Drift guard: every whisper model in the shared `phoneme-core` registry
+    /// (which the CLI `phoneme model get` downloads + verifies against) must have
+    /// a matching pin here (same URL → same SHA-256). Without this the headless
+    /// download and the desktop download could verify against different hashes —
+    /// exactly the lock-step drift this file's header warns about.
+    #[test]
+    fn core_whisper_registry_matches_pins() {
+        for m in phoneme_core::models::WHISPER_MODELS {
+            let pinned = expected_sha256(m.url).unwrap_or_else(|| {
+                panic!("core registry URL not pinned in checksums.rs: {}", m.url)
+            });
+            assert_eq!(
+                pinned, m.sha256,
+                "SHA-256 drift for {} between checksums.rs and phoneme-core::models",
+                m.file
+            );
+        }
+    }
+
     // ── file_sha256 against a known vector ────────────────────────────────────
 
     #[test]

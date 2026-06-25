@@ -628,6 +628,8 @@ pub fn run() {
             commands::wizard_download_diarization_model,
             commands::wizard_get_system_info,
             commands::wizard_list_downloaded_models,
+            commands::wizard_downloaded_model_sizes,
+            commands::wizard_delete_model,
             commands::wizard_download_server,
             commands::wizard_ping_ollama,
             commands::wizard_detect_deps,

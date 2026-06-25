@@ -1119,7 +1119,42 @@ phoneme doctor --diagnostics
 With `--json`, each check object keeps the original `name`/`ok`/`detail` keys
 and additionally carries `category` (`"critical" | "warning" | "info"`),
 `explanation`, and `fix_hint` (string or null) — additive only, so existing
-consumers keep working.
+consumers keep working. The `Model storage` check reports the total disk used by
+downloaded transcription models — usually the largest thing under app-data.
+
+### 💽 `phoneme model`
+
+Manage the downloaded local transcription (whisper.cpp) models on disk. They are
+75 MB–3 GB each, download on demand, and are never auto-removed, so they're the
+usual answer to "what's filling up app-data". Operates on the model files
+directly — no daemon required — and a removed model re-downloads the next time
+it's selected.
+
+```bash
+phoneme model            # defaults to `ls`
+phoneme model ls         # list downloaded models with sizes + a running total
+phoneme model ls --json  # [{name, path, bytes, active}]
+
+# Download a model (the headless equivalent of the desktop "Download" cards):
+# fetches from the pinned whisper.cpp source and verifies its SHA-256.
+phoneme model get ggml-small.en.bin
+
+# Select a downloaded model for transcription (writes whisper.model_path + reloads
+# a running daemon) — the headless equivalent of "Select":
+phoneme model use ggml-small.en.bin
+
+# Delete one to reclaim space (name as shown by `model ls`):
+phoneme model rm ggml-large-v3.bin
+# Refuses a model that's currently configured for transcription / live-preview /
+# dictation — pass --force to remove it anyway:
+phoneme model rm ggml-small.en.bin --force
+```
+
+`get`, `use`, and `rm` only accept known whisper model filenames (an allow-list),
+so they can never download to, select, or delete anything outside the models
+directory; `get` deletes the file and fails on a checksum mismatch. This is full
+parity with **Settings → Whisper** (download cards · Select · the **Remove**
+button). Run `phoneme model ls` with no models downloaded to see the names.
 
 ### ⚙️ `phoneme config`
 
