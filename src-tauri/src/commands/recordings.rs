@@ -343,7 +343,9 @@ pub async fn retranscribe_recording(
 /// pipeline. Returns `{ id }` for the new recording.
 #[tauri::command]
 pub async fn import_recording(bridge: Br<'_>, path: String) -> Result<Value, CommandError> {
-    forward(&bridge, Request::ImportRecording { path }).await
+    // The GUI import dialog has no recipe picker yet, so it always runs the
+    // default pipeline (recipe selection on import is exposed via the CLI for now).
+    forward(&bridge, Request::ImportRecording { path, recipe_id: None }).await
 }
 
 /// Safe, non-destructive re-import: scan the audio dir and re-link any file with

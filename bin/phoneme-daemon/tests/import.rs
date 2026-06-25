@@ -28,6 +28,7 @@ async fn import_recording_creates_row_and_transcribes() {
         .client
         .request(Request::ImportRecording {
             path: src.to_string_lossy().into_owned(),
+            recipe_id: None,
         })
         .await
         .unwrap();
@@ -92,6 +93,7 @@ async fn import_nonexistent_path_errors_and_creates_no_row() {
         .client
         .request(Request::ImportRecording {
             path: missing.to_string_lossy().into_owned(),
+            recipe_id: None,
         })
         .await
         .unwrap();
@@ -114,6 +116,7 @@ async fn import_unsupported_extension_errors_and_creates_no_row() {
         .client
         .request(Request::ImportRecording {
             path: txt.to_string_lossy().into_owned(),
+            recipe_id: None,
         })
         .await
         .unwrap();

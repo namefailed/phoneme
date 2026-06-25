@@ -56,6 +56,21 @@ phoneme import --format flac "https://youtu.be/VIDEO_ID"
 # choices: m4a (default), mp3, flac, wav
 ```
 
+### Pick a Playbook recipe for the import
+
+By default an import runs the **default pipeline**. To run it through a specific
+recipe instead — in a single pass, rather than importing then re-transcribing —
+add `--recipe` (by id or name, the same picker `record`/`retranscribe` use):
+
+```bash
+phoneme import "https://youtu.be/VIDEO_ID" --recipe lecture-clean
+phoneme recipes          # list your recipes (add --json for a machine-readable list)
+```
+
+The recipe is checked **before** any download, so a typo (or a meeting template,
+which can't apply to a single recording) fails fast. Already imported? Change its
+recipe with `phoneme retranscribe <id> --recipe <name>`.
+
 > [!NOTE]
 > URL import requires **yt-dlp** and **ffmpeg** on your PATH. Install yt-dlp with
 > `python -m pip install -U yt-dlp` (ffmpeg via your package manager, e.g.

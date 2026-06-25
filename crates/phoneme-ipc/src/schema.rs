@@ -434,6 +434,16 @@ pub enum Request {
         /// Absolute path to the audio file (the daemon resolves it on ITS
         /// side, so relative paths from another process don't survive).
         path: String,
+        /// One-time Playbook recipe override for THIS import (never persisted),
+        /// mirroring [`Request::RecordStart::recipe_id`]: the imported file runs
+        /// the named recipe instead of the global `default`. `None`/empty ⇒
+        /// `default` (backward compatible). Recorded in `pending_recipe` for this
+        /// job only, exactly like a custom hotkey's override. A `scope = Meeting`
+        /// recipe is rejected up front (a single import is not a meeting); an
+        /// unknown id degrades to `default` inside `resolve_recipe`. `phoneme
+        /// import --recipe <id|name>`.
+        #[serde(default)]
+        recipe_id: Option<String>,
     },
 
     /// Export a `[start_ms, end_ms)` slice of a recording's audio to a new WAV

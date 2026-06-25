@@ -36,6 +36,7 @@ Commands:
   delete            Delete a recording
   doctor            Health check
   config            Configuration management
+  recipes           List the configured Playbook recipes (id, name, scope, description). With `--json`, emits a machine-readable array so a client can present a recipe picker (e.g. filtering scope=recording for `import --recipe` / `record --recipe`). Reads the same config the daemon does; no daemon required
   daemon            Daemon control
   watch             Subscribe to the daemon's event stream
   hook              Test the configured hook

@@ -95,6 +95,11 @@ pub enum Command {
     Doctor(DoctorArgs),
     /// Configuration management.
     Config(ConfigArgs),
+    /// List the configured Playbook recipes (id, name, scope, description). With
+    /// `--json`, emits a machine-readable array so a client can present a recipe
+    /// picker (e.g. filtering scope=recording for `import --recipe` / `record
+    /// --recipe`). Reads the same config the daemon does; no daemon required.
+    Recipes,
     /// Daemon control.
     Daemon(DaemonArgs),
     /// Subscribe to the daemon's event stream.
@@ -673,6 +678,12 @@ pub struct ImportArgs {
     /// m4a/mp3 are lossy but transparent for speech; flac/wav avoid re-encoding.
     #[arg(long, value_enum, default_value_t = AudioFormat::M4a)]
     pub format: AudioFormat,
+    /// Playbook recipe to run for this import, by id or name (as in the GUI recipe
+    /// picker, or `phoneme recipes`). Omit for the default pipeline. Resolved (and
+    /// rejected if it names a meeting template) before any download, so a typo
+    /// fails fast. Avoids the import-then-`retranscribe --recipe` double pass.
+    #[arg(long)]
+    pub recipe: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]

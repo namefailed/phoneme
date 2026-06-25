@@ -156,6 +156,32 @@ fn run_with_timeout(
 }
 
 pub async fn run(args: ImportArgs, cfg: &Config) -> ExitCode {
+    // Resolve the optional recipe (id|name → id) up front — before any download or
+    // decode — so a typo'd or meeting-scope --recipe fails fast without fetching
+    // anything. The daemon re-validates, but failing here avoids the wasted pull.
+    let recipe_id = match args.recipe.as_deref() {
+        None => None,
+        Some(v) => match crate::commands::recipe::resolve(cfg, v) {
+            Ok(id) => {
+                if cfg
+                    .recipes
+                    .iter()
+                    .any(|r| r.id == id && matches!(r.scope, phoneme_core::config::RecipeScope::Meeting))
+                {
+                    eprintln!(
+                        "error: recipe '{id}' is a meeting template (scope = Meeting); import a single recording with a recording-scope recipe"
+                    );
+                    return ExitCode::FAILURE;
+                }
+                Some(id)
+            }
+            Err(msg) => {
+                eprintln!("error: {msg}");
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+
     // For a URL, download first; hold the temp dir alive for the whole function
     // so the file survives until the daemon has decoded it (the import call
     // blocks until decode completes), then it's cleaned up on return.
@@ -208,7 +234,13 @@ pub async fn run(args: ImportArgs, cfg: &Config) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    match client.send(Request::ImportRecording { path: abs }).await {
+    match client
+        .send(Request::ImportRecording {
+            path: abs,
+            recipe_id,
+        })
+        .await
+    {
         Ok(v) => {
             let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
             println!("imported {id}");

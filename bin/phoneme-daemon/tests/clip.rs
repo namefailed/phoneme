@@ -26,6 +26,7 @@ async fn export_clip_writes_a_sub_range_wav() {
         .client
         .request(Request::ImportRecording {
             path: src.to_string_lossy().into_owned(),
+            recipe_id: None,
         })
         .await
         .unwrap()
@@ -91,6 +92,7 @@ async fn export_clip_default_out_path_sits_beside_the_source() {
         .client
         .request(Request::ImportRecording {
             path: src.to_string_lossy().into_owned(),
+            recipe_id: None,
         })
         .await
         .unwrap()

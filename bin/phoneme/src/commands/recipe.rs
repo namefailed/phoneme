@@ -12,6 +12,43 @@
 //! quietly running the wrong pipeline.
 
 use phoneme_core::Config;
+use std::process::ExitCode;
+
+/// `phoneme recipes` — list the configured Playbook recipes from the same config
+/// the daemon reads (no daemon required). With `--json`, prints one JSON array of
+/// the full recipe objects (id, name, description, builtin, scope, steps) so a
+/// client can build a recipe picker — e.g. filtering `scope == "recording"` for
+/// `import --recipe` / `record --recipe`. Otherwise a short human listing.
+pub fn list(cfg: &Config, json: bool) -> ExitCode {
+    if json {
+        return match serde_json::to_string(&cfg.recipes) {
+            Ok(s) => {
+                println!("{s}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to serialize recipes: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if cfg.recipes.is_empty() {
+        println!("(no recipes configured)");
+        return ExitCode::SUCCESS;
+    }
+    for r in &cfg.recipes {
+        let scope = match r.scope {
+            phoneme_core::config::RecipeScope::Recording => "recording",
+            phoneme_core::config::RecipeScope::Meeting => "meeting",
+        };
+        let builtin = if r.builtin { " · built-in" } else { "" };
+        println!("{}  \"{}\"  [{scope}{builtin}]", r.id, r.name);
+        if !r.description.trim().is_empty() {
+            println!("    {}", r.description);
+        }
+    }
+    ExitCode::SUCCESS
+}
 
 /// Resolve a `--recipe` value to a recipe id from `config.recipes`.
 ///

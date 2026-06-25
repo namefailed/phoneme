@@ -4,6 +4,25 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 
 ---
 
+## Unreleased
+
+### Integration & CLI
+
+- [x] **Per-import Playbook recipe** — `phoneme import <file-or-url> --recipe
+  <id|name>` runs the import through a chosen recipe in a single pass, closing the
+  gap that used to force `import` (default) then `retranscribe --recipe` — a full
+  double transcription. The recipe (`recipe_id`, also on the `ImportRecording`
+  IPC) is resolved like `record`/`retranscribe` and validated **before** any
+  download: a typo, or a `scope = Meeting` template on a single import, fails fast.
+  Omitting it is byte-for-byte today's behaviour. (Requested by the youtube-note
+  sister project, whose only URL→audio path is `phoneme import`.)
+- [x] **`phoneme recipes`** — list the configured Playbook recipes from the same
+  config the daemon reads (no daemon required). `phoneme --json recipes` emits a
+  machine-readable array (`id, name, description, builtin, scope, steps`) so a
+  client can build a recipe picker — filtering `scope == "recording"` for import.
+
+---
+
 ## v1.8 — Recall, Meetings & Hardening
 
 *Workspace version `1.8.1`. The release that closes the promise-vs-reality gaps and

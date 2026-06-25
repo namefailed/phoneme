@@ -177,16 +177,38 @@ phoneme import "https://www.youtube.com/watch?v=VIDEO_ID"
 
 # Choose the extracted format for URL imports (default m4a)
 phoneme import --format flac "https://youtu.be/VIDEO_ID"
+
+# Transcribe the import through a specific Playbook recipe (by id or name)
+# instead of the default pipeline — one pass, no import-then-retranscribe.
+phoneme import "https://youtu.be/VIDEO_ID" --recipe lecture-clean
 ```
 
 | Flag | Default | Notes |
 | --- | --- | --- |
 | `--format <m4a\|mp3\|flac\|wav>` | `m4a` | Audio format yt-dlp extracts to (URL imports only). m4a/mp3 are lossy but transparent for speech; flac/wav avoid a re-encode. |
+| `--recipe <ID\|NAME>` | default pipeline | Run this import through a chosen Playbook recipe, the same picker `record`/`retranscribe` use. Resolved (id first, then name) and rejected if it names a meeting template — **before** any download, so a typo or wrong scope fails fast. Omit for the default pipeline. Use `phoneme recipes` to list the choices. |
 
 URL import requires **yt-dlp** and **ffmpeg** on PATH (`python -m pip install -U
 yt-dlp`). The download lands in a temp folder and is removed after import —
-Phoneme keeps only its own decoded copy. Pair it with `retranscribe` to A/B
-transcription settings on real-world audio.
+Phoneme keeps only its own decoded copy. `--recipe` closes the gap that used to
+force an `import` (default) then `retranscribe --recipe` — a full double
+transcription — into a single pass; for an already-imported recording, change
+its recipe with `retranscribe --recipe`.
+
+### 📜 `phoneme recipes`
+
+List the configured Playbook recipes — the same recipes the GUI's recipe picker
+and the `--recipe` flag (`record` / `import` / `retranscribe`) draw from. Reads
+the same config the daemon does, so it works without the daemon running.
+
+```bash
+phoneme recipes            # human-readable: id, name, scope, description
+phoneme --json recipes     # machine-readable JSON array (for scripting / clients)
+```
+
+The `--json` form emits one array of `{id, name, description, builtin, scope,
+steps}`; a client picking a recipe for `import` filters to `scope == "recording"`
+(meeting templates are `scope == "meeting"`).
 
 ### 📋 `phoneme list`
 
