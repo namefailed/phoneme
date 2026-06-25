@@ -237,7 +237,11 @@ export const CURATED_TRANSCRIPTION: Record<string, CuratedModel[]> = {
  *
  * Transcript cleanup is a short, cheap task (a paragraph in, a paragraph out),
  * so the recommended default for every provider is its small/fast tier; the
- * larger tiers are offered for users who want maximum polish.
+ * larger tiers are offered for users who want maximum polish. The Ollama list
+ * also carries an ultra-light sub-3B tier (0.5B–2B) for genuinely weak / no-GPU
+ * machines — fine for cleanup, but too small for the JSON enrichment steps.
+ * Even smaller experimental/ternary models (e.g. Bonsai-class) aren't listed
+ * here — pull one in Ollama and type its id via the "Other…" escape hatch.
  *
  * `openai` here is the OpenAI-compatible wire protocol — these are OpenAI's own
  * chat model ids. Other OpenAI-compatible clouds (Gemini, Mistral, DeepSeek,
@@ -247,9 +251,30 @@ export const CURATED_TRANSCRIPTION: Record<string, CuratedModel[]> = {
 export const CURATED_CLEANUP: Record<string, CuratedModel[]> = {
   ollama: [
     {
+      id: "qwen2.5:0.5b",
+      label: "Qwen 2.5 0.5B (ultra-light)",
+      description: "Tiny (~1 GB RAM, no GPU). Runs on almost anything — basic cleanup only; too small for the JSON steps (entities/tasks/chapters). For genuinely weak machines.",
+      tier: "low",
+      useCase: "fast",
+    },
+    {
+      id: "llama3.2:1b",
+      label: "Llama 3.2 1B (ultra-light)",
+      description: "Very light (~2 GB RAM). Fast cleanup and short titles on weak/no-GPU machines; unreliable for structured (JSON) enrichment.",
+      tier: "low",
+      useCase: "fast",
+    },
+    {
+      id: "gemma2:2b",
+      label: "Gemma 2 2B (light)",
+      description: "Light (~3 GB RAM). Better wording than the 1B while still tiny; the lightest pick that handles simple JSON steps.",
+      tier: "low",
+      useCase: "fast",
+    },
+    {
       id: "llama3.2:3b",
       label: "Llama 3.2 3B",
-      description: "Fastest local option, runs on ~8 GB RAM. Plenty for cleanup and short summaries.",
+      description: "Fastest mainstream local option, runs on ~8 GB RAM. Plenty for cleanup and short summaries.",
       tier: "low",
       useCase: "fast",
       recommended: true,
