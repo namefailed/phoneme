@@ -502,6 +502,33 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
         ));
     }
 
+    // Downloaded-model storage. Informational, never a failure: it answers
+    // "where did the space go" since downloaded whisper models dwarf everything
+    // else under app-data, and points at the manager that removes the unused ones.
+    {
+        let downloaded = crate::models::downloaded_models();
+        let total: u64 = downloaded.iter().map(|m| m.bytes).sum();
+        let detail = if downloaded.is_empty() {
+            "no transcription models downloaded yet".to_string()
+        } else {
+            format!(
+                "{} model{} · {} on disk",
+                downloaded.len(),
+                if downloaded.len() == 1 { "" } else { "s" },
+                crate::models::format_bytes(total),
+            )
+        };
+        out.push(CheckResult {
+            name: "Model storage".into(),
+            ok: true,
+            detail,
+            fix_action: None,
+            category: CheckCategory::Info,
+            explanation: "Disk used by downloaded local transcription models — usually the largest thing under app-data. Remove unused ones in Settings → Whisper or with `phoneme model rm` to reclaim space.".into(),
+            fix_hint: None,
+        });
+    }
+
     // Hook executable resolvable. An empty hook list is fine (treated as ok).
     // Read the expanded copy so a `~/`/`%APPDATA%` hook command resolves to its
     // real path — the same expansion the pipeline applies before running it
@@ -2236,6 +2263,7 @@ mod tests {
                 "Audio directory",
                 "Disk space (recordings)",
                 "Disk space (app data)",
+                "Model storage",
                 "Hook command",
                 "yt-dlp (URL import)",
                 "Whisper model file",

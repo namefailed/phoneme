@@ -160,6 +160,12 @@ const MODELS = [
   { id: "large-v3", filename: "ggml-large-v3.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin", name: "Large v3", size: "3.1 GB", desc: "Slowest, best accuracy. High-end hardware only." }
 ];
 
+/** Human byte size for the model cards, e.g. `465 MB` / `2.9 GB`. */
+function fmtBytes(bytes: number): string {
+  const mb = bytes / 1024 / 1024;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(0)} MB`;
+}
+
 /**
  * Settings → Transcription: the main speech-to-text engine (`config.whisper`).
  * Provider choice via the shared connection block (local whisper.cpp / the
@@ -167,11 +173,16 @@ const MODELS = [
  * model field with curated per-provider suggestions, and — for the local
  * engine — downloadable whisper model cards with size/accuracy notes, a
  * "recommended for your RAM" pick (`wizard_get_system_info`), download
- * progress, and the currently-downloaded check
- * (`wizard_list_downloaded_models`). Plain section class composing the
- * shared connectionField/modelField mounts over the form.ts binding.
+ * progress, and per-model management: the real on-disk size
+ * (`wizard_downloaded_model_sizes`) plus a "Remove" button
+ * (`wizard_delete_model`) on each downloaded model so users can reclaim space
+ * without leaving the app (the active model is protected). Plain section class
+ * composing the shared connectionField/modelField mounts over the form.ts binding.
  */
 export class SectionWhisper {
+  /** Real on-disk byte size per downloaded model filename, for the card labels +
+   *  the "Remove" affordance. Populated by fetchHardwareAndModels. */
+  private modelSizes: Map<string, number> = new Map();
 
   constructor(
     private container: HTMLElement,
@@ -211,7 +222,14 @@ export class SectionWhisper {
   private async fetchHardwareAndModels() {
     try {
       const sysInfo = await invoke<{ ram_mb: number }>("wizard_get_system_info");
-      const downloaded = await invoke<string[]>("wizard_list_downloaded_models");
+      // Real on-disk sizes (not the catalog's approximate labels), so "Remove"
+      // shows exactly what gets reclaimed. `downloaded` is derived from the same
+      // list so the two never disagree.
+      const sizes = await invoke<{ name: string; path: string; bytes: number }[]>(
+        "wizard_downloaded_model_sizes",
+      );
+      this.modelSizes = new Map(sizes.map((s) => [s.name, s.bytes]));
+      const downloaded = sizes.map((s) => s.path);
 
       let recommendedId = "base";
       if (sysInfo.ram_mb >= 16000) recommendedId = "large-v3";
@@ -241,12 +259,19 @@ export class SectionWhisper {
         }
       }
 
+      const sizeBytes = this.modelSizes.get(m.filename);
+      const sizeStr = sizeBytes ? ` · ${fmtBytes(sizeBytes)}` : "";
+
       const btnArea = card.querySelector(".model-actions");
       if (btnArea) {
         if (isSelected) {
-          btnArea.innerHTML = `<button disabled style="background: var(--accent); color: var(--bg-surface); border-color: var(--accent); border-radius: 6px;">✅ Selected</button>`;
+          // The active model is protected here: removing the model the engine is
+          // running would break transcription. Manage it via the CLI (--force) or
+          // switch models first. We still show its size so the user sees the cost.
+          btnArea.innerHTML = `<button disabled style="background: var(--accent); color: var(--bg-surface); border-color: var(--accent); border-radius: 6px;">✅ Selected${sizeStr}</button>`;
         } else if (isDownloaded) {
-          btnArea.innerHTML = `<button class="select-btn" data-id="${escapeAttr(m.id)}" data-path="${escapeAttr(downloadedPath ?? "")}" style="border-radius: 6px;">Select</button>`;
+          btnArea.innerHTML = `<button class="select-btn" data-id="${escapeAttr(m.id)}" data-path="${escapeAttr(downloadedPath ?? "")}" style="border-radius: 6px;">Select</button>` +
+            `<button class="remove-btn" data-filename="${escapeAttr(m.filename)}" title="Delete this downloaded model to reclaim disk — it re-downloads on demand when you next select it" style="border-radius: 6px; margin-left: 6px; color: var(--err); border-color: var(--err);">Remove${sizeStr}</button>`;
         } else {
           btnArea.innerHTML = `
             <button class="download-btn" data-id="${m.id}" data-url="${m.url}" data-filename="${m.filename}" style="border-radius: 6px;">
@@ -316,6 +341,39 @@ export class SectionWhisper {
           if (unlisten) unlisten();
           this.updateModelCards(downloadedPaths, recommendedId);
         }
+      });
+    });
+
+    this.container.querySelectorAll(".remove-btn").forEach((btn) => {
+      const b = btn as HTMLButtonElement;
+      let confirming = false;
+      let resetTimer: number | undefined;
+      const orig = b.textContent ?? "Remove";
+      b.addEventListener("click", async () => {
+        // Two-click confirm — re-fetching a multi-GB model after a stray click
+        // is a real annoyance, so make the destructive step deliberate.
+        if (!confirming) {
+          confirming = true;
+          b.textContent = "Click again to remove";
+          resetTimer = window.setTimeout(() => {
+            confirming = false;
+            b.textContent = orig;
+          }, 3000);
+          return;
+        }
+        if (resetTimer) window.clearTimeout(resetTimer);
+        const filename = b.dataset.filename!;
+        b.disabled = true;
+        b.textContent = "Removing…";
+        try {
+          await invoke("wizard_delete_model", { filename });
+        } catch (err) {
+          console.error(err);
+          b.textContent = "Error";
+          return;
+        }
+        // Re-fetch sizes + re-render — the card flips back to a Download button.
+        await this.fetchHardwareAndModels();
       });
     });
   }

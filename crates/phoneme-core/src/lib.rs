@@ -112,6 +112,7 @@ pub mod id;
 #[cfg(windows)]
 pub mod job;
 pub mod llm;
+pub mod models;
 #[cfg(feature = "native-whisper")]
 pub mod native_whisper;
 pub mod profiles;

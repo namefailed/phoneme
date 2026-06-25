@@ -154,7 +154,9 @@ fn mask_item(item: &mut toml_edit::Item) {
     }
 }
 
-fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
+/// Edit one dotted config key to a new value, with the same validation +
+/// atomic, DPAPI-safe write as `config set`. Reused by `phoneme model use`.
+pub(crate) fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
     // Parse the config as a TOML value to handle different types
     let toml_value =
         toml::to_string(cfg).map_err(|e| format!("failed to serialize current config: {e}"))?;

@@ -93,6 +93,10 @@ pub enum Command {
     Delete(DeleteArgs),
     /// Health check.
     Doctor(DoctorArgs),
+    /// Manage the downloaded local transcription (whisper.cpp) models on disk:
+    /// list their sizes, or delete one you no longer use to reclaim space.
+    /// Operates on the model files directly — no daemon required.
+    Model(ModelArgs),
     /// Configuration management.
     Config(ConfigArgs),
     /// List the configured Playbook recipes (id, name, scope, description). With
@@ -723,6 +727,48 @@ pub struct DoctorArgs {
     /// with the GUI Doctor's "Export diagnostics" button; needs a running daemon.
     #[arg(long)]
     pub diagnostics: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ModelArgs {
+    /// Defaults to `ls` when omitted.
+    #[command(subcommand)]
+    pub action: Option<ModelAction>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ModelAction {
+    /// List downloaded local whisper models with their on-disk size and the
+    /// running total. The model(s) currently configured for transcription /
+    /// live-preview / dictation are flagged `[active]`.
+    Ls,
+    /// Download a local whisper model by name (e.g. `ggml-small.en.bin`) from the
+    /// pinned whisper.cpp source and verify its SHA-256. The headless equivalent
+    /// of the desktop "Download" cards. Already-present, intact models are a
+    /// no-op. Run `phoneme model ls` to see the available names.
+    Get {
+        /// The model filename to download (e.g. `ggml-small.en.bin`).
+        name: String,
+    },
+    /// Select a downloaded model as the transcription model: writes
+    /// `whisper.model_path` and reloads a running daemon. The headless
+    /// equivalent of the desktop "Select" button.
+    Use {
+        /// The downloaded model filename to use (from `phoneme model ls`).
+        name: String,
+    },
+    /// Delete a downloaded local whisper model file by name (e.g.
+    /// `ggml-large-v3.bin`, as shown by `phoneme model ls`) to reclaim disk. It
+    /// re-downloads on demand the next time you select it. Refuses a model
+    /// that's currently configured (transcription / live-preview / dictation)
+    /// unless `--force`.
+    Rm {
+        /// The model filename to remove (from `phoneme model ls`).
+        name: String,
+        /// Remove it even if it's a currently-configured model.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, clap::Args)]
