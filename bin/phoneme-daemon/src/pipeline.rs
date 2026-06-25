@@ -2859,9 +2859,31 @@ pub async fn run(
         tracing::warn!(id = %id.as_str(), "failed to persist transcript versions: {e}");
     }
 
-    // Persist the provider's segment timeline (replacing any previous one —
-    // a retranscribe describes a new machine output). Best-effort: a failure
-    // here costs the timeline views, not the recording.
+    // Persist the segment timeline (replacing any previous one — a retranscribe
+    // describes a new machine output). Best-effort: a failure here costs the
+    // timeline views, not the recording.
+    //
+    // By default, re-derive the segments from the per-word timings and split them on
+    // sentence punctuation — the same shape the edit and cleanup re-flows produce
+    // (`realign_transcript` → `build_segments`) — so the Timeline/Synced views read
+    // as sentences from the very first transcribe instead of the provider's coarse
+    // blocks (which `groupSegments` can merge but never split, so a long multi-
+    // sentence whisper segment renders as one giant row until the user edits the
+    // transcript). Only adopt the re-derived set when it is strictly *finer* than
+    // the provider's: a provider that already returns good per-sentence segments —
+    // or that returns only partial word timings (which would otherwise collapse the
+    // timeline to one block) — is never made coarser. The realign carries the
+    // diarized speaker through the words/markers, so turns are preserved. Gated by
+    // `editor.resync_views_on_edit`, the same opt-out the edit path honors for users
+    // who prefer the raw machine timings.
+    let segments = if cfg.editor.resync_views_on_edit && !words.is_empty() {
+        match phoneme_core::realign::realign_transcript(&raw_transcript, &words) {
+            Some(r) if r.segments.len() > segments.len() => r.segments,
+            _ => segments,
+        }
+    } else {
+        segments
+    };
     if let Err(e) = state.catalog.replace_segments(&id, &segments).await {
         tracing::warn!(id = %id.as_str(), "failed to persist transcript segments: {e}");
     }
