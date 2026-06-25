@@ -475,6 +475,7 @@ mod tests {
             diarization_model: None,
             mean_confidence: Some(0.82),
             detected_language: None,
+            ext_ref: None,
             tags: vec![],
             entities: vec![],
             tasks: vec![],

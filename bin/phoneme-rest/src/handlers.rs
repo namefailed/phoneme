@@ -15,8 +15,8 @@ use phoneme_ipc::Request;
 use crate::daemon;
 use crate::error::RestError;
 use crate::request_map::{
-    self, AttachTagBody, ClipBody, FavoriteBody, ListQuery, PinnedBody, SearchQuery, SimilarQuery,
-    TitleBody,
+    self, AttachTagBody, ClipBody, FavoriteBody, ImportBody, ListQuery, PinnedBody, SearchQuery,
+    SimilarQuery, TitleBody,
 };
 use crate::server::AppState;
 
@@ -244,6 +244,32 @@ pub async fn record_stop(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, RestError> {
     forward(&state, request_map::record_stop()).await
+}
+
+/// `POST /api/import` — queue a local audio file through the pipeline, optionally
+/// under a one-time Playbook recipe (`{"path":"…","recipe_id":"…"}`). The daemon
+/// resolves the path on its side; URL/yt-dlp import stays CLI-only.
+pub async fn import_recording(
+    State(state): State<AppState>,
+    Json(body): Json<ImportBody>,
+) -> Result<Json<serde_json::Value>, RestError> {
+    forward(&state, request_map::import_recording(&body)).await
+}
+
+/// `GET /api/recipes` — the configured Playbook recipes (id, name, description,
+/// builtin, scope, steps), so an HTTP client can build a recipe picker (e.g.
+/// filter `scope == "recording"` to pair with `POST /api/import`).
+///
+/// ponytail: recipes live in config, not daemon runtime state, so this reads the
+/// same config the daemon does rather than adding an IPC verb just to relay it.
+/// Re-reads per call (cheap, rarely hit) so an edited recipe shows up without a
+/// bridge restart.
+pub async fn list_recipes() -> Result<Json<serde_json::Value>, RestError> {
+    let cfg = phoneme_core::Config::load_resolved()
+        .map_err(|e| RestError::Internal(format!("failed to load config: {e}")))?;
+    serde_json::to_value(&cfg.recipes)
+        .map(Json)
+        .map_err(|e| RestError::Internal(format!("failed to serialize recipes: {e}")))
 }
 
 /// `GET /api/status` — the daemon's liveness + identity probe.

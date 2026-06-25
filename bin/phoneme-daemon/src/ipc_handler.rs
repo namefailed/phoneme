@@ -1485,9 +1485,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::UndoForgetNamedVoice { id } => {
             catalog_call!(state.catalog.undo_forget(&id).await => json "restored")
         }
-        Request::ImportRecording { path, recipe_id } => {
-            import_recording(state, path, recipe_id).await
-        }
+        Request::ImportRecording {
+            path,
+            recipe_id,
+            ext_ref,
+        } => import_recording(state, path, recipe_id, ext_ref).await,
         Request::ExportClip {
             id,
             start_ms,
@@ -3298,6 +3300,7 @@ async fn import_recording(
     state: &AppState,
     path: String,
     recipe_id: Option<String>,
+    ext_ref: Option<String>,
 ) -> Response {
     // One-time Playbook recipe for this import (mirrors RecordStart). Validate it
     // up front — before the (potentially slow) decode — so a meeting template is
@@ -3313,6 +3316,25 @@ async fn import_recording(
             })
         }
     };
+
+    // Idempotent import: if the caller supplied an external-reference key and a
+    // recording already carries it, return that one untouched instead of
+    // importing a duplicate — checked BEFORE the decode so a re-import is cheap.
+    // Lets a client (the youtube-note project) fire-and-forget and reconcile via
+    // `phoneme list --json`'s `ext_ref` without its own dedup bookkeeping.
+    let ext_ref = ext_ref.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(ref key) = ext_ref {
+        match state.catalog.find_id_by_ext_ref(key).await {
+            Ok(Some(existing)) => {
+                tracing::info!(id = %existing, ext_ref = %key, "import deduped on ext_ref");
+                return Response::Ok(
+                    serde_json::json!({ "id": existing.to_string(), "reused": true }),
+                );
+            }
+            Ok(None) => {}
+            Err(e) => return err_response(&e),
+        }
+    }
 
     let requested = std::path::PathBuf::from(&path);
 
@@ -3439,6 +3461,8 @@ async fn import_recording(
         diarization_model: None,
         mean_confidence: None,
         detected_language: None,
+        // Persisted by the base insert; drives future idempotent re-imports.
+        ext_ref: ext_ref.clone(),
         tags: vec![],
         entities: vec![],
         tasks: vec![],
@@ -3624,7 +3648,7 @@ async fn edit_recording(
                 })
             }
         }
-        let resp = import_recording(state, tmp.to_string_lossy().into_owned(), None).await;
+        let resp = import_recording(state, tmp.to_string_lossy().into_owned(), None, None).await;
         let _ = tokio::fs::remove_file(&tmp).await; // import copied it in; drop the temp
         return resp;
     }
@@ -3862,6 +3886,7 @@ async fn reimport_from_disk(state: &AppState, dry_run: bool) -> Response {
             diarization_model: None,
             mean_confidence: None,
             detected_language: None,
+            ext_ref: None,
             tags: vec![],
             entities: vec![],
             tasks: vec![],
@@ -4351,6 +4376,7 @@ mod tests {
             diarization_model: None,
             mean_confidence: None,
             detected_language: None,
+            ext_ref: None,
             tags: vec![],
             entities: vec![],
             tasks: vec![],

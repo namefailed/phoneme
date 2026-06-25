@@ -544,6 +544,7 @@ mod tests {
         assert!(!is_retry_safe(&Request::ImportRecording {
             path: "C:/audio/take1.wav".to_string(),
             recipe_id: None,
+            ext_ref: None,
         }));
         // A few more non-idempotent guards so the boundary can't quietly drift.
         assert!(!is_retry_safe(&Request::RecordStart {

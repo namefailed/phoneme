@@ -106,6 +106,7 @@ Each endpoint still maps one HTTP request to exactly one `phoneme-ipc`
 | `GET`  | `/api/tags` | `ListTags` | Tags attached to at least one recording. |
 | `GET`  | `/api/queue` | `ListQueue` | The transcription pipeline queue (processing first, then pending). |
 | `GET`  | `/api/search` | `SemanticSearch` | Query params: `q` (string), `limit` (usize, default `20`). |
+| `GET`  | `/api/recipes` | *(reads config)* | The configured Playbook recipes (`id, name, description, builtin, scope, steps`), read from the same config the daemon uses — not a daemon round-trip. Build a recipe picker by filtering `scope == "recording"` to pair with `POST /api/import`. |
 | `GET`  | `/api/events` | `SubscribeEvents` | Server-Sent Events; see below. |
 
 ### Mutate
@@ -121,6 +122,7 @@ guard is uniform, not POST-only). All id-bearing routes reject a malformed
 | `POST`   | `/api/record/stop` | `RecordStop` | No body. Stops and finalizes the active recording. |
 | `POST`   | `/api/meeting/start` | `StartMeeting` | No body. Starts a dual-track meeting recording. |
 | `POST`   | `/api/meeting/stop` | `StopMeeting` | No body. Stops and finalizes the active meeting. |
+| `POST`   | `/api/import` | `ImportRecording` | `{"path":"<absolute local file>"}`, optional `"recipe_id"` for a one-time Playbook recipe (a `scope = meeting` recipe is rejected), optional `"ext_ref"` for an idempotency key — if a recording already carries it, returns that one (`{"id":…,"reused":true}`) instead of importing a duplicate. The daemon resolves the path on its side. URL/yt-dlp import is **CLI-only** (`phoneme import <url>`), where the downloader lives. |
 | `POST`   | `/api/recordings/{id}/title` | `SetRecordingTitle` | `{"title":"…"}` to set; `{}` or `{"title":null}` to clear back to auto. |
 | `POST`   | `/api/recordings/{id}/favorite` | `SetFavorite` | `{"favorite":true|false}`. |
 | `POST`   | `/api/recordings/{id}/pinned` | `SetPinned` | `{"pinned":true|false}`. Pinned recordings sort to the top of the library. |
@@ -231,6 +233,12 @@ curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042/versions
 # Semantic search, and "more like this" from one recording
 curl -s 'http://127.0.0.1:3737/api/search?q=quarterly%20planning&limit=5'
 curl -s 'http://127.0.0.1:3737/api/recordings/20260519T143500042/similar?limit=5'
+
+# List Playbook recipes, then import a local file under one of them
+curl -s http://127.0.0.1:3737/api/recipes
+curl -s -X POST http://127.0.0.1:3737/api/import \
+  -H 'content-type: application/json' \
+  -d '{"path":"C:/Users/me/audio/talk.m4a","recipe_id":"default"}'
 
 # Tags: list all, list one recording's, attach, detach
 curl -s http://127.0.0.1:3737/api/tags

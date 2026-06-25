@@ -238,12 +238,19 @@ pub async fn run(args: ImportArgs, cfg: &Config) -> ExitCode {
         .send(Request::ImportRecording {
             path: abs,
             recipe_id,
+            ext_ref: args.ext_ref.clone(),
         })
         .await
     {
         Ok(v) => {
             let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
-            println!("imported {id}");
+            // `reused` ⇒ an existing recording matched the --ext-ref key; nothing
+            // new was imported.
+            if v.get("reused").and_then(|x| x.as_bool()).unwrap_or(false) {
+                println!("already imported {id} (matched --ext-ref)");
+            } else {
+                println!("imported {id}");
+            }
             ExitCode::SUCCESS
         }
         Err(code) => code,

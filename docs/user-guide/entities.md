@@ -16,7 +16,9 @@ Every entity has a **kind**:
 
 ## The Entities list (detail pane)
 
-Open any recording and look for the **🔎 Entities** section under the transcript:
+Open any recording and look for the **🔎 Entities** section inside the **Insights**
+card under the transcript (shared with [Tasks](tasks_and_reminders.md); the card
+collapses, and can be hidden from **Settings → Interface → Detail pane**):
 
 - Entities show as **chips grouped by kind** (People, then Organizations, then
   Topics, then Terms), each with its kind's icon.

@@ -569,6 +569,9 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         // Detected spoken language (nullable). `unwrap_or(None)` keeps older rows
         // that predate the column NULL — no badge, never routed.
         detected_language: row.try_get("detected_language").unwrap_or(None),
+        // External-reference key for idempotent import (nullable). `unwrap_or(None)`
+        // keeps older rows that predate the column NULL.
+        ext_ref: row.try_get("ext_ref").unwrap_or(None),
         tags: Vec::new(),
         // Populated separately (child query against `entities`) by list/get, like `tags`.
         entities: Vec::new(),

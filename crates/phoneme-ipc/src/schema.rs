@@ -444,6 +444,16 @@ pub enum Request {
         /// import --recipe <id|name>`.
         #[serde(default)]
         recipe_id: Option<String>,
+        /// Caller-supplied external-reference key for idempotent import (never
+        /// persisted beyond `recordings.ext_ref`). When set, the daemon first
+        /// looks for an existing recording carrying this key and, on a hit,
+        /// returns it untouched (`{"id":…,"reused":true}`) instead of importing a
+        /// duplicate — so a client (e.g. the youtube-note project) can
+        /// fire-and-forget and reconcile via `phoneme list --json`'s `ext_ref`.
+        /// `None`/empty ⇒ a normal import that always creates a new recording
+        /// (backward compatible). `phoneme import --ext-ref <key>`.
+        #[serde(default)]
+        ext_ref: Option<String>,
     },
 
     /// Export a `[start_ms, end_ms)` slice of a recording's audio to a new WAV

@@ -50,6 +50,7 @@ fn meeting_track(meeting_id: &str, track: &str) -> Recording {
         diarization_model: None,
         mean_confidence: None,
         detected_language: None,
+        ext_ref: None,
         tags: vec![],
         entities: vec![],
         tasks: vec![],

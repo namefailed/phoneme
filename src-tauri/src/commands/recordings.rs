@@ -345,7 +345,16 @@ pub async fn retranscribe_recording(
 pub async fn import_recording(bridge: Br<'_>, path: String) -> Result<Value, CommandError> {
     // The GUI import dialog has no recipe picker yet, so it always runs the
     // default pipeline (recipe selection on import is exposed via the CLI for now).
-    forward(&bridge, Request::ImportRecording { path, recipe_id: None }).await
+    // No ext_ref either — idempotent import is for programmatic clients (CLI/REST).
+    forward(
+        &bridge,
+        Request::ImportRecording {
+            path,
+            recipe_id: None,
+            ext_ref: None,
+        },
+    )
+    .await
 }
 
 /// Safe, non-destructive re-import: scan the audio dir and re-link any file with

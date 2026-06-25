@@ -115,6 +115,8 @@ pub struct AppState {
 /// | GET    | `/api/tags`                   | `ListTags`        |
 /// | GET    | `/api/queue`                  | `ListQueue`       |
 /// | GET    | `/api/search`                 | `SemanticSearch`  |
+/// | GET    | `/api/recipes`                | (reads config)    |
+/// | POST   | `/api/import`                 | `ImportRecording` |
 /// | POST   | `/api/record/start`           | `RecordStart`     |
 /// | POST   | `/api/record/stop`            | `RecordStop`      |
 /// | POST   | `/api/meeting/start`          | `StartMeeting`    |
@@ -160,6 +162,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tags", get(handlers::list_tags))
         .route("/api/queue", get(handlers::list_queue))
         .route("/api/search", get(handlers::search))
+        .route("/api/recipes", get(handlers::list_recipes))
+        .route("/api/import", post(handlers::import_recording))
         .route("/api/record/start", post(handlers::record_start))
         .route("/api/record/stop", post(handlers::record_stop))
         .route("/api/meeting/start", post(handlers::meeting_start))
@@ -781,6 +785,45 @@ mod tests {
         let got = mock.received();
         assert!(matches!(got[0], IpcRequest::StartMeeting));
         assert!(matches!(got[1], IpcRequest::StopMeeting));
+    }
+
+    /// `POST /api/import` forwards `ImportRecording` carrying the body's path and
+    /// recipe id.
+    #[tokio::test]
+    async fn import_forwards_path_and_recipe() {
+        let mock = MockDaemon::spawn("import", |req| match req {
+            IpcRequest::ImportRecording { .. } => Response::Ok(serde_json::json!({ "id": "i1" })),
+            _ => Response::Ok(serde_json::Value::Null),
+        });
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let resp = app
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/import")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"C:/audio/talk.m4a","recipe_id":"lecture"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        match &mock.received()[0] {
+            IpcRequest::ImportRecording {
+                path,
+                recipe_id,
+                ext_ref,
+            } => {
+                assert_eq!(path, "C:/audio/talk.m4a");
+                assert_eq!(recipe_id.as_deref(), Some("lecture"));
+                assert_eq!(ext_ref.as_deref(), None);
+            }
+            other => panic!("expected ImportRecording, got {other:?}"),
+        }
     }
 
     /// A malformed `:id` on a new id-bearing route is `400` and never forwarded
