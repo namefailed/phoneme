@@ -3222,7 +3222,12 @@ async fn recognize_speakers_snorm_routes_and_assigns() {
 
     // z-bar ~1.0: a genuine match stands well above its cohort mean.
     let sugg = db
-        .recognize_speakers_for(rec.id.as_str(), 1.0, crate::voiceprint::ScoreNorm::SNorm, "")
+        .recognize_speakers_for(
+            rec.id.as_str(),
+            1.0,
+            crate::voiceprint::ScoreNorm::SNorm,
+            "",
+        )
         .await
         .unwrap();
     assert_eq!(sugg.len(), 2, "both distinct speakers recognized: {sugg:?}");

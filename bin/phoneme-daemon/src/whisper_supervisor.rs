@@ -250,7 +250,9 @@ static MAIN_LABELS: RoleLabels = RoleLabels {
     config_changed: "whisper-server config changed; restarting",
     shutdown_kill: "shutdown — killing whisper-server",
     probe_warn: |preferred, port| {
-        format!("preferred port {preferred} in use by another app — whisper-server starting on {port}")
+        format!(
+            "preferred port {preferred} in use by another app — whisper-server starting on {port}"
+        )
     },
 };
 

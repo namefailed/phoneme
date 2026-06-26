@@ -287,14 +287,8 @@ async fn run_calibrate(cfg: &Config, json: bool) -> ExitCode {
         let eer = report.eer.unwrap_or_default();
         let suggested = report.eer_threshold.unwrap_or_default();
         println!("speaker recognition calibration ({named_voices} named voices)");
-        println!(
-            "  same-voice (genuine) pairs : {}",
-            report.genuine_trials
-        );
-        println!(
-            "  cross-voice (impostor) pairs: {}",
-            report.impostor_trials
-        );
+        println!("  same-voice (genuine) pairs : {}", report.genuine_trials);
+        println!("  cross-voice (impostor) pairs: {}", report.impostor_trials);
         if let Some(m) = mean(&genuine_scores) {
             println!("  intra (same-voice) mean cosine : {m:.3}");
         }

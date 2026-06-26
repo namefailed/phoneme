@@ -157,8 +157,7 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         RecordMode::Duration { secs } => secs as u64,
         _ => 0,
     };
-    let timeout =
-        std::time::Duration::from_secs(cfg.whisper.timeout_secs + 60 + capture_secs);
+    let timeout = std::time::Duration::from_secs(cfg.whisper.timeout_secs + 60 + capture_secs);
     let start = std::time::Instant::now();
 
     // `rec_id` is `None` only if the daemon's RecordStart response carried no

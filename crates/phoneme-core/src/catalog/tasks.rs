@@ -46,7 +46,7 @@ impl Catalog {
     /// transaction this reads the existing `(text, done)` map, deletes only the
     /// LLM-extracted rows (user-added `source='manual'` tasks survive a re-run),
     /// then inserts each new task carrying the prior `done` — matched on exact
-    /// text first, then on a normalized key ([`normalize_task_text`]) so a minor
+    /// text first, then on a normalized key (`normalize_task_text`) so a minor
     /// reword (case / spacing / punctuation) keeps its tick. The
     /// `(recording_id, text)` UNIQUE is the storage key. An empty slice clears the
     /// extracted tasks (manual ones stay).

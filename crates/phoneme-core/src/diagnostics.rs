@@ -104,7 +104,7 @@ pub const REDACTION_PLACEHOLDER: &str = "<redacted>";
 /// dir. Pure apart from reading the log file: the config is serialized and
 /// masked in memory, and the OS/version info comes from `env`/`app_version`.
 ///
-/// `log_tail_lines` is clamped to [`MAX_LOG_TAIL_LINES`]. The config is
+/// `log_tail_lines` is clamped to `MAX_LOG_TAIL_LINES`. The config is
 /// expanded (`%VAR%`/`~`) so paths read as their real locations, exactly like
 /// the rest of Doctor; expansion failure falls back to the raw config rather
 /// than erroring (the bundle is a best-effort snapshot, not a config save).
@@ -235,7 +235,10 @@ mod tests {
         // The masked fields read as the placeholder, proving they were present
         // and deliberately redacted (not simply dropped).
         assert_eq!(bundle.config["whisper"]["api_key"], REDACTION_PLACEHOLDER);
-        assert_eq!(bundle.config["webhook"]["hmac_secret"], REDACTION_PLACEHOLDER);
+        assert_eq!(
+            bundle.config["webhook"]["hmac_secret"],
+            REDACTION_PLACEHOLDER
+        );
     }
 
     /// Env info reports the build version it was handed and the compile-time

@@ -82,7 +82,11 @@ fn ls(cfg: &Config, json: bool) -> ExitCode {
     }
     let total: u64 = downloaded.iter().map(|m| m.bytes).sum();
     for m in &downloaded {
-        let tag = if active.contains(&m.name) { "  [active]" } else { "" };
+        let tag = if active.contains(&m.name) {
+            "  [active]"
+        } else {
+            ""
+        };
         println!("{:>9}  {}{tag}", format_bytes(m.bytes), m.name);
     }
     println!(
@@ -96,7 +100,10 @@ fn ls(cfg: &Config, json: bool) -> ExitCode {
 
 async fn get(name: &str, json: bool) -> ExitCode {
     let Some(model) = models::whisper_model(name) else {
-        eprintln!("error: '{name}' is not a known whisper model. Known models: {}", known_list());
+        eprintln!(
+            "error: '{name}' is not a known whisper model. Known models: {}",
+            known_list()
+        );
         return ExitCode::FAILURE;
     };
     let Some(dir) = models::models_dir() else {
@@ -116,7 +123,10 @@ async fn get(name: &str, json: bool) -> ExitCode {
         if let Ok(Ok(got)) = tokio::task::spawn_blocking(move || models::sha256_hex(&vp)).await {
             if got.eq_ignore_ascii_case(model.sha256) {
                 if json {
-                    println!("{}", serde_json::json!({"name": name, "downloaded": false, "reason": "already present"}));
+                    println!(
+                        "{}",
+                        serde_json::json!({"name": name, "downloaded": false, "reason": "already present"})
+                    );
                 } else {
                     println!("{name} is already downloaded.");
                 }
@@ -163,7 +173,9 @@ async fn get(name: &str, json: bool) -> ExitCode {
                 if !json && downloaded - last_report >= 25 * 1024 * 1024 {
                     last_report = downloaded;
                     match total {
-                        Some(t) => eprint!("\r  {} / {}", format_bytes(downloaded), format_bytes(t)),
+                        Some(t) => {
+                            eprint!("\r  {} / {}", format_bytes(downloaded), format_bytes(t))
+                        }
                         None => eprint!("\r  {}", format_bytes(downloaded)),
                     }
                 }
@@ -202,12 +214,17 @@ async fn get(name: &str, json: bool) -> ExitCode {
     };
     if !got.eq_ignore_ascii_case(model.sha256) {
         let _ = tokio::fs::remove_file(&path).await;
-        eprintln!("error: checksum mismatch — the download was corrupt or tampered and has been deleted.");
+        eprintln!(
+            "error: checksum mismatch — the download was corrupt or tampered and has been deleted."
+        );
         return ExitCode::FAILURE;
     }
 
     if json {
-        println!("{}", serde_json::json!({"name": name, "downloaded": true, "path": path.to_string_lossy()}));
+        println!(
+            "{}",
+            serde_json::json!({"name": name, "downloaded": true, "path": path.to_string_lossy()})
+        );
     } else {
         println!("Downloaded {name} ({}).", format_bytes(downloaded));
         println!("Select it with `phoneme model use {name}`.");
@@ -217,7 +234,10 @@ async fn get(name: &str, json: bool) -> ExitCode {
 
 async fn use_model(name: &str, cfg: &Config, json: bool) -> ExitCode {
     if !models::is_known_whisper_model(name) {
-        eprintln!("error: '{name}' is not a known whisper model. Known models: {}", known_list());
+        eprintln!(
+            "error: '{name}' is not a known whisper model. Known models: {}",
+            known_list()
+        );
         return ExitCode::FAILURE;
     }
     let Some(dir) = models::models_dir() else {
@@ -242,7 +262,10 @@ async fn use_model(name: &str, cfg: &Config, json: bool) -> ExitCode {
         reloaded = conn.send(phoneme_ipc::Request::ReloadConfig).await.is_ok();
     }
     if json {
-        println!("{}", serde_json::json!({"name": name, "selected": true, "path": path_str, "daemon_reloaded": reloaded}));
+        println!(
+            "{}",
+            serde_json::json!({"name": name, "selected": true, "path": path_str, "daemon_reloaded": reloaded})
+        );
     } else {
         println!("Using {name} for transcription.");
         if !reloaded {
@@ -254,7 +277,10 @@ async fn use_model(name: &str, cfg: &Config, json: bool) -> ExitCode {
 
 fn rm(name: &str, force: bool, cfg: &Config, json: bool) -> ExitCode {
     if !models::is_known_whisper_model(name) {
-        eprintln!("error: '{name}' is not a known whisper model. Known models: {}", known_list());
+        eprintln!(
+            "error: '{name}' is not a known whisper model. Known models: {}",
+            known_list()
+        );
         return ExitCode::FAILURE;
     }
     let Some(dir) = models::models_dir() else {
@@ -278,7 +304,9 @@ fn rm(name: &str, force: bool, cfg: &Config, json: bool) -> ExitCode {
         eprintln!(
             "error: '{name}' is a currently-configured model (transcription / live-preview / dictation)."
         );
-        eprintln!("Re-run with --force to remove it anyway — it re-downloads with `phoneme model get`.");
+        eprintln!(
+            "Re-run with --force to remove it anyway — it re-downloads with `phoneme model get`."
+        );
         return ExitCode::FAILURE;
     }
     match std::fs::remove_file(&path) {
@@ -304,7 +332,8 @@ mod tests {
     #[test]
     fn active_names_take_basenames_and_dedup() {
         let mut cfg = Config::default();
-        cfg.whisper.model_path = "C:/Users/x/AppData/Local/phoneme/data/models/ggml-small.en.bin".into();
+        cfg.whisper.model_path =
+            "C:/Users/x/AppData/Local/phoneme/data/models/ggml-small.en.bin".into();
         let active = active_model_names(&cfg);
         assert!(active.contains("ggml-small.en.bin"));
         assert!(!active.contains("ggml-large-v3.bin"));

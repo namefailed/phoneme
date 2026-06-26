@@ -2703,7 +2703,10 @@ mod tests {
     fn llm_probe_url_only_derives_from_a_recognized_chat_route() {
         // Standard shapes → the sibling free model-list route.
         assert_eq!(
-            llm_probe_url(LlmKind::OpenAiCompat, "https://api.openai.com/v1/chat/completions"),
+            llm_probe_url(
+                LlmKind::OpenAiCompat,
+                "https://api.openai.com/v1/chat/completions"
+            ),
             Some("https://api.openai.com/v1/models".to_string())
         );
         assert_eq!(
@@ -2719,7 +2722,10 @@ mod tests {
             None
         );
         assert_eq!(
-            llm_probe_url(LlmKind::OpenAiCompat, "https://api.openai.com/v1/chat/completions/"),
+            llm_probe_url(
+                LlmKind::OpenAiCompat,
+                "https://api.openai.com/v1/chat/completions/"
+            ),
             None
         );
         assert_eq!(
@@ -2748,7 +2754,11 @@ mod tests {
             .expect("llm endpoint check present");
         assert!(ep.ok, "skipped probe is not a failure: {}", ep.detail);
         assert_eq!(ep.category, CheckCategory::Info);
-        assert!(ep.detail.contains("non-standard shape"), "detail: {}", ep.detail);
+        assert!(
+            ep.detail.contains("non-standard shape"),
+            "detail: {}",
+            ep.detail
+        );
         // The key never leaks, and we never reached out to the proxy URL.
         assert!(!format!("{backend:?}").contains("sk-TEST-NEVER-PRINT"));
     }

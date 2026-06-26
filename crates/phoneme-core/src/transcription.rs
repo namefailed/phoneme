@@ -1838,7 +1838,9 @@ fn assemble_elevenlabs(parsed: ElevenLabsResponse, diarize: bool) -> Transcripti
     let real: Vec<&ElevenLabsWord> = parsed
         .words
         .iter()
-        .filter(|w| w.word_type.as_deref().map(|t| t == "word").unwrap_or(true) && !w.text.is_empty())
+        .filter(|w| {
+            w.word_type.as_deref().map(|t| t == "word").unwrap_or(true) && !w.text.is_empty()
+        })
         .collect();
 
     // Per-word layer, always (independent of diarization), with no speaker.
@@ -2045,7 +2047,11 @@ mod tests {
         assert_eq!(t.text, "hello world");
         assert_eq!(t.language.as_deref(), Some("en"));
         assert!(t.segments.is_empty());
-        assert_eq!(t.words.len(), 2, "spacing token excluded from the word layer");
+        assert_eq!(
+            t.words.len(),
+            2,
+            "spacing token excluded from the word layer"
+        );
         assert_eq!(t.words[0].text, "hello");
         assert_eq!(t.words[0].start_ms, 0);
         assert_eq!(t.words[1].end_ms, 1000);

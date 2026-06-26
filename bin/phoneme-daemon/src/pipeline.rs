@@ -954,7 +954,6 @@ pub(crate) async fn generate_summary_with(
 /// [`resolve_meeting_recipe`]).
 pub(crate) use phoneme_core::config::MEETING_DIGEST_PROMPT;
 
-
 /// Whether this pipeline run should type the transcript at the cursor.
 ///
 /// Only in-place dictations type, and only when the text hasn't already landed.
@@ -1437,7 +1436,6 @@ async fn run_tags_step(
     });
     suggest_tags_with(state, cfg, id, transcript, llm_cfg, prompt).await
 }
-
 
 /// Write a recording's terminal status at the end of the pipeline: `Done` on a
 /// clean run, or the earliest failed optional step's status — and in that case
@@ -2938,7 +2936,11 @@ pub async fn run(
     if transcript != raw_transcript {
         reflow_cleaned_timing(state, &id, &transcript).await;
     } else {
-        if let Err(e) = state.catalog.replace_words_variant(&id, "cleaned", &[]).await {
+        if let Err(e) = state
+            .catalog
+            .replace_words_variant(&id, "cleaned", &[])
+            .await
+        {
             tracing::warn!(id = %id.as_str(), error = %e, "failed to clear cleaned words");
         }
         if let Err(e) = state

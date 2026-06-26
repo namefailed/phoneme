@@ -4216,8 +4216,8 @@ pub fn expand_cmd(s: &str) -> String {
 /// bare `~`) with absolute paths. The home dir is always forward-slashed so the
 /// result is a clean path regardless of whether the input used `\` or `/`.
 fn expand_home_tokens(s: &str) -> String {
-    let home = directories::UserDirs::new()
-        .map(|u| u.home_dir().to_string_lossy().replace('\\', "/"));
+    let home =
+        directories::UserDirs::new().map(|u| u.home_dir().to_string_lossy().replace('\\', "/"));
     let Some(home) = home else {
         // No home dir resolvable — leave tokens as-is rather than corrupt them.
         return s.to_string();

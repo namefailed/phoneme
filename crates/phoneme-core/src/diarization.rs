@@ -886,7 +886,7 @@ pub struct DiarizerCache<H> {
 struct CacheSlot<H> {
     handle: Option<Arc<H>>,
     /// The load-affecting config the cached handle was built under (see
-    /// [`PipelineKey`]). Meaningless while `handle` is `None`.
+    /// `PipelineKey`). Meaningless while `handle` is `None`.
     key: PipelineKey,
 }
 
@@ -948,7 +948,7 @@ impl<H> DiarizerCache<H> {
     /// The load runs while the slot lock is held — that's the entire double-load
     /// guard: a second caller racing the first blocks on the lock, then takes the
     /// cache-hit branch instead of loading again. A cached handle built under a
-    /// different load-affecting config (see [`PipelineKey`]) is dropped and rebuilt
+    /// different load-affecting config (see `PipelineKey`) is dropped and rebuilt
     /// here, so model staleness is impossible at the point of use.
     pub fn get_or_load<F>(&self, cfg: &DiarizationConfig, load: F) -> Result<Arc<H>>
     where
@@ -988,7 +988,7 @@ impl<H> DiarizerCache<H> {
     }
 
     /// Drop the cached handle only if it was built under a different
-    /// load-affecting config than `cfg` (see [`PipelineKey`]); returns whether it
+    /// load-affecting config than `cfg` (see `PipelineKey`); returns whether it
     /// was dropped. Called from the daemon's config-apply points so a model-path or
     /// tuning change takes effect without waiting for the next run. Post-clustering
     /// knobs are applied per-run, so toggling them never drops the loaded models.
@@ -2431,10 +2431,10 @@ mod tests {
         let mut cols = Vec::new();
         let mut t = 0.0;
         let push_word = |words: &mut Vec<WordSpan>,
-                             cols: &mut Vec<Option<usize>>,
-                             t: &mut f64,
-                             col: usize,
-                             pieces: usize| {
+                         cols: &mut Vec<Option<usize>>,
+                         t: &mut f64,
+                         col: usize,
+                         pieces: usize| {
             // First piece starts the written word; the rest are continuations.
             words.push(word(*t, *t + 0.3, "w"));
             cols.push(Some(col));

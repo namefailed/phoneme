@@ -64,7 +64,7 @@ impl HookRunner {
     ///
     /// The payload is also exposed via the `PHONEME_ID`, `PHONEME_AUDIO_PATH`,
     /// and `PHONEME_TRANSCRIPT` environment variables for scripts that prefer
-    /// them. `PHONEME_TRANSCRIPT` is capped at [`MAX_TRANSCRIPT_ENV_BYTES`] with
+    /// them. `PHONEME_TRANSCRIPT` is capped at `MAX_TRANSCRIPT_ENV_BYTES` with
     /// a truncation marker — Windows rejects a single env var over ~32 KiB and
     /// would fail the spawn outright; the full, untruncated transcript is always
     /// on stdin (the JSON payload). Returns [`Error::HookFailed`] on a non-zero
@@ -365,7 +365,10 @@ mod tests {
 
         let long = "x".repeat(MAX_TRANSCRIPT_ENV_BYTES * 4);
         let out = truncate_transcript_env(&long);
-        assert!(out.ends_with(TRANSCRIPT_ENV_TRUNCATED_MARKER), "marker: {out}");
+        assert!(
+            out.ends_with(TRANSCRIPT_ENV_TRUNCATED_MARKER),
+            "marker: {out}"
+        );
         assert!(
             out.len() <= MAX_TRANSCRIPT_ENV_BYTES + TRANSCRIPT_ENV_TRUNCATED_MARKER.len(),
             "cap not enforced: {} bytes",
@@ -395,7 +398,10 @@ mod tests {
         payload.transcript = "x".repeat(512 * 1024); // 512 KiB, far past the env limit
 
         let result = runner.run(&payload).await;
-        assert!(result.is_ok(), "spawn must survive a huge transcript: {result:?}");
+        assert!(
+            result.is_ok(),
+            "spawn must survive a huge transcript: {result:?}"
+        );
     }
 
     /// Build a minimal payload for the subprocess tests.

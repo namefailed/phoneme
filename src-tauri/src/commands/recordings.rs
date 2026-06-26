@@ -574,7 +574,8 @@ pub async fn rerun_meeting_digest(
 /// `DateTime<Local>` fields through the wire schema (the same shape `ListFilter`
 /// uses), so this command needs no direct chrono dependency. A malformed
 /// timestamp yields a descriptive error rather than reaching the daemon.
-#[allow(clippy::too_many_arguments)] // Tauri command: args map 1:1 to the frontend invoke (period window + model + optional cloud connection)
+#[allow(clippy::too_many_arguments)]
+// Tauri command: args map 1:1 to the frontend invoke (period window + model + optional cloud connection)
 #[tauri::command]
 pub async fn rerun_period_digest(
     bridge: Br<'_>,

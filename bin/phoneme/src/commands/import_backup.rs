@@ -58,7 +58,10 @@ pub async fn run(args: ImportBackupArgs, cfg: &Config) -> ExitCode {
             // the handshake rejected (it's still holding catalog.db). Tell them
             // apart with a plain pipe probe: if the pipe still answers, a daemon
             // is alive — refuse to open the DB rather than risk corrupting it.
-            if NamedPipeTransport::connect(&cfg.daemon.pipe_name).await.is_ok() {
+            if NamedPipeTransport::connect(&cfg.daemon.pipe_name)
+                .await
+                .is_ok()
+            {
                 eprintln!(
                     "error: could not confirm the daemon is stopped (it's running but \
                      speaks an incompatible protocol). Stop it first (phoneme daemon \

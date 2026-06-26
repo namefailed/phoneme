@@ -82,7 +82,8 @@ pub async fn run(args: AskArgs, cfg: &Config, json: bool) -> ExitCode {
     // box) must not be killed mid-answer, so we only give up when nothing has
     // arrived for this long — `last_activity` resets on every delta/sources
     // event. Matches the daemon's own idle-based streaming timeout.
-    let idle_timeout = std::time::Duration::from_secs(cfg.llm_post_process.timeout_secs.max(60) + 120);
+    let idle_timeout =
+        std::time::Duration::from_secs(cfg.llm_post_process.timeout_secs.max(60) + 120);
     // A far looser absolute ceiling still guards against a provider that dribbles
     // a byte forever without ever finishing.
     let hard_cap = std::time::Duration::from_secs(3600);

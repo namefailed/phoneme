@@ -101,7 +101,7 @@ pub struct FailedPayload {
 /// - `processing/`: the single payload currently being transcribed or
 ///   post-processed.
 /// - `done/`: completed payloads, kept only as a small bounded tail (the newest
-///   [`DONE_KEEP`]). They exist solely as crash-recovery markers — see
+///   `DONE_KEEP`). They exist solely as crash-recovery markers — see
 ///   [`Self::recover_orphans`] — not as an archive; the catalog is the durable
 ///   record of every transcript. [`Self::finish_done`] prunes the tail on write.
 /// - `failed/`: payloads that hit an error, alongside their error record.
