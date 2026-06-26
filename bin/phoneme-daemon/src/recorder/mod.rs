@@ -1130,21 +1130,43 @@ pub(crate) mod tests {
     use crate::app_state::AppState;
     use phoneme_core::Config;
 
+    /// Serializes every `EnvVarGuard` so two env-mutating tests never overlap.
+    /// `std::env` is process-global and `make_source()` reads `PHONEME_AUDIO_BACKEND`
+    /// at `start()` time, so without this a sibling guard's `Drop` could clear the
+    /// var mid-test — dropping the test onto the real audio backend, which `Err`s on
+    /// a headless CI runner (the flaky `start synthetic recording` failure).
+    fn env_guard_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
     /// RAII guard that sets an env var for a test and restores its prior value (or
     /// removes it) on drop — even if the test panics. Honors the repo's
     /// no-bare-`set_var` convention: a forgotten/early-aborted `remove_var` can't
-    /// leak a global into a sibling test. Hold it in a `let _guard = …;` binding for
-    /// the duration of the test.
+    /// leak a global into a sibling test. Holds [`env_guard_lock`] for its lifetime
+    /// so concurrent tests can't race on the shared process environment. Hold it in
+    /// a `let _guard = …;` binding for the duration of the test.
+    ///
+    /// One guard per test — taking a second while the first is held would deadlock
+    /// on the non-reentrant lock.
     struct EnvVarGuard {
         key: &'static str,
         prev: Option<String>,
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl EnvVarGuard {
         fn set(key: &'static str, value: &str) -> Self {
+            // Recover from a poisoned lock (a prior test panicked while holding it)
+            // so one failure doesn't cascade into every other env-using test.
+            let lock = env_guard_lock().lock().unwrap_or_else(|p| p.into_inner());
             let prev = std::env::var(key).ok();
             std::env::set_var(key, value);
-            Self { key, prev }
+            Self {
+                key,
+                prev,
+                _lock: lock,
+            }
         }
     }
 
