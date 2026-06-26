@@ -805,7 +805,9 @@ mod tests {
                     .method("POST")
                     .uri("/api/import")
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"path":"C:/audio/talk.m4a","recipe_id":"lecture"}"#))
+                    .body(Body::from(
+                        r#"{"path":"C:/audio/talk.m4a","recipe_id":"lecture"}"#,
+                    ))
                     .unwrap(),
             )
             .await

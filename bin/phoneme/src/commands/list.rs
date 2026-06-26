@@ -194,11 +194,7 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> Result<ListFilter, ExitC
         if let Ok(d) = chrono::DateTime::parse_from_rfc3339(&s) {
             return Some(d.with_timezone(&chrono::Local));
         }
-        let time = if end_of_day {
-            (23, 59, 59)
-        } else {
-            (0, 0, 0)
-        };
+        let time = if end_of_day { (23, 59, 59) } else { (0, 0, 0) };
         chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
             .ok()
             .and_then(|d| d.and_hms_opt(time.0, time.1, time.2))
@@ -211,18 +207,19 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> Result<ListFilter, ExitC
     // dropping it would widen the query to the whole library — the same footgun
     // --status / --kind are clap-validated against (see args.rs). The flags carry
     // no clap value_parser (the format is too lax for a fixed set), so guard here.
-    let parse_flag = |name: &str, v: Option<String>, end_of_day: bool| -> Result<Option<_>, ExitCode> {
-        match v {
-            None => Ok(None),
-            Some(s) => match parse_date(s.clone(), end_of_day) {
-                Some(d) => Ok(Some(d)),
-                None => {
-                    eprintln!("error: could not parse {name} '{s}' (expected e.g. 2026-05-19)");
-                    Err(ExitCode::from(exit::USAGE_ERROR))
-                }
-            },
-        }
-    };
+    let parse_flag =
+        |name: &str, v: Option<String>, end_of_day: bool| -> Result<Option<_>, ExitCode> {
+            match v {
+                None => Ok(None),
+                Some(s) => match parse_date(s.clone(), end_of_day) {
+                    Some(d) => Ok(Some(d)),
+                    None => {
+                        eprintln!("error: could not parse {name} '{s}' (expected e.g. 2026-05-19)");
+                        Err(ExitCode::from(exit::USAGE_ERROR))
+                    }
+                },
+            }
+        };
     let since = parse_flag("--since", args.since, false)?;
     let until = parse_flag("--until", args.until, true)?;
     // `kind` is applied in SQL (before LIMIT/OFFSET) so pagination stays correct.

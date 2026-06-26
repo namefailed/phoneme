@@ -157,11 +157,12 @@ impl DaemonRecorder {
             STOP_TAIL_GRACE,
         )
         .map_err(|e| Error::Internal(format!("meeting: open microphone: {e}")))?;
-        let system_source =
-            CpalSource::open_kind_with_grace(device, CaptureSource::SystemAudio, STOP_TAIL_GRACE)
-                .map_err(|e| {
-                    Error::Internal(format!("meeting: open system audio (loopback): {e}"))
-                })?;
+        let system_source = CpalSource::open_kind_with_grace(
+            device,
+            CaptureSource::SystemAudio,
+            STOP_TAIL_GRACE,
+        )
+        .map_err(|e| Error::Internal(format!("meeting: open system audio (loopback): {e}")))?;
 
         let sources: Vec<(MeetingTrack, Box<dyn Source>)> = vec![
             (MeetingTrack::Mic, Box::new(mic_source)),

@@ -50,7 +50,13 @@ pub async fn run(args: IdArgs, cfg: &Config, json: bool) -> ExitCode {
             .and_then(|x| x.as_str())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| if idx == 0 { "Raw (ASR)".into() } else { format!("Step {idx}") });
+            .unwrap_or_else(|| {
+                if idx == 0 {
+                    "Raw (ASR)".into()
+                } else {
+                    format!("Step {idx}")
+                }
+            });
         let model = v.get("model").and_then(|x| x.as_str()).unwrap_or("");
         if model.is_empty() {
             println!("{idx:>2}  {label}");
@@ -88,6 +94,9 @@ mod tests {
         .await
         .expect("versions must return promptly");
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
-        assert_eq!(mock.received(), vec![Request::ListTranscriptVersions { id }]);
+        assert_eq!(
+            mock.received(),
+            vec![Request::ListTranscriptVersions { id }]
+        );
     }
 }

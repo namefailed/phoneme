@@ -163,11 +163,9 @@ pub async fn run(args: ImportArgs, cfg: &Config) -> ExitCode {
         None => None,
         Some(v) => match crate::commands::recipe::resolve(cfg, v) {
             Ok(id) => {
-                if cfg
-                    .recipes
-                    .iter()
-                    .any(|r| r.id == id && matches!(r.scope, phoneme_core::config::RecipeScope::Meeting))
-                {
+                if cfg.recipes.iter().any(|r| {
+                    r.id == id && matches!(r.scope, phoneme_core::config::RecipeScope::Meeting)
+                }) {
                     eprintln!(
                         "error: recipe '{id}' is a meeting template (scope = Meeting); import a single recording with a recording-scope recipe"
                     );

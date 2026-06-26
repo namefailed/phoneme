@@ -48,7 +48,8 @@ pub const WHISPER_MODELS: &[WhisperModel] = &[
     },
     WhisperModel {
         file: "ggml-large-v3-turbo-q5_0.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        url:
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
         sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
     },
     WhisperModel {
@@ -191,8 +192,16 @@ mod tests {
             );
             // Every entry must be a 64-hex SHA-256 and a pinned whisper.cpp URL.
             assert_eq!(m.sha256.len(), 64, "{} sha must be 64 hex chars", m.file);
-            assert!(m.url.starts_with("https://"), "{} url must be https", m.file);
-            assert!(m.url.ends_with(m.file), "{} url must end with its file", m.file);
+            assert!(
+                m.url.starts_with("https://"),
+                "{} url must be https",
+                m.file
+            );
+            assert!(
+                m.url.ends_with(m.file),
+                "{} url must end with its file",
+                m.file
+            );
         }
     }
 

@@ -2964,9 +2964,11 @@ async fn rerun_summary(
     // the helper here only adds the final fallback when even that yields no provider.
     let probe = match &resolution {
         Resolution::Entry { llm_cfg, .. } => llm_cfg.clone(),
-        Resolution::Legacy { cfg } => {
-            crate::pipeline::ondemand_connection(&state.llm, cfg, crate::pipeline::summary_llm_config(cfg))
-        }
+        Resolution::Legacy { cfg } => crate::pipeline::ondemand_connection(
+            &state.llm,
+            cfg,
+            crate::pipeline::summary_llm_config(cfg),
+        ),
     };
     if state.llm.provider(&probe).is_none() {
         return Response::Err(IpcError {
@@ -3322,7 +3324,9 @@ async fn import_recording(
     // importing a duplicate — checked BEFORE the decode so a re-import is cheap.
     // Lets a client (the youtube-note project) fire-and-forget and reconcile via
     // `phoneme list --json`'s `ext_ref` without its own dedup bookkeeping.
-    let ext_ref = ext_ref.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let ext_ref = ext_ref
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     if let Some(ref key) = ext_ref {
         match state.catalog.find_id_by_ext_ref(key).await {
             Ok(Some(existing)) => {
@@ -4190,7 +4194,10 @@ mod tests {
         let cfg = phoneme_core::Config::default();
         // None / empty / whitespace → no override (the global default).
         assert_eq!(validate_import_recipe(&cfg, None).unwrap(), None);
-        assert_eq!(validate_import_recipe(&cfg, Some("   ".into())).unwrap(), None);
+        assert_eq!(
+            validate_import_recipe(&cfg, Some("   ".into())).unwrap(),
+            None
+        );
         // A recording-scope recipe passes through (trimmed).
         assert_eq!(
             validate_import_recipe(&cfg, Some(" default ".into())).unwrap(),

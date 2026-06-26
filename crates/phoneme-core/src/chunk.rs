@@ -133,8 +133,7 @@ pub fn chunk_transcript(text: &str) -> Vec<String> {
     // sentence-boundary slop, so we land comfortably under the cap rather than
     // grazing it. Only hours-long recordings ever clear this floor.
     let total_words = word_count(text);
-    let target = CHUNK_TARGET_WORDS
-        .max(total_words.div_ceil(MAX_CHUNKS_PER_RECORDING / 2));
+    let target = CHUNK_TARGET_WORDS.max(total_words.div_ceil(MAX_CHUNKS_PER_RECORDING / 2));
 
     let mut chunks = Vec::new();
     let mut i = 0;
@@ -335,8 +334,7 @@ mod tests {
         // allowed chunk must absorb the rest so the very last sentence is still
         // searchable — coarsening, not a dropped tail. (Regression: the cap used
         // to break mid-transcript here.)
-        let body_sentence =
-            "This is a fairly long dictated sentence with about thirty distinct \
+        let body_sentence = "This is a fairly long dictated sentence with about thirty distinct \
              words in it so that only a couple of these will fit inside one \
              single chunk at the normal target size okay.";
         assert!(
@@ -381,7 +379,9 @@ mod tests {
         );
         // And no sentence may be lost: the last short sentence is still present.
         assert!(
-            chunks.iter().any(|c| c.contains("Fifth short sentence here.")),
+            chunks
+                .iter()
+                .any(|c| c.contains("Fifth short sentence here.")),
             "no sentence may be dropped around the long-sentence seam"
         );
     }

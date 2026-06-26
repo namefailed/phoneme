@@ -120,8 +120,8 @@ fn redact_secrets_for_display(doc: &mut toml_edit::DocumentMut) {
                 }
             }
             SecretLocation::ArrayField { path, field } => {
-                if let Some(arr) = nav_item_mut(doc.as_table_mut(), path)
-                    .and_then(|i| i.as_array_of_tables_mut())
+                if let Some(arr) =
+                    nav_item_mut(doc.as_table_mut(), path).and_then(|i| i.as_array_of_tables_mut())
                 {
                     for entry in arr.iter_mut() {
                         if let Some(item) = nav_item_mut(entry, field) {
@@ -287,8 +287,14 @@ api_key = "{sentinel}"
         let mut doc = toml_src.parse::<toml_edit::DocumentMut>().unwrap();
         redact_secrets_for_display(&mut doc);
         let out = doc.to_string();
-        assert!(!out.contains(sentinel), "a secret survived redaction:\n{out}");
-        assert!(out.contains(REDACTED_SECRET), "expected redaction marker in output");
+        assert!(
+            !out.contains(sentinel),
+            "a secret survived redaction:\n{out}"
+        );
+        assert!(
+            out.contains(REDACTED_SECRET),
+            "expected redaction marker in output"
+        );
     }
 
     /// Serializes every `PHONEME_CONFIG` mutation. `set_var` is process-global,
