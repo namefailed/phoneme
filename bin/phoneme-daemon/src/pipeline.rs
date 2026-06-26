@@ -1598,7 +1598,7 @@ enum ResolvedStep {
     /// Enrichment writing time-ranged topic chapters over the recording. Carries
     /// the entry-resolved LLM config + prompt from the `chapters` Playbook entry.
     /// Like [`ResolvedStep::Entities`] but the result is anchored to the
-    /// recording's segment timing (see [`extract_chapters_with`]).
+    /// recording's segment timing (see `extract_chapters_with`).
     Chapters {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
@@ -1629,13 +1629,13 @@ enum ResolvedStep {
 /// as the legacy pipeline did.
 /// A Playbook entry's LLM connection is inherit-anchored in the UI ("Same as
 /// Post-Processing default" writes a blank provider), so an entry never
-/// legitimately pins "none". Older configs migrated the [llm_post_process]
+/// legitimately pins "none". Older configs migrated the `[llm_post_process]`
 /// default (provider "none") into the seeded entries, which made every LLM step
 /// resolve to no provider and silently skip — leaving raw transcripts with no
 /// cleanup/title/summary/tags even though a global provider was configured.
 /// Treat an entry provider of "none" as inherit so the step uses the global
 /// connection. ("none" as a deliberate "off" still works on the global
-/// [llm_post_process] base + the Re-run modal's own override, neither of which
+/// `[llm_post_process]` base + the Re-run modal's own override, neither of which
 /// goes through here.)
 fn entry_provider(provider: &str) -> &str {
     if provider.trim().eq_ignore_ascii_case("none") {
