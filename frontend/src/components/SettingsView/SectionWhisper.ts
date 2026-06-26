@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr, escapeHtml } from "../../utils/format";
+import { showToast } from "../../utils/toast";
+import { errText } from "../../utils/error";
 import { sttMeta, curatedSttModels } from "../../services/sttProviders";
 import { mountConnectionField } from "./connectionField";
 import { mountModelField } from "./modelField";
@@ -166,6 +168,16 @@ function fmtBytes(bytes: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(0)} MB`;
 }
 
+/** A small, rounded trash-can glyph for the per-model delete button. */
+const TRASH_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>`;
+
+/** Hover + armed-to-confirm styling for the trashcan (inline styles can't do
+ *  `:hover`; injected once with the model cards). */
+const TRASH_STYLE = `<style>
+  .model-trash:hover { color: var(--err); border-color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); transform: scale(1.08); }
+  .model-trash.confirm { color: var(--err); border-color: var(--err); background: color-mix(in srgb, var(--err) 22%, transparent); transform: scale(1.08); }
+</style>`;
+
 /**
  * Settings → Transcription: the main speech-to-text engine (`config.whisper`).
  * Provider choice via the shared connection block (local whisper.cpp / the
@@ -259,19 +271,18 @@ export class SectionWhisper {
         }
       }
 
+      // Show the real on-disk size on the card once known (more honest than the
+      // catalog estimate, since reclaiming disk is the whole point here).
       const sizeBytes = this.modelSizes.get(m.filename);
-      const sizeStr = sizeBytes ? ` · ${fmtBytes(sizeBytes)}` : "";
+      const sizeEl = card.querySelector<HTMLElement>(".model-size");
+      if (sizeEl && sizeBytes) sizeEl.textContent = fmtBytes(sizeBytes);
 
       const btnArea = card.querySelector(".model-actions");
       if (btnArea) {
         if (isSelected) {
-          // The active model is protected here: removing the model the engine is
-          // running would break transcription. Manage it via the CLI (--force) or
-          // switch models first. We still show its size so the user sees the cost.
-          btnArea.innerHTML = `<button disabled style="background: var(--accent); color: var(--bg-surface); border-color: var(--accent); border-radius: 6px;">✅ Selected${sizeStr}</button>`;
+          btnArea.innerHTML = `<button disabled style="background: var(--accent); color: var(--bg-surface); border-color: var(--accent); border-radius: 6px;">✅ Selected</button>`;
         } else if (isDownloaded) {
-          btnArea.innerHTML = `<button class="select-btn" data-id="${escapeAttr(m.id)}" data-path="${escapeAttr(downloadedPath ?? "")}" style="border-radius: 6px;">Select</button>` +
-            `<button class="remove-btn" data-filename="${escapeAttr(m.filename)}" title="Delete this downloaded model to reclaim disk — it re-downloads on demand when you next select it" style="border-radius: 6px; margin-left: 6px; color: var(--err); border-color: var(--err);">Remove${sizeStr}</button>`;
+          btnArea.innerHTML = `<button class="select-btn" data-id="${escapeAttr(m.id)}" data-path="${escapeAttr(downloadedPath ?? "")}" style="border-radius: 6px;">Select</button>`;
         } else {
           btnArea.innerHTML = `
             <button class="download-btn" data-id="${m.id}" data-url="${m.url}" data-filename="${m.filename}" style="border-radius: 6px;">
@@ -281,6 +292,12 @@ export class SectionWhisper {
           `;
         }
       }
+
+      // The little trashcan lives OUTSIDE the card, to its right. Show it only for
+      // a downloaded model that isn't the active one — you can't delete the model
+      // the engine is currently running on (it re-downloads on demand otherwise).
+      const trash = this.container.querySelector<HTMLElement>(`.model-trash[data-id="${m.id}"]`);
+      if (trash) trash.style.display = isDownloaded && !isSelected ? "flex" : "none";
     });
 
     // Re-bind dynamically generated buttons
@@ -344,35 +361,41 @@ export class SectionWhisper {
       });
     });
 
-    this.container.querySelectorAll(".remove-btn").forEach((btn) => {
+    // The cute trashcan beside each downloaded model. Two-click confirm: the
+    // first click "arms" it (turns red), a second within 3s deletes — re-fetching
+    // a multi-GB model after a stray click is a real annoyance, so make it
+    // deliberate without an ugly inline button.
+    this.container.querySelectorAll(".model-trash").forEach((btn) => {
       const b = btn as HTMLButtonElement;
-      let confirming = false;
+      let armed = false;
       let resetTimer: number | undefined;
-      const orig = b.textContent ?? "Remove";
       b.addEventListener("click", async () => {
-        // Two-click confirm — re-fetching a multi-GB model after a stray click
-        // is a real annoyance, so make the destructive step deliberate.
-        if (!confirming) {
-          confirming = true;
-          b.textContent = "Click again to remove";
+        if (!armed) {
+          armed = true;
+          b.classList.add("confirm");
+          b.title = "Click again to delete";
+          showToast("Click the trash again to delete this model.", "info");
           resetTimer = window.setTimeout(() => {
-            confirming = false;
-            b.textContent = orig;
+            armed = false;
+            b.classList.remove("confirm");
+            b.title = "Delete this download";
           }, 3000);
           return;
         }
         if (resetTimer) window.clearTimeout(resetTimer);
         const filename = b.dataset.filename!;
         b.disabled = true;
-        b.textContent = "Removing…";
         try {
           await invoke("wizard_delete_model", { filename });
+          showToast("Model deleted — reclaimed the space.", "success");
         } catch (err) {
           console.error(err);
-          b.textContent = "Error";
+          showToast(`Could not delete: ${errText(err)}`, "error");
+          b.disabled = false;
+          b.classList.remove("confirm");
           return;
         }
-        // Re-fetch sizes + re-render — the card flips back to a Download button.
+        // Re-fetch + re-render: the card flips back to Download, the trash hides.
         await this.fetchHardwareAndModels();
       });
     });
@@ -393,19 +416,22 @@ export class SectionWhisper {
   }
 
   private render(container: HTMLElement) {
-    const modelCardsHtml = MODELS.map(m => `
-      <div id="model-card-${m.id}" style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; margin-bottom: 4px; background: var(--bg-deep);">
-        <div style="display: flex; flex-direction: column; gap: 2px;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <strong style="color: var(--fg-default); font-size: 0.9286rem;">${m.name}</strong>
-            <span style="color: var(--fg-faded); font-size: 0.7857rem;">${m.size}</span>
-            <div class="model-badge"></div>
+    const modelCardsHtml = TRASH_STYLE + MODELS.map(m => `
+      <div class="model-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+        <div id="model-card-${m.id}" style="flex: 1; min-width: 0; display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-deep);">
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <strong style="color: var(--fg-default); font-size: 0.9286rem;">${m.name}</strong>
+              <span class="model-size" style="color: var(--fg-faded); font-size: 0.7857rem;">${m.size}</span>
+              <div class="model-badge"></div>
+            </div>
+            <span style="font-size: 0.7857rem; color: var(--fg-muted);">${m.desc}</span>
           </div>
-          <span style="font-size: 0.7857rem; color: var(--fg-muted);">${m.desc}</span>
+          <div class="model-actions" style="display: flex; flex-direction: column; align-items: flex-end;">
+             <span style="font-size: 0.7857rem; color: var(--fg-faded);">Loading...</span>
+          </div>
         </div>
-        <div class="model-actions" style="display: flex; flex-direction: column; align-items: flex-end;">
-           <span style="font-size: 0.7857rem; color: var(--fg-faded);">Loading...</span>
-        </div>
+        <button class="model-trash" data-id="${escapeAttr(m.id)}" data-filename="${escapeAttr(m.filename)}" title="Delete this download" aria-label="Delete the ${escapeAttr(m.name)} model" style="flex: 0 0 auto; width: 30px; height: 30px; display: none; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-deep); color: var(--fg-faded); cursor: pointer; transition: color .12s ease, border-color .12s ease, background .12s ease, transform .12s ease;">${TRASH_SVG}</button>
       </div>
     `).join("");
 
