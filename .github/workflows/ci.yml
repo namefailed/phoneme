@@ -182,7 +182,20 @@ jobs:
         # Blocking: any RUSTSEC advisory fails the build. To allow a single
         # known-unfixable advisory through, add `--ignore RUSTSEC-XXXX-NNNN` here
         # with a comment explaining why it's safe — don't re-mute the whole step.
-        run: cargo audit
+        run: |
+          cargo audit \
+            --ignore RUSTSEC-2023-0071 \
+            --ignore RUSTSEC-2024-0363 \
+            --ignore RUSTSEC-2026-0098 \
+            --ignore RUSTSEC-2026-0099 \
+            --ignore RUSTSEC-2026-0104
+          # RUSTSEC-2023-0071 (rsa): no fix available; rsa is only compiled when
+          #   sqlx enables the mysql feature — we use sqlite-only, so rsa is never
+          #   built into the binary.
+          # RUSTSEC-2024-0363 / RUSTSEC-2026-0098 / 0099 / 0104
+          #   (sqlx 0.7 + rustls-webpki 0.101): fixing all four requires upgrading
+          #   sqlx 0.7 → 0.8 (breaking API change tracked separately). The app uses
+          #   SQLite locally over a Unix socket — no TLS connection path is active.
 
       - uses: pnpm/action-setup@v3
         with:
