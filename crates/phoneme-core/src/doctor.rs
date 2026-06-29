@@ -82,15 +82,36 @@ fn ytdlp_available() -> bool {
     }
     for py in ["python", "python3"] {
         if which::which(py).is_ok() {
-            let ok = std::process::Command::new(py)
+            let Ok(mut child) = std::process::Command::new(py)
                 .args(["-m", "yt_dlp", "--version"])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if ok {
-                return true;
+                .spawn()
+            else {
+                continue;
+            };
+            // Bounded poll: a python install that hangs on startup (slow network
+            // drive, AV scan, corrupt venv) must not block the caller — this runs
+            // on the synchronous Tauri IPC thread. Kill it after 3s and move on.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if status.success() {
+                            return true;
+                        }
+                        break;
+                    }
+                    Ok(None) => {
+                        if std::time::Instant::now() >= deadline {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Err(_) => break,
+                }
             }
         }
     }
@@ -438,9 +459,27 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
         }),
     });
 
-    // Audio directory writable.
+    // Audio directory writable. Existence isn't enough — a dir that exists but is
+    // read-only (permissions change, read-only mount) must report Critical, since
+    // recordings would silently fail to save. Probe with a throwaway file.
     let audio_dir = Path::new(&xcfg.recording.audio_dir);
-    let writable = audio_dir.exists() || std::fs::create_dir_all(audio_dir).is_ok();
+    let writable = if audio_dir.exists() {
+        let probe = audio_dir.join(".phoneme_write_probe");
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&probe)
+        {
+            Ok(_) => {
+                let _ = std::fs::remove_file(&probe);
+                true
+            }
+            Err(_) => false,
+        }
+    } else {
+        std::fs::create_dir_all(audio_dir).is_ok()
+    };
     out.push(CheckResult {
         name: "Audio directory".into(),
         ok: writable,
@@ -1710,7 +1749,12 @@ mod tests {
     #[test]
     fn hook_check_passes_when_no_hook_configured() {
         let mut cfg = Config::default();
-        cfg.hook.commands.clear(); // default has a command; clear it for this test
+        // The check now inspects both legacy `hook.commands` and Playbook `Hook`
+        // entries, and the default config seeds a clipboard Playbook hook — clear
+        // both so this genuinely exercises the "nothing configured" branch.
+        cfg.hook.commands.clear();
+        cfg.playbook
+            .retain(|e| e.kind != crate::config::PlaybookKind::Hook);
         let results = run_local_checks(&cfg);
         let hook = results.iter().find(|r| r.name == "Hook command").unwrap();
         assert!(hook.ok);
