@@ -370,6 +370,9 @@ pub struct BridgeSlot {
     inner: Arc<RwLock<Option<Bridge>>>,
     /// Reconnect rate-limiter, shared across clones of the slot.
     backoff: Arc<StdMutex<Backoff>>,
+    /// Held only during the async spawn + connect, NOT the write lock — keeps
+    /// the write lock brief while still serializing concurrent connect attempts.
+    connect_lock: Arc<Mutex<()>>,
     /// False only in tests: a slot that never dials out, so unit tests can
     /// assert the disconnected error path without touching real pipes or
     /// spawning a real daemon.
@@ -381,6 +384,7 @@ impl BridgeSlot {
         Self {
             inner: Arc::new(RwLock::new(initial)),
             backoff: Arc::new(StdMutex::new(Backoff::default())),
+            connect_lock: Arc::new(Mutex::new(())),
             connect_enabled: true,
         }
     }
@@ -391,6 +395,7 @@ impl BridgeSlot {
         Self {
             inner: Arc::new(RwLock::new(None)),
             backoff: Arc::new(StdMutex::new(Backoff::default())),
+            connect_lock: Arc::new(Mutex::new(())),
             connect_enabled: false,
         }
     }
@@ -403,9 +408,11 @@ impl BridgeSlot {
     }
 
     /// The bridge, connecting first when the slot is empty (auto-spawning the
-    /// daemon exactly like startup does). Concurrent callers serialize on the
-    /// write lock; losers reuse the winner's connection instead of dialing
-    /// their own.
+    /// daemon exactly like startup does). Concurrent callers serialize on
+    /// `connect_lock` so only one attempt runs at a time; losers see the
+    /// winner's result via the second `read()` check. The `inner` write lock
+    /// is only held for the brief moment of writing the result, not across
+    /// the slow async spawn + connect.
     pub async fn get_or_connect(&self) -> Option<Bridge> {
         if let Some(b) = self.inner.read().await.clone() {
             return Some(b);
@@ -413,9 +420,11 @@ impl BridgeSlot {
         if !self.connect_enabled {
             return None;
         }
-        let mut slot = self.inner.write().await;
-        if let Some(b) = slot.clone() {
-            return Some(b); // another caller connected while we waited
+        // Serialize connect attempts without holding the write lock during I/O.
+        let _connect_guard = self.connect_lock.lock().await;
+        // Another caller may have connected while we waited for the lock.
+        if let Some(b) = self.inner.read().await.clone() {
+            return Some(b);
         }
         // Inside a backoff window: report down without re-attempting, so a burst
         // of UI actions during an outage cannot spawn-storm the daemon.
@@ -438,7 +447,7 @@ impl BridgeSlot {
                     .lock()
                     .expect("backoff mutex poisoned")
                     .record_success();
-                *slot = Some(b.clone());
+                *self.inner.write().await = Some(b.clone());
                 Some(b)
             }
             Err(e) => {

@@ -212,4 +212,18 @@ mod tests {
         assert_eq!(format_bytes(465 * 1024 * 1024), "465.0 MB");
         assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.0 GB");
     }
+
+    #[test]
+    fn sha256_hex_known_vector() {
+        // SHA-256("abc") = ba7816bf..., same constant used by src-tauri/src/checksums.rs.
+        let dir = std::env::temp_dir();
+        let p = dir.join("phoneme-test-sha256-abc.bin");
+        std::fs::write(&p, b"abc").unwrap();
+        let hex = sha256_hex(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(
+            hex,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 }

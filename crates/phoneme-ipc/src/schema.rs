@@ -792,9 +792,12 @@ pub enum Request {
     /// zero matches is skipped entirely — no write, no version churn, no event —
     /// so only the recordings that actually changed are touched. A literal empty
     /// `find` is a whole-operation no-op (nothing written). Ok =
-    /// `{"recordings_changed":R,"total_replacements":N}` (R recordings rewritten,
-    /// N occurrences total); emits one [`DaemonEvent::TranscriptUpdated`] per
-    /// changed recording. GUI library-wide find/replace, `phoneme find-replace
+    /// `{"recordings_changed":R,"total_replacements":N,"failed":F}` (R recordings
+    /// rewritten, N occurrences total, F recordings whose post-replacement
+    /// re-flow/re-embed failed — the replacement itself succeeded, so the
+    /// transcript is correct but timing and vector layers may be stale for those
+    /// recordings); emits one [`DaemonEvent::TranscriptUpdated`] per changed
+    /// recording. GUI library-wide find/replace, `phoneme find-replace
     /// --library <FIND> <REPLACE>`.
     FindReplaceLibrary {
         /// The literal text to find across the whole library (empty = no-op).

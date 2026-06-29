@@ -27,7 +27,7 @@ use crate::config::{
 };
 use crate::Config;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// How severe a check result is right now. Passing checks report `Info`
 /// (nothing to act on); failing checks report `Warning` or `Critical`
@@ -276,24 +276,6 @@ pub fn categorize_free_space(free_bytes: u64) -> (bool, CheckCategory) {
     }
 }
 
-/// Human-readable byte count using binary math with the conventional GB/MB
-/// labels (matches what Windows Explorer shows for the same volume).
-pub fn format_bytes(bytes: u64) -> String {
-    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    const MIB: f64 = 1024.0 * 1024.0;
-    const KIB: f64 = 1024.0;
-    let b = bytes as f64;
-    if b >= GIB {
-        format!("{:.1} GB", b / GIB)
-    } else if b >= MIB {
-        format!("{:.0} MB", b / MIB)
-    } else if b >= KIB {
-        format!("{:.0} KB", b / KIB)
-    } else {
-        format!("{bytes} bytes")
-    }
-}
-
 /// Free bytes available on the volume holding `path` (walking up to the
 /// nearest existing ancestor first, since the dir itself may not exist yet).
 /// `None` when it can't be measured — off Windows, or when even the root
@@ -335,18 +317,6 @@ fn free_bytes_for_path(_path: &Path) -> Option<u64> {
     None
 }
 
-/// The local app-data root (catalog, inbox, logs, downloaded models). Honors
-/// the `PHONEME_DATA_LOCAL` override the daemon and integration tests use, so
-/// the doctor measures the volume that actually gets written to.
-fn data_local_dir() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("PHONEME_DATA_LOCAL") {
-        if !p.is_empty() {
-            return Some(PathBuf::from(p));
-        }
-    }
-    directories::ProjectDirs::from("", "", "phoneme").map(|d| d.data_local_dir().to_path_buf())
-}
-
 /// Build the disk-space check for one directory. `label` names the volume's
 /// role ("recordings", "app data"); `hint` is shown when space runs low.
 fn disk_space_check(
@@ -362,7 +332,7 @@ fn disk_space_check(
             CheckResult {
                 name: name.into(),
                 ok,
-                detail: format!("{} free — {}", format_bytes(free), dir.display()),
+                detail: format!("{} free — {}", crate::models::format_bytes(free), dir.display()),
                 fix_action: if ok { None } else { fix_action },
                 category,
                 explanation: explanation.into(),
@@ -399,7 +369,7 @@ fn model_integrity_check(
         ModelFileState::Intact(size) => (
             true,
             CheckCategory::Info,
-            format!("{} ({})", path.display(), format_bytes(size)),
+            format!("{} ({})", path.display(), crate::models::format_bytes(size)),
             None,
         ),
         ModelFileState::Missing => (
@@ -422,7 +392,7 @@ fn model_integrity_check(
             CheckCategory::Critical,
             format!(
                 "implausibly small ({}) — looks like a truncated download — {}",
-                format_bytes(size),
+                crate::models::format_bytes(size),
                 path.display()
             ),
             Some("Delete the file and download the model again.".into()),
@@ -492,7 +462,7 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
     ));
 
     // Free disk space on the volume holding the catalog/inbox/models.
-    if let Some(data_dir) = data_local_dir() {
+    if let Some(data_dir) = crate::models::data_local_dir() {
         out.push(disk_space_check(
             "Disk space (app data)",
             &data_dir,
@@ -529,28 +499,66 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
         });
     }
 
-    // Hook executable resolvable. An empty hook list is fine (treated as ok).
-    // Read the expanded copy so a `~/`/`%APPDATA%` hook command resolves to its
-    // real path — the same expansion the pipeline applies before running it
-    // (see `Config::expanded`) — instead of a false Warning on the literal token.
-    let hook_cmd = xcfg.hook.commands.first().map(String::as_str).unwrap_or("");
-    let hook_first_word = hook_cmd.split_whitespace().next().unwrap_or("");
-    let (hook_ok, hook_detail) = if hook_first_word.is_empty() {
-        (true, "no hook configured".into())
-    } else {
-        let found = which::which(hook_first_word).is_ok() || Path::new(hook_first_word).exists();
-        (found, hook_cmd.to_owned())
-    };
-    out.push(CheckResult {
-        name: "Hook command".into(),
-        ok: hook_ok,
-        detail: hook_detail,
-        fix_action: Some("open_hooks_folder".into()),
-        category: category_for(hook_ok, CheckCategory::Warning),
-        explanation: "Verifies the post-transcription hook resolves to a runnable command, so transcripts keep reaching your scripts.".into(),
-        fix_hint: (!hook_ok)
-            .then(|| "Fix the command path in hook.commands (Settings → Post-Processing), or clear it if you no longer use a hook.".into()),
-    });
+    // Hook executable resolvable. Read the expanded copy so `~/`/`%APPDATA%`
+    // paths resolve the same way the pipeline does (see `Config::expanded`).
+    // Check all hook commands: legacy hook.commands (all of them, not just first)
+    // and Playbook Hook entries (the live path after migration).
+    {
+        let mut all_cmds: Vec<(&str, String)> = Vec::new(); // (source_label, cmd)
+        for cmd in &xcfg.hook.commands {
+            let trimmed = cmd.trim();
+            if !trimmed.is_empty() {
+                all_cmds.push(("hook.commands", trimmed.to_owned()));
+            }
+        }
+        for entry in &xcfg.playbook {
+            if entry.kind == crate::config::PlaybookKind::Hook {
+                let cmd = entry.hook.command.trim();
+                if !cmd.is_empty() {
+                    all_cmds.push(("Playbook", cmd.to_owned()));
+                }
+            }
+        }
+        if all_cmds.is_empty() {
+            out.push(CheckResult {
+                name: "Hook command".into(),
+                ok: true,
+                detail: "no hook configured".into(),
+                fix_action: Some("open_hooks_folder".into()),
+                category: CheckCategory::Info,
+                explanation: "Verifies post-transcription hook commands resolve to runnable executables.".into(),
+                fix_hint: None,
+            });
+        } else {
+            let mut broken: Vec<String> = Vec::new();
+            for (_src, cmd) in &all_cmds {
+                let first = cmd.split_whitespace().next().unwrap_or("");
+                if !first.is_empty() {
+                    let found = which::which(first).is_ok() || Path::new(first).exists();
+                    if !found {
+                        broken.push(cmd.clone());
+                    }
+                }
+            }
+            let hook_ok = broken.is_empty();
+            let detail = if hook_ok {
+                format!("{} hook command(s) OK", all_cmds.len())
+            } else {
+                format!("broken: {}", broken.join("; "))
+            };
+            out.push(CheckResult {
+                name: "Hook command".into(),
+                ok: hook_ok,
+                detail,
+                fix_action: Some("open_hooks_folder".into()),
+                category: category_for(hook_ok, CheckCategory::Warning),
+                explanation: "Verifies post-transcription hook commands (legacy hook.commands and Playbook Hook entries) resolve to runnable executables, so transcripts reach your scripts.".into(),
+                fix_hint: (!hook_ok).then(|| {
+                    "Fix the broken command path(s) in Settings → Playbook (or hook.commands if using legacy config).".into()
+                }),
+            });
+        }
+    }
 
     // yt-dlp for URL imports (`phoneme import <url>`). Purely optional — local
     // file imports never touch it — so it's Info either way and never dings the
@@ -1360,11 +1368,12 @@ pub async fn run_backend_checks_with_ports(
             //    check with no Fix — there's nothing daemon-owned to restart.
             SttConnection::LocalBundled | SttConnection::LocalExternal => {
                 let (url, fallback_note) = bundled_probe_url(ports, cfg, stt);
+                let probe_url = format!("{url}/health");
                 let mut check = if dedicated {
                     endpoint_check(
                         &client,
                         "Dictation STT endpoint",
-                        &url,
+                        &probe_url,
                         CheckCategory::Warning,
                         "Probes the dedicated dictation server — in-place dictation types nothing while it's down.",
                         "Use Fix (or `phoneme doctor --fix`) to sweep and respawn the bundled server(s).",
@@ -1374,7 +1383,7 @@ pub async fn run_backend_checks_with_ports(
                     endpoint_check(
                         &client,
                         "Dictation STT endpoint",
-                        &url,
+                        &probe_url,
                         CheckCategory::Warning,
                         "Probes the STT endpoint dictation is pointed at — in-place dictation types nothing while it's unreachable.",
                         "Dictation expects an already-running server here — point it at the main or preview server, or fix the URL (Settings → Capture → Dictation).",
@@ -1504,9 +1513,8 @@ pub async fn run_backend_checks_with_ports(
             LlmKind::Ollama => {
                 any_step_on_ollama = true;
                 let base = url
-                    .split("/api/")
-                    .next()
-                    .unwrap_or("http://127.0.0.1:11434")
+                    .rsplit_once("/api/")
+                    .map_or(url.as_str(), |(b, _)| b)
                     .to_string();
                 let probe = format!("{base}/api/tags");
                 let (probe_ok, detail) = match client.get(&probe).send().await {
@@ -1652,9 +1660,8 @@ pub async fn run_backend_checks_with_ports(
             "http://127.0.0.1:11434".into()
         };
         let ollama_base = ollama_url
-            .split("/api/")
-            .next()
-            .unwrap_or("http://127.0.0.1:11434");
+            .rsplit_once("/api/")
+            .map_or(ollama_url.as_str(), |(b, _)| b);
         let ollama_probe = format!("{ollama_base}/api/tags");
         let (probe_ok, ollama_detail) = match client.get(&ollama_probe).send().await {
             Ok(resp) => (
@@ -1786,11 +1793,11 @@ mod tests {
 
     #[test]
     fn format_bytes_picks_sane_units() {
-        assert_eq!(format_bytes(0), "0 bytes");
-        assert_eq!(format_bytes(512), "512 bytes");
-        assert_eq!(format_bytes(2048), "2 KB");
-        assert_eq!(format_bytes(200 * 1024 * 1024), "200 MB");
-        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024 / 2), "1.5 GB");
+        assert_eq!(crate::models::format_bytes(0), "0 B");
+        assert_eq!(crate::models::format_bytes(512), "512 B");
+        assert_eq!(crate::models::format_bytes(2048), "2.0 KB");
+        assert_eq!(crate::models::format_bytes(200 * 1024 * 1024), "200.0 MB");
+        assert_eq!(crate::models::format_bytes(3 * 1024 * 1024 * 1024 / 2), "1.5 GB");
     }
 
     #[test]

@@ -255,6 +255,9 @@ pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, Command
         other => {
             if let Some(secs) = other.strip_prefix("duration:") {
                 let secs: u32 = secs.parse().map_err(|_| "bad duration")?;
+                if secs == 0 {
+                    return Err("duration must be at least 1 second".into());
+                }
                 RecordMode::Duration { secs }
             } else {
                 return Err(format!("unknown mode: {other}").into());
@@ -1021,6 +1024,20 @@ fn reject_sensitive_dir_dest(dest: &str) -> Result<(), CommandError> {
                 .join("Startup"),
         );
     }
+    // All-users Startup folder (ProgramData) — also auto-runs at login for
+    // every account on the machine; requires admin to write but the guard is
+    // still a defence-in-depth layer.
+    #[cfg(target_os = "windows")]
+    if let Ok(programdata) = std::env::var("PROGRAMDATA") {
+        guarded.push(
+            std::path::Path::new(&programdata)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs")
+                .join("Startup"),
+        );
+    }
 
     if guarded.iter().any(|root| super::path_within(&parent, root)) {
         return Err(CommandError::new(
@@ -1045,8 +1062,13 @@ fn reject_sensitive_dir_dest(dest: &str) -> Result<(), CommandError> {
 pub fn save_text_export(dest: String, contents: String) -> Result<(), CommandError> {
     reject_executable_dest(&dest)?;
     reject_sensitive_dir_dest(&dest)?;
-    std::fs::write(&dest, contents)
-        .map_err(|e| CommandError::new("io", format!("writing {dest}: {e}")))
+    let tmp = format!("{dest}.tmp");
+    std::fs::write(&tmp, &contents)
+        .map_err(|e| CommandError::new("io", format!("writing {tmp}: {e}")))?;
+    std::fs::rename(&tmp, &dest).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        CommandError::new("io", format!("renaming {tmp} to {dest}: {e}"))
+    })
 }
 
 /// Bundle one recording's full data — the catalog row plus its machine
@@ -1192,11 +1214,12 @@ pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, Com
     // which on a large library would block an async worker thread — run it
     // off-runtime via spawn_blocking and await the result.
     tokio::task::spawn_blocking(move || -> Result<u64, CommandError> {
-        use std::io::{Read, Write};
+        use std::io::Write;
         use zip::write::SimpleFileOptions;
 
-        let file = std::fs::File::create(&dest)
-            .map_err(|e| CommandError::new("io", format!("creating {dest}: {e}")))?;
+        let tmp = format!("{dest}.tmp");
+        let file = std::fs::File::create(&tmp)
+            .map_err(|e| CommandError::new("io", format!("creating {tmp}: {e}")))?;
         let mut zip = zip::ZipWriter::new(file);
         let options =
             SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -1242,8 +1265,7 @@ pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, Com
                         continue;
                     }
                     if let Ok(mut f) = std::fs::File::open(&path) {
-                        let mut buf = Vec::new();
-                        if f.read_to_end(&mut buf).is_ok() && zip.write_all(&buf).is_ok() {
+                        if std::io::copy(&mut f, &mut zip).is_ok() {
                             packed += 1;
                         }
                     }
@@ -1252,7 +1274,15 @@ pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, Com
         }
 
         zip.finish()
-            .map_err(|e| CommandError::new("io", format!("finalizing zip: {e}")))?;
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&tmp);
+                CommandError::new("io", format!("finalizing zip: {e}"))
+            })?;
+        std::fs::rename(&tmp, &dest)
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&tmp);
+                CommandError::new("io", format!("renaming {tmp} to {dest}: {e}"))
+            })?;
         Ok(packed)
     })
     .await

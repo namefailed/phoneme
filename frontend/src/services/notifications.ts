@@ -123,6 +123,12 @@ function onEvent(event: DaemonEvent) {
     case "entities_failed":
       stepFailedToast("Entity extraction", String(e.error ?? ""), stepsEnabled);
       return;
+    case "tasks_failed":
+      stepFailedToast("Tasks", String(e.error ?? ""), stepsEnabled);
+      return;
+    case "chapters_failed":
+      stepFailedToast("Chapters", String(e.error ?? ""), stepsEnabled);
+      return;
     case "entities_updated":
       if (stepsEnabled) showToast("Entities extracted", "success");
       return;

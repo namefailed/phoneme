@@ -13,7 +13,6 @@
 
 use tokio::sync::watch;
 
-#[allow(dead_code)]
 #[derive(Clone)]
 pub struct ShutdownSignal {
     rx: watch::Receiver<bool>,
@@ -21,7 +20,6 @@ pub struct ShutdownSignal {
 
 impl ShutdownSignal {
     /// `true` if shutdown has been signaled.
-    #[allow(dead_code)]
     pub fn is_shutting_down(&self) -> bool {
         *self.rx.borrow()
     }
@@ -62,19 +60,8 @@ impl ShutdownCoordinator {
         }
     }
 
-    #[allow(dead_code)]
     pub fn trigger(&self) {
         let _ = self.tx.send(true);
-    }
-
-    /// Hand out a clone of the underlying sender so spawned tasks can
-    /// trigger shutdown when they fail (e.g. the IPC server task on bind
-    /// failure). Without this, a critical-component failure leaves the
-    /// daemon process alive but unresponsive (no IPC) — which is much
-    /// worse than exiting and letting the supervisor / user notice.
-    #[allow(dead_code)]
-    pub fn sender(&self) -> watch::Sender<bool> {
-        self.tx.clone()
     }
 
     /// Install Ctrl+C handler. Returns immediately after starting the

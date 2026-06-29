@@ -170,11 +170,14 @@ impl OllamaLauncher {
             return;
         };
 
-        // Single-flight from here: probe + decision + spawn happen under one
-        // lock, so a concurrent LLM step waits and then sees the result
-        // (NotOurs, or an Owned child already starting) instead of racing.
-        let mut ledger = self.ledger.lock().await;
+        // Probe before acquiring the lock so the 2-second network round-trip
+        // doesn't serialize every concurrent LLM step that calls ensure_ready.
+        // Two callers can probe simultaneously, which is safe — both observe
+        // the same server state and make the same decision.
         let reachable = self.probe(&base).await;
+        // Decision + any ledger mutation happen under the lock so a concurrent
+        // caller sees the settled state (NotOurs or Owned already starting).
+        let mut ledger = self.ledger.lock().await;
         let kind = match &mut *ledger {
             Ledger::Unprobed => LedgerKind::Unprobed,
             Ledger::NotOurs => LedgerKind::NotOurs,

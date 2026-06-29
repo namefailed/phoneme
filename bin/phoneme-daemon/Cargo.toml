@@ -23,12 +23,11 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 clap.workspace = true
-notify.workspace = true
 directories.workspace = true
 chrono.workspace = true
-futures = "0.3"
-async-trait = "0.1"
-which = "6"
+futures.workspace = true
+async-trait.workspace = true
+which.workspace = true
 arc-swap = "1.6"
 enigo = { workspace = true }
 arboard = { workspace = true }

@@ -170,7 +170,10 @@ fn opt_limit(args: &Value, tool: &str) -> Result<u32, ToolError> {
                     reason: "`limit` must be at least 1".to_string(),
                 });
             }
-            Ok(n as u32)
+            u32::try_from(n).map_err(|_| ToolError::BadArgs {
+                tool: tool.to_string(),
+                reason: format!("`limit` {n} exceeds the maximum allowed value"),
+            })
         }
     }
 }
@@ -1047,6 +1050,12 @@ impl Tool for SplitSpeaker {
         let id = require_recording_id(args, "split_speaker")?;
         let label = require_i64_min(args, "label", 1, "split_speaker")?;
         let new_label = require_i64_min(args, "new_label", 1, "split_speaker")?;
+        if label == new_label {
+            return Err(ToolError::BadArgs {
+                tool: "split_speaker".to_string(),
+                reason: "`label` and `new_label` must differ".to_string(),
+            });
+        }
         // A non-empty array of non-negative segment indices.
         let raw = args
             .get("segment_idxs")

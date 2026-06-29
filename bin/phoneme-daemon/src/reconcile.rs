@@ -68,7 +68,9 @@ async fn sweep_stale_catalog_rows(state: &AppState) -> anyhow::Result<usize> {
                 .inbox_dir
                 .join("pending")
                 .join(format!("{}.json", row.id));
-            if !processing_path.exists() && !pending_path.exists() {
+            let processing_exists = tokio::fs::try_exists(&processing_path).await.unwrap_or(true);
+            let pending_exists = tokio::fs::try_exists(&pending_path).await.unwrap_or(true);
+            if !processing_exists && !pending_exists {
                 let _ = state
                     .catalog
                     .update_status(&row.id, RecordingStatus::TranscribeFailed)

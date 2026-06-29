@@ -2656,7 +2656,6 @@ mod tests {
             discrete_diarization: m,
             embeddings: ndarray::Array3::zeros((0, 0, 0)),
             hard_clusters: Array2::zeros((0, 0)),
-            segmentations: ndarray::Array3::zeros((0, 0, 0)),
         };
         // Place each word at the center of its target frame so the ms→seconds
         // round-trip can't nudge it across a frame boundary. speakrs centers
@@ -2716,7 +2715,6 @@ mod tests {
             discrete_diarization: m,
             embeddings: ndarray::Array3::zeros((0, 0, 0)),
             hard_clusters: Array2::zeros((0, 0)),
-            segmentations: ndarray::Array3::zeros((0, 0, 0)),
         };
         let center_ms = |frame: f64| ((frame * step + 0.5 * dur) * 1000.0).round() as i64;
         let tok = |frame: f64, text: &str, lead: bool| TranscriptWord {
@@ -2754,7 +2752,6 @@ mod tests {
             discrete_diarization: m,
             embeddings: ndarray::Array3::zeros((0, 0, 0)),
             hard_clusters: Array2::zeros((0, 0)),
-            segmentations: ndarray::Array3::zeros((0, 0, 0)),
         };
         let dur = speakrs::pipeline::FRAME_DURATION_SECONDS;
         let center_ms = |frame: f64| ((frame * step + 0.5 * dur) * 1000.0).round() as i64;
@@ -2812,7 +2809,6 @@ mod tests {
             discrete_diarization: m,
             embeddings: ndarray::Array3::zeros((0, 0, 0)),
             hard_clusters: Array2::zeros((0, 0)),
-            segmentations: ndarray::Array3::zeros((0, 0, 0)),
         };
         // Raw (smoothing off) does split — the flip is genuinely in the matrix.
         assert!(

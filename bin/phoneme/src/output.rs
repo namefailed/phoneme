@@ -12,7 +12,6 @@ use phoneme_core::Recording;
 use serde_json::Value;
 
 /// Print one recording in pretty form.
-#[allow(dead_code)]
 pub fn print_recording_pretty(r: &Recording) {
     let mut table = Table::new();
     table
@@ -47,7 +46,6 @@ pub fn print_recording_pretty(r: &Recording) {
 }
 
 /// Print a list of recordings as a table.
-#[allow(dead_code)]
 pub fn print_list_pretty(rows: &[Recording]) {
     let mut table = Table::new();
     table
@@ -75,7 +73,6 @@ pub fn print_list_pretty(rows: &[Recording]) {
 }
 
 /// Print as JSON-lines (one row per line).
-#[allow(dead_code)]
 pub fn print_json_lines<T: serde::Serialize>(items: &[T]) {
     for item in items {
         if let Ok(line) = serde_json::to_string(item) {
@@ -85,7 +82,6 @@ pub fn print_json_lines<T: serde::Serialize>(items: &[T]) {
 }
 
 /// Print a JSON value as a single line.
-#[allow(dead_code)]
 pub fn print_json(value: &Value) {
     if let Ok(s) = serde_json::to_string(value) {
         println!("{s}");

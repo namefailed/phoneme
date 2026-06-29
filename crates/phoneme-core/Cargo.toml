@@ -41,11 +41,11 @@ whisper-rs = { version = "0.11", optional = true }
 # `catalog::ann` behind `#[cfg(feature = "ann-usearch")]`.
 usearch = { version = "=2.25.3", optional = true }
 regex.workspace = true
-which = "6"
+which.workspace = true
 # HMAC-SHA256 signing of outbound webhook bodies (X-Phoneme-Signature). Both
 # already resolve in Cargo.lock as transitive deps, so this adds no new versions.
 hmac = "0.12"
-sha2 = "0.10"
+sha2.workspace = true
 
 # DPAPI (CryptProtectData/CryptUnprotectData) for at-rest API-key encryption,
 # GetDiskFreeSpaceExW for the Doctor's disk-space checks, Job Objects for the

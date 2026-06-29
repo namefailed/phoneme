@@ -12,14 +12,7 @@ const IN_CHUNK: usize = 900;
 /// is always a chunk length the caller controls (never user input), so the
 /// generated text is safe to interpolate; the values themselves are still bound.
 fn in_placeholders(n: usize) -> String {
-    let mut s = String::with_capacity(n * 2);
-    for i in 0..n {
-        if i > 0 {
-            s.push(',');
-        }
-        s.push('?');
-    }
-    s
+    vec!["?"; n].join(",")
 }
 
 impl Catalog {
@@ -88,9 +81,9 @@ impl Catalog {
                  error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
                  transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
                  cleanup_model, diarized, user_edited, favorite, pinned, tag_suggestions, summary,
-                 summary_model, entities_model, tasks_model, title, title_is_auto, title_model, tag_model,
+                 summary_model, entities_model, tasks_model, chapters_model, title, title_is_auto, title_model, tag_model,
                  diarization_model, mean_confidence, detected_language, ext_ref
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -121,6 +114,7 @@ impl Catalog {
         .bind(r.summary_model.as_deref())
         .bind(r.entities_model.as_deref())
         .bind(r.tasks_model.as_deref())
+        .bind(r.chapters_model.as_deref())
         .bind(r.title.as_deref())
         .bind(r.title_is_auto)
         .bind(r.title_model.as_deref())
@@ -1029,9 +1023,6 @@ impl Catalog {
     ) -> Result<std::collections::HashMap<String, Vec<Tag>>> {
         let mut map: std::collections::HashMap<String, Vec<Tag>> = std::collections::HashMap::new();
         for chunk in ids.chunks(IN_CHUNK) {
-            if chunk.is_empty() {
-                continue;
-            }
             let sql = format!(
                 "SELECT rt.recording_id, t.id, t.name, t.color \
                  FROM tags t JOIN recording_tags rt ON rt.tag_id = t.id \
@@ -1066,9 +1057,6 @@ impl Catalog {
         let mut map: std::collections::HashMap<String, Vec<Entity>> =
             std::collections::HashMap::new();
         for chunk in ids.chunks(IN_CHUNK) {
-            if chunk.is_empty() {
-                continue;
-            }
             let sql = format!(
                 "SELECT recording_id, kind, value FROM entities \
                  WHERE recording_id IN ({}) \
@@ -1101,9 +1089,6 @@ impl Catalog {
         let mut map: std::collections::HashMap<String, Vec<Task>> =
             std::collections::HashMap::new();
         for chunk in ids.chunks(IN_CHUNK) {
-            if chunk.is_empty() {
-                continue;
-            }
             let sql = format!(
                 "SELECT recording_id, id, text, due_hint, done FROM tasks \
                  WHERE recording_id IN ({}) \
@@ -1138,9 +1123,6 @@ impl Catalog {
         let mut map: std::collections::HashMap<String, Vec<SpeakerName>> =
             std::collections::HashMap::new();
         for chunk in ids.chunks(IN_CHUNK) {
-            if chunk.is_empty() {
-                continue;
-            }
             let sql = format!(
                 "SELECT recording_id, speaker_label, name FROM speaker_names \
                  WHERE recording_id IN ({}) \

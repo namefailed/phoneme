@@ -23,15 +23,10 @@ use phoneme_core::Config;
 use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport, PROTOCOL_VERSION};
 use std::process::ExitCode;
 
-// All four methods on Client are exercised once Tasks 5–11 wire up the
-// individual subcommand handlers; until then clippy would otherwise warn
-// that the struct and methods are dead.
-#[allow(dead_code)]
 pub struct Client {
     transport: NamedPipeTransport,
 }
 
-#[allow(dead_code)]
 impl Client {
     /// Connect to the daemon. If absent, auto-spawn and retry. Returns an
     /// ExitCode if we ultimately can't reach the daemon.
@@ -140,13 +135,11 @@ impl Client {
     }
 
     /// Send and ignore the response (for fire-and-forget requests).
-    #[allow(dead_code)]
     pub async fn send_silent(&mut self, req: Request) -> Result<(), ExitCode> {
         self.send(req).await.map(|_| ())
     }
 
     /// Subscribe to events; useful for `--oneshot` waiting + `phoneme watch`.
-    #[allow(dead_code)]
     pub async fn subscribe(
         &mut self,
     ) -> Result<

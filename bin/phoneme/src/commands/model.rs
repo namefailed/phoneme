@@ -255,6 +255,10 @@ async fn use_model(name: &str, cfg: &Config, json: bool) -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::from(crate::exit::INVALID_CONFIG);
     }
+    if let Err(e) = crate::commands::config_cmd::set_value(cfg, "whisper.mode", "bundled_model") {
+        eprintln!("error: {e}");
+        return ExitCode::from(crate::exit::INVALID_CONFIG);
+    }
     // Best-effort live reload — if no daemon is running the file is already
     // written, so the next start (or the queue worker's mtime check) applies it.
     let mut reloaded = false;

@@ -62,14 +62,13 @@ pub fn strip_fillers(text: &str, cfg: &FillerConfig) -> String {
         .split_whitespace()
         .filter_map(|word| {
             if is_filler_word(word, &cfg.words) {
-                let trailing: String = word
-                    .chars()
+                let cut = word
+                    .char_indices()
                     .rev()
-                    .take_while(|c| !c.is_alphanumeric())
-                    .collect::<Vec<char>>()
-                    .into_iter()
-                    .rev()
-                    .collect();
+                    .find(|(_, c)| c.is_alphanumeric())
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(0);
+                let trailing = word[cut..].to_string();
                 (!trailing.is_empty()).then_some(trailing)
             } else {
                 Some(word.to_string())
