@@ -1184,10 +1184,6 @@ pub struct LocalDiarization {
     /// Per-chunk-speaker cluster ids, shape `(chunks, speakers)` (`-1` =
     /// unassigned). Read alongside `embeddings` for centroid aggregation.
     pub hard_clusters: Array2<i32>,
-    /// Decoded powerset segmentations, shape `(chunks, frames, speakers)`.
-    /// Surfaced from the speakrs result but not yet read by anything here. See
-    /// the note on the line that populates it in `run_local_diarization`.
-    pub segmentations: Array3<f32>,
 }
 
 /// Two speaker clusters whose centroid voiceprints have at least this cosine
@@ -1627,10 +1623,6 @@ pub fn run_local_diarization(
         discrete_diarization: result.discrete_diarization.0,
         embeddings: result.embeddings.0,
         hard_clusters: result.hard_clusters.0,
-        // Nothing reads `segmentations` yet — it's a full (chunks×frames×speakers)
-        // tensor carried on every result. Drop the field + this move once it's
-        // confirmed dead (also update the test constructors in transcription.rs).
-        segmentations: result.segmentations.0,
     })
 }
 

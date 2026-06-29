@@ -39,8 +39,8 @@ export function recordingShellHtml(r: Recording, use24h: boolean, stats: string)
             </div>
           </div>
           <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
-            ${showFavorites() ? `<button class="detail-focus-btn rec-fav-btn ${r.favorite ? "on" : ""}" id="detail-fav" aria-label=${r.favorite ? "Unstar" : "Star"} title=${r.favorite ? "Remove from Favorites" : "Add to Favorites"}>⭐</button>` : ""}
-            ${showPinned() ? `<button class="detail-focus-btn rec-pin-btn ${r.pinned ? "on" : ""}" id="detail-pin" aria-label=${r.pinned ? "Unpin" : "Pin to top"} title=${r.pinned ? "Unpin from the top of the library" : "Pin to the top of the library"}>📌</button>` : ""}
+            ${showFavorites() ? `<button class="detail-focus-btn rec-fav-btn ${r.favorite ? "on" : ""}" id="detail-fav" aria-label="${r.favorite ? "Unstar" : "Star"}" title="${r.favorite ? "Remove from Favorites" : "Add to Favorites"}">⭐</button>` : ""}
+            ${showPinned() ? `<button class="detail-focus-btn rec-pin-btn ${r.pinned ? "on" : ""}" id="detail-pin" aria-label="${r.pinned ? "Unpin" : "Pin to top"}" title="${r.pinned ? "Unpin from the top of the library" : "Pin to the top of the library"}">📌</button>` : ""}
             <button class="detail-focus-btn" id="detail-similar" aria-label="More like this" title="More like this — fill the list with recordings about similar things"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
             <span aria-hidden="true" style="width: 1px; align-self: stretch; margin: 2px 2px; background: var(--border-subtle);"></span>
             <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">${EXPAND_SVG}</button>

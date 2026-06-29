@@ -29,6 +29,5 @@ symphonia = { version = "0.5", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-proptest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }

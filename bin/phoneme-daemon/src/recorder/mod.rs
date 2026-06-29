@@ -407,6 +407,11 @@ impl DaemonRecorder {
             .join(id.day_folder())
             .join(format!("{}.wav", id.file_stem()));
 
+        // Snapshot once — `config.load()` is cheap but returns the point-in-time
+        // Arc; calling it five separate times risks tearing if a `ReloadConfig`
+        // fires between calls. One snapshot is consistent across all fields below.
+        let cfg = state.config.load();
+
         // Capture the foreground app for in-place dictations, at start — this is
         // the window the user is dictating into, before the brief recording can
         // shift focus. The process stem keys the per-app type/paste/off override;
@@ -415,7 +420,6 @@ impl DaemonRecorder {
         // Both Win32 calls and `config.load()` are synchronous (no await), so
         // doing this under the `active` guard is sound.
         let (focused_app, focused_window_title) = if in_place {
-            let cfg = state.config.load();
             let app = phoneme_core::foreground::foreground_app();
             let exe = app.as_ref().map(|a| a.exe_name.clone());
             let title = app.filter(|a| {
@@ -434,12 +438,9 @@ impl DaemonRecorder {
         // off) delivery. Computed here, before `focused_app` moves into the active
         // slot below; the stop reconcile re-checks the same conditions so both
         // agree on whether streaming happened.
-        let stream_type = {
-            let c = state.config.load();
-            in_place
-                && c.in_place.stream_type
-                && c.in_place.resolve_type_mode(focused_app.as_deref()) == "type"
-        };
+        let stream_type = in_place
+            && cfg.in_place.stream_type
+            && cfg.in_place.resolve_type_mode(focused_app.as_deref()) == "type";
 
         // Per-app tone: pick the cleanup recipe (and so the LLM's register) by the
         // app focused at record START. Resolve `[in_place].app_recipes` against the
@@ -460,10 +461,7 @@ impl DaemonRecorder {
         // `app_recipes`, `resolve_app_recipe` returns `None` and nothing is seeded —
         // today's behavior, byte-for-byte.
         let app_recipe: Option<String> = if in_place {
-            state
-                .config
-                .load()
-                .in_place
+            cfg.in_place
                 .resolve_app_recipe(focused_app.as_deref())
                 .map(str::to_string)
         } else {
@@ -488,8 +486,7 @@ impl DaemonRecorder {
         // on the row's `track` so the list's Source column reflects the real source
         // instead of assuming "single == microphone". Loaded once here and reused
         // for the capture stream below.
-        let app_cfg = state.config.load();
-        let kind = source_override.unwrap_or(app_cfg.recording.source);
+        let kind = source_override.unwrap_or(cfg.recording.source);
         let track = Some(
             match kind {
                 CaptureSource::SystemAudio => "system",
@@ -570,7 +567,7 @@ impl DaemonRecorder {
         // different source, that buffered audio is from the wrong device — drop it
         // and open a fresh stream for the override source below, so the recording
         // actually captures (and is labelled as) the source the binding asked for.
-        let (prepend, preroll_source) = if kind == app_cfg.recording.source {
+        let (prepend, preroll_source) = if kind == cfg.recording.source {
             (prepend, preroll_source)
         } else {
             (Vec::new(), None)
@@ -580,7 +577,7 @@ impl DaemonRecorder {
         } else {
             match make_source(|| {
                 CpalSource::open_kind_with_grace(
-                    resolve_input_device(&app_cfg.recording.input_device)?,
+                    resolve_input_device(&cfg.recording.input_device)?,
                     kind,
                     STOP_TAIL_GRACE,
                 )
@@ -606,9 +603,9 @@ impl DaemonRecorder {
             // the pre-roll lead-in added on top — the requested length is never
             // shortened by pre-roll, and the cap bounds the same amount of speech
             // whether or not pre-roll is enabled.
-            max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
-            silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
-            silence_window_ms: state.config.load().recording.silence_window_ms,
+            max_duration_ms: cfg.recording.max_duration_secs as u64 * 1000,
+            silence_threshold_dbfs: cfg.recording.silence_threshold_dbfs,
+            silence_window_ms: cfg.recording.silence_window_ms,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         let mut recorder =
@@ -1001,8 +998,15 @@ impl DaemonRecorder {
     pub async fn pause(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
         if active_lock.is_none() {
-            let mut meeting_lock = self.meeting.lock().await;
-            if let Some(ref mut meeting) = *meeting_lock {
+            // Pause all recorders (quick channel sends to audio thread) while
+            // holding the lock; collect IDs and drop the lock before the async
+            // catalog writes + event emissions (avoids holding the mutex across
+            // DB awaits while still keeping the in-memory state consistent).
+            let (track_ids, first_id, meeting_id) = {
+                let mut meeting_lock = self.meeting.lock().await;
+                let Some(ref mut meeting) = *meeting_lock else {
+                    return Err(Error::NotRecording);
+                };
                 if meeting.paused {
                     return Ok(meeting.tracks[0].id.clone());
                 }
@@ -1012,26 +1016,29 @@ impl DaemonRecorder {
                         .pause()
                         .await
                         .map_err(|e| Error::Internal(e.to_string()))?;
-                    state
-                        .catalog
-                        .update_status(&track_handle.id, RecordingStatus::Paused)
-                        .await?;
-                    state.events.emit(DaemonEvent::RecordingPaused {
-                        id: track_handle.id.clone(),
-                    });
                 }
                 meeting.paused = true;
-                // Mark when (on the meeting's wall clock) this pause began, so
-                // stop_meeting can fold the paused span out of the timeline.
                 meeting.paused_at_ms = Some(
                     Instant::now()
                         .duration_since(meeting.wall_started)
                         .as_millis() as i64,
                 );
-                tracing::info!(session = %meeting.meeting_id, "meeting paused");
-                return Ok(meeting.tracks[0].id.clone());
+                let track_ids: Vec<RecordingId> = meeting.tracks.iter().map(|t| t.id.clone()).collect();
+                let first_id = meeting.tracks[0].id.clone();
+                let meeting_id = meeting.meeting_id.clone();
+                (track_ids, first_id, meeting_id)
+                // meeting_lock drops here
+            };
+            // Lock released — catalog writes and event emissions run outside the mutex.
+            for id in &track_ids {
+                state
+                    .catalog
+                    .update_status(id, RecordingStatus::Paused)
+                    .await?;
+                state.events.emit(DaemonEvent::RecordingPaused { id: id.clone() });
             }
-            return Err(Error::NotRecording);
+            tracing::info!(session = %meeting_id, "meeting paused");
+            return Ok(first_id);
         }
         let active = active_lock
             .as_mut()
@@ -1040,11 +1047,12 @@ impl DaemonRecorder {
             return Ok(active.id.clone());
         }
 
-        if let Some(recorder) = self.handle.lock().await.as_ref() {
-            recorder
+        match self.handle.lock().await.as_ref() {
+            Some(recorder) => recorder
                 .pause()
                 .await
-                .map_err(|e| Error::Internal(e.to_string()))?;
+                .map_err(|e| Error::Internal(e.to_string()))?,
+            None => return Err(Error::Internal("recorder handle missing while active is Some; cannot pause".into())),
         }
 
         active.paused = true;
@@ -1064,8 +1072,11 @@ impl DaemonRecorder {
     pub async fn resume(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
         if active_lock.is_none() {
-            let mut meeting_lock = self.meeting.lock().await;
-            if let Some(ref mut meeting) = *meeting_lock {
+            let (track_ids, first_id, meeting_id) = {
+                let mut meeting_lock = self.meeting.lock().await;
+                let Some(ref mut meeting) = *meeting_lock else {
+                    return Err(Error::NotRecording);
+                };
                 if !meeting.paused {
                     return Ok(meeting.tracks[0].id.clone());
                 }
@@ -1075,26 +1086,28 @@ impl DaemonRecorder {
                         .resume()
                         .await
                         .map_err(|e| Error::Internal(e.to_string()))?;
-                    state
-                        .catalog
-                        .update_status(&track_handle.id, RecordingStatus::Recording)
-                        .await?;
-                    state.events.emit(DaemonEvent::RecordingResumed {
-                        id: track_handle.id.clone(),
-                    });
                 }
                 meeting.paused = false;
-                // Close the open pause span on the meeting's wall clock.
                 if let Some(start_ms) = meeting.paused_at_ms.take() {
                     let end_ms = Instant::now()
                         .duration_since(meeting.wall_started)
                         .as_millis() as i64;
                     meeting.pause_spans_ms.push((start_ms, end_ms));
                 }
-                tracing::info!(session = %meeting.meeting_id, "meeting resumed");
-                return Ok(meeting.tracks[0].id.clone());
+                let track_ids: Vec<RecordingId> = meeting.tracks.iter().map(|t| t.id.clone()).collect();
+                let first_id = meeting.tracks[0].id.clone();
+                let meeting_id = meeting.meeting_id.clone();
+                (track_ids, first_id, meeting_id)
+            };
+            for id in &track_ids {
+                state
+                    .catalog
+                    .update_status(id, RecordingStatus::Recording)
+                    .await?;
+                state.events.emit(DaemonEvent::RecordingResumed { id: id.clone() });
             }
-            return Err(Error::NotRecording);
+            tracing::info!(session = %meeting_id, "meeting resumed");
+            return Ok(first_id);
         }
         let active = active_lock
             .as_mut()

@@ -26,7 +26,7 @@ tauri-plugin-dialog.workspace = true
 tauri-plugin-fs.workspace = true
 tauri-plugin-global-shortcut.workspace = true
 tauri-plugin-window-state.workspace = true
-tauri-plugin-updater = "2"
+tauri-plugin-updater.workspace = true
 sysinfo = "0.30"
 tokio.workspace = true
 serde.workspace = true
@@ -36,11 +36,11 @@ thiserror.workspace = true
 tracing.workspace = true
 toml.workspace = true
 reqwest.workspace = true
-which = "6"
-futures = "0.3"
-sha2 = "0.10"
+which.workspace = true
+futures.workspace = true
+sha2.workspace = true
 zip = { workspace = true }
-tauri-plugin-notification = "2.3.3"
+tauri-plugin-notification.workspace = true
 speakrs = "0.4.2"
 
 [dev-dependencies]

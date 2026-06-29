@@ -114,7 +114,6 @@ fn force_kill_pid(pid: u32) {
 
 /// Ensure the daemon is reachable. If not, spawn it detached and poll the
 /// pipe for `POLL_TOTAL` before giving up.
-#[allow(dead_code)] // wired up by Client::connect in Task 5+
 pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
     // Reuse a running daemon only if it matches our version; otherwise a stale
     // daemon would fail to deserialize newer requests and drop the pipe

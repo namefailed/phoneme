@@ -122,6 +122,7 @@ export type DaemonEvent =
       done: boolean;
       error: string;
     }
+  | { event: "meeting_name_updated"; meeting_id: string }
   | { event: "preview_source_changed"; track: string };
 
 /** One Ask-my-archive citation, mirroring the daemon's `AskSource`. `n` is the

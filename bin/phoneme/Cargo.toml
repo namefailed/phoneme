@@ -26,9 +26,9 @@ tracing-subscriber.workspace = true
 toml.workspace = true
 toml_edit = "0.22"
 reqwest.workspace = true
-futures = "0.3"
-which = "6"
-directories = "5"
+futures.workspace = true
+which.workspace = true
+directories.workspace = true
 zip = { workspace = true }
 tempfile.workspace = true
 

@@ -80,6 +80,8 @@ function rec(
     track: null,
     meeting_name: null,
     in_place: false,
+    detected_language: "en",
+    mean_confidence: 0.72,
     ...extra,
   };
 }

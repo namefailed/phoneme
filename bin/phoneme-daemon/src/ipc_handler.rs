@@ -2132,19 +2132,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         // so it's not an extra privilege-escalation channel and isn't subject to
         // the `RefireHook` allowlist (S-C2).
         Request::HookTest { custom_command } => {
+            let cfg = state.config.load();
             let command = custom_command.unwrap_or_else(|| {
-                state
-                    .config
-                    .load()
-                    .hook
-                    .commands
-                    .first()
-                    .cloned()
-                    .unwrap_or_default()
+                cfg.hook.commands.first().cloned().unwrap_or_default()
             });
             let runner = HookRunner::new(
                 command,
-                std::time::Duration::from_secs(state.config.load().hook.timeout_secs),
+                std::time::Duration::from_secs(cfg.hook.timeout_secs),
             );
             // Build a representative test payload. Use a plausible-looking
             // audio path so hooks that reference it (e.g. file-logging hooks)
@@ -2344,28 +2338,6 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
 /// allocation. Far above any real UI/CLI page size.
 const MAX_SEARCH_RESULTS: usize = 1000;
 
-/// Stash a custom-hotkey recording's per-job overrides against its freshly minted
-/// recording id, so `pipeline::run` resolves the binding's recipe and transcribes
-/// with its model. Two ledgers, both already proven by `RetranscribeRecording`:
-///
-///  - `whisper_model` → `pending_overrides` (the existing per-job model override
-///    map): the pipeline applies it via `apply_model_override` for one job, then
-///    restores — the same #49-safe path a model-override retranscribe uses.
-///  - `recipe_id` → `pending_recipe` (the parallel recipe ledger): the pipeline
-///    passes it to `resolve_recipe`, falling back to the `default` recipe when the
-///    id is empty or names a deleted recipe.
-///
-/// Both are written only when non-empty, so a normal (non-custom-hotkey) record,
-/// which sends `None`, leaves the recording on the global default recipe and
-/// configured model. The maps are ephemeral: a daemon restart between stash and
-/// the pipeline claim drops the override and the job runs the default recipe and
-/// configured model (the documented `pending_overrides` contract). A leftover
-/// entry can't leak onto another recording (each `RecordingId` is unique), and the
-/// entries are claimed-and-removed on every terminal path: `pipeline::run` removes
-/// both early — alongside the model/all-overrides removals, before transcription —
-/// so a permanently-failed recording leaves nothing, and `DaemonRecorder::cancel`
-/// removes both in its single-recording arm so a recording canceled mid-capture
-/// (which never reaches `pipeline::run`) leaves nothing either.
 /// Validate + normalize a one-time import recipe id. A `scope = Meeting` recipe is
 /// rejected (a single import is not a meeting); `None`/empty is fine (the global
 /// default), and an unknown id is left to `resolve_recipe`'s lenient fallback
@@ -2392,6 +2364,28 @@ fn validate_import_recipe(
     Ok(rid)
 }
 
+/// Stash a custom-hotkey recording's per-job overrides against its freshly minted
+/// recording id, so `pipeline::run` resolves the binding's recipe and transcribes
+/// with its model. Two ledgers, both already proven by `RetranscribeRecording`:
+///
+///  - `whisper_model` → `pending_overrides` (the existing per-job model override
+///    map): the pipeline applies it via `apply_model_override` for one job, then
+///    restores — the same #49-safe path a model-override retranscribe uses.
+///  - `recipe_id` → `pending_recipe` (the parallel recipe ledger): the pipeline
+///    passes it to `resolve_recipe`, falling back to the `default` recipe when the
+///    id is empty or names a deleted recipe.
+///
+/// Both are written only when non-empty, so a normal (non-custom-hotkey) record,
+/// which sends `None`, leaves the recording on the global default recipe and
+/// configured model. The maps are ephemeral: a daemon restart between stash and
+/// the pipeline claim drops the override and the job runs the default recipe and
+/// configured model (the documented `pending_overrides` contract). A leftover
+/// entry can't leak onto another recording (each `RecordingId` is unique), and the
+/// entries are claimed-and-removed on every terminal path: `pipeline::run` removes
+/// both early — alongside the model/all-overrides removals, before transcription —
+/// so a permanently-failed recording leaves nothing, and `DaemonRecorder::cancel`
+/// removes both in its single-recording arm so a recording canceled mid-capture
+/// (which never reaches `pipeline::run`) leaves nothing either.
 fn stash_hotkey_overrides(
     state: &AppState,
     id: &phoneme_core::RecordingId,
@@ -3227,13 +3221,21 @@ async fn rerun_period_digest(
     // `rerun_summary` / the meeting digest.
     conn.apply_to(&mut cfg.summary);
 
+    // On-demand: same pattern as `rerun_meeting_digest` — the period digest reuses
+    // the summary connection, which can pin `provider = "none"` even with a working
+    // global LLM. Route through `ondemand_connection`; if it falls back to the
+    // global, write that connection onto `[summary]` so the spawned task sees it.
+    let resolved = crate::pipeline::summary_llm_config(&cfg);
+    let effective = crate::pipeline::ondemand_connection(&state.llm, &cfg, resolved.clone());
+    if effective.provider != resolved.provider {
+        cfg.summary.provider = effective.provider.clone();
+        cfg.summary.api_url = effective.api_url.clone();
+        cfg.summary.set_api_key(effective.api_key_str().to_string());
+    }
+
     // Require a usable LLM provider up front so the user gets a clear error rather
     // than a silent failure inside the spawned task.
-    if state
-        .llm
-        .provider(&crate::pipeline::summary_llm_config(&cfg))
-        .is_none()
-    {
+    if state.llm.provider(&effective).is_none() {
         return Response::Err(IpcError {
             kind: IpcErrorKind::InvalidConfig,
             message: "no LLM provider configured for summaries (set a summary or [llm_post_process] provider)".into(),
@@ -3724,7 +3726,15 @@ async fn edit_recording(
                 "backup": backup.to_string_lossy(),
             }))
         }
-        Err(e) => err_response(&e),
+        Err(e) => {
+            // Roll the status back so the recording is not stuck as Queued with
+            // no inbox entry to advance it.
+            let _ = state
+                .catalog
+                .update_status_and_duration(&id, RecordingStatus::Done, new_duration)
+                .await;
+            err_response(&e)
+        }
     }
 }
 

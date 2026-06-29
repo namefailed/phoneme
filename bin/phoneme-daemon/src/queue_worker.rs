@@ -245,13 +245,10 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                 // The payload moves into the pipeline; keep the id for the
                 // retry bookkeeping below.
                 let rec_id = payload.id.clone();
-                if let Ok(mut slot) = state.processing.lock() {
-                    *slot = Some((payload.id.clone(), token.clone()));
-                }
+                *state.processing.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some((payload.id.clone(), token.clone()));
                 let result = pipeline::run(&state, payload, token).await;
-                if let Ok(mut slot) = state.processing.lock() {
-                    *slot = None;
-                }
+                *state.processing.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 match result {
                     Ok(()) => {
                         backoff = Duration::from_secs(30); // reset on success

@@ -241,6 +241,40 @@ fn completions_bash_emits_script() {
     );
 }
 
+/// `model` and its subcommands must be recognized.
+#[test]
+fn model_subcommands_are_recognized() {
+    Command::cargo_bin("phoneme")
+        .unwrap()
+        .args(["model", "--help"])
+        .assert()
+        .success();
+    for sub in ["ls", "get", "use", "rm"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args(["model", sub, "--help"])
+            .assert()
+            .success();
+    }
+}
+
+/// `voice` and its subcommands must be recognized.
+#[test]
+fn voice_subcommands_are_recognized() {
+    Command::cargo_bin("phoneme")
+        .unwrap()
+        .args(["voice", "--help"])
+        .assert()
+        .success();
+    for sub in ["list", "rename", "forget", "restore", "merge"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args(["voice", sub, "--help"])
+            .assert()
+            .success();
+    }
+}
+
 /// Every shell the `Shell` value-enum covers must be accepted and emit output.
 #[test]
 fn completions_all_shells_are_recognized() {

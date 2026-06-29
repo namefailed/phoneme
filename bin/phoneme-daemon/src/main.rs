@@ -111,6 +111,19 @@ async fn main() -> Result<()> {
         tracing::error!(panic = true, location = %location, "Thread panicked: {}", msg);
     }));
 
+    // Sweep any crash-leaked preview temp WAVs from a previous run.
+    // Each preview WAV is written to temp_dir/phoneme-preview-<ulid>.wav and
+    // removed when the recording stops normally; a crash skips the cleanup.
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("phoneme-preview-") && name.ends_with(".wav") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+
     reconcile::run(&state).await?;
 
     // Optionally warm the local diarization models now (opt-in

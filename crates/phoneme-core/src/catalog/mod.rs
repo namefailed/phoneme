@@ -594,27 +594,6 @@ fn parse_dt(s: &str) -> Result<DateTime<Local>> {
 }
 
 fn parse_status(s: &str) -> Result<RecordingStatus> {
-    Ok(match s {
-        "recording" => RecordingStatus::Recording,
-        "paused" => RecordingStatus::Paused,
-        "queued" => RecordingStatus::Queued,
-        "transcribing" => RecordingStatus::Transcribing,
-        "cleaning_up" => RecordingStatus::CleaningUp,
-        "summarizing" => RecordingStatus::Summarizing,
-        "tagging" => RecordingStatus::Tagging,
-        "hook_running" => RecordingStatus::HookRunning,
-        "done" => RecordingStatus::Done,
-        "transcribe_failed" => RecordingStatus::TranscribeFailed,
-        "hook_failed" => RecordingStatus::HookFailed,
-        "cleanup_failed" => RecordingStatus::CleanupFailed,
-        "summarize_failed" => RecordingStatus::SummarizeFailed,
-        "title_failed" => RecordingStatus::TitleFailed,
-        "tag_failed" => RecordingStatus::TagFailed,
-        "cancelled" => RecordingStatus::Cancelled,
-        other => {
-            return Err(crate::error::Error::Internal(format!(
-                "unknown recording status: {other}"
-            )))
-        }
-    })
+    RecordingStatus::from_str_opt(s)
+        .ok_or_else(|| crate::error::Error::Internal(format!("unknown recording status: {s}")))
 }

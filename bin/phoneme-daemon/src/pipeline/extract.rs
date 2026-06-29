@@ -667,11 +667,11 @@ pub(crate) async fn extract_chapters_with(
                 tracing::info!(id = %id.as_str(), "auto-chapter produced nothing");
                 return None;
             }
-            if let Err(e) = state.catalog.set_chapters_model(id, &llm_cfg.model).await {
-                tracing::warn!(error = %e, "failed to persist chapters model");
-            }
             match state.catalog.replace_chapters(id, &chapters).await {
                 Ok(()) => {
+                    if let Err(e) = state.catalog.set_chapters_model(id, &llm_cfg.model).await {
+                        tracing::warn!(error = %e, "failed to persist chapters model");
+                    }
                     tracing::info!(id = %id.as_str(), count = chapters.len(), "chapters saved");
                     state
                         .events

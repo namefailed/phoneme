@@ -100,7 +100,7 @@ impl Catalog {
                  ON CONFLICT(recording_id, text) DO UPDATE SET \
                  due_hint = excluded.due_hint, done = excluded.done, \
                  source = CASE WHEN tasks.source = 'manual' THEN 'manual' ELSE 'llm' END, \
-                 sort_order = excluded.sort_order",
+                 sort_order = CASE WHEN tasks.source = 'manual' THEN tasks.sort_order ELSE excluded.sort_order END",
             )
             .bind(id.as_str())
             .bind(&t.text)

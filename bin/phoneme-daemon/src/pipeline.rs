@@ -593,6 +593,7 @@ async fn wait_for_whisper_ready(
     };
     let deadline = std::time::Instant::now() + timeout;
     let mut poll = tokio::time::interval(Duration::from_millis(200));
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         // Accept readiness only once the supervisor has actually (re)spawned the
         // server (`is_fresh` — its spawn generation advanced past the override) AND
@@ -1209,32 +1210,20 @@ pub(crate) async fn suggest_tags_with(
     .await
     {
         Ok(reply) => {
-            // Record which model ran the auto-tagger (the detail provenance line
-            // names it), once per run and before the suggest-vs-auto-accept branch
-            // — so it sticks even when every suggestion was auto-accepted and
-            // nothing is left to approve.
-            if let Err(e) = state.catalog.set_tag_model(id, &llm_cfg.model).await {
-                tracing::warn!(error = %e, "failed to persist tag model");
-            }
             let mut names = parse_tag_names(&reply, max);
             // Don't suggest tags the recording already has.
             if let Ok(Some(rec)) = state.catalog.get(id).await {
                 let have: Vec<String> = rec.tags.iter().map(|t| t.name.to_lowercase()).collect();
                 names.retain(|n| !have.contains(&n.to_lowercase()));
             }
-            // Canonicalize against the existing tag set, case-insensitively: a
-            // suggested "Code" when the library already has "code" becomes "code"
-            // — so a chip can't read as a new tag when it isn't, and approving
-            // can't mint a casing-duplicate. The same model emitting "Code" and
-            // "code" collapses to one suggestion.
-            let canonical: std::collections::HashMap<String, String> =
-                match state.catalog.list_all_tags().await {
-                    Ok(tags) => tags
-                        .into_iter()
-                        .map(|t| (t.name.to_lowercase(), t.name))
-                        .collect(),
-                    Err(_) => std::collections::HashMap::new(),
-                };
+            // Canonicalize against the already-fetched existing tag set,
+            // case-insensitively: a suggested "Code" when the library already
+            // has "code" becomes "code" — so a chip can't read as a new tag
+            // when it isn't, and approving can't mint a casing-duplicate.
+            let canonical: std::collections::HashMap<String, String> = existing
+                .iter()
+                .map(|name| (name.to_lowercase(), name.clone()))
+                .collect();
             let mut seen = std::collections::HashSet::new();
             names = names
                 .into_iter()
@@ -1277,6 +1266,11 @@ pub(crate) async fn suggest_tags_with(
             // suggestions, which is right when everything was auto-accepted.
             match state.catalog.set_tag_suggestions(id, &names).await {
                 Ok(()) => {
+                    // Record the model after successfully storing something so the
+                    // provenance column only advances when an action actually landed.
+                    if let Err(e) = state.catalog.set_tag_model(id, &llm_cfg.model).await {
+                        tracing::warn!(error = %e, "failed to persist tag model");
+                    }
                     tracing::info!(id = %id.as_str(), count = names.len(), "tag suggestions saved");
                     state
                         .events
@@ -3129,6 +3123,10 @@ pub async fn run(
                     crate::in_place::reconcile_at_cursor(backspaces, &insert).await
                 {
                     tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to reconcile streamed text");
+                    state.events.emit(DaemonEvent::TranscriptionFailed {
+                        id: id.clone(),
+                        error: format!("dictation: could not replace streamed text — {e}. Full transcript saved to library."),
+                    });
                 }
                 // A paste-mode flip still owes the user the final text via the
                 // clipboard once the orphaned live text is cleared. Skip on focus
@@ -3329,7 +3327,11 @@ pub async fn run(
             match runner.run(&payload).await {
                 Ok(result) => {
                     total_duration += result.duration_ms;
-                    last_cmd = rule.command.clone();
+                    // Don't overwrite last_cmd when the primary loop already set
+                    // it (non-zero exit from a legacy command would be lost).
+                    if last_cmd.is_empty() {
+                        last_cmd = rule.command.clone();
+                    }
                     if result.exit_code != 0 {
                         tracing::warn!(pattern = %rule.pattern, exit_code = result.exit_code, "keyword hook exited non-zero");
                     } else {

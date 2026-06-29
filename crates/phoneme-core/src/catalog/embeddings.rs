@@ -640,13 +640,14 @@ impl Catalog {
         if q.is_empty() {
             return Ok(Vec::new());
         }
-        let like = format!("%{q}%");
+        let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let like = format!("%{escaped}%");
         let rows = sqlx::query(
             "SELECT r.id AS id, r.meeting_id AS meeting_id \
              FROM recordings r \
              JOIN recording_tags rt ON rt.recording_id = r.id \
              JOIN tags t ON t.id = rt.tag_id \
-             WHERE t.name LIKE ? \
+             WHERE t.name LIKE ? ESCAPE '\\' \
              ORDER BY r.started_at DESC, r.id DESC",
         )
         .bind(&like)

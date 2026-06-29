@@ -4038,6 +4038,18 @@ impl Config {
                 ));
             }
         }
+        if self.llm_post_process.enabled {
+            let p = self.llm_post_process.provider.trim();
+            let cloud =
+                !p.is_empty() && !matches!(p, "ollama" | "lmstudio" | "jan" | "llamacpp" | "none");
+            if cloud && self.llm_post_process.api_key_str().trim().is_empty() {
+                return Err(Error::InvalidConfig(
+                    "llm_post_process uses a cloud provider but has no API key (set \
+                     llm_post_process.api_key)"
+                        .into(),
+                ));
+            }
+        }
         if let Some(pw) = &self.preview_whisper {
             let needs_key = matches!(
                 pw.provider,
@@ -4131,7 +4143,7 @@ impl Config {
             _ => {
                 if self.whisper.api_key.expose_secret().trim().is_empty() {
                     return Err(Error::InvalidConfig(
-                        "whisper.api_key is required for cloud transcription providers (openai/groq/deepgram/assemblyai)"
+                        "whisper.api_key is required for cloud transcription providers (openai/groq/deepgram/assemblyai/elevenlabs)"
                             .into(),
                     ));
                 }

@@ -31,6 +31,7 @@ const LIST_REFRESH_EVENTS = new Set([
   // instead of needing a manual reload.
   "tag_attached",
   "all_tag_suggestions_cleared",
+  "meeting_name_updated",
   "tag_detached",
   "tag_updated",
   "tag_deleted",
