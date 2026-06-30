@@ -65,3 +65,16 @@ futures = "0.3"
 sha2 = "0.10"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
+
+# Shipped-binary slimming for `cargo build --release` (the artifacts users get).
+# All three are behaviour-preserving — they only change the output binary, not
+# what it does: `strip` drops symbol tables, `lto = "thin"` does cross-crate
+# dead-code elimination + inlining, and one codegen unit lets the optimizer see
+# the whole crate. (Deliberately NOT setting opt-level = "s"/"z" or
+# panic = "abort": those trade run speed / drop unwinding + catch_unwind, which
+# the daemon relies on.) Debug/test builds are untouched, so this costs nothing
+# day to day — only release builds spend a bit more time linking.
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
