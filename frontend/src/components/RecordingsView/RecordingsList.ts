@@ -890,7 +890,7 @@ export class RecordingsListElement extends LitElement {
     );
 
     return html`
-      <div class="rec-table ${this.config?.interface?.vim_nav || this.config?.interface?.arrow_nav ? "vim-on" : ""}" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, navRows)}>
+      <div class="rec-table ${this.config?.interface?.vim_nav || this.config?.interface?.arrow_nav ? "vim-on" : ""}" tabindex="0" role="listbox" aria-label="Recordings" aria-activedescendant=${this.focusedIndex >= 0 ? `rec-row-${this.focusedIndex}` : nothing} @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, navRows)}>
         <div class="rec-table-inner${transcriptIsLast ? " transcript-tail" : ""}" style="${transcriptIsLast ? "" : `min-width: ${gridMinWidth}px;`}">
           ${head}
           ${body}
@@ -1008,11 +1008,12 @@ export class RecordingsListElement extends LitElement {
     const cells = visibleCols.map((c) => cellMap[c] || nothing);
     
     return html`
-      <div 
+      <div
+        id="rec-row-${index}"
         class="rec-row ${active ? "active" : ""} ${kbFocused ? "kbd-focused" : ""} ${multiChecked ? "multi-selected" : ""} ${track ? "rec-row--track" : ""} ${this.freshIds.has(r.id) ? "rec-row-enter" : ""}"
         data-id="${r.id}"
-        role="option" 
-        aria-selected="${active}" 
+        role="option"
+        aria-selected="${active}"
         style="grid-template-columns: ${gridTemplate}"
         @click=${(e: MouseEvent) => this.handleRowClick(e, r.id, index, navRows)}
       >
@@ -1054,9 +1055,10 @@ export class RecordingsListElement extends LitElement {
 
     return html`
       <div
+        id="rec-row-${index}"
         class="rec-group-head ${isActive ? "active" : ""} ${kbFocused ? "kbd-focused" : ""} ${tracks.some((t) => this.freshIds.has(t.id)) ? "rec-row-enter" : ""}"
-        data-session="${meetingId}" 
-        role="group" 
+        data-session="${meetingId}"
+        role="group"
         aria-expanded="${expanded}"
         @click=${(e: MouseEvent) => this.handleGroupClick(e, meetingId)}
       >

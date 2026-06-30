@@ -1639,11 +1639,16 @@ impl<'de> Deserialize<'de> for ServerRequest {
     where
         D: serde::Deserializer<'de>,
     {
-        // Decode to a generic Value first — any well-formed JSON line succeeds
-        // here — then try to interpret it as a Request. An unknown variant
-        // becomes data (`Unknown`) rather than a stream-fatal codec error.
-        let value = serde_json::Value::deserialize(deserializer)?;
-        Ok(match serde_json::from_value::<Request>(value) {
+        // Capture the raw JSON of the line WITHOUT building a full `Value` AST
+        // (`RawValue` just borrows/owns the bytes), then parse those bytes once,
+        // directly into a `Request`. The old path decoded to `Value` and then
+        // walked that AST into `Request` — two passes plus an AST allocation per
+        // request; this is a single parse on the happy path. An unknown variant
+        // still becomes data (`Unknown`) rather than a stream-fatal codec error.
+        // (`ServerRequest` is only ever decoded from serde_json on the wire, which
+        // is what `RawValue` requires.)
+        let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+        Ok(match serde_json::from_str::<Request>(raw.get()) {
             Ok(req) => ServerRequest::Known(Box::new(req)),
             Err(e) => ServerRequest::Unknown {
                 detail: e.to_string(),
@@ -2219,17 +2224,26 @@ pub enum DaemonEvent {
         /// The removed tag's id.
         id: i64,
     },
-    /// A tag was attached to some recording (`AttachTag`, an approved
-    /// suggestion, or auto-accept). Carries only the tag id — affected views
-    /// refresh their recording's tag list.
+    /// A tag was attached to a recording (`AttachTag`, an approved suggestion, or
+    /// auto-accept). Carries the tag id and (additively) the affected recording
+    /// id so a subscriber can refresh exactly that recording's tag list without a
+    /// round-trip. `recording_id` is `#[serde(default)]` so an older daemon that
+    /// omits it, or an older client that ignores it, stays compatible.
     TagAttached {
         /// The attached tag's id.
         tag_id: i64,
+        /// The recording the tag was attached to (`None` from older daemons).
+        #[serde(default)]
+        recording_id: Option<RecordingId>,
     },
-    /// A tag was detached from some recording (`DetachTag`).
+    /// A tag was detached from a recording (`DetachTag`). Carries the tag id and
+    /// (additively) the affected recording id — see [`DaemonEvent::TagAttached`].
     TagDetached {
         /// The detached tag's id.
         tag_id: i64,
+        /// The recording the tag was detached from (`None` from older daemons).
+        #[serde(default)]
+        recording_id: Option<RecordingId>,
     },
 }
 

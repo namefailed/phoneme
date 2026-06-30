@@ -24,6 +24,22 @@
 /// the scheme can evolve without misreading old values.
 const PREFIX: &str = "dpapi:v1:";
 
+/// Set by [`protect`] whenever it has to write a key UNENCRYPTED because DPAPI
+/// failed. `protect` runs deep inside serde serialization (see `config.rs`), so
+/// it can't signal the caller directly — this process-global latch lets the
+/// config-write path detect a fallback after the fact and surface it.
+/// [`take_plaintext_fallback`] reads and clears it.
+static PLAINTEXT_FALLBACK: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Read-and-clear the "a secret was written unencrypted" latch. The config-write
+/// path calls this right after serializing so it can warn the user that at-rest
+/// protection didn't hold for this save (a transient DPAPI failure). Returns
+/// `true` exactly once per fallback burst.
+pub fn take_plaintext_fallback() -> bool {
+    PLAINTEXT_FALLBACK.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Encrypt `plaintext` for storage. Empty stays empty; on Windows this returns
 /// `dpapi:v1:<hex>`; off Windows (or if DPAPI fails) it returns the plaintext
 /// unchanged (best-effort, with a warning) so a key is never lost.
@@ -39,7 +55,9 @@ pub fn protect(plaintext: &str) -> String {
         // At error level: this breaks the module's "never stored in the clear"
         // guarantee. We still return the plaintext rather than drop the key (a
         // transient DPAPI failure shouldn't silently lose a key the user typed),
-        // but the failure must be visible, not buried in a warning.
+        // but the failure must be visible, not buried in a warning. Latch it so
+        // the config-write path can surface it after serialization too.
+        PLAINTEXT_FALLBACK.store(true, std::sync::atomic::Ordering::Relaxed);
         tracing::error!(
             "DPAPI encrypt failed; the API key will be written to config.toml UNENCRYPTED as a fallback"
         );

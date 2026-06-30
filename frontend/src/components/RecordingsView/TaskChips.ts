@@ -60,6 +60,10 @@ export class TaskChipsElement extends LitElement {
   private dragId: number | null = null;
   @state() private dragOverId: number | null = null;
   private unsubEvents: (() => void) | null = null;
+  /** Bumped on every (dis)connect so a slow `subscribe()` promise that resolves
+   *  after a disconnect — or after a disconnect+reconnect — unsubscribes itself
+   *  instead of leaking a listener or clobbering the live subscription. */
+  private subToken = 0;
 
   private toggleCollapsed = () => {
     this.collapsed = !this.collapsed;
@@ -73,6 +77,7 @@ export class TaskChipsElement extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    const myToken = ++this.subToken;
     if (this.recordingId) void this.load();
     void subscribe((e: DaemonEvent) => {
       if (e.event === "tasks_updated" && e.id === this.recordingId) {
@@ -83,13 +88,20 @@ export class TaskChipsElement extends LitElement {
         this.extracting = false;
       }
     }).then((un) => {
-      if (!this.isConnected) un();
-      else this.unsubEvents = un;
+      // A newer connect (or a disconnect) has happened while this promise was in
+      // flight — drop this listener rather than store a stale one.
+      if (this.subToken !== myToken || !this.isConnected) {
+        un();
+        return;
+      }
+      this.unsubEvents?.();
+      this.unsubEvents = un;
     });
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.subToken++;
     this.unsubEvents?.();
     this.unsubEvents = null;
   }

@@ -71,6 +71,20 @@ Any other method returns a JSON-RPC `-32601` (method not found).
 | `approve_tag_suggestion` | `id`, `name` (both required) | `ApproveTagSuggestion` | Confirmation — creates the tag if needed, attaches it, drops the suggestion |
 | `dismiss_tag_suggestion` | `id`, `name` (both required) | `DismissTagSuggestion` | Confirmation — drops the suggestion without attaching |
 
+**Ask, enrich & find/replace** (grounded Q&A, on-demand enrichment, and bulk edits):
+
+| Tool | Arguments | Maps to | Returns |
+|------|-----------|---------|---------|
+| `ask_archive` | `query` (required), `top_k?` (default server) | `Ask` | A natural-language answer grounded in the library, plus the cited source recordings |
+| `find_replace` | `id`, `find`, `replace` (required), `case_sensitive?` (default false) | `FindReplace` | Confirmation — literal find/replace in one transcript |
+| `find_replace_library` | `find`, `replace` (required), `case_sensitive?` | `FindReplaceLibrary` | How many recordings changed — literal find/replace across the whole library |
+| `suggest_entities` | `id` (required) | `SuggestEntities` | Confirmation — runs the LLM entity step on demand (awaits it) |
+| `get_entities` | `id` (required) | `GetEntities` | The recording's structured entities (person/org/topic/term) |
+| `suggest_tasks` | `id` (required) | `SuggestTasks` | Confirmation — runs the LLM task-extraction step on demand (awaits it) |
+| `set_task_done` | `id`, `task_id` (int), `done` (bool) | `SetTaskDone` | Confirmation — toggles one extracted task's done flag |
+| `suggest_chapters` | `id` (required) | `SuggestChapters` | Confirmation — runs the LLM auto-chapter step on demand (awaits it) |
+| `get_chapters` | `id` (required) | `GetChapters` | The recording's auto-chapters (start/end, title, optional summary) |
+
 **Meetings** (two-track capture on a shared timeline):
 
 | Tool | Arguments | Maps to | Returns |
@@ -88,6 +102,7 @@ Any other method returns a JSON-RPC `-32601` (method not found).
 | `merge_speakers` | `id`, `from_label` (≥1), `into_label` (≥1) | `MergeSpeakers` | Confirmation — `from` is absorbed into `into` |
 | `split_speaker` | `id`, `label` (≥1), `segment_idxs` (non-empty array of ≥0), `new_label` (≥1) | `SplitSpeaker` | Confirmation — moves the listed segments onto a fresh label |
 | `recognize_speakers` | `id` (required) | `RecognizeSpeakers` | Named-speaker matches (Speaker N → name), or a "no matches" note |
+| `dismiss_speaker_suggestion` | `id`, `speaker_label` (≥1) | `DismissSpeakerSuggestion` | Confirmation — drops the recognized-name suggestion for one label (keeps generic Speaker N) |
 
 **Named-voice library** (the enrolled voices recognition matches against):
 
@@ -97,6 +112,7 @@ Any other method returns a JSON-RPC `-32601` (method not found).
 | `rename_named_voice` | `id`, `name` (both required) | `RenameNamedVoice` | Confirmation |
 | `merge_named_voices` | `from_id`, `into_id` (both required) | `MergeNamedVoices` | Confirmation — `from`'s samples move onto `into`, then `from` is removed |
 | `forget_named_voice` | `id` (required) | `ForgetNamedVoice` | Confirmation — **reversible** in-app (raw voiceprints stay); confirm with the user first |
+| `undo_forget_named_voice` | `id` (required) | `UndoForgetNamedVoice` | Confirmation — restores a previously-forgotten voice back into recognition |
 
 **Destructive prune** (irreversible — confirm with the user before calling):
 

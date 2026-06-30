@@ -51,23 +51,27 @@ pub async fn get_recording(
 }
 
 /// `GET /api/recordings/:id/segments` — fetch the recording's transcript
-/// segments in timeline order.
+/// segments in timeline order. `?variant=cleaned` reads the post-cleanup
+/// re-aligned timeline instead of the raw transcript.
 pub async fn get_segments(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(v): Query<request_map::VariantQuery>,
 ) -> Result<Json<serde_json::Value>, RestError> {
     let id = require_id(&id)?;
-    forward(&state, request_map::get_segments(id)).await
+    forward(&state, request_map::get_segments(id, v.variant.as_deref())).await
 }
 
 /// `GET /api/recordings/:id/words` — fetch the per-word layer beneath
 /// `segments` (word seek, confidence). May be an empty array — a normal state.
+/// `?variant=cleaned` reads the post-cleanup re-aligned timeline.
 pub async fn get_words(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(v): Query<request_map::VariantQuery>,
 ) -> Result<Json<serde_json::Value>, RestError> {
     let id = require_id(&id)?;
-    forward(&state, request_map::get_words(id)).await
+    forward(&state, request_map::get_words(id, v.variant.as_deref())).await
 }
 
 /// `GET /api/recordings/:id/chapters` — fetch the recording's auto-chapters in

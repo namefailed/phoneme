@@ -46,6 +46,10 @@ export class InsightsCardElement extends LitElement {
   @state() private taskTotal = 0;
   @state() private entityByKind: Record<string, number> = {};
   private unsubEvents: (() => void) | null = null;
+  /** Bumped on every (dis)connect so a slow `subscribe()` promise that resolves
+   *  after a disconnect — or after a disconnect+reconnect — unsubscribes itself
+   *  instead of leaking a listener or clobbering the live subscription. */
+  private subToken = 0;
 
   private toggle = () => {
     this.collapsed = !this.collapsed;
@@ -54,6 +58,7 @@ export class InsightsCardElement extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    const myToken = ++this.subToken;
     // Initial counts load is driven by the first updated() (recordingId change),
     // so it isn't duplicated here.
     void subscribe((e: DaemonEvent) => {
@@ -63,13 +68,18 @@ export class InsightsCardElement extends LitElement {
       else if (e.event === "entities_updated" && e.id === this.recordingId) void this.loadCounts();
       else if (e.event === "entities_merged") void this.loadCounts();
     }).then((un) => {
-      if (!this.isConnected) un();
-      else this.unsubEvents = un;
+      if (this.subToken !== myToken || !this.isConnected) {
+        un();
+        return;
+      }
+      this.unsubEvents?.();
+      this.unsubEvents = un;
     });
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.subToken++;
     this.unsubEvents?.();
     this.unsubEvents = null;
   }

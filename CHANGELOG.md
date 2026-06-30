@@ -8,6 +8,20 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 
 ### Added
 
+- [x] **Agent / MCP gains an `ask_archive` tool + on-demand enrichment & bulk
+  edit** — the `phoneme-agent-core` registry (and so the MCP server) now exposes
+  `ask_archive` (grounded Q&A over the whole library), `find_replace` /
+  `find_replace_library`, `suggest_entities` / `get_entities`, `suggest_tasks` /
+  `set_task_done`, `suggest_chapters` / `get_chapters`, `dismiss_speaker_suggestion`,
+  and `undo_forget_named_voice`. See [`docs/developer-guide/mcp_server.md`](docs/developer-guide/mcp_server.md).
+- [x] **REST: filter `GET /api/recordings` as richly as the GUI** — the listing
+  endpoint now accepts `text` (full-text), `tag_id`, `status`, `favorite`,
+  `pinned`, `in_place`, `tagged`, `since`/`until` (RFC-3339) and `sort_desc`, not
+  just `limit`/`offset`/`kind`. The transcript-timeline endpoints take an optional
+  `?variant=cleaned` to read the post-cleanup re-aligned timeline. The
+  `tag_attached` / `tag_detached` SSE events now carry the affected `recording_id`,
+  and toggling favorite/pin emits a refresh event so other clients stay in sync.
+
 - [x] **Manage downloaded transcription models from inside the app** — downloaded
   whisper.cpp models accumulate on disk (they're 75 MB–3 GB each and never
   auto-removed), but until now the only way to reclaim that space was deleting
@@ -29,6 +43,21 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 
 ### Fixed
 
+- [x] **At-rest key protection failures are no longer silent** — if Windows DPAPI
+  can't encrypt an API key at save time (credential service down, profile not
+  loaded), the key still saves so your other settings aren't lost, but the
+  fallback-to-plaintext is now escalated to a single actionable error in the log +
+  diagnostics bundle ("re-save once the credential service is healthy") instead of
+  a buried per-key warning.
+- [x] **Cloud transcription uploads stream from disk** — OpenAI/Groq, Deepgram,
+  AssemblyAI and ElevenLabs uploads no longer read the whole WAV into memory
+  first; a multi-GB recording is streamed straight off disk (the request bytes are
+  identical — only the memory spike is gone).
+- [x] **Faster semantic search / Ask on large libraries** — the Ask retrieval
+  path and the semantic-search / "more like this" handlers now batch their
+  database reads instead of one round-trip per result (up to ~1000 fewer queries
+  on a big result set); the recordings-list filter query was unified so a
+  filtered semantic search fetches only ids, not full rows it throws away.
 - [x] **Keyboard nav reaches Tasks & Entities** — the detail-pane grid never
   collected the Insights card, so `j`/`k`/`h`/`l` skipped straight past Tasks and
   Entities to the notes/footer. The card header, both section collapse toggles,

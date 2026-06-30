@@ -1245,9 +1245,10 @@ pub(crate) async fn suggest_tags_with(
                         Ok(tag) => match state.catalog.attach_tag(id, tag.id).await {
                             Ok(()) => {
                                 accepted += 1;
-                                state
-                                    .events
-                                    .emit(DaemonEvent::TagAttached { tag_id: tag.id });
+                                state.events.emit(DaemonEvent::TagAttached {
+                                    tag_id: tag.id,
+                                    recording_id: Some(id.clone()),
+                                });
                             }
                             Err(e) => tracing::warn!(error = %e, "auto-accept: attach failed"),
                         },

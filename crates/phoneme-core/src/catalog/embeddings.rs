@@ -710,10 +710,14 @@ impl Catalog {
                     sort_desc: None,
                     ..f.clone()
                 };
-                let rows = self.list(&scoped).await?;
+                // Only the ids are needed to build the in-scope key set, so use the
+                // id-only `list_ids` rather than `list` — the latter would fetch and
+                // fully deserialize every matching Recording plus its tags/entities/
+                // tasks child queries, all discarded here.
+                let rows = self.list_ids(&scoped).await?;
                 Some(
                     rows.into_iter()
-                        .map(|r| r.meeting_id.unwrap_or_else(|| r.id.as_str().to_string()))
+                        .map(|(id, meeting_id)| meeting_id.unwrap_or(id))
                         .collect(),
                 )
             }
@@ -929,6 +933,54 @@ impl Catalog {
             .await?;
 
         let mut out: Vec<RetrievedChunk> = Vec::new();
+
+        // Pre-fetch every fused recording's transcript+meeting_id and its chunk
+        // vectors in two batched `WHERE … IN (…)` queries, instead of a `get()`
+        // plus a chunk query PER result (2×N sequential round-trips on the Ask
+        // hot path). Only transcript + meeting_id are needed, so this also skips
+        // the tag/entity/task child queries a full `get` would run.
+        const RETRIEVE_IN_BATCH: usize = 500;
+        let fused_ids: Vec<String> = fused
+            .iter()
+            .map(|(_, rec_id, _, _)| rec_id.as_str().to_string())
+            .collect();
+        let mut rec_map: std::collections::HashMap<String, (Option<String>, Option<String>)> =
+            std::collections::HashMap::new();
+        for ids in fused_ids.chunks(RETRIEVE_IN_BATCH) {
+            let ph = vec!["?"; ids.len()].join(",");
+            let sql = format!("SELECT id, transcript, meeting_id FROM recordings WHERE id IN ({ph})");
+            let mut q = sqlx::query(&sql);
+            for id in ids {
+                q = q.bind(id);
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                let id: String = row.try_get("id")?;
+                let transcript: Option<String> = row.try_get("transcript")?;
+                let meeting_id: Option<String> = row.try_get("meeting_id")?;
+                rec_map.insert(id, (transcript, meeting_id));
+            }
+        }
+        // Chunk vectors grouped by recording (ORDER BY chunk_index preserves the
+        // ordinal the argmax + citation rely on).
+        let mut chunk_map: std::collections::HashMap<String, Vec<Vec<u8>>> =
+            std::collections::HashMap::new();
+        for ids in fused_ids.chunks(RETRIEVE_IN_BATCH) {
+            let ph = vec!["?"; ids.len()].join(",");
+            let sql = format!(
+                "SELECT recording_id, vector FROM embedding_chunks WHERE recording_id IN ({ph}) \
+                 ORDER BY recording_id, chunk_index"
+            );
+            let mut q = sqlx::query(&sql);
+            for id in ids {
+                q = q.bind(id);
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                let rid: String = row.try_get("recording_id")?;
+                let vector: Vec<u8> = row.try_get("vector")?;
+                chunk_map.entry(rid).or_default().push(vector);
+            }
+        }
+
         for (_key, rec_id, display, _matched_lexically) in fused {
             if out.len() >= top_k {
                 break;
@@ -936,33 +988,24 @@ impl Catalog {
 
             // Recover the recording's live transcript; an audio-only /
             // retention-reclaimed row can't ground anything, so it is dropped.
-            let Some(recording) = self.get(&rec_id).await? else {
+            let Some((transcript_opt, meeting_id_opt)) = rec_map.get(rec_id.as_str()) else {
                 continue;
             };
-            let Some(transcript) = recording
-                .transcript
-                .as_deref()
-                .filter(|t| !t.trim().is_empty())
-            else {
+            let Some(transcript) = transcript_opt.as_deref().filter(|t| !t.trim().is_empty()) else {
                 continue;
             };
-            let meeting_id = recording.meeting_id.clone();
+            let meeting_id = meeting_id_opt.clone();
             let chunks = crate::chunk::chunk_transcript(transcript);
 
-            // Argmax the recording's stored chunk vectors against the query to
-            // find which chunk matched (citation granularity). A lexical-only /
-            // legacy-only hit has no chunk vectors to argmax over.
-            let chunk_rows = sqlx::query(
-                "SELECT vector FROM embedding_chunks WHERE recording_id = ? ORDER BY chunk_index",
-            )
-            .bind(rec_id.as_str())
-            .fetch_all(&self.pool)
-            .await?;
+            // Argmax the recording's stored chunk vectors (pre-fetched above)
+            // against the query to find which chunk matched (citation
+            // granularity). A lexical-only / legacy-only hit has none to argmax.
+            static NO_CHUNKS: Vec<Vec<u8>> = Vec::new();
+            let chunk_blobs = chunk_map.get(rec_id.as_str()).unwrap_or(&NO_CHUNKS);
 
             let mut best_chunk: Option<usize> = None;
             let mut best_score = f32::NEG_INFINITY;
-            for (ordinal, row) in chunk_rows.iter().enumerate() {
-                let bytes: Vec<u8> = row.try_get("vector")?;
+            for (ordinal, bytes) in chunk_blobs.iter().enumerate() {
                 if !bytes.len().is_multiple_of(4) {
                     continue; // corrupt blob — same guard as the scan paths
                 }
@@ -1463,11 +1506,37 @@ impl Catalog {
         )
         .fetch_all(&self.pool)
         .await?;
+        // Allocate keys for every recording in ONE transaction. The per-recording
+        // `allocate_ann_keys` opens its own transaction (BEGIN+DELETE+INSERT+SELECT+
+        // COMMIT) and returns the keys — but this build path re-reads the keys via
+        // the JOIN below, so here we skip the SELECT-back and fold all recordings
+        // into a single transaction, turning N transactions on a full reindex into 1.
+        let mut tx = self.pool.begin().await?;
         for (rid, n) in &counts {
-            if let Some(id) = RecordingId::parse(rid.clone()) {
-                self.allocate_ann_keys(&id, *n as usize).await?;
+            let Some(id) = RecordingId::parse(rid.clone()) else {
+                continue;
+            };
+            let chunk_count = *n as usize;
+            // Drop key rows for chunk indices that no longer exist (recording shrank).
+            sqlx::query("DELETE FROM ann_keys WHERE recording_id = ? AND chunk_index >= ?")
+                .bind(id.as_str())
+                .bind(chunk_count as i64)
+                .execute(&mut *tx)
+                .await?;
+            if chunk_count == 0 {
+                continue;
             }
+            let placeholders = vec!["(?, ?)"; chunk_count].join(", ");
+            let insert = format!(
+                "INSERT OR IGNORE INTO ann_keys (recording_id, chunk_index) VALUES {placeholders}"
+            );
+            let mut q = sqlx::query(&insert);
+            for idx in 0..chunk_count {
+                q = q.bind(id.as_str()).bind(idx as i64);
+            }
+            q.execute(&mut *tx).await?;
         }
+        tx.commit().await?;
 
         // Join chunks to their keys and decode.
         let rows = sqlx::query(
@@ -1722,13 +1791,15 @@ impl Catalog {
     pub async fn ann_health(&self) -> AnnHealth {
         let compiled = ann::feature_compiled();
         let enabled = self.ann_config_snapshot().enabled;
-        let sqlite_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM ann_keys ak JOIN embedding_chunks ec \
-             ON ak.recording_id = ec.recording_id AND ak.chunk_index = ec.chunk_index",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .unwrap_or(0);
+        // Count only the chunk vectors the index would actually build from: those
+        // at the modal embedding dimension. An unfiltered COUNT(*) here includes
+        // off-dimension / corrupt blobs (which `collect_ann_build_pairs` skips),
+        // so it would diverge from `index_vectors` and read as "rebuilding" forever
+        // on a mixed-dimension library. `None` dim (no well-formed chunks) → 0.
+        let sqlite_count = match self.ann_dim_from_sqlite().await {
+            Some(dim) => self.ann_indexable_count(dim).await,
+            None => 0,
+        };
         let index_count = self
             .ann
             .read()
@@ -1739,7 +1810,7 @@ impl Catalog {
             enabled,
             index_loaded: index_count.is_some(),
             index_vectors: index_count.unwrap_or(0),
-            sqlite_vectors: sqlite_count as usize,
+            sqlite_vectors: sqlite_count,
         }
     }
 }
