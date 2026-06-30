@@ -169,4 +169,33 @@ mod tests {
         let code = run(args, &cfg, false).await;
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
     }
+
+    /// Two *distinct* seconds (start < end) can still round to the same
+    /// millisecond — 0.9995 and 1.0004 both round to 1000ms. This passes the
+    /// earlier `start >= end` check but must be caught by the same-millisecond
+    /// guard (clip.rs lines 47-52), locally, before any daemon connection.
+    #[tokio::test]
+    async fn rejects_start_and_end_that_round_to_the_same_ms() {
+        let id = RecordingId::new();
+        // Sanity-check the rounding the guard relies on: distinct seconds, but
+        // the same millisecond after `(s * 1000.0).round()`.
+        assert!(0.9995_f64 < 1.0004_f64, "the seconds must be distinct");
+        assert_eq!((0.9995_f64 * 1000.0).round() as i64, 1000);
+        assert_eq!((1.0004_f64 * 1000.0).round() as i64, 1000);
+
+        let args = ClipArgs {
+            id: id.to_string(),
+            start: 0.9995,
+            end: 1.0004,
+            out: None,
+        };
+        // Spawn a mock so we can prove the rejection happened *before* connecting:
+        // nothing must reach the daemon.
+        let (code, reqs) = run_clip(args, "C:/audio/unused.wav").await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+        assert!(
+            reqs.is_empty(),
+            "a same-millisecond range must be rejected before any request is sent"
+        );
+    }
 }

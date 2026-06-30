@@ -60,8 +60,16 @@ async fn fresh_catalog() -> (TempDir, Catalog) {
 
 #[tokio::test]
 async fn opens_creates_schema_when_missing() {
-    let (_dir, _catalog) = fresh_catalog().await;
-    // Reaching this point means migrations ran without error.
+    let (_dir, catalog) = fresh_catalog().await;
+    // Migrations ran without error AND the core tables they create are actually
+    // queryable: a list over the fresh schema succeeds and returns no rows, so a
+    // migration that silently failed to create the `recordings` table (or its
+    // FTS/tag companions the query joins) would surface here rather than only in
+    // a later insert/get test.
+    let list = catalog.list(&ListFilter::default()).await.unwrap();
+    assert!(list.is_empty(), "a fresh catalog lists no recordings");
+    assert!(catalog.list_all_tags().await.unwrap().is_empty());
+    assert!(catalog.list_saved_searches().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -295,11 +303,13 @@ async fn list_returns_inserted_recordings_descending() {
 #[tokio::test]
 async fn list_respects_limit() {
     let (_dir, catalog) = fresh_catalog().await;
+    let mut ids = Vec::new();
     for h in 0..5 {
         let rec = sample_recording(RecordingId::from_datetime(
             Local.with_ymd_and_hms(2026, 5, 19, h, 0, 0).unwrap(),
         ));
         catalog.insert(&rec).await.unwrap();
+        ids.push(rec.id); // ids[h] is the recording at hour h
     }
     let list = catalog
         .list(&ListFilter {
@@ -308,7 +318,12 @@ async fn list_respects_limit() {
         })
         .await
         .unwrap();
+    // LIMIT applies AFTER the newest-first ORDER BY, so the two newest (h4, h3)
+    // come back in that order — not just any two rows. A LIMIT-before-ORDER-BY,
+    // a flipped sort, or an oldest-first LIMIT would all change these identities.
     assert_eq!(list.len(), 2);
+    assert_eq!(list[0].id, ids[4], "first row is the newest (h4)");
+    assert_eq!(list[1].id, ids[3], "second row is the next-newest (h3)");
 }
 
 #[tokio::test]
@@ -386,6 +401,255 @@ async fn list_filters_by_status() {
         .unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, r2.id);
+}
+
+#[tokio::test]
+async fn list_since_until_filter_restricts_to_the_date_window() {
+    let (_dir, catalog) = fresh_catalog().await;
+    // Three recordings on distinct days. started_at (not the id) drives the
+    // since/until SQL, so set it explicitly on each row.
+    let at = |y, m, d| {
+        let when = Local.with_ymd_and_hms(y, m, d, 12, 0, 0).unwrap();
+        let mut rec = sample_recording(RecordingId::from_datetime(when));
+        rec.started_at = when;
+        rec
+    };
+    let jan = at(2026, 1, 10);
+    let mar = at(2026, 3, 15);
+    let may = at(2026, 5, 20);
+    for r in [&jan, &mar, &may] {
+        catalog.insert(r).await.unwrap();
+    }
+
+    // since: keep only recordings started at or after Feb 1 → mar + may (newest first).
+    let from_feb = catalog
+        .list(&ListFilter {
+            since: Some(Local.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        from_feb.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+        vec![may.id.clone(), mar.id.clone()],
+        "since keeps started_at >= the bound, newest first"
+    );
+
+    // until: keep only recordings started at or before Apr 1 → jan + mar.
+    let through_mar = catalog
+        .list(&ListFilter {
+            until: Some(Local.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        through_mar.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+        vec![mar.id.clone(), jan.id.clone()],
+        "until keeps started_at <= the bound, newest first"
+    );
+
+    // since+until window [Feb 1, Apr 1] intersects to exactly the March recording —
+    // proving the two binds compose as >= and <= (not swapped), in the right order.
+    let window = catalog
+        .list(&ListFilter {
+            since: Some(Local.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap()),
+            until: Some(Local.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(window.len(), 1, "only the in-window recording survives");
+    assert_eq!(window[0].id, mar.id);
+}
+
+#[tokio::test]
+async fn list_boolean_flag_filters_partition_by_predicate() {
+    let (_dir, catalog) = fresh_catalog().await;
+    // Four recordings; flip favorite/pinned/in_place on a chosen one each.
+    // in_place has no setter, so it's set at insert time on the struct.
+    let plain = sample_recording(RecordingId::new());
+    let fav = sample_recording(RecordingId::new());
+    let pin = sample_recording(RecordingId::new());
+    let mut inplace = sample_recording(RecordingId::new());
+    inplace.in_place = true;
+    for r in [&plain, &fav, &pin, &inplace] {
+        catalog.insert(r).await.unwrap();
+    }
+    catalog.set_favorite(&fav.id, true).await.unwrap();
+    catalog.set_pinned(&pin.id, true).await.unwrap();
+
+    let ids = |rows: &[Recording]| {
+        rows.iter().map(|r| r.id.clone()).collect::<std::collections::HashSet<_>>()
+    };
+    let list = |f: ListFilter| {
+        let catalog = &catalog;
+        async move { catalog.list(&f).await.unwrap() }
+    };
+
+    // favorite: Some(true) returns exactly the starred one; Some(false) is the rest.
+    let only_fav = list(ListFilter {
+        favorite: Some(true),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(ids(&only_fav), std::collections::HashSet::from([fav.id.clone()]));
+    let not_fav = list(ListFilter {
+        favorite: Some(false),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(
+        ids(&not_fav),
+        ids(&[plain.clone(), pin.clone(), inplace.clone()]),
+        "Some(false) is the exact complement of Some(true)"
+    );
+
+    // pinned: Some(true)/Some(false) symmetry.
+    let only_pin = list(ListFilter {
+        pinned: Some(true),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(ids(&only_pin), std::collections::HashSet::from([pin.id.clone()]));
+    let not_pin = list(ListFilter {
+        pinned: Some(false),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(ids(&not_pin), ids(&[plain.clone(), fav.clone(), inplace.clone()]));
+
+    // in_place: Some(true)/Some(false) symmetry.
+    let only_inplace = list(ListFilter {
+        in_place: Some(true),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(
+        ids(&only_inplace),
+        std::collections::HashSet::from([inplace.id.clone()])
+    );
+    let not_inplace = list(ListFilter {
+        in_place: Some(false),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(ids(&not_inplace), ids(&[plain.clone(), fav.clone(), pin.clone()]));
+
+    // None = no filter: all four.
+    assert_eq!(list(ListFilter::default()).await.len(), 4);
+}
+
+#[tokio::test]
+async fn list_tagged_true_returns_only_tagged_recordings() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("any", None).await.unwrap();
+    let tagged = sample_recording(RecordingId::new());
+    let untagged = sample_recording(RecordingId::new());
+    catalog.insert(&tagged).await.unwrap();
+    catalog.insert(&untagged).await.unwrap();
+    catalog.attach_tag(&tagged.id, tag.id).await.unwrap();
+
+    let has_tag = catalog
+        .list(&ListFilter {
+            tagged: Some(true),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(has_tag.len(), 1);
+    assert_eq!(has_tag[0].id, tagged.id);
+
+    // Some(false) is the complement: only the untagged recording.
+    let no_tag = catalog
+        .list(&ListFilter {
+            tagged: Some(false),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(no_tag.len(), 1);
+    assert_eq!(no_tag[0].id, untagged.id);
+}
+
+#[tokio::test]
+async fn list_task_state_filters_open_vs_any() {
+    use phoneme_core::Task;
+    let (_dir, catalog) = fresh_catalog().await;
+    // open: a recording with a not-done task. done_only: a recording whose only
+    // task is already done. none: a recording with no tasks at all.
+    let open = sample_recording(RecordingId::new());
+    let done_only = sample_recording(RecordingId::new());
+    let none = sample_recording(RecordingId::new());
+    for r in [&open, &done_only, &none] {
+        catalog.insert(r).await.unwrap();
+    }
+    let task = |text: &str, done: bool| Task {
+        id: 0,
+        text: text.into(),
+        due_hint: None,
+        done,
+    };
+    catalog
+        .set_tasks(&open.id, &[task("email Sarah", false)])
+        .await
+        .unwrap();
+    catalog
+        .set_tasks(&done_only.id, &[task("already shipped", true)])
+        .await
+        .unwrap();
+
+    // has_open → only the recording with an unfinished task.
+    let has_open = catalog
+        .list(&ListFilter {
+            task_state: Some("has_open".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(has_open.len(), 1);
+    assert_eq!(has_open[0].id, open.id);
+
+    // has_tasks → both recordings that have any task (open + done_only), not `none`.
+    let has_tasks = catalog
+        .list(&ListFilter {
+            task_state: Some("has_tasks".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let ids: std::collections::HashSet<_> = has_tasks.iter().map(|r| r.id.clone()).collect();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.contains(&open.id));
+    assert!(ids.contains(&done_only.id));
+    assert!(!ids.contains(&none.id), "a task-less recording is excluded");
+}
+
+#[tokio::test]
+async fn list_low_confidence_below_excludes_null_aggregate() {
+    let (_dir, catalog) = fresh_catalog().await;
+    // below: mean_confidence 0.4; above: 0.9; null: never scored.
+    let below = sample_recording(RecordingId::new());
+    let above = sample_recording(RecordingId::new());
+    let null = sample_recording(RecordingId::new());
+    for r in [&below, &above, &null] {
+        catalog.insert(r).await.unwrap();
+    }
+    catalog.update_confidence(&below.id, Some(0.4)).await.unwrap();
+    catalog.update_confidence(&above.id, Some(0.9)).await.unwrap();
+    // `null` keeps a NULL mean_confidence.
+
+    let low = catalog
+        .list(&ListFilter {
+            low_confidence_below: Some(0.6),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    // The `mean_confidence IS NOT NULL AND < ?` predicate excludes both the
+    // above-threshold row and the NULL-aggregate row.
+    assert_eq!(low.len(), 1, "only the strictly-below, non-NULL row matches");
+    assert_eq!(low[0].id, below.id);
 }
 
 #[tokio::test]
@@ -1959,6 +2223,22 @@ async fn voiceprints_enroll_recognize_merge_and_forget() {
     let voices = catalog.list_named_voices().await.unwrap();
     assert_eq!(voices.len(), 1);
     assert_eq!(voices[0].samples, 3);
+
+    // Guard branches: a merge that can't proceed returns false and mutates
+    // nothing. Snapshot the library so we can prove it's untouched.
+    let before_guards = catalog.list_named_voices().await.unwrap();
+    // Self-merge (from == into) is a no-op.
+    assert!(!catalog.merge_named_voices(&id, &id).await.unwrap());
+    // A missing `from` id (only one of the pair exists → both < 2) is a no-op.
+    assert!(!catalog.merge_named_voices("nv_bogus", &id).await.unwrap());
+    // A missing `into` id is likewise a no-op.
+    assert!(!catalog.merge_named_voices(&id, "nv_bogus").await.unwrap());
+    // The library — names, ids, and the 3-sample centroid — is unchanged.
+    assert_eq!(
+        catalog.list_named_voices().await.unwrap(),
+        before_guards,
+        "a guarded merge must leave the named-voice library untouched"
+    );
 
     // Forgetting Alice empties the library but keeps the raw captures.
     assert!(catalog.forget_named_voice(&id).await.unwrap());

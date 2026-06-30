@@ -167,14 +167,31 @@ describe("SyncedTranscript", () => {
     view.dispose();
   });
 
-  it("never edits — dispose empties the host and leaves no live spans", async () => {
+  it("never edits — word spans are read-only, and dispose empties the host", async () => {
     vi.mocked(getWords).mockResolvedValue(WORDS);
     const host = document.createElement("div");
     document.body.appendChild(host);
     const view = new SyncedTranscript(host, "rec-1", { onSeek: vi.fn() });
     await tick();
-    expect(host.querySelectorAll(".st-word").length).toBe(4);
+
+    const spans = [...host.querySelectorAll<HTMLElement>(".st-word")];
+    expect(spans.length).toBe(4);
+    // "Never edits": every word span is a plain, non-editable element (clicking
+    // only seeks). A regression that made a span contenteditable would break
+    // this. (jsdom doesn't implement HTMLElement.isContentEditable, so assert
+    // on the attribute, which is what drives editability.)
+    for (const span of spans) {
+      expect(span.hasAttribute("contenteditable")).toBe(false);
+      expect(span.getAttribute("contenteditable")).toBeNull();
+      // A read-only seek span, not an input/textarea.
+      expect(span.tagName).toBe("SPAN");
+    }
+    // The host container itself isn't an editable surface either.
+    expect(host.hasAttribute("contenteditable")).toBe(false);
+
+    // dispose() fully tears the host down — no live spans left behind.
     view.dispose();
     expect(host.innerHTML).toBe("");
+    expect(host.querySelectorAll(".st-word").length).toBe(0);
   });
 });

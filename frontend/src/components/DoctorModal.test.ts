@@ -203,6 +203,19 @@ describe("DoctorModal layout: failures first, passing collapsed", () => {
       "Audio directory",
       "Mystery probe",
     ]);
+
+    // Per-group MEMBERSHIP, not just overall order: each passing check must
+    // render UNDER its own subsystem header inside its own .doctor-group, so a
+    // mis-bucketing that kept the flat order would still be caught here.
+    const groups = qa(".doctor-group").map((g) => ({
+      title: g.querySelector(".doctor-group-title")?.textContent?.trim(),
+      names: Array.from(g.querySelectorAll(".doctor-pass-name")).map((n) => n.textContent),
+    }));
+    expect(groups).toEqual([
+      { title: "Servers", names: ["Whisper server"] },
+      { title: "Storage", names: ["Audio directory"] },
+      { title: "Other", names: ["Mystery probe"] },
+    ]);
   });
 
   it("toggles the passing fold via its summary", async () => {

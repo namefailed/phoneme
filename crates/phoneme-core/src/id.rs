@@ -176,6 +176,35 @@ mod tests {
         let a = RecordingId::from_datetime(dt);
         let b = RecordingId::from_datetime(dt);
         assert_ne!(a, b);
+        // The only difference is the 3-digit counter suffix: the YYYYMMDDTHHMMSS
+        // wall-clock prefix is identical for the same datetime, so the counter
+        // (not the timestamp) is what disambiguates same-second ids.
+        assert_eq!(a.as_str()[..15], b.as_str()[..15]);
+        assert_eq!(&a.as_str()[..15], "20260519T143500");
+    }
+
+    #[test]
+    fn counter_suffix_wraps_at_1000() {
+        // The doc comment promises a 3-digit counter taken `mod 1000`. Generate a
+        // run of ids spanning more than 1000 counter values in one fixed second
+        // and confirm the suffix always stays a 3-digit value in 000..=999 — i.e.
+        // it wraps 999 -> 000 rather than overflowing to a 4th digit and pushing
+        // the id past 18 chars. (`COUNTER` is a process-wide AtomicU64 that other
+        // parallel tests also bump, so this asserts the wrap invariant on each
+        // suffix rather than a strict +1 step, which interleaving could break.)
+        let dt = Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap();
+        let suffix = |id: &RecordingId| id.as_str()[15..].parse::<u32>().unwrap();
+        for _ in 0..1500 {
+            let id = RecordingId::from_datetime(dt);
+            assert_eq!(id.as_str().len(), 18, "id stays 18 chars across the wrap");
+            // The whole suffix is digits and within the mod-1000 range.
+            assert!(
+                id.as_str()[15..].chars().all(|c| c.is_ascii_digit()),
+                "suffix must be 3 digits, got {:?}",
+                &id.as_str()[15..]
+            );
+            assert!(suffix(&id) < 1000, "suffix must stay in 000..=999");
+        }
     }
 
     #[test]

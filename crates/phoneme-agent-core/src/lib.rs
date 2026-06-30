@@ -1694,6 +1694,280 @@ mod tests {
     }
 
     #[test]
+    fn ask_archive_maps_with_deterministic_request_id() {
+        let r = ToolRegistry::with_phoneme_tools();
+        // Missing query → BadArgs (never reaches the daemon).
+        assert!(matches!(
+            r.to_request("ask_archive", &json!({})),
+            Err(ToolError::BadArgs { .. })
+        ));
+        // No top_k → server default (0); filter stays None.
+        let got = r.to_request("ask_archive", &json!({ "query": "x" })).unwrap();
+        let Request::Ask {
+            request_id,
+            query,
+            top_k,
+            filter,
+        } = got
+        else {
+            panic!("expected Request::Ask, got {got:?}");
+        };
+        assert_eq!(query, "x");
+        assert_eq!(top_k, 0);
+        assert_eq!(filter, None);
+        // request_id is the documented stable hash of the query.
+        assert_eq!(request_id, "agent-ask-735b2f4734cda621");
+        // Deterministic: the same query yields the same id across calls.
+        let again = r.to_request("ask_archive", &json!({ "query": "x" })).unwrap();
+        let Request::Ask {
+            request_id: again_id,
+            ..
+        } = again
+        else {
+            panic!("expected Request::Ask");
+        };
+        assert_eq!(again_id, request_id);
+        // A different query yields a different id, and top_k is threaded through.
+        let other = r
+            .to_request("ask_archive", &json!({ "query": "y", "top_k": 5 }))
+            .unwrap();
+        assert_eq!(
+            other,
+            Request::Ask {
+                request_id: "agent-ask-3e6a7ae8d0c88f4f".to_string(),
+                query: "y".to_string(),
+                top_k: 5,
+                filter: None,
+            }
+        );
+    }
+
+    #[test]
+    fn find_replace_defaults_case_insensitive() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        // case_sensitive omitted → false.
+        assert_eq!(
+            r.to_request(
+                "find_replace",
+                &json!({ "id": id.as_str(), "find": "teh", "replace": "the" })
+            )
+            .unwrap(),
+            Request::FindReplace {
+                id: id.clone(),
+                find: "teh".to_string(),
+                replace: "the".to_string(),
+                case_sensitive: false,
+            }
+        );
+        // case_sensitive: true threaded through.
+        assert_eq!(
+            r.to_request(
+                "find_replace",
+                &json!({ "id": id.as_str(), "find": "API", "replace": "api", "case_sensitive": true })
+            )
+            .unwrap(),
+            Request::FindReplace {
+                id: id.clone(),
+                find: "API".to_string(),
+                replace: "api".to_string(),
+                case_sensitive: true,
+            }
+        );
+        // Missing find or replace → BadArgs.
+        assert!(matches!(
+            r.to_request("find_replace", &json!({ "id": id.as_str(), "replace": "x" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+        assert!(matches!(
+            r.to_request("find_replace", &json!({ "id": id.as_str(), "find": "x" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn find_replace_library_defaults_case_insensitive() {
+        let r = ToolRegistry::with_phoneme_tools();
+        // case_sensitive omitted → false; no id is taken.
+        assert_eq!(
+            r.to_request(
+                "find_replace_library",
+                &json!({ "find": "color", "replace": "colour" })
+            )
+            .unwrap(),
+            Request::FindReplaceLibrary {
+                find: "color".to_string(),
+                replace: "colour".to_string(),
+                case_sensitive: false,
+            }
+        );
+        // case_sensitive: true threaded through.
+        assert_eq!(
+            r.to_request(
+                "find_replace_library",
+                &json!({ "find": "Foo", "replace": "Bar", "case_sensitive": true })
+            )
+            .unwrap(),
+            Request::FindReplaceLibrary {
+                find: "Foo".to_string(),
+                replace: "Bar".to_string(),
+                case_sensitive: true,
+            }
+        );
+        // Missing find or replace → BadArgs.
+        assert!(matches!(
+            r.to_request("find_replace_library", &json!({ "replace": "x" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+        assert!(matches!(
+            r.to_request("find_replace_library", &json!({ "find": "x" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn set_task_done_maps_and_requires_fields() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request(
+                "set_task_done",
+                &json!({ "id": id.as_str(), "task_id": 42, "done": true })
+            )
+            .unwrap(),
+            Request::SetTaskDone {
+                id: id.clone(),
+                task_id: 42,
+                done: true
+            }
+        );
+        // Missing the required boolean `done` → BadArgs.
+        assert!(matches!(
+            r.to_request(
+                "set_task_done",
+                &json!({ "id": id.as_str(), "task_id": 42 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+        // Missing the required integer `task_id` → BadArgs.
+        assert!(matches!(
+            r.to_request(
+                "set_task_done",
+                &json!({ "id": id.as_str(), "done": true })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn dismiss_speaker_suggestion_maps_and_validates_label() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request(
+                "dismiss_speaker_suggestion",
+                &json!({ "id": id.as_str(), "speaker_label": 2 })
+            )
+            .unwrap(),
+            Request::DismissSpeakerSuggestion {
+                id: id.clone(),
+                speaker_label: 2
+            }
+        );
+        // A label below 1 → BadArgs.
+        assert!(matches!(
+            r.to_request(
+                "dismiss_speaker_suggestion",
+                &json!({ "id": id.as_str(), "speaker_label": 0 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn id_only_enrichment_tools_map_and_validate_id() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        // Each id-only enrichment tool maps to its matching Request variant.
+        assert_eq!(
+            r.to_request("suggest_entities", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::SuggestEntities { id: id.clone() }
+        );
+        assert_eq!(
+            r.to_request("get_entities", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::GetEntities { id: id.clone() }
+        );
+        assert_eq!(
+            r.to_request("suggest_tasks", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::SuggestTasks { id: id.clone() }
+        );
+        assert_eq!(
+            r.to_request("suggest_chapters", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::SuggestChapters { id: id.clone() }
+        );
+        assert_eq!(
+            r.to_request("get_chapters", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::GetChapters { id: id.clone() }
+        );
+        // The shared require_recording_id path rejects a malformed id for each.
+        for tool in [
+            "suggest_entities",
+            "get_entities",
+            "suggest_tasks",
+            "suggest_chapters",
+            "get_chapters",
+        ] {
+            assert!(
+                matches!(
+                    r.to_request(tool, &json!({ "id": "not-an-id" })),
+                    Err(ToolError::BadArgs { .. })
+                ),
+                "{tool} should reject a malformed id"
+            );
+        }
+    }
+
+    #[test]
+    fn name_only_tools_carry_required_input_schema_arrays() {
+        // The order pin proves these tools are registered; this pins each one's
+        // declared `required` args so a dropped/renamed required field fails.
+        let r = ToolRegistry::with_phoneme_tools();
+        let required = |name: &str| -> Vec<String> {
+            let spec = r
+                .specs()
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap_or_else(|| panic!("no spec named {name}"))
+                .clone();
+            spec.input_schema["required"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{name} schema has no required array"))
+                .iter()
+                .map(|v| v.as_str().expect("required entry is a string").to_string())
+                .collect()
+        };
+        assert_eq!(required("ask_archive"), ["query"]);
+        assert_eq!(required("find_replace"), ["id", "find", "replace"]);
+        assert_eq!(required("find_replace_library"), ["find", "replace"]);
+        assert_eq!(required("suggest_entities"), ["id"]);
+        assert_eq!(required("get_entities"), ["id"]);
+        assert_eq!(required("suggest_tasks"), ["id"]);
+        assert_eq!(required("set_task_done"), ["id", "task_id", "done"]);
+        assert_eq!(required("suggest_chapters"), ["id"]);
+        assert_eq!(required("get_chapters"), ["id"]);
+        assert_eq!(
+            required("dismiss_speaker_suggestion"),
+            ["id", "speaker_label"]
+        );
+        assert_eq!(required("undo_forget_named_voice"), ["id"]);
+    }
+
+    #[test]
     fn list_recent_defaults_to_ten_and_sorts_newest_first() {
         let r = ToolRegistry::with_phoneme_tools();
         assert_eq!(
@@ -2025,6 +2299,12 @@ mod tests {
                 keep_audio: true
             }
         );
+        // A malformed id must be rejected by the shared id validator before any
+        // destructive Request::DeleteRecording is built.
+        assert!(matches!(
+            r.to_request("delete_recording", &json!({ "id": "not-an-id" })),
+            Err(ToolError::BadArgs { .. })
+        ));
     }
 
     #[test]
@@ -2287,6 +2567,15 @@ mod tests {
             r.to_request(
                 "split_speaker",
                 &json!({ "id": id.as_str(), "label": 1, "new_label": 2 })
+            ),
+            Err(ToolError::BadArgs { .. })
+        ));
+        // Source label == destination label is a contradiction → BadArgs, rejected
+        // before any Request is built (guards the `label == new_label` branch).
+        assert!(matches!(
+            r.to_request(
+                "split_speaker",
+                &json!({ "id": id.as_str(), "label": 2, "segment_idxs": [0], "new_label": 2 })
             ),
             Err(ToolError::BadArgs { .. })
         ));

@@ -710,6 +710,109 @@ mod tests {
     // Pause / resume
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // User-defined claim order (.queue-order manifest)
+    // -------------------------------------------------------------------------
+
+    /// A payload whose id has a controlled wall-clock prefix, so files sort
+    /// chronologically by that prefix and the order test is deterministic
+    /// regardless of the process-wide counter suffix.
+    fn payload_at(h: u32, m: u32, s: u32) -> HookPayload {
+        use chrono::{Local, TimeZone};
+        let dt = Local.with_ymd_and_hms(2026, 5, 19, h, m, s).unwrap();
+        HookPayload {
+            id: RecordingId::from_datetime(dt),
+            timestamp: dt,
+            transcript: String::new(),
+            audio_path: "x.wav".into(),
+            duration_ms: 0,
+            model: String::new(),
+            metadata: HookMetadata::current(),
+        }
+    }
+
+    #[tokio::test]
+    async fn set_order_claims_manifest_first_then_chronological() {
+        // Enqueue A < B < C chronologically (distinct seconds → deterministic
+        // sort), then set a custom order [C, A]. claim_next must honor the
+        // manifest first (C, then A) and fall back to chronological for the
+        // unlisted file (B last) — never duplicating a file.
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let a = payload_at(9, 0, 0);
+        let b = payload_at(12, 0, 0);
+        let c = payload_at(15, 0, 0);
+        // Enqueue out of chronological order to prove the order isn't just
+        // "insertion order".
+        inbox.enqueue(&b).await.unwrap();
+        inbox.enqueue(&c).await.unwrap();
+        inbox.enqueue(&a).await.unwrap();
+
+        inbox.set_order(&[c.id.clone(), a.id.clone()]).await.unwrap();
+
+        // list_pending exposes the same effective order claim_next walks.
+        let pending_order: Vec<RecordingId> = inbox
+            .list_pending()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(
+            pending_order,
+            vec![c.id.clone(), a.id.clone(), b.id.clone()],
+            "manifest [C, A] first, then unlisted B chronologically"
+        );
+
+        // And claim_next yields exactly that sequence, each id once.
+        assert_eq!(inbox.claim_next().await.unwrap().unwrap().id, c.id);
+        assert_eq!(inbox.claim_next().await.unwrap().unwrap().id, a.id);
+        assert_eq!(inbox.claim_next().await.unwrap().unwrap().id, b.id);
+        assert!(
+            inbox.claim_next().await.unwrap().is_none(),
+            "nothing duplicated or left over"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_order_skips_manifest_ids_with_no_pending_file() {
+        // A manifest id that no longer has a pending file (claimed/cancelled
+        // since the user reordered) must be skipped silently, and the real
+        // pending files still claim in manifest-then-chronological order.
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let a = payload_at(9, 0, 0);
+        let b = payload_at(12, 0, 0);
+        inbox.enqueue(&a).await.unwrap();
+        inbox.enqueue(&b).await.unwrap();
+
+        // A ghost id that was never enqueued sits between B and A in the manifest.
+        let ghost = RecordingId::from_datetime(
+            chrono::TimeZone::with_ymd_and_hms(&chrono::Local, 2026, 5, 19, 23, 59, 59).unwrap(),
+        );
+        inbox
+            .set_order(&[b.id.clone(), ghost.clone(), a.id.clone()])
+            .await
+            .unwrap();
+
+        let order: Vec<RecordingId> = inbox
+            .list_pending()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(
+            order,
+            vec![b.id.clone(), a.id.clone()],
+            "ghost manifest id is skipped; the rest keep manifest order, no panic"
+        );
+        // The two real files claim cleanly in that order.
+        assert_eq!(inbox.claim_next().await.unwrap().unwrap().id, b.id);
+        assert_eq!(inbox.claim_next().await.unwrap().unwrap().id, a.id);
+        assert!(inbox.claim_next().await.unwrap().is_none());
+    }
+
     #[tokio::test]
     async fn pause_resume_round_trip() {
         let tmp = tempfile::tempdir().unwrap();

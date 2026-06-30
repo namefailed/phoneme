@@ -5486,13 +5486,81 @@ mod tests {
         let serialized = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(parsed.webhook.custom_headers, cfg.webhook.custom_headers);
-        // On Windows the token must not appear in plaintext on disk; off Windows
-        // protect() is a passthrough, so only assert the encrypted property there.
-        #[cfg(windows)]
-        assert!(
-            !serialized.contains("super-secret-token"),
-            "header value leaked in plaintext to config.toml: {serialized}"
+        // Pin the exact decrypted values + key set so a wiring regression that
+        // dropped/garbled a header (or its key) is caught, not just map-equality
+        // against a possibly-also-broken `cfg`.
+        assert_eq!(parsed.webhook.custom_headers.len(), 2);
+        assert_eq!(
+            parsed.webhook.custom_headers.get("Authorization").map(String::as_str),
+            Some("Bearer super-secret-token")
         );
+        assert_eq!(
+            parsed.webhook.custom_headers.get("X-Webhook-Source").map(String::as_str),
+            Some("phoneme")
+        );
+        // On Windows the secret-bearing value must not appear in plaintext on
+        // disk; off Windows protect() is a passthrough, so only assert the
+        // encrypted property there. The key stays plaintext (it's not a secret).
+        #[cfg(windows)]
+        {
+            assert!(
+                !serialized.contains("super-secret-token"),
+                "header value leaked in plaintext to config.toml: {serialized}"
+            );
+            assert!(
+                serialized.contains("Authorization"),
+                "header key must stay plaintext on disk: {serialized}"
+            );
+        }
+    }
+
+    #[test]
+    fn protected_headers_serde_helpers_encrypt_per_value() {
+        // Exercise serialize_protected_headers / deserialize_protected_headers
+        // directly (not just via WebhookConfig) so the map-encryption wiring has
+        // its own Windows-asserted leak check and a round-trip guarantee.
+        #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+        struct Wrap {
+            #[serde(
+                serialize_with = "serialize_protected_headers",
+                deserialize_with = "deserialize_protected_headers"
+            )]
+            headers: std::collections::BTreeMap<String, String>,
+        }
+
+        let mut headers = std::collections::BTreeMap::new();
+        headers.insert("Authorization".to_string(), "Bearer per-value-secret".to_string());
+        headers.insert("X-Empty".to_string(), String::new());
+        let wrap = Wrap { headers };
+
+        let serialized = toml::to_string(&wrap).unwrap();
+        let parsed: Wrap = toml::from_str(&serialized).unwrap();
+        // Decryption restores both the secret and the empty value exactly.
+        assert_eq!(parsed, wrap);
+        assert_eq!(
+            parsed.headers.get("Authorization").map(String::as_str),
+            Some("Bearer per-value-secret")
+        );
+        assert_eq!(parsed.headers.get("X-Empty").map(String::as_str), Some(""));
+
+        #[cfg(windows)]
+        {
+            // The value is encrypted (dpapi-tagged) and never on disk in the
+            // clear; the key is left verbatim. An empty value stays empty (no
+            // dpapi: blob for it).
+            assert!(
+                !serialized.contains("per-value-secret"),
+                "per-value encryption leaked plaintext to disk: {serialized}"
+            );
+            assert!(
+                serialized.contains("dpapi:v1:"),
+                "the encrypted value must carry the dpapi tag: {serialized}"
+            );
+            assert!(
+                serialized.contains("Authorization"),
+                "header key must stay plaintext on disk: {serialized}"
+            );
+        }
     }
 
     #[test]
@@ -5872,11 +5940,19 @@ mod tests {
         let mut cfg = Config::default();
         cfg.recording.audio_dir = "~/test".into();
         let expanded = cfg.expanded().unwrap();
+        // `expand_path` forward-slashes the home dir, so `~/test` resolves to
+        // exactly `<home>/test`. Pin the whole string (prefix included) so a bug
+        // that dropped `~` to "" (yielding "/test") or used a wrong root is caught.
+        let home = directories::UserDirs::new()
+            .map(|u| u.home_dir().to_string_lossy().replace('\\', "/"))
+            .expect("home dir resolvable in tests");
         assert!(!expanded.recording.audio_dir.starts_with('~'));
         assert!(
-            expanded.recording.audio_dir.ends_with("/test")
-                || expanded.recording.audio_dir.ends_with("\\test")
+            expanded.recording.audio_dir.starts_with(&home),
+            "expansion must use the real home dir as prefix: got {}, home {home}",
+            expanded.recording.audio_dir
         );
+        assert_eq!(expanded.recording.audio_dir, format!("{home}/test"));
     }
     #[test]
     fn tilde_expansion_in_semantic_search_model_dir() {
@@ -5886,14 +5962,21 @@ mod tests {
         cfg.semantic_search.model_dir = "~/models/embed".into();
         let expanded = cfg.expanded().unwrap();
         let dir = expanded.semantic_search.model_dir.to_string_lossy();
+        // `expand_path` forward-slashes the home dir; `~/models/embed` resolves to
+        // exactly `<home>/models/embed`. Pin prefix + whole string so a tilde
+        // dropped to "" (yielding "/models/embed") or a wrong root is caught.
+        let home = directories::UserDirs::new()
+            .map(|u| u.home_dir().to_string_lossy().replace('\\', "/"))
+            .expect("home dir resolvable in tests");
         assert!(
             !dir.starts_with('~'),
             "tilde should be expanded, got: {dir}"
         );
         assert!(
-            dir.ends_with("/models/embed") || dir.ends_with("\\models\\embed"),
-            "the path suffix should be preserved, got: {dir}"
+            dir.starts_with(&home),
+            "expansion must use the real home dir as prefix: got {dir}, home {home}"
         );
+        assert_eq!(dir, format!("{home}/models/embed"));
     }
 
     #[test]
@@ -5930,13 +6013,20 @@ mod tests {
 
     #[test]
     fn expand_home_tokens_handles_leading_backslash_tilde() {
-        // A leading `~\` (Windows) expands just like `~/`.
+        // A leading `~\` (Windows) expands just like `~/`: the `~\` becomes
+        // `<home>/` (home forward-slashed) and the remainder is kept verbatim,
+        // backslashes and all. Pin the prefix AND the full string so a bug that
+        // dropped `~\` to "" (yielding "/models\\embed") is caught.
         let out = expand_home_tokens("~\\models\\embed");
+        let home = directories::UserDirs::new()
+            .map(|u| u.home_dir().to_string_lossy().replace('\\', "/"))
+            .expect("home dir resolvable in tests");
         assert!(!out.starts_with('~'), "tilde should expand, got: {out}");
         assert!(
-            out.ends_with("/models\\embed"),
-            "the suffix is preserved verbatim, got: {out}"
+            out.starts_with(&home),
+            "expansion must use the real home dir as prefix: got {out}, home {home}"
         );
+        assert_eq!(out, format!("{home}/models\\embed"));
     }
 
     #[test]
@@ -5988,7 +6078,9 @@ mod tests {
         let parsed = Config::load(&path).unwrap();
         assert_eq!(parsed.interface.theme, "tokyo-night");
         assert!(parsed.interface.strip_titlebar);
-        assert_eq!(parsed.interface.column_widths.first().unwrap(), "150px");
+        // Pin the whole vec (length included) so a bug that duplicated or
+        // appended entries is caught, not just `.first()`.
+        assert_eq!(parsed.interface.column_widths, vec!["150px".to_string()]);
     }
 
     /// The lifecycle knobs default on, and a config written before they

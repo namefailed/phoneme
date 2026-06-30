@@ -42,11 +42,45 @@ describe("openTagManager", () => {
     expect(queryEl(".modal-overlay")).toBeFalsy();
   });
 
-  it("closes on Escape", async () => {
+  it("closes on Escape when focus is outside any editing/merging/search control", async () => {
     const p = openTagManager();
     await vi.waitFor(() =>
       expect(queryEl(".tag-mgr-dialog")).toBeTruthy(),
     );
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await p;
+    expect(queryEl(".modal-overlay")).toBeFalsy();
+  });
+
+  it("swallows Escape (modal stays) while focus is inside the search box, then closes on the next", async () => {
+    const p = openTagManager();
+    await vi.waitFor(() =>
+      expect(queryEl(".tag-mgr-dialog")).toBeTruthy(),
+    );
+    const mgr = document.querySelector("ph-tag-manager")!;
+
+    // The layered-Escape guard returns early when document.activeElement is
+    // inside `.tag-mgr-row.editing`, `.tag-mgr-row.merging`, or
+    // `.tag-mgr-search` (so an inline rename/merge/search keeps its own Escape).
+    // Stage a focused `.tag-mgr-search` input to drive that guarded branch — in
+    // bare mode with no tags the real search box isn't rendered, but the guard
+    // is selector-based, so this exercises the exact early-return path.
+    const search = document.createElement("div");
+    search.className = "tag-mgr-search";
+    const input = document.createElement("input");
+    search.appendChild(input);
+    mgr.appendChild(search);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    // First Escape is swallowed by the guard — the modal must stay open.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(queryEl(".tag-mgr-dialog")).toBeTruthy();
+    expect(queryEl(".modal-overlay")).toBeTruthy();
+
+    // Move focus out of the guarded control; the next Escape closes the modal.
+    input.blur();
+    (document.activeElement as HTMLElement | null)?.blur?.();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await p;
     expect(queryEl(".modal-overlay")).toBeFalsy();

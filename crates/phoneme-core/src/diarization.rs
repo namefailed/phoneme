@@ -1949,6 +1949,21 @@ mod tests {
         }
         assert_eq!(frame_for_time(0.0, STEP, DUR), 0);
         assert_eq!(frame_for_time(-1.0, STEP, DUR), 0);
+
+        // Off-center / rounding-boundary inputs with hand-computed rows, so a
+        // dropped half-duration offset or a round→floor swap is caught (the
+        // frame-center round-trip above passes for either by construction).
+        //
+        // t = 0.10: round((0.10 - 0.05)/0.05) = round(1.0) = 1. With the offset
+        // dropped it'd be round(0.10/0.05) = 2, so this pins the half-duration term.
+        assert_eq!(frame_for_time(0.10, STEP, DUR), 1);
+        // t = 0.215 sits just past frame 3's center (0.20): round(3.3) = 3, the
+        // frame whose window covers it (covering, not nearest-edge).
+        assert_eq!(frame_for_time(0.215, STEP, DUR), 3);
+        // t = 0.226 is just past the 3↔4 rounding boundary (3.5): round(3.52) = 4,
+        // where floor(3.52) = 3 would land — pins round, not floor. (A dropped
+        // offset would give round(4.52) = 5, so this guards both.)
+        assert_eq!(frame_for_time(0.226, STEP, DUR), 4);
     }
 
     #[test]
@@ -2015,16 +2030,27 @@ mod tests {
             [0.0, 1.0], // 4
             [0.0, 1.0], // 5
         ];
-        let words = vec![word(frame_mid(1), frame_mid(5), "straddle")]; // frames 1..=5
+        // An anchor word entirely in column 0 (frame 0) appears first, so column 0
+        // claims speaker index 1. The straddler must then become index 2 — which it
+        // can only do by picking its DOMINANT column (1), not the column 0 it starts
+        // in. (With only the straddler, first-appearance would hand it index 1
+        // whether it picked column 0 or 1, hiding a dominance regression.)
+        let words = vec![
+            word(frame_mid(0), frame_mid(0), "anchor"), // frame 0 → column 0
+            word(frame_mid(1), frame_mid(5), "straddle"), // frames 1..=5 → column 1 dominates
+        ];
         let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
-        assert_eq!(n, 1);
-        // Only one word, so it's the first-appearing speaker → index 1, but it is
-        // speaker column 1 (the dominant one), not column 0 where it started.
-        assert_eq!(labeled[0].1, 1);
-        // Prove the dominance: the same word over a matrix where column 0 is
-        // dominant instead would still map to index 1 (first appearance), so
-        // assert the column directly via the helper.
+        assert_eq!(n, 2, "anchor (col 0) and straddler (col 1) are distinct speakers");
+        let idxs: Vec<usize> = labeled.iter().map(|(_, i)| *i).collect();
+        // anchor → index 1 (column 0, first appearance); straddler → index 2 (column
+        // 1, its dominant frames), NOT index 1 it would get had it picked column 0.
+        assert_eq!(idxs, vec![1, 2]);
+        // Belt-and-suspenders on the underlying dominance: frame 1 (col 0) vs frames
+        // 2–5 (col 1) is 1 vs 4 summed activation → column 1.
         assert_eq!(dominant_column(&m, 1, 5), Some(1));
+        // And the anchor really resolves to the OTHER column, so the index split is
+        // a genuine two-column result, not two reads of the same column.
+        assert_eq!(dominant_column(&m, 0, 0), Some(0));
     }
 
     #[test]
@@ -2594,15 +2620,32 @@ mod tests {
     }
 
     #[test]
-    fn expected_count_none_path_is_unchanged() {
-        // `expected_speakers = None` never calls this, but `target` larger-or-equal
-        // than the detected count is also a no-op (the prior never splits).
+    fn expected_count_equal_to_detected_is_unchanged() {
+        // target == detected hits the `active.len() <= target` early-return: the
+        // prior never splits, so the three voices stay three distinct speakers.
+        // (The run_local_diarization None-config gate that skips this call entirely
+        // lives in that function, not here; this only pins the >= guard.)
         let centroids = vec![unit2(0.0), unit2(0.2), unit2(1.5)];
         let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 3);
         assert_eq!(
             canon,
             vec![0, 1, 2],
-            "expected >= detected leaves clusters intact"
+            "expected == detected leaves clusters intact"
+        );
+    }
+
+    #[test]
+    fn expected_count_target_zero_is_a_no_op() {
+        // target == 0 hits the dedicated zero guard, NOT the collapse loop. Without
+        // that guard the loop condition `groups + centroid_less > 0` would be true
+        // and every voice (incl. the far-off 1.5 rad one) would fold into column 0;
+        // the guard must leave all three clusters intact instead.
+        let centroids = vec![unit2(0.0), unit2(0.2), unit2(1.5)];
+        let canon = merge_to_expected_count(&centroids, &[0, 1, 2], 0);
+        assert_eq!(
+            canon,
+            vec![0, 1, 2],
+            "target 0 is a no-op, not a collapse-all"
         );
     }
 

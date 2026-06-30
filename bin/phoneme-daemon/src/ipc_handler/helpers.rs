@@ -393,25 +393,36 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mut cfg = Config::default();
         cfg.whisper.bundled_server_port = 5809;
+        // A dedicated preview server is configured on its own port, so the
+        // preview-port fields aren't null-by-default — they carry the configured
+        // (preferred) value and, once published, the bound (effective) one.
+        let mut preview = cfg.whisper.clone();
+        preview.bundled_server_port = 5810;
+        cfg.preview_whisper = Some(preview);
         let state = override_test_state(tmp.path(), cfg).await;
 
-        // Server not (yet) running: preferred mirrors config, effective null.
+        // Servers not (yet) running: each preferred mirrors config, each effective null.
         let Response::Ok(v) = handle_request(Request::DaemonStatus, &state).await else {
             panic!("daemon_status should answer ok");
         };
         assert_eq!(v["whisper_preferred_port"], 5809);
         assert!(v["whisper_effective_port"].is_null());
-        assert!(v["preview_whisper_preferred_port"].is_null());
+        assert_eq!(v["preview_whisper_preferred_port"], 5810);
         assert!(v["preview_whisper_effective_port"].is_null());
 
-        // The supervisor published a fallback port: effective reports it
-        // while preferred keeps naming the configured value.
+        // The supervisor published a fallback port for each server: effective
+        // reports it while preferred keeps naming the configured value. The main
+        // and preview ports must not cross-wire — each effective field carries its
+        // own server's bound port.
         state.whisper_ports.set_main(Some(51234));
+        state.whisper_ports.set_preview(Some(52345));
         let Response::Ok(v) = handle_request(Request::DaemonStatus, &state).await else {
             panic!("daemon_status should answer ok");
         };
         assert_eq!(v["whisper_preferred_port"], 5809);
         assert_eq!(v["whisper_effective_port"], 51234);
+        assert_eq!(v["preview_whisper_preferred_port"], 5810);
+        assert_eq!(v["preview_whisper_effective_port"], 52345);
     }
 
     /// Insert a minimal Done recording row so a retranscribe has something to act

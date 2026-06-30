@@ -270,10 +270,13 @@ mod tests {
             ..FillerConfig::default()
         };
         assert_eq!(strip_fillers("İ sort of done", &cfg), "İ done");
-        // Direct: phrase removed, non-ASCII prefix preserved, no panic.
-        let out = remove_phrase("İ kind of nice", "kind of");
-        assert!(!out.to_lowercase().contains("kind of"));
-        assert!(out.contains('İ'));
+        // Direct: the phrase is replaced by its single-space placeholder, leaving
+        // the original space on each side, so "İ kind of nice" becomes "İ" + the
+        // pre-phrase space + the placeholder + the post-phrase space + "nice" —
+        // exactly three spaces, with the multibyte 'İ' (U+0130) preserved
+        // byte-for-byte and no panic on the length-changing fold. tidy() (run by
+        // strip_fillers, not here) is what would later squeeze those spaces.
+        assert_eq!(remove_phrase("İ kind of nice", "kind of"), "İ   nice");
     }
 
     #[test]
@@ -307,5 +310,32 @@ mod tests {
         assert_eq!(strip_fillers("", &cfg), "");
         assert_eq!(strip_fillers("   ", &cfg), "");
         assert_eq!(strip_fillers("um uh er ah hmm", &cfg), "");
+    }
+
+    #[test]
+    fn aggressive_phrase_at_start_or_end_tidies_like_single_words() {
+        let cfg = FillerConfig {
+            aggressive: true,
+            ..FillerConfig::default()
+        };
+        // Leading "you know," — the phrase removal strands the comma it carried at
+        // the very front; tidy()'s leading-orphan trim drops it, exactly like the
+        // single-word "um, the plan works" case (drops_leading_and_trailing_filler).
+        assert_eq!(
+            strip_fillers("you know, the plan works", &cfg),
+            "the plan works"
+        );
+        // Trailing phrase with no carried punctuation removes cleanly.
+        assert_eq!(
+            strip_fillers("the plan works you know", &cfg),
+            "the plan works"
+        );
+        // A trailing phrase preceded by a comma keeps that comma attached to the
+        // preceding word (tidy only strips a LEADING orphan separator, not a
+        // trailing one), so the result ends with the comma.
+        assert_eq!(
+            strip_fillers("the plan works, you know", &cfg),
+            "the plan works,"
+        );
     }
 }

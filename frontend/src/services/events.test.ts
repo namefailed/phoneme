@@ -32,76 +32,32 @@ describe('Event Services', () => {
     expect(unsub).toBeTypeOf('function');
   });
 
-  it('passes transcription_partial events through to the handler', async () => {
+  it('forwards every event payload unchanged regardless of variant (no discrimination in subscribe)', async () => {
+    // subscribe()'s only logic is `(e) => handler(e.payload)` — it does NOT
+    // switch on event.event. One variant-agnostic test pins that contract: a
+    // representative set of distinct payloads each arrives byte-for-byte (same
+    // reference, by toBe), in order. Per-variant routing is exercised where it
+    // actually lives — notifications.test.ts switches on event.event.
     const captured = captureSubscribeHandler();
     const mockCallback = vi.fn();
     await subscribe(mockCallback);
     const { handler } = await captured;
 
-    const payload: DaemonEvent = { event: 'transcription_partial', id: 'abc', text: 'hello wor' };
-    handler({ payload });
+    const payloads: DaemonEvent[] = [
+      { event: 'transcription_partial', id: 'abc', text: 'hello wor' },
+      { event: 'tag_created', id: 7 },
+      { event: 'tag_updated', id: 42 },
+      { event: 'tag_deleted', id: 3 },
+      { event: 'tag_attached', tag_id: 1 },
+      { event: 'tag_detached', tag_id: 1 },
+    ];
+    for (const payload of payloads) handler({ payload });
 
-    expect(mockCallback).toHaveBeenCalledWith(payload);
-  });
-
-  it('passes tag_created events through to the handler', async () => {
-    const captured = captureSubscribeHandler();
-    const mockCallback = vi.fn();
-    await subscribe(mockCallback);
-    const { handler } = await captured;
-
-    const payload: DaemonEvent = { event: 'tag_created', id: 7 };
-    handler({ payload });
-
-    expect(mockCallback).toHaveBeenCalledWith(payload);
-  });
-
-  it('passes tag_updated events through to the handler', async () => {
-    const captured = captureSubscribeHandler();
-    const mockCallback = vi.fn();
-    await subscribe(mockCallback);
-    const { handler } = await captured;
-
-    const payload: DaemonEvent = { event: 'tag_updated', id: 42 };
-    handler({ payload });
-
-    expect(mockCallback).toHaveBeenCalledWith(payload);
-  });
-
-  it('passes tag_deleted events through to the handler', async () => {
-    const captured = captureSubscribeHandler();
-    const mockCallback = vi.fn();
-    await subscribe(mockCallback);
-    const { handler } = await captured;
-
-    const payload: DaemonEvent = { event: 'tag_deleted', id: 3 };
-    handler({ payload });
-
-    expect(mockCallback).toHaveBeenCalledWith(payload);
-  });
-
-  it('passes tag_attached events through to the handler', async () => {
-    const captured = captureSubscribeHandler();
-    const mockCallback = vi.fn();
-    await subscribe(mockCallback);
-    const { handler } = await captured;
-
-    const payload: DaemonEvent = { event: 'tag_attached', tag_id: 1 };
-    handler({ payload });
-
-    expect(mockCallback).toHaveBeenCalledWith(payload);
-  });
-
-  it('passes tag_detached events through to the handler', async () => {
-    const captured = captureSubscribeHandler();
-    const mockCallback = vi.fn();
-    await subscribe(mockCallback);
-    const { handler } = await captured;
-
-    const payload: DaemonEvent = { event: 'tag_detached', tag_id: 1 };
-    handler({ payload });
-
-    expect(mockCallback).toHaveBeenCalledWith(payload);
+    expect(mockCallback).toHaveBeenCalledTimes(payloads.length);
+    payloads.forEach((payload, i) => {
+      // Reference-identity: the unwrapped payload is forwarded as-is, untouched.
+      expect(mockCallback.mock.calls[i][0]).toBe(payload);
+    });
   });
 
   it('subscribes to onMenu events', async () => {

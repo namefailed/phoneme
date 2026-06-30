@@ -3,7 +3,7 @@ use phoneme_core::{Error, Transcriber, TranscriptionProvider};
 use std::path::Path;
 use std::time::Duration;
 use tempfile::TempDir;
-use wiremock::matchers::{body_string_contains, header, method, path};
+use wiremock::matchers::{body_string_contains, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 async fn fake_wav(dir: &TempDir) -> std::path::PathBuf {
@@ -119,9 +119,13 @@ async fn errors_on_missing_audio_file() {
 #[tokio::test]
 async fn language_hint_is_included_in_multipart_form() {
     let server = MockServer::start().await;
+    // Match on the multipart field name, not the bare value "en" — "en" appears
+    // in the streamed WAV bytes, the boundary, and other fields, so a provider
+    // that dropped the `language` field would still match on the value alone.
+    // The field-name token only appears when the field is actually sent.
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))
-        .and(body_string_contains("en"))
+        .and(body_string_contains("name=\"language\""))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "hello"})),
         )
@@ -133,6 +137,18 @@ async fn language_hint_is_included_in_multipart_form() {
     let provider = local_provider(server.uri(), Duration::from_secs(5));
     let result = provider.transcribe(&wav, Some("en")).await.unwrap();
     assert_eq!(result, "hello");
+
+    // And the field carries the actual hint value, paired with its name.
+    let requests = server.received_requests().await.unwrap();
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(
+        body.contains("name=\"language\""),
+        "request must carry a `language` multipart field: {body}",
+    );
+    assert!(
+        body.contains("\r\n\r\nen\r\n"),
+        "the `language` field value must be the hint `en`: {body}",
+    );
 }
 
 #[tokio::test]
@@ -267,10 +283,13 @@ async fn omits_prompt_field_when_empty() {
 #[tokio::test]
 async fn factory_builds_openai_provider_with_auth_and_model() {
     let server = MockServer::start().await;
+    // Match the multipart `model` field by name+value (not the loose "whisper-1"
+    // substring) so a wrong/missing model fails the match.
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))
         .and(header("authorization", "Bearer sk-test"))
-        .and(body_string_contains("whisper-1"))
+        .and(body_string_contains("name=\"model\""))
+        .and(body_string_contains("\r\n\r\nwhisper-1\r\n"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "cloud"})),
         )
@@ -290,6 +309,20 @@ async fn factory_builds_openai_provider_with_auth_and_model() {
     let provider = transcriber.provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "cloud");
+
+    // The factory builds this provider with segment capture off (diarization is
+    // off), so it must request plain `json` — the gpt-4o-transcribe family
+    // rejects verbose_json — not the verbose shape.
+    let requests = server.received_requests().await.unwrap();
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(
+        !body.contains("verbose_json"),
+        "factory OpenAI provider (diarize off) must not request verbose_json: {body}",
+    );
+    assert!(
+        body.contains("\r\n\r\njson\r\n"),
+        "factory OpenAI provider (diarize off) must request response_format=json: {body}",
+    );
 }
 
 /// Deepgram is not OpenAI-compatible: it authenticates with `Token <key>` and
@@ -298,9 +331,16 @@ async fn factory_builds_openai_provider_with_auth_and_model() {
 #[tokio::test]
 async fn factory_builds_deepgram_provider_with_token_auth() {
     let server = MockServer::start().await;
+    // The mock matches only when the Deepgram query carries the default model
+    // (`nova-2`), `smart_format=true`, and — with no language hint — the
+    // `detect_language=true` opt-in. A wrong/missing model or a dropped
+    // detect-language default fails the match and the request errors out.
     Mock::given(method("POST"))
         .and(path("/v1/listen"))
         .and(header("authorization", "Token dg-test"))
+        .and(query_param("model", "nova-2"))
+        .and(query_param("smart_format", "true"))
+        .and(query_param("detect_language", "true"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "results": {
                 "channels": [
@@ -339,8 +379,14 @@ async fn factory_builds_assemblyai_provider_upload_create_poll() {
         })))
         .mount(&server)
         .await;
+    // The create step must thread the upload step's `upload_url` back into the
+    // request body as `audio_url`. The body matcher makes a create POST that
+    // dropped or mangled the upload URL fail the match (no 200, request errors).
     Mock::given(method("POST"))
         .and(path("/v2/transcript"))
+        .and(body_string_contains(
+            "\"audio_url\":\"https://cdn.assemblyai.test/upload/abc\"",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": "t-123",
             "status": "queued"
@@ -429,6 +475,22 @@ async fn factory_builds_custom_openai_compatible_provider() {
         .provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "custom");
+
+    // The Custom path configures neither a key nor a model, so the request must
+    // carry no Authorization header and no `model` multipart field. (A regression
+    // that injected a spurious bearer token or a default model would still return
+    // "custom" against the path-only mock, so assert the wire contract directly.)
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0].headers.get("authorization").is_none(),
+        "Custom provider with no key must send no Authorization header",
+    );
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(
+        !body.contains("name=\"model\""),
+        "Custom provider with no model must omit the model field: {body}",
+    );
 }
 
 /// With segment capture on (the local whisper.cpp shape), verbose_json

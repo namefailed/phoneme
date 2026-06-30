@@ -2008,7 +2008,12 @@ mod tests {
             Duration::from_secs(30),
             false,
         );
-        assert!(!format!("{p:?}").contains(SECRET));
+        let dbg = format!("{p:?}");
+        assert!(!dbg.contains(SECRET), "api key leaked: {dbg}");
+        // Positive: the field is still present and rendered through redact_key,
+        // not silently dropped — matching the OpenAI-compat redaction test.
+        assert!(dbg.contains("api_key"), "api_key field missing: {dbg}");
+        assert!(dbg.contains("redacted"), "redaction marker missing: {dbg}");
     }
 
     #[test]
@@ -2021,7 +2026,12 @@ mod tests {
             Duration::from_secs(30),
             false,
         );
-        assert!(!format!("{p:?}").contains(SECRET));
+        let dbg = format!("{p:?}");
+        assert!(!dbg.contains(SECRET), "api key leaked: {dbg}");
+        // Positive: the field is still present and rendered through redact_key,
+        // not silently dropped — matching the OpenAI-compat redaction test.
+        assert!(dbg.contains("api_key"), "api_key field missing: {dbg}");
+        assert!(dbg.contains("redacted"), "redaction marker missing: {dbg}");
     }
 
     #[test]
@@ -2034,7 +2044,12 @@ mod tests {
             Duration::from_secs(30),
             false,
         );
-        assert!(!format!("{p:?}").contains(SECRET));
+        let dbg = format!("{p:?}");
+        assert!(!dbg.contains(SECRET), "api key leaked: {dbg}");
+        // Positive: the field is still present and rendered through redact_key,
+        // not silently dropped — matching the OpenAI-compat redaction test.
+        assert!(dbg.contains("api_key"), "api_key field missing: {dbg}");
+        assert!(dbg.contains("redacted"), "redaction marker missing: {dbg}");
     }
 
     fn el_word(text: &str, start: f64, end: f64, speaker: Option<&str>) -> ElevenLabsWord {

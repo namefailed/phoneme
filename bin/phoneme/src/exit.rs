@@ -48,8 +48,22 @@ mod tests {
             from_ipc_kind(IpcErrorKind::DaemonNotRunning),
             DAEMON_NOT_REACHABLE
         );
+        // PipeInUse and ShuttingDown share the DAEMON_NOT_REACHABLE arm with
+        // DaemonNotRunning; pin them so a regression that drops one of them out
+        // of the `|` pattern (falling through to GENERIC_FAIL) is caught — these
+        // exit codes are the stable scriptable CLI contract.
+        assert_eq!(from_ipc_kind(IpcErrorKind::PipeInUse), DAEMON_NOT_REACHABLE);
+        assert_eq!(
+            from_ipc_kind(IpcErrorKind::ShuttingDown),
+            DAEMON_NOT_REACHABLE
+        );
         assert_eq!(
             from_ipc_kind(IpcErrorKind::WhisperUnreachable),
+            WHISPER_UNREACHABLE
+        );
+        // WhisperTimeout shares the WHISPER_UNREACHABLE arm with WhisperUnreachable.
+        assert_eq!(
+            from_ipc_kind(IpcErrorKind::WhisperTimeout),
             WHISPER_UNREACHABLE
         );
         assert_eq!(from_ipc_kind(IpcErrorKind::HookFailed), HOOK_FAILED);

@@ -44,3 +44,69 @@ pub async fn run(args: RefireHookArgs, cfg: &Config, json: bool) -> ExitCode {
         Err(code) => code,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::MockDaemon;
+    use phoneme_ipc::Response;
+    use std::time::Duration;
+
+    async fn run_refire(args: RefireHookArgs) -> (ExitCode, Vec<Request>) {
+        let mock = MockDaemon::spawn("refire-hook", |_req| {
+            Response::Ok(serde_json::Value::Null)
+        });
+        let mut cfg = Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+        let code = tokio::time::timeout(Duration::from_secs(5), run(args, &cfg, false))
+            .await
+            .expect("refire-hook must return promptly");
+        (code, mock.received())
+    }
+
+    /// No `--command`: re-fire the configured default hook — `RefireHook` with
+    /// `command: None`, carrying the parsed recording id.
+    #[tokio::test]
+    async fn sends_refire_with_default_hook() {
+        let id = RecordingId::new();
+        let (code, reqs) = run_refire(RefireHookArgs {
+            id: id.to_string(),
+            command: None,
+        })
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(reqs, vec![Request::RefireHook { id, command: None }]);
+    }
+
+    /// `--command` forwards the chosen hook command verbatim.
+    #[tokio::test]
+    async fn sends_refire_with_explicit_command() {
+        let id = RecordingId::new();
+        let (code, reqs) = run_refire(RefireHookArgs {
+            id: id.to_string(),
+            command: Some("copy-to-clipboard".into()),
+        })
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            reqs,
+            vec![Request::RefireHook {
+                id,
+                command: Some("copy-to-clipboard".into()),
+            }]
+        );
+    }
+
+    /// An invalid recording id is rejected locally (FAILURE) before connecting —
+    /// no request reaches the daemon.
+    #[tokio::test]
+    async fn invalid_id_rejected_without_sending() {
+        let (code, reqs) = run_refire(RefireHookArgs {
+            id: "not-an-id".into(),
+            command: None,
+        })
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+        assert!(reqs.is_empty(), "a bad id must not reach the daemon");
+    }
+}

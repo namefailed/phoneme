@@ -300,4 +300,83 @@ mod tests {
         let since = filter.since.expect("since parsed");
         assert_eq!((since.hour(), since.minute(), since.second()), (0, 0, 0));
     }
+
+    // A *present* but unparseable date must be a hard USAGE_ERROR, not a silent
+    // "no filter" that widens the query to the whole library (the footgun the
+    // code comment calls out). Guards both --until and --since.
+    #[test]
+    fn unparseable_until_is_a_usage_error() {
+        let mut args = empty_args();
+        args.until = Some("not-a-date".into());
+        let err = build_filter(args, None).expect_err("an unparseable --until must error");
+        assert_eq!(
+            format!("{err:?}"),
+            format!("{:?}", ExitCode::from(exit::USAGE_ERROR))
+        );
+    }
+
+    #[test]
+    fn unparseable_since_is_a_usage_error() {
+        let mut args = empty_args();
+        args.since = Some("xyz".into());
+        let err = build_filter(args, None).expect_err("an unparseable --since must error");
+        assert_eq!(
+            format!("{err:?}"),
+            format!("{:?}", ExitCode::from(exit::USAGE_ERROR))
+        );
+    }
+
+    // Each documented --status string must map to its enum variant; spot-check a
+    // representative few so swapping a match arm regresses here.
+    #[test]
+    fn status_strings_map_to_enum_variants() {
+        let mut args = empty_args();
+        args.status = Some("queued".into());
+        assert_eq!(
+            build_filter(args, None).expect("builds").status,
+            Some(RecordingStatus::Queued)
+        );
+
+        let mut args = empty_args();
+        args.status = Some("transcribe_failed".into());
+        assert_eq!(
+            build_filter(args, None).expect("builds").status,
+            Some(RecordingStatus::TranscribeFailed)
+        );
+
+        let mut args = empty_args();
+        args.status = Some("done".into());
+        assert_eq!(
+            build_filter(args, None).expect("builds").status,
+            Some(RecordingStatus::Done)
+        );
+
+        // An unrecognised status is dropped to None (no filter), not an error.
+        let mut args = empty_args();
+        args.status = Some("not-a-status".into());
+        assert_eq!(build_filter(args, None).expect("builds").status, None);
+    }
+
+    // `--kind single|meeting` maps to the ListKind variant; anything else (incl.
+    // "all") means no kind filter.
+    #[test]
+    fn kind_strings_map_to_list_kind() {
+        let mut args = empty_args();
+        args.kind = Some("meeting".into());
+        assert_eq!(
+            build_filter(args, None).expect("builds").kind,
+            Some(ListKind::Meeting)
+        );
+
+        let mut args = empty_args();
+        args.kind = Some("single".into());
+        assert_eq!(
+            build_filter(args, None).expect("builds").kind,
+            Some(ListKind::Single)
+        );
+
+        let mut args = empty_args();
+        args.kind = Some("all".into());
+        assert_eq!(build_filter(args, None).expect("builds").kind, None);
+    }
 }

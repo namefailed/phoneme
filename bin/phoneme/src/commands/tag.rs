@@ -382,4 +382,181 @@ mod tests {
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
         assert_eq!(reqs, vec![Request::GetRecording { id }]);
     }
+
+    /// `tag list --all` must send `ListAllTags` (includes orphans), not the
+    /// default `ListTags`. A regression that swapped the two would pass without
+    /// this assertion.
+    #[tokio::test]
+    async fn list_all_sends_list_all_tags() {
+        let (code, reqs) = run_tag(TagAction::List { all: true }, |_req| {
+            Response::Ok(serde_json::json!([]))
+        })
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(reqs, vec![Request::ListAllTags]);
+    }
+
+    /// `tag list` (no `--all`) must send `ListTags` (attached-only).
+    #[tokio::test]
+    async fn list_without_all_sends_list_tags() {
+        let (code, reqs) = run_tag(TagAction::List { all: false }, |_req| {
+            Response::Ok(serde_json::json!([]))
+        })
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(reqs, vec![Request::ListTags]);
+    }
+
+    /// `tag merge <from-name> <into-name>` resolves *both* endpoints by name via
+    /// `ListAllTags`, then sends `MergeTags` with the resolved ids in the right
+    /// from/into slots.
+    #[tokio::test]
+    async fn merge_resolves_both_names_to_ids() {
+        let (code, reqs) = run_tag(
+            TagAction::Merge {
+                from: "work".into(),
+                into: "Work".into(),
+            },
+            |req| match req {
+                Request::ListAllTags => Response::Ok(serde_json::json!([
+                    { "id": 11, "name": "work", "color": null },
+                    { "id": 22, "name": "Work", "color": null },
+                ])),
+                _ => Response::Ok(serde_json::Value::Null),
+            },
+        )
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        // Two name lookups (one per endpoint) then the merge with from=11 → into=22.
+        assert_eq!(
+            reqs,
+            vec![
+                Request::ListAllTags,
+                Request::ListAllTags,
+                Request::MergeTags {
+                    from_id: 11,
+                    into_id: 22,
+                },
+            ]
+        );
+    }
+
+    /// A numeric tag id skips the name-lookup fast path: `tag merge 3 5` sends
+    /// `MergeTags` directly with no `ListAllTags` round trips.
+    #[tokio::test]
+    async fn merge_with_numeric_ids_skips_lookup() {
+        let (code, reqs) = run_tag(
+            TagAction::Merge {
+                from: "3".into(),
+                into: "5".into(),
+            },
+            |_req| Response::Ok(serde_json::Value::Null),
+        )
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            reqs,
+            vec![Request::MergeTags {
+                from_id: 3,
+                into_id: 5,
+            }]
+        );
+    }
+
+    /// `tag attach <rec> <name>` resolves the name to its id and sends
+    /// `AttachTag` with the resolved id (after the `ListAllTags` lookup).
+    #[tokio::test]
+    async fn attach_resolves_name_then_sends_attach() {
+        let id = RecordingId::new();
+        let (code, reqs) = run_tag(
+            TagAction::Attach {
+                recording_id: id.to_string(),
+                tag: "rust".into(),
+            },
+            |req| match req {
+                Request::ListAllTags => Response::Ok(serde_json::json!([
+                    { "id": 7, "name": "rust", "color": null },
+                ])),
+                _ => Response::Ok(serde_json::Value::Null),
+            },
+        )
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            reqs,
+            vec![
+                Request::ListAllTags,
+                Request::AttachTag {
+                    recording_id: id,
+                    tag_id: 7,
+                },
+            ]
+        );
+    }
+
+    /// `tag detach <rec> <id>` with a numeric id sends `DetachTag` directly.
+    #[tokio::test]
+    async fn detach_with_numeric_id_sends_detach() {
+        let id = RecordingId::new();
+        let (code, reqs) = run_tag(
+            TagAction::Detach {
+                recording_id: id.to_string(),
+                tag: "9".into(),
+            },
+            |_req| Response::Ok(serde_json::Value::Null),
+        )
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            reqs,
+            vec![Request::DetachTag {
+                recording_id: id,
+                tag_id: 9,
+            }]
+        );
+    }
+
+    /// An unknown tag name must exit `NOT_FOUND` (7) and send NO mutation — only
+    /// the `ListAllTags` lookup that failed to resolve. Guards the "resolve to
+    /// the wrong/absent id then mutate anyway" regression.
+    #[tokio::test]
+    async fn attach_unknown_name_exits_not_found_without_mutating() {
+        let id = RecordingId::new();
+        let (code, reqs) = run_tag(
+            TagAction::Attach {
+                recording_id: id.to_string(),
+                tag: "nope".into(),
+            },
+            |_req| {
+                // Tag list contains a different name, so "nope" never resolves.
+                Response::Ok(serde_json::json!([
+                    { "id": 1, "name": "work", "color": null },
+                ]))
+            },
+        )
+        .await;
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::from(crate::exit::NOT_FOUND))
+        );
+        // Only the lookup happened; no AttachTag was sent.
+        assert_eq!(reqs, vec![Request::ListAllTags]);
+    }
+
+    /// `tag usage` sends `TagUsageCounts`, then (for the human output) looks up
+    /// names via `ListAllTags` to decorate the ids.
+    #[tokio::test]
+    async fn usage_sends_counts_then_resolves_names() {
+        let (code, reqs) = run_tag(TagAction::Usage, |req| match req {
+            Request::TagUsageCounts => Response::Ok(serde_json::json!({ "1": 3, "2": 0 })),
+            Request::ListAllTags => Response::Ok(serde_json::json!([
+                { "id": 1, "name": "work", "color": null },
+                { "id": 2, "name": "rust", "color": null },
+            ])),
+            _ => Response::Ok(serde_json::Value::Null),
+        })
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(reqs, vec![Request::TagUsageCounts, Request::ListAllTags]);
+    }
 }

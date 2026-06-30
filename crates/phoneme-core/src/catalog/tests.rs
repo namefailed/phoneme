@@ -440,6 +440,172 @@ async fn list_pins_float_to_top_and_filters_in_sql() {
     assert_eq!(counts.pinned, 2);
 }
 
+#[tokio::test]
+async fn list_ids_mirrors_list_filtering_and_carries_meeting_id() {
+    // `list_ids` shares the filter/ORDER/LIMIT SQL with `list` (via
+    // `list_query_suffix`); it must return the SAME recordings in the SAME order,
+    // just as (id, meeting_id) pairs — meeting tracks carrying their meeting_id,
+    // solos carrying None. A column swap or a diverging filter would break this.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+    // A deterministic mix: 4 solos + 2 tracks of one meeting, inserted oldest →
+    // newest. The meeting tracks sit in the MIDDLE of the timeline (indices 2,3)
+    // so the filtered page below straddles the solo/meeting boundary and exercises
+    // both meeting_id-bearing and meeting_id-None rows.
+    let mut solo_ids = Vec::new();
+    let mut meeting_ids = Vec::new();
+    for i in 0..6 {
+        let dt = Local::now() - chrono::Duration::minutes((20 - i) as i64);
+        let id = RecordingId::from_datetime(dt);
+        let meeting = if i == 2 || i == 3 { Some("meeting-1") } else { None };
+        let r = Recording {
+            id: id.clone(),
+            started_at: dt,
+            ..embedded_recording(meeting)
+        };
+        db.insert(&r).await.unwrap();
+        if meeting.is_some() {
+            meeting_ids.push(id);
+        } else {
+            solo_ids.push(id);
+        }
+    }
+
+    // A non-trivial filter that exercises ORDER + LIMIT + OFFSET: ascending sort,
+    // skip the first, take three. Both queries must agree.
+    let filter = ListFilter {
+        sort_desc: Some(false),
+        limit: Some(3),
+        offset: Some(1),
+        ..Default::default()
+    };
+    let full = db.list(&filter).await.unwrap();
+    let id_pairs = db.list_ids(&filter).await.unwrap();
+
+    let full_ids: Vec<&str> = full.iter().map(|r| r.id.as_str()).collect();
+    let lean_ids: Vec<&str> = id_pairs.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(
+        lean_ids, full_ids,
+        "list_ids returns the same filtered+ordered ids as list()"
+    );
+    assert_eq!(full_ids.len(), 3, "the LIMIT/OFFSET applied identically");
+
+    // The meeting_id column must come back correctly: each pair's meeting_id
+    // matches what list() carries on the full row for the same id.
+    for (id, meeting_id) in &id_pairs {
+        let row = full.iter().find(|r| r.id.as_str() == id).unwrap();
+        assert_eq!(
+            meeting_id.as_deref(),
+            row.meeting_id.as_deref(),
+            "list_ids meeting_id must match the full row's meeting_id"
+        );
+    }
+    // And concretely: a meeting track carries Some("meeting-1"); a solo carries None.
+    let meeting_pair = id_pairs
+        .iter()
+        .find(|(id, _)| meeting_ids.iter().any(|m| m.as_str() == id))
+        .expect("a meeting track is in this filtered page");
+    assert_eq!(meeting_pair.1.as_deref(), Some("meeting-1"));
+    let solo_pair = id_pairs
+        .iter()
+        .find(|(id, _)| solo_ids.iter().any(|s| s.as_str() == id))
+        .expect("a solo recording is in this filtered page");
+    assert_eq!(solo_pair.1, None, "a standalone recording carries no meeting_id");
+}
+
+#[tokio::test]
+async fn get_batch_returns_existing_with_own_children_and_omits_unknown() {
+    // get_batch fetches the requested EXISTING recordings in one chunked IN(...)
+    // query, omits unknown ids, returns [] for empty input, and populates
+    // entities/tasks/speaker_names per recording keyed correctly by id (tags
+    // excluded). A mis-bucketed child map would attach A's children to B.
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let a = embedded_recording(None);
+    let b = embedded_recording(None);
+    let c = embedded_recording(None); // a third, NOT requested below
+    for r in [&a, &b, &c] {
+        db.insert(r).await.unwrap();
+    }
+
+    // Distinct children per recording so correct bucketing is observable.
+    db.add_entity(&a.id, "person", "Ada").await.unwrap();
+    db.add_task(&a.id, "ship A", None).await.unwrap();
+    db.set_speaker_name(&a.id, 1, "Alice").await.unwrap();
+
+    db.add_entity(&b.id, "org", "Acme").await.unwrap();
+    db.add_task(&b.id, "ship B", None).await.unwrap();
+    db.set_speaker_name(&b.id, 1, "Bob").await.unwrap();
+
+    // Also give A a tag — get_batch must NOT populate tags (callers fetch those
+    // separately), proving the deliberate exclusion.
+    let tag = db.add_tag("important", None).await.unwrap();
+    db.attach_tag(&a.id, tag.id).await.unwrap();
+
+    // Empty input short-circuits to [].
+    assert!(
+        db.get_batch(&[]).await.unwrap().is_empty(),
+        "empty input returns an empty Vec (early return)"
+    );
+
+    // Request a, b, and an UNKNOWN id. Order is unspecified, so index by id.
+    let unknown = RecordingId::new();
+    let got = db
+        .get_batch(&[a.id.clone(), b.id.clone(), unknown.clone()])
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 2, "exactly the two existing ids come back");
+    assert!(
+        !got.iter().any(|r| r.id.as_str() == unknown.as_str()),
+        "an id absent from the catalog is omitted, not returned empty"
+    );
+    assert!(
+        !got.iter().any(|r| r.id.as_str() == c.id.as_str()),
+        "an existing recording that wasn't requested is not returned"
+    );
+
+    let got_a = got.iter().find(|r| r.id.as_str() == a.id.as_str()).unwrap();
+    let got_b = got.iter().find(|r| r.id.as_str() == b.id.as_str()).unwrap();
+
+    // A's children are A's — not bucketed onto B (proves correct id keying).
+    assert_eq!(
+        got_a.entities,
+        vec![Entity {
+            kind: "person".into(),
+            value: "Ada".into()
+        }]
+    );
+    assert_eq!(got_a.tasks.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), vec!["ship A"]);
+    assert_eq!(
+        got_a.speaker_names,
+        vec![SpeakerName {
+            speaker_label: 1,
+            name: "Alice".into()
+        }]
+    );
+    // get_batch deliberately does NOT load tags, even though A has one.
+    assert!(
+        got_a.tags.is_empty(),
+        "get_batch must not populate tags (callers fetch those separately)"
+    );
+
+    // B's children are B's.
+    assert_eq!(
+        got_b.entities,
+        vec![Entity {
+            kind: "org".into(),
+            value: "Acme".into()
+        }]
+    );
+    assert_eq!(got_b.tasks.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), vec!["ship B"]);
+    assert_eq!(
+        got_b.speaker_names,
+        vec![SpeakerName {
+            speaker_label: 1,
+            name: "Bob".into()
+        }]
+    );
+}
+
 #[test]
 fn test_sanitize_fts5_query() {
     // Bare words become quoted prefix terms, AND-ed.
@@ -2221,6 +2387,11 @@ async fn add_task_appends_a_manual_task_that_survives_reextraction() {
     )
     .await
     .unwrap();
+    // Assert on the ORDERED list, not just membership: the manual task was
+    // appended at sort_order = max+1 (after the LLM "Ship it" at sort_order 0), and
+    // the re-extraction keeps the manual row's own sort_order while the new LLM row
+    // re-takes sort_order 0. list_tasks orders by (done, sort_order, id), so the
+    // manual task must still sort AFTER the freshly-extracted one.
     let texts: Vec<String> = db
         .list_tasks(&r.id)
         .await
@@ -2228,17 +2399,60 @@ async fn add_task_appends_a_manual_task_that_survives_reextraction() {
         .into_iter()
         .map(|t| t.text)
         .collect();
-    assert!(
-        texts.iter().any(|t| t == "Call the client"),
-        "the manual task must survive re-extraction"
+    assert_eq!(
+        texts,
+        vec!["Ship it v2".to_string(), "Call the client".to_string()],
+        "the LLM task keeps the head slot; the manual task stays appended after it (no sort_order reset to the extraction index)"
     );
-    assert!(
-        texts.iter().any(|t| t == "Ship it v2"),
-        "the new extracted task is present"
-    );
-    assert!(
-        !texts.iter().any(|t| t == "Ship it"),
-        "the old extracted task was replaced"
+
+    // The upsert CASE branch: when the LLM re-extracts the SAME text as a manual
+    // task, that row must STAY 'manual' (and keep its sort_order), or the next
+    // re-extraction's `DELETE ... WHERE source='llm'` would silently remove a
+    // user-owned task. Re-extract a set containing the manual task's exact text…
+    db.set_tasks(
+        &r.id,
+        &[
+            Task {
+                id: 0,
+                text: "Ship it v3".into(),
+                due_hint: None,
+                done: false,
+            },
+            Task {
+                id: 0,
+                text: "Call the client".into(), // collides with the manual row
+                due_hint: None,
+                done: false,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    // …then re-extract WITHOUT it. If the collision had flipped the row to 'llm',
+    // this DELETE would drop "Call the client"; because it stayed 'manual', it
+    // survives — and still sorts last on its preserved sort_order.
+    db.set_tasks(
+        &r.id,
+        &[Task {
+            id: 0,
+            text: "Ship it v4".into(),
+            due_hint: None,
+            done: false,
+        }],
+    )
+    .await
+    .unwrap();
+    let final_texts: Vec<String> = db
+        .list_tasks(&r.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.text)
+        .collect();
+    assert_eq!(
+        final_texts,
+        vec!["Ship it v4".to_string(), "Call the client".to_string()],
+        "a manual row the LLM re-extracted verbatim stays 'manual' (survives the next llm-only DELETE) and keeps its trailing sort_order"
     );
 }
 
@@ -2373,6 +2587,106 @@ async fn add_entity_survives_reextraction_and_delete_is_scoped() {
 }
 
 #[tokio::test]
+async fn update_entity_renames_marks_manual_and_skips_collisions() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = embedded_recording(None);
+    db.insert(&r).await.unwrap();
+    // An LLM-extracted entity to edit in place.
+    db.set_entities(
+        &r.id,
+        &[Entity {
+            kind: "person".into(),
+            value: "Ada".into(),
+        }],
+    )
+    .await
+    .unwrap();
+
+    // Rename (person, Ada) → (person, Grace): one row updated, value changed.
+    assert_eq!(
+        db.update_entity(&r.id, "person", "Ada", "person", "Grace")
+            .await
+            .unwrap(),
+        1,
+        "an existing entity renames in place (one row affected)"
+    );
+    let after_rename = db.list_entities(&r.id).await.unwrap();
+    assert_eq!(
+        after_rename,
+        vec![Entity {
+            kind: "person".into(),
+            value: "Grace".into(),
+        }],
+        "the rename replaced Ada with Grace, nothing else"
+    );
+
+    // The edit flipped source to 'manual', so a subsequent re-extraction (which
+    // DELETEs only 'llm' rows) must NOT remove it. If update_entity had left it
+    // 'llm', this set_entities would drop Grace.
+    db.set_entities(
+        &r.id,
+        &[Entity {
+            kind: "person".into(),
+            value: "Babbage".into(),
+        }],
+    )
+    .await
+    .unwrap();
+    let after_reextract: Vec<String> = db
+        .list_entities(&r.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|e| e.value)
+        .collect();
+    assert!(
+        after_reextract.iter().any(|v| v == "Grace"),
+        "an edited (now 'manual') entity survives re-extraction"
+    );
+    assert!(
+        after_reextract.iter().any(|v| v == "Babbage"),
+        "the fresh LLM entity is present"
+    );
+
+    // Collision: renaming Grace onto an entity the recording already has must be a
+    // no-op (UPDATE OR IGNORE), returning 0 and leaving BOTH rows untouched.
+    assert_eq!(db.add_entity(&r.id, "org", "Acme").await.unwrap(), 1);
+    let before_collision = db.list_entities(&r.id).await.unwrap();
+    assert_eq!(
+        db.update_entity(&r.id, "person", "Grace", "org", "Acme")
+            .await
+            .unwrap(),
+        0,
+        "a rename onto an existing (kind,value) is a no-op, not a UNIQUE error"
+    );
+    assert_eq!(
+        db.list_entities(&r.id).await.unwrap(),
+        before_collision,
+        "the would-collide rename left both the source and the target row intact"
+    );
+
+    // The UPDATE is scoped to the recording: editing on a different recording
+    // touches nothing here.
+    let other = embedded_recording(None);
+    db.insert(&other).await.unwrap();
+    assert_eq!(
+        db.update_entity(&other.id, "person", "Grace", "person", "Hopper")
+            .await
+            .unwrap(),
+        0,
+        "no entity on the other recording → no row affected"
+    );
+    assert!(
+        db.list_entities(&r.id)
+            .await
+            .unwrap()
+            .iter()
+            .any(|e| e.value == "Grace"),
+        "the original recording's Grace is untouched by the other-recording edit"
+    );
+}
+
+#[tokio::test]
 async fn merge_entities_folds_variants_across_the_library() {
     let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
     let a = embedded_recording(None);
@@ -2501,6 +2815,95 @@ async fn add_tag_is_case_insensitive() {
     assert_eq!(first.id, second.id, "casing variants must reuse the tag");
     assert_eq!(second.name, "Code", "the first-created casing wins");
     assert_eq!(second.color.as_deref(), Some("#f00"), "existing color kept");
+}
+
+#[tokio::test]
+async fn tag_usage_counts_counts_recordings_per_tag_and_omits_unattached() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let a = embedded_recording(None);
+    let b = embedded_recording(None);
+    db.insert(&a).await.unwrap();
+    db.insert(&b).await.unwrap();
+    let t = db.add_tag("shared", None).await.unwrap();
+    let u = db.add_tag("orphan", None).await.unwrap(); // created but never attached
+    db.attach_tag(&a.id, t.id).await.unwrap();
+    db.attach_tag(&b.id, t.id).await.unwrap();
+    // Attaching the same tag twice must NOT double-count (INSERT OR IGNORE).
+    db.attach_tag(&b.id, t.id).await.unwrap();
+
+    let counts = db.tag_usage_counts().await.unwrap();
+    assert_eq!(
+        counts.get(&t.id).copied(),
+        Some(2),
+        "the shared tag is counted once per attached recording (2), not per row"
+    );
+    assert!(
+        !counts.contains_key(&u.id),
+        "a tag with no attachments is absent from the map (treated as zero)"
+    );
+    assert_eq!(counts.len(), 1, "only attached tags appear");
+}
+
+#[tokio::test]
+async fn merge_tags_repoints_dedupes_and_drops_the_source() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let a = embedded_recording(None);
+    let b = embedded_recording(None);
+    db.insert(&a).await.unwrap();
+    db.insert(&b).await.unwrap();
+    let from = db.add_tag("from", None).await.unwrap();
+    let into = db.add_tag("into", None).await.unwrap();
+
+    // A carries only `from`; B already carries BOTH (the de-dup case).
+    db.attach_tag(&a.id, from.id).await.unwrap();
+    db.attach_tag(&b.id, from.id).await.unwrap();
+    db.attach_tag(&b.id, into.id).await.unwrap();
+
+    db.merge_tags(from.id, into.id).await.unwrap();
+
+    // A: its `from` link was re-pointed onto `into`.
+    let a_tags: Vec<i64> = db.tags_for(&a.id).await.unwrap().iter().map(|t| t.id).collect();
+    assert_eq!(
+        a_tags,
+        vec![into.id],
+        "the source tag on A was re-pointed onto the target"
+    );
+    // B: had both already, so it ends with exactly ONE `into` link (no dup row).
+    let b_tags: Vec<i64> = db.tags_for(&b.id).await.unwrap().iter().map(|t| t.id).collect();
+    assert_eq!(
+        b_tags,
+        vec![into.id],
+        "a recording that already carried both keeps a single de-duped link"
+    );
+    // The source tag row itself is gone from the library.
+    assert!(
+        db.list_all_tags()
+            .await
+            .unwrap()
+            .iter()
+            .all(|t| t.id != from.id),
+        "the merged-from tag row is deleted"
+    );
+    // The target now counts both recordings exactly once each.
+    assert_eq!(
+        db.tag_usage_counts().await.unwrap().get(&into.id).copied(),
+        Some(2),
+        "into ends attached to both recordings, counted once each"
+    );
+
+    // from_id == into_id is a no-op: nothing changes.
+    let before_tags = db.list_all_tags().await.unwrap();
+    db.merge_tags(into.id, into.id).await.unwrap();
+    assert_eq!(
+        db.list_all_tags().await.unwrap(),
+        before_tags,
+        "merging a tag into itself leaves the tag set untouched"
+    );
+    assert_eq!(
+        db.tag_usage_counts().await.unwrap().get(&into.id).copied(),
+        Some(2),
+        "the self-merge no-op leaves usage counts untouched"
+    );
 }
 
 #[tokio::test]
@@ -3104,6 +3507,49 @@ async fn labeled_voiceprints_returns_only_enrolled_captures() {
     assert_eq!(labeled.len(), 1, "only the enrolled capture is labelled");
     assert_eq!(labeled[0].0, ada, "labelled by its named-voice id");
     assert_eq!(labeled[0].1, vec![1.0, 0.0]);
+}
+
+#[tokio::test]
+async fn rename_named_voice_renames_ignores_blank_and_unknown_id() {
+    let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+    let r = embedded_recording(None);
+    db.insert(&r).await.unwrap();
+    db.save_speaker_voiceprint(r.id.as_str(), 1, &[1.0, 0.0, 0.0], 0)
+        .await
+        .unwrap();
+    let id = db
+        .enroll_speaker(r.id.as_str(), 1, "Ada")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // A live rename updates the name for exactly that voice.
+    db.rename_named_voice(&id, "Grace").await.unwrap();
+    let voices = db.list_named_voices().await.unwrap();
+    assert_eq!(voices.len(), 1, "still exactly one named voice");
+    assert_eq!(voices[0].id, id);
+    assert_eq!(voices[0].name, "Grace", "the rename took effect");
+
+    // A blank / whitespace-only name is a no-op (early return after trim): the
+    // name must stay "Grace", never become empty.
+    db.rename_named_voice(&id, "   ").await.unwrap();
+    let after_blank = db.list_named_voices().await.unwrap();
+    assert_eq!(
+        after_blank[0].name, "Grace",
+        "a whitespace-only rename leaves the name unchanged"
+    );
+
+    // An unknown id touches no row and isn't an error: the real voice is intact
+    // and no phantom voice is created.
+    db.rename_named_voice("nv_does_not_exist", "Hopper")
+        .await
+        .unwrap();
+    let after_unknown = db.list_named_voices().await.unwrap();
+    assert_eq!(after_unknown.len(), 1, "no row was added or removed");
+    assert_eq!(
+        after_unknown[0].name, "Grace",
+        "renaming an unknown id must not touch the existing voice"
+    );
 }
 
 #[tokio::test]
@@ -5086,8 +5532,14 @@ mod ann_tests {
         // Build the ANN index from SQLite (the daemon's background-build path).
         ann.rebuild_ann_index().await.unwrap();
         let health = ann.ann_health().await;
+        assert!(health.feature_compiled, "the ann-usearch feature is built");
+        assert!(health.enabled, "enabled_cfg turned the runtime flag on");
         assert!(health.index_loaded, "index should be warm after rebuild");
         assert_eq!(health.index_vectors, n, "every chunk vector is indexed");
+        assert_eq!(
+            health.sqlite_vectors, n,
+            "a single-dimension corpus reports every chunk as indexable (matches the warm index)"
+        );
 
         // Run a battery of queries; compare the top-10 recording sets.
         let queries = 40;
@@ -5132,6 +5584,77 @@ mod ann_tests {
         assert!(
             recall >= 0.95,
             "recall@10 = {recall:.3} must be >= 0.95 (overlap {total_overlap}/{total_expected})"
+        );
+    }
+
+    /// The Doctor probe reads every field of `AnnHealth`. Pin them:
+    /// `feature_compiled`/`enabled` reflect the build + runtime flag, and
+    /// `sqlite_vectors` counts ONLY indexable (modal-dimension, well-formed) chunk
+    /// vectors — not a raw `COUNT(*)`. An unfiltered count would include
+    /// off-dimension/corrupt blobs that the index deliberately skips, so it would
+    /// diverge from `index_vectors` and read as "rebuilding forever" on a
+    /// mixed-dimension library.
+    #[tokio::test]
+    async fn ann_health_reports_compiled_enabled_and_modal_dim_count() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = open_ann_catalog(dir.path(), enabled_cfg()).await;
+
+        // Two recordings, each one 4-dim chunk → modal dimension is firmly 4.
+        let a = embedded_recording(None);
+        let b = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.insert(&b).await.unwrap();
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&b.id, &[vec![0.0, 1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.rebuild_ann_index().await.unwrap();
+
+        let health = db.ann_health().await;
+        assert!(
+            health.feature_compiled,
+            "this test only compiles under the ann-usearch feature"
+        );
+        assert!(health.enabled, "enabled_cfg set the runtime flag");
+        assert!(health.index_loaded, "the index is warm after a rebuild");
+        assert_eq!(health.index_vectors, 2, "both 4-dim chunks are indexed");
+        assert_eq!(
+            health.sqlite_vectors, 2,
+            "all chunks are at the modal dimension and keyed → 2 indexable"
+        );
+
+        // Insert a THIRD chunk at a different (3-dim) dimension straight into
+        // SQLite, bypassing `upsert_chunk_embeddings` so the warm 4-dim index stays
+        // intact and unkeyed (it would refuse a 3-dim add). A raw COUNT(*) over
+        // `embedding_chunks` is now 3; the modal dimension is still 4.
+        let c = embedded_recording(None);
+        db.insert(&c).await.unwrap();
+        let mut three_dim = Vec::with_capacity(12);
+        for &v in &[1.0f32, 0.0, 0.0] {
+            three_dim.extend_from_slice(&v.to_le_bytes());
+        }
+        sqlx::query("INSERT INTO embedding_chunks (recording_id, chunk_index, vector) VALUES (?, ?, ?)")
+            .bind(c.id.as_str())
+            .bind(0i64)
+            .bind(three_dim)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        // sqlite_vectors must STILL be 2: the off-dimension, unkeyed chunk is not
+        // indexable, so it's excluded — proving the modal-dimension + ann_keys
+        // filter, not a `SELECT COUNT(*) FROM embedding_chunks` (which would read 3
+        // and falsely imply the index is perpetually behind).
+        let health = db.ann_health().await;
+        assert_eq!(
+            health.sqlite_vectors, 2,
+            "the off-dimension chunk must NOT be counted as indexable (got {health:?})"
+        );
+        assert_eq!(
+            health.sqlite_vectors, health.index_vectors,
+            "indexable count matches the warm index, so the Doctor reads 'healthy', not 'rebuilding'"
         );
     }
 
@@ -5180,8 +5703,12 @@ mod ann_tests {
         assert_eq!(reembed[0].1.as_str(), b.id.as_str());
     }
 
-    /// Fallback: a corrupt/dimension-mismatched sidecar must not panic and must
-    /// fall through to brute force (same results).
+    /// Fallback: a query whose dimension doesn't match the warm ANN index must
+    /// not panic AND must still surface whatever brute force would find — proving
+    /// it *declined to ANN and scanned*, not *returned an empty candidate set and
+    /// skipped every chunk* (the failure mode `ann_empty_key_resolution_falls_back_to_brute_force`
+    /// guards). An empty result alone can't tell those two apart, so we seed an
+    /// off-dimension recording that only brute force can recover.
     #[tokio::test]
     async fn ann_dim_mismatch_falls_back_to_brute_force() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -5194,18 +5721,44 @@ mod ann_tests {
             .unwrap();
         db.rebuild_ann_index().await.unwrap();
 
-        // Query with a DIFFERENT dimension (3 vs the index's 4): the ANN path
-        // declines (dim mismatch) and brute force scores nothing (it also skips
-        // the dim-mismatched stored vector), so this is just a no-panic check.
-        let res = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
-        assert!(
-            res.is_empty(),
-            "dim-mismatched query yields nothing, no panic"
-        );
-
-        // A matching-dim query still works via the ANN path.
+        // While the warm 4-dim index is intact: a matching-dim query goes through
+        // the ANN path and finds `a`. Assert this BEFORE seeding the off-dim
+        // recording below, whose incremental add drops the warm index.
+        assert!(db.ann_health().await.index_loaded, "4-dim index is warm");
         let ok = db.vector_ranking(&[1.0, 0.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(ok.len(), 1, "the 4-dim recording is the only ANN result");
         assert_eq!(ok[0].1.as_str(), a.id.as_str());
+
+        // Seed a recording whose ONLY chunk is 3-dim. The incremental
+        // `sync_recording_to_ann` tries to add a 3-dim vector to the 4-dim index,
+        // which errors and drops the warm index (a rebuild would heal it). The
+        // 3-dim chunk now lives only in SQLite/the brute-force corpus.
+        let b = embedded_recording(None);
+        db.insert(&b).await.unwrap();
+        db.upsert_chunk_embeddings(&b.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+
+        // A 3-dim query now: there's no usable warm index, so the scan runs over
+        // the whole corpus. `a`'s 4-dim chunk is skipped (dim guard), but `b`'s
+        // 3-dim chunk matches — so brute force MUST surface `b`. A non-empty,
+        // `b`-only result distinguishes "declined to ANN + scanned" from "empty
+        // candidate set + skipped everything" (which would return nothing).
+        let res = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(
+            res.len(),
+            1,
+            "the 3-dim recording is recovered by the brute-force scan, got {res:?}"
+        );
+        assert_eq!(
+            res[0].1.as_str(),
+            b.id.as_str(),
+            "dim-mismatched query must still surface the off-dim recording via brute force, not drop it"
+        );
+        assert!(
+            (res[0].2 - 1.0).abs() < 1e-6,
+            "the 3-dim query is identical to b's 3-dim chunk → cosine ~1.0"
+        );
     }
 
     /// With ANN enabled but no index built yet (cold), search must fall back to

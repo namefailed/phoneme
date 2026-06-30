@@ -29,3 +29,29 @@ pub async fn run(cfg: &Config, json: bool) -> ExitCode {
         Err(code) => code,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::MockDaemon;
+    use phoneme_ipc::Response;
+    use std::time::Duration;
+
+    /// `phoneme reembed` sends exactly one `ReembedAll` request (and nothing
+    /// else) and reports success. The snapshot smoke test only proves `--help`
+    /// parses; this pins the request that actually crosses the wire.
+    #[tokio::test]
+    async fn sends_reembed_all() {
+        let mock = MockDaemon::spawn("reembed", |_req| {
+            Response::Ok(serde_json::json!({ "queued": true }))
+        });
+        let mut cfg = Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+
+        let code = tokio::time::timeout(Duration::from_secs(5), run(&cfg, false))
+            .await
+            .expect("reembed must return promptly");
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(mock.received(), vec![Request::ReembedAll]);
+    }
+}

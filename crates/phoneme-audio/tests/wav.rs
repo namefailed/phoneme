@@ -59,13 +59,16 @@ fn duration_matches_sample_count() {
 
 #[test]
 fn read_nonexistent_file_is_error() {
+    // A missing path must map to the Io-mapped NotFound branch
+    // (hound::Error::IoError -> Error::Io), not Error::Internal or a silent
+    // empty read. Matching the variant is locale-independent and catches a
+    // regression that mis-maps the missing-file case.
     let err = wav::read_wav(std::path::Path::new("/no/such/file.wav")).unwrap_err();
     assert!(
-        format!("{err}").to_lowercase().contains("no such")
-            || format!("{err}").to_lowercase().contains("not found")
-            || format!("{err}").to_lowercase().contains("cannot")
-            || format!("{err}")
-                .to_lowercase()
-                .contains("system cannot find")
+        matches!(
+            &err,
+            phoneme_core::error::Error::Io(e) if e.kind() == std::io::ErrorKind::NotFound
+        ),
+        "missing file should map to Error::Io(NotFound), got {err:?}"
     );
 }

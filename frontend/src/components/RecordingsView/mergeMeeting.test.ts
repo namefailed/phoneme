@@ -7,6 +7,8 @@ import {
   sourceFor,
   speakerDisplayName,
   speakerLabelsIn,
+  speakersForRename,
+  renameSpeakerInTranscript,
   applySpeakerNames,
   segmentIdxsForChronoBlock,
 } from "./mergeMeeting";
@@ -261,6 +263,79 @@ describe("applySpeakerNames", () => {
   it("ignores a whitespace-only custom name (keeps the default marker)", () => {
     const t = "[Speaker 1]: hello";
     expect(applySpeakerNames(t, [{ speaker_label: 1, name: "   " }])).toBe(t);
+  });
+});
+
+describe("speakersForRename", () => {
+  it("unions marker labels with labels that exist only in speaker_names", () => {
+    // Only [Speaker 2] survives as a marker; label 1 was already renamed (its
+    // marker is gone from the baked text) but is remembered via speaker_names.
+    const transcript = "Sarah: hi there\n\n[Speaker 2]: hello back";
+    expect(speakersForRename(transcript, [{ speaker_label: 1, name: "Sarah" }])).toEqual([1, 2]);
+  });
+
+  it("keeps a fully-baked transcript renamable from speaker_names alone", () => {
+    // No [Speaker N] markers remain at all — every label comes from the names map.
+    const baked = "Sarah: first\n\nMax: second";
+    expect(
+      speakersForRename(baked, [
+        { speaker_label: 1, name: "Sarah" },
+        { speaker_label: 3, name: "Max" },
+      ]),
+    ).toEqual([1, 3]);
+  });
+
+  it("dedupes a label present in both the markers and the names map, sorted ascending", () => {
+    const transcript = "[Speaker 2]: a\n\n[Speaker 1]: b";
+    expect(speakersForRename(transcript, [{ speaker_label: 2, name: "Bob" }])).toEqual([1, 2]);
+  });
+
+  it("falls back to marker labels alone when there are no custom names", () => {
+    expect(speakersForRename("[Speaker 3]: x\n\n[Speaker 1]: y", undefined)).toEqual([1, 3]);
+    expect(speakersForRename("no markers here", [])).toEqual([]);
+  });
+});
+
+describe("renameSpeakerInTranscript", () => {
+  it("rewrites the canonical [Speaker N]: marker on a fresh rename", () => {
+    const t = "[Speaker 1]: hello\n\n[Speaker 2]: hi";
+    expect(renameSpeakerInTranscript(t, 1, "Speaker 1", "Sarah")).toBe(
+      "Sarah: hello\n\n[Speaker 2]: hi",
+    );
+  });
+
+  it("rewrites a previously-baked oldName: label on a rename-after-rename", () => {
+    // After the first rename the text reads "Sarah:"; renaming again must catch
+    // both the (now absent) marker AND the baked "Sarah:" turns.
+    const t = "Sarah: turn one\n\n[Speaker 2]: other\n\nSarah: turn two";
+    expect(renameSpeakerInTranscript(t, 1, "Sarah", "Sara")).toBe(
+      "Sara: turn one\n\n[Speaker 2]: other\n\nSara: turn two",
+    );
+  });
+
+  it("restores the [Speaker N]: marker when newName is cleared and oldName was custom", () => {
+    const t = "Sarah: hello\n\n[Speaker 2]: hi";
+    expect(renameSpeakerInTranscript(t, 1, "Sarah", "")).toBe(
+      "[Speaker 1]: hello\n\n[Speaker 2]: hi",
+    );
+    // Whitespace-only newName counts as cleared too.
+    expect(renameSpeakerInTranscript(t, 1, "Sarah", "   ")).toBe(
+      "[Speaker 1]: hello\n\n[Speaker 2]: hi",
+    );
+  });
+
+  it("does not touch unrelated 'Word:' text when oldName is the default marker name", () => {
+    // wasCustom is false (oldName === "Speaker 1"), so only the marker is
+    // rewritten — a coincidental "Note:" in the body must survive untouched.
+    const t = "[Speaker 1]: Note: remember this\n\n[Speaker 2]: ok";
+    expect(renameSpeakerInTranscript(t, 1, "Speaker 1", "Sarah")).toBe(
+      "Sarah: Note: remember this\n\n[Speaker 2]: ok",
+    );
+  });
+
+  it("is a no-op when clearing a name that was never custom", () => {
+    const t = "[Speaker 1]: hello";
+    expect(renameSpeakerInTranscript(t, 1, "Speaker 1", "")).toBe(t);
   });
 });
 

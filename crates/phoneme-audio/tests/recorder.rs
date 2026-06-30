@@ -1,4 +1,4 @@
-use phoneme_audio::format::{AudioConfig, SampleRate};
+use phoneme_audio::format::{AudioConfig, Channels, SampleRate};
 use phoneme_audio::recorder::{RecorderConfig, RecordingMode};
 use phoneme_audio::source::{SampleBlock, Source, SyntheticSink, SyntheticSource};
 use phoneme_audio::wav;
@@ -155,8 +155,39 @@ async fn oneshot_mode_stops_on_silence() {
     let finalize = recorder.wait_for_finalize(&wav_path).await.unwrap();
     sink.close();
 
-    assert!(finalize.duration_ms < 30_000);
+    // Blocks are processed whole: the loud block (16_000) is appended, then the
+    // entire silent block (16_000) is appended before the silence gate is
+    // evaluated at the block boundary — where the trailing 8000-sample window is
+    // all-zero and fires the auto-stop. So the recording is exactly the two
+    // blocks: 32_000 samples = 2000 ms. Pinning the exact stop point catches a
+    // regression that fires the gate a block too early (on the loud audio, ~1000
+    // ms) or one that never fires (the test would hang, since the sink isn't
+    // closed until after finalize — auto-stop firing at all is what lets
+    // `wait_for_finalize` return).
+    assert_eq!(
+        finalize.duration_ms, 2000,
+        "oneshot must auto-stop exactly at the silent-block boundary (2.0s)"
+    );
+    assert_eq!(
+        finalize.samples_written, 32_000,
+        "the loud + silent blocks (32_000 samples) must all be written"
+    );
     assert!(wav_path.exists());
+    let (samples, _) = wav::read_wav(&wav_path).unwrap();
+    assert_eq!(samples.len(), 32_000, "WAV must carry all 32_000 samples");
+    // The first half is the loud signal (peak well above the gate); the trailing
+    // silence (last 8000 samples) is what tripped the auto-stop — both must be
+    // present, proving the gate fired on the quiet tail, not on the loud audio.
+    assert!(
+        peak_of(&samples[..16_000]) > 10_000,
+        "the loud lead-in must survive, got peak {}",
+        peak_of(&samples[..16_000])
+    );
+    assert_eq!(
+        peak_of(&samples[24_000..]),
+        0,
+        "the trailing 0.5s window that tripped the gate must be true silence"
+    );
 }
 
 #[tokio::test]
@@ -610,6 +641,20 @@ async fn snapshot_tail_bounds_clone_and_reports_total() {
     let (total_all, all) = recorder.snapshot_tail(0).await.unwrap();
     assert_eq!(all.len(), total_all, "max_tail=0 returns the full buffer");
     assert!(all.len() >= tail.len());
+    // The full snapshot must carry the *actual* captured loud audio, not a
+    // correctly-sized but zeroed/wrong buffer. `loud_block` peaks near 20_000, so
+    // a faithful clone has a large peak; its trailing 8000 samples must equal the
+    // bounded tail (same window over the same buffer).
+    assert!(
+        peak_of(&all) > 10_000,
+        "the full snapshot must contain the captured loud signal, got peak {}",
+        peak_of(&all)
+    );
+    assert_eq!(
+        &all[all.len() - tail.len()..],
+        &tail[..],
+        "the tail snapshot must equal the last max_tail samples of the full buffer"
+    );
 
     // A max_tail larger than the buffer returns everything (never panics).
     let (_t, big) = recorder.snapshot_tail(10_000_000).await.unwrap();
@@ -620,11 +665,36 @@ async fn snapshot_tail_bounds_clone_and_reports_total() {
 }
 
 #[tokio::test]
-async fn config_is_canonical_format() {
+async fn config_forwards_full_source_format() {
+    // `audio_config()` must faithfully forward the *source's* format — both rate
+    // AND channels — not hardcode the 16 kHz mono default. Build the source from
+    // a deliberately non-canonical config (44.1 kHz stereo) so a recorder that
+    // mangled either field, or echoed a hardcoded default, is caught.
+    let non_default = AudioConfig {
+        sample_rate: SampleRate::HZ_44_1K,
+        channels: Channels::STEREO,
+    };
+    let (source, _sink) = SyntheticSource::new(non_default);
+    let recorder = Recorder::start(Box::new(source), RecorderConfig::default(), None)
+        .await
+        .unwrap();
+    let reported = recorder.audio_config();
+    assert_eq!(reported.sample_rate, SampleRate::HZ_44_1K);
+    assert_eq!(reported.channels, Channels::STEREO);
+    assert_eq!(reported, non_default);
+    let _ = recorder.cancel().await;
+}
+
+#[tokio::test]
+async fn config_reports_canonical_default_format() {
+    // The default synthetic source carries Phoneme's canonical capture format —
+    // 16 kHz mono — and the recorder must report exactly that.
     let (source, _sink) = make_synthetic();
-    let cfg = RecorderConfig::default();
-    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
+    let recorder = Recorder::start(Box::new(source), RecorderConfig::default(), None)
+        .await
+        .unwrap();
     assert_eq!(recorder.audio_config().sample_rate, SampleRate::HZ_16K);
+    assert_eq!(recorder.audio_config().channels, Channels::MONO);
     let _ = recorder.cancel().await;
 }
 
