@@ -95,10 +95,10 @@ Each endpoint still maps one HTTP request to exactly one `phoneme-ipc`
 |--------|------|------------------|-------|
 | `GET`  | `/api/health` | `DaemonStatus` | `200 {"status":"ok"}` when the daemon answered; `503` otherwise. |
 | `GET`  | `/api/status` | `DaemonStatus` | The daemon's liveness + identity probe (pid, version, whisper ports). |
-| `GET`  | `/api/recordings` | `ListRecordings` | Query params: `limit` (u32), `offset` (u32), `kind` (`single`\|`meeting`; anything else = all). |
+| `GET`  | `/api/recordings` | `ListRecordings` | Query params (all optional): `limit` (u32), `offset` (u32), `kind` (`single`\|`meeting`; anything else = all), `text` (full-text transcript search), `tag_id` (i64), `status` (e.g. `done`, `transcribe_failed`; unknown = ignored), `favorite` (bool), `pinned` (bool), `in_place` (bool, dictation only), `tagged` (bool; `false` = untagged only), `since`/`until` (RFC-3339 bounds on `started_at`), `sort_desc` (bool; default newest-first). |
 | `GET`  | `/api/recordings/{id}` | `GetRecording` | `id` must be the canonical 18-char id; a malformed id is `400` and is never forwarded. |
-| `GET`  | `/api/recordings/{id}/segments` | `GetSegments` | Transcript segments in timeline order (may be an empty array — a normal state). |
-| `GET`  | `/api/recordings/{id}/words` | `GetWords` | The per-word layer beneath `segments` (word seek, confidence); may be empty. |
+| `GET`  | `/api/recordings/{id}/segments` | `GetSegments` | Transcript segments in timeline order (may be an empty array — a normal state). Optional `?variant=cleaned` reads the post-cleanup re-aligned timeline instead of the raw transcript. |
+| `GET`  | `/api/recordings/{id}/words` | `GetWords` | The per-word layer beneath `segments` (word seek, confidence); may be empty. Optional `?variant=cleaned` reads the re-aligned timeline. |
 | `GET`  | `/api/recordings/{id}/chapters` | `GetChapters` | Auto-chapters in chronological order (`start_ms`/`end_ms`, `title`, optional `summary`); may be an empty array — a normal state when the recording has no timing to chapter or the auto-chapter step never ran. |
 | `GET`  | `/api/recordings/{id}/versions` | `ListTranscriptVersions` | The transcript-version chain (raw ASR → each pipeline step → live), in `idx` order, for side-by-side compare. A cross-platform alternative to the pipe-only access. |
 | `GET`  | `/api/recordings/{id}/similar` | `MoreLikeThis` | "More like this" from the recording's stored vectors. Query param: `limit` (usize, default `20`). |
@@ -220,6 +220,12 @@ curl -s 'http://127.0.0.1:3737/api/recordings?limit=10'
 
 # Only meeting tracks, second page of 20
 curl -s 'http://127.0.0.1:3737/api/recordings?kind=meeting&limit=20&offset=20'
+
+# Filter: favorites with "budget" in the transcript, since a date, oldest-first
+curl -s 'http://127.0.0.1:3737/api/recordings?favorite=true&text=budget&since=2026-01-01T00:00:00Z&sort_desc=false'
+
+# The cleaned (post-cleanup re-aligned) timeline instead of the raw transcript
+curl -s 'http://127.0.0.1:3737/api/recordings/20260519T143500042/segments?variant=cleaned'
 
 # One recording, its transcript segments, its per-word layer, and its chapters
 curl -s http://127.0.0.1:3737/api/recordings/20260519T143500042

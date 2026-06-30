@@ -106,8 +106,8 @@ export type DaemonEvent =
   | { event: "tag_created"; id: number }
   | { event: "tag_updated"; id: number }
   | { event: "tag_deleted"; id: number }
-  | { event: "tag_attached"; tag_id: number }
-  | { event: "tag_detached"; tag_id: number }
+  | { event: "tag_attached"; tag_id: number; recording_id?: string | null }
+  | { event: "tag_detached"; tag_id: number; recording_id?: string | null }
   | { event: "tag_suggestions_updated"; id: string }
   | { event: "all_tag_suggestions_cleared"; cleared: number }
   // Ask-my-archive (local RAG): the answer stream for one question, tagged with

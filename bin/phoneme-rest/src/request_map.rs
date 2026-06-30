@@ -10,11 +10,12 @@
 //! The query-parameter shapes used by the list/search handlers live here too as
 //! `Deserialize` structs, so axum's `Query` extractor produces them directly.
 
-use phoneme_core::{ListFilter, ListKind, RecordMode, RecordingId};
+use phoneme_core::{ListFilter, ListKind, RecordMode, RecordingId, RecordingStatus};
 use phoneme_ipc::Request;
 use serde::Deserialize;
 
-/// Query parameters for `GET /api/recordings`.
+/// Query parameters for `GET /api/recordings`. Mirrors the most-used facets of
+/// the IPC [`ListFilter`] so REST clients can filter as richly as the GUI.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ListQuery {
     /// Maximum rows to return (maps to [`ListFilter::limit`]).
@@ -24,6 +25,37 @@ pub struct ListQuery {
     /// Recording-type filter: `single` or `meeting` (maps to
     /// [`ListFilter::kind`]). Any other value is ignored (treated as "all").
     pub kind: Option<String>,
+    /// Full-text search over transcripts (maps to [`ListFilter::search`]).
+    pub text: Option<String>,
+    /// Restrict to recordings carrying this tag id (maps to [`ListFilter::tag_id`]).
+    pub tag_id: Option<i64>,
+    /// Status filter, e.g. `done` / `transcribe_failed` (maps to
+    /// [`ListFilter::status`]); an unrecognized value is ignored.
+    pub status: Option<String>,
+    /// `true` = favorites only, `false` = non-favorites (maps to [`ListFilter::favorite`]).
+    pub favorite: Option<bool>,
+    /// `true` = pinned only, `false` = non-pinned (maps to [`ListFilter::pinned`]).
+    pub pinned: Option<bool>,
+    /// `true` = dictation (in-place) only (maps to [`ListFilter::in_place`]).
+    pub in_place: Option<bool>,
+    /// `true` = tagged only, `false` = untagged only (maps to [`ListFilter::tagged`]).
+    pub tagged: Option<bool>,
+    /// RFC-3339 lower bound on `started_at` (maps to [`ListFilter::since`]).
+    pub since: Option<String>,
+    /// RFC-3339 upper bound on `started_at` (maps to [`ListFilter::until`]).
+    pub until: Option<String>,
+    /// Sort newest-first (`true`, the default) or oldest-first (`false`).
+    pub sort_desc: Option<bool>,
+}
+
+/// Query parameters for the timeline endpoints (`/segments`, `/words`). Selects
+/// which transcript timeline to read: raw (default) or `cleaned` (re-aligned
+/// after post-processing).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct VariantQuery {
+    /// `cleaned` = the post-cleanup re-aligned timeline; absent / anything else
+    /// = the raw machine transcript.
+    pub variant: Option<String>,
 }
 
 /// Query parameters for `GET /api/search`.
@@ -49,13 +81,34 @@ fn parse_kind(kind: Option<&str>) -> Option<ListKind> {
     }
 }
 
-/// `GET /api/recordings` → [`Request::ListRecordings`].
+/// Parse an RFC-3339 timestamp into the daemon's `Local` clock, or `None`.
+fn parse_dt(s: Option<&str>) -> Option<chrono::DateTime<chrono::Local>> {
+    s.and_then(|raw| {
+        chrono::DateTime::parse_from_rfc3339(raw.trim())
+            .ok()
+            .map(|dt| dt.with_timezone(&chrono::Local))
+    })
+}
+
+/// `GET /api/recordings` → [`Request::ListRecordings`]. Threads the full facet
+/// set so REST clients can filter by text / tag / status / favorite / pinned /
+/// date range, not just limit/offset/kind.
 pub fn list_recordings(q: &ListQuery) -> Request {
     Request::ListRecordings {
         filter: ListFilter {
             limit: q.limit,
             offset: q.offset,
             kind: parse_kind(q.kind.as_deref()),
+            search: q.text.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+            tag_id: q.tag_id,
+            status: q.status.as_deref().and_then(RecordingStatus::from_str_opt),
+            favorite: q.favorite,
+            pinned: q.pinned,
+            in_place: q.in_place,
+            tagged: q.tagged,
+            since: parse_dt(q.since.as_deref()),
+            until: parse_dt(q.until.as_deref()),
+            sort_desc: q.sort_desc,
             ..ListFilter::default()
         },
     }
@@ -76,14 +129,31 @@ pub fn get_recording(id: RecordingId) -> Request {
     Request::GetRecording { id }
 }
 
-/// `GET /api/recordings/:id/segments` → [`Request::GetSegments`].
-pub fn get_segments(id: RecordingId) -> Request {
-    Request::GetSegments { id, variant: None }
+/// Normalize the `variant` query value: `cleaned` selects the re-aligned
+/// post-cleanup timeline; anything else (incl. absent) reads the raw transcript.
+fn parse_variant(v: Option<&str>) -> Option<String> {
+    match v.map(str::trim) {
+        Some("cleaned") => Some("cleaned".to_string()),
+        _ => None,
+    }
 }
 
-/// `GET /api/recordings/:id/words` → [`Request::GetWords`].
-pub fn get_words(id: RecordingId) -> Request {
-    Request::GetWords { id, variant: None }
+/// `GET /api/recordings/:id/segments` → [`Request::GetSegments`]. The optional
+/// `?variant=cleaned` selects the re-aligned post-cleanup timeline.
+pub fn get_segments(id: RecordingId, variant: Option<&str>) -> Request {
+    Request::GetSegments {
+        id,
+        variant: parse_variant(variant),
+    }
+}
+
+/// `GET /api/recordings/:id/words` → [`Request::GetWords`]. The optional
+/// `?variant=cleaned` selects the re-aligned post-cleanup timeline.
+pub fn get_words(id: RecordingId, variant: Option<&str>) -> Request {
+    Request::GetWords {
+        id,
+        variant: parse_variant(variant),
+    }
 }
 
 /// `GET /api/recordings/:id/chapters` → [`Request::GetChapters`].
@@ -346,12 +416,43 @@ mod tests {
             limit: Some(10),
             offset: Some(20),
             kind: Some("meeting".into()),
+            ..ListQuery::default()
         };
         match list_recordings(&q) {
             Request::ListRecordings { filter } => {
                 assert_eq!(filter.limit, Some(10));
                 assert_eq!(filter.offset, Some(20));
                 assert_eq!(filter.kind, Some(ListKind::Meeting));
+            }
+            other => panic!("expected ListRecordings, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_recordings_threads_the_full_facet_set() {
+        let q = ListQuery {
+            text: Some("budget".into()),
+            tag_id: Some(7),
+            status: Some("done".into()),
+            favorite: Some(true),
+            pinned: Some(false),
+            in_place: Some(true),
+            tagged: Some(true),
+            since: Some("2026-01-01T00:00:00Z".into()),
+            sort_desc: Some(false),
+            ..ListQuery::default()
+        };
+        match list_recordings(&q) {
+            Request::ListRecordings { filter } => {
+                assert_eq!(filter.search.as_deref(), Some("budget"));
+                assert_eq!(filter.tag_id, Some(7));
+                assert_eq!(filter.favorite, Some(true));
+                assert_eq!(filter.pinned, Some(false));
+                assert_eq!(filter.in_place, Some(true));
+                assert_eq!(filter.tagged, Some(true));
+                assert_eq!(filter.sort_desc, Some(false));
+                assert!(filter.status.is_some());
+                assert!(filter.since.is_some());
             }
             other => panic!("expected ListRecordings, got {other:?}"),
         }
@@ -394,9 +495,19 @@ mod tests {
             Request::GetRecording { id: got } => assert_eq!(got, id),
             other => panic!("expected GetRecording, got {other:?}"),
         }
-        match get_segments(id.clone()) {
-            Request::GetSegments { id: got, .. } => assert_eq!(got, id),
+        match get_segments(id.clone(), None) {
+            Request::GetSegments {
+                id: got,
+                variant: None,
+            } => assert_eq!(got, id),
             other => panic!("expected GetSegments, got {other:?}"),
+        }
+        // `?variant=cleaned` selects the re-aligned timeline.
+        match get_segments(id.clone(), Some("cleaned")) {
+            Request::GetSegments {
+                variant: Some(v), ..
+            } => assert_eq!(v, "cleaned"),
+            other => panic!("expected cleaned GetSegments, got {other:?}"),
         }
         match get_chapters(id.clone()) {
             Request::GetChapters { id: got } => assert_eq!(got, id),
@@ -451,9 +562,18 @@ mod tests {
     #[test]
     fn get_words_carries_the_id() {
         let id = parse_id("20260519T143500042").unwrap();
-        match get_words(id.clone()) {
-            Request::GetWords { id: got, .. } => assert_eq!(got, id),
+        match get_words(id.clone(), None) {
+            Request::GetWords {
+                id: got,
+                variant: None,
+            } => assert_eq!(got, id),
             other => panic!("expected GetWords, got {other:?}"),
+        }
+        match get_words(id.clone(), Some("cleaned")) {
+            Request::GetWords {
+                variant: Some(v), ..
+            } => assert_eq!(v, "cleaned"),
+            other => panic!("expected cleaned GetWords, got {other:?}"),
         }
     }
 

@@ -15,6 +15,171 @@ fn in_placeholders(n: usize) -> String {
     vec!["?"; n].join(",")
 }
 
+/// A bound value for the dynamic recordings-`list` filter, replayed in WHERE
+/// order by both [`Catalog::list`] (full rows) and [`Catalog::list_ids`]
+/// (id-only). Keeping the SQL + bind building in one place is what stops the two
+/// queries from drifting.
+enum ListBind {
+    Text(String),
+    F32(f32),
+}
+
+/// Build the part of the recordings query after `FROM recordings` — the optional
+/// tag JOIN, the dynamic WHERE, ORDER BY, and LIMIT/OFFSET — plus the bind values
+/// in WHERE order. Shared by [`Catalog::list`] and [`Catalog::list_ids`] so a
+/// filter behaves identically whether the caller fetches whole rows or just ids.
+fn list_query_suffix(filter: &ListFilter) -> (String, Vec<ListBind>) {
+    let mut sql = String::new();
+
+    let mut fts_query = None;
+    let mut tag_search_query = None;
+    let mut model_search_query = None;
+
+    if let Some(q) = filter.search.as_deref() {
+        let sanitized = sanitize_fts5_query(q);
+        if !sanitized.is_empty() {
+            fts_query = Some(sanitized);
+            let like = format!("%{}%", q);
+            tag_search_query = Some(like.clone());
+            // The same substring also matches any step's model name, so a search
+            // like "large-v3" or "gemma3:4b" finds everything that model ran on.
+            model_search_query = Some(like);
+        }
+    }
+
+    if filter.tag_id.is_some() {
+        sql.push_str(" JOIN recording_tags rt ON rt.recording_id = recordings.id");
+    }
+
+    sql.push_str(" WHERE 1=1");
+
+    if fts_query.is_some() {
+        sql.push_str(" AND (recordings.rowid IN (SELECT rowid FROM recordings_fts WHERE transcript MATCH ?) OR recordings.id IN (SELECT recording_id FROM recording_tags rts JOIN tags ts ON ts.id = rts.tag_id WHERE ts.name LIKE ?) OR recordings.model LIKE ? OR recordings.cleanup_model LIKE ? OR recordings.summary_model LIKE ? OR recordings.title_model LIKE ? OR recordings.tag_model LIKE ? OR recordings.diarization_model LIKE ?)");
+    }
+    if let Some(tag_id) = filter.tag_id {
+        // `tag_id` is an `i64`, so formatting it directly is injection-safe — an
+        // integer can't carry SQL. Same rationale as the `u32` LIMIT/OFFSET below.
+        sql.push_str(&format!(" AND rt.tag_id = {tag_id}"));
+    }
+    if filter.status.is_some() {
+        sql.push_str(" AND recordings.status = ?");
+    }
+    match filter.kind {
+        Some(crate::types::ListKind::Single) => {
+            sql.push_str(" AND recordings.meeting_id IS NULL")
+        }
+        Some(crate::types::ListKind::Meeting) => {
+            sql.push_str(" AND recordings.meeting_id IS NOT NULL")
+        }
+        None => {}
+    }
+    match filter.favorite {
+        Some(true) => sql.push_str(" AND recordings.favorite = 1"),
+        Some(false) => sql.push_str(" AND recordings.favorite = 0"),
+        None => {}
+    }
+    match filter.pinned {
+        Some(true) => sql.push_str(" AND recordings.pinned = 1"),
+        Some(false) => sql.push_str(" AND recordings.pinned = 0"),
+        None => {}
+    }
+    match filter.in_place {
+        Some(true) => sql.push_str(" AND recordings.in_place = 1"),
+        Some(false) => sql.push_str(" AND recordings.in_place = 0"),
+        None => {}
+    }
+    match filter.tagged {
+        Some(true) => {
+            sql.push_str(" AND recordings.id IN (SELECT recording_id FROM recording_tags)")
+        }
+        Some(false) => {
+            sql.push_str(" AND recordings.id NOT IN (SELECT recording_id FROM recording_tags)")
+        }
+        None => {}
+    }
+    if filter.entity_value.is_some() {
+        if filter.entity_kind.is_some() {
+            sql.push_str(
+                " AND recordings.id IN (SELECT recording_id FROM entities WHERE value = ? AND kind = ?)",
+            );
+        } else {
+            sql.push_str(
+                " AND recordings.id IN (SELECT recording_id FROM entities WHERE value = ?)",
+            );
+        }
+    }
+    match filter.task_state.as_deref() {
+        Some("has_open") => {
+            sql.push_str(" AND recordings.id IN (SELECT recording_id FROM tasks WHERE done = 0)")
+        }
+        Some("has_tasks") => {
+            sql.push_str(" AND recordings.id IN (SELECT recording_id FROM tasks)")
+        }
+        _ => {}
+    }
+    if filter.low_confidence_below.is_some() {
+        sql.push_str(
+            " AND recordings.mean_confidence IS NOT NULL AND recordings.mean_confidence < ?",
+        );
+    }
+    if filter.since.is_some() {
+        sql.push_str(" AND recordings.started_at >= ?");
+    }
+    if filter.until.is_some() {
+        sql.push_str(" AND recordings.started_at <= ?");
+    }
+    let dir = if filter.sort_desc.unwrap_or(true) {
+        "DESC"
+    } else {
+        "ASC"
+    };
+    sql.push_str(&format!(
+        " ORDER BY recordings.pinned DESC, recordings.started_at {dir}, recordings.id {dir}"
+    ));
+    match (filter.limit, filter.offset) {
+        (Some(n), Some(m)) => sql.push_str(&format!(" LIMIT {n} OFFSET {m}")),
+        (Some(n), None) => sql.push_str(&format!(" LIMIT {n}")),
+        (None, Some(m)) => sql.push_str(&format!(" LIMIT -1 OFFSET {m}")),
+        (None, None) => {}
+    }
+
+    // Binds in WHERE order — must mirror the clause order built above exactly.
+    let mut binds: Vec<ListBind> = Vec::new();
+    if let Some(fq) = fts_query {
+        binds.push(ListBind::Text(fq));
+    }
+    if let Some(tq) = tag_search_query {
+        binds.push(ListBind::Text(tq));
+    }
+    if let Some(mq) = model_search_query {
+        // One bind per model column in the WHERE OR above (transcription + cleanup
+        // + summary + title + tag + diarization), in that order.
+        for _ in 0..6 {
+            binds.push(ListBind::Text(mq.clone()));
+        }
+    }
+    if let Some(s) = filter.status {
+        binds.push(ListBind::Text(s.as_str().to_string()));
+    }
+    if let Some(value) = &filter.entity_value {
+        binds.push(ListBind::Text(value.clone()));
+        if let Some(kind) = &filter.entity_kind {
+            binds.push(ListBind::Text(kind.clone()));
+        }
+    }
+    if let Some(thresh) = filter.low_confidence_below {
+        binds.push(ListBind::F32(thresh));
+    }
+    if let Some(t) = filter.since {
+        binds.push(ListBind::Text(t.to_rfc3339()));
+    }
+    if let Some(t) = filter.until {
+        binds.push(ListBind::Text(t.to_rfc3339()));
+    }
+
+    (sql, binds)
+}
+
 impl Catalog {
     /// Insert a new recording row. The pipeline calls this once, when capture
     /// starts; later stages update the same row in place.
@@ -789,6 +954,47 @@ impl Catalog {
         Ok(Some(rec))
     }
 
+    /// Bulk counterpart of [`Self::get`]: fetch many recordings by id in one
+    /// `WHERE id IN (…)` query (chunked under SQLite's bound-param cap) plus three
+    /// batched child queries, instead of a full round-trip per id. Populates the
+    /// same children as `get` (speaker names + entities + tasks, NOT tags). Order
+    /// is unspecified — callers that need a particular order (e.g. by search score)
+    /// re-join on id. Ids absent from the catalog are simply omitted. Used by the
+    /// semantic-search / more-like-this handlers, which otherwise issued up to
+    /// `MAX_SEARCH_RESULTS` sequential `get` calls.
+    pub async fn get_batch(&self, ids: &[RecordingId]) -> Result<Vec<Recording>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let id_strs: Vec<String> = ids.iter().map(|i| i.as_str().to_string()).collect();
+        let mut recs: Vec<Recording> = Vec::new();
+        for chunk in id_strs.chunks(IN_CHUNK) {
+            let ph = in_placeholders(chunk.len());
+            let sql = format!("SELECT * FROM recordings WHERE id IN ({ph})");
+            let mut q = sqlx::query(&sql);
+            for id in chunk {
+                q = q.bind(id);
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                recs.push(row_to_recording(row)?);
+            }
+        }
+        // Match `get`'s children — entities + tasks + speaker names (tags are
+        // deliberately left out, callers fetch those separately) — but batched
+        // into one query each over the whole set rather than per recording.
+        let ids2: Vec<String> = recs.iter().map(|r| r.id.as_str().to_string()).collect();
+        let mut entities = self.entities_for_many(&ids2).await.unwrap_or_default();
+        let mut tasks = self.tasks_for_many(&ids2).await.unwrap_or_default();
+        let mut speaker_names = self.speaker_names_for_many(&ids2).await.unwrap_or_default();
+        for rec in &mut recs {
+            let key = rec.id.as_str().to_string();
+            rec.entities = entities.remove(&key).unwrap_or_default();
+            rec.tasks = tasks.remove(&key).unwrap_or_default();
+            rec.speaker_names = speaker_names.remove(&key).unwrap_or_default();
+        }
+        Ok(recs)
+    }
+
     /// List recordings matching `filter`, pinned-first then newest-first by
     /// default, with tags and speaker names populated per row.
     ///
@@ -799,193 +1005,14 @@ impl Catalog {
     /// top (`pinned DESC` leads the ORDER BY), ahead of the date sort. Backs the
     /// GUI Library and the CLI `phoneme list`.
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
-        let mut sql = String::from("SELECT recordings.* FROM recordings");
-
-        let mut fts_query = None;
-        let mut tag_search_query = None;
-        let mut model_search_query = None;
-
-        if let Some(q) = filter.search.as_deref() {
-            let sanitized = sanitize_fts5_query(q);
-            if !sanitized.is_empty() {
-                fts_query = Some(sanitized);
-                let like = format!("%{}%", q);
-                tag_search_query = Some(like.clone());
-                // The same substring also matches any step's model name, so a
-                // search like "large-v3" or "gemma3:4b" finds everything that
-                // model ran on (see the WHERE OR + per-column binds below).
-                model_search_query = Some(like);
-            }
-        }
-
-        if filter.tag_id.is_some() {
-            sql.push_str(" JOIN recording_tags rt ON rt.recording_id = recordings.id");
-        }
-
-        sql.push_str(" WHERE 1=1");
-
-        if fts_query.is_some() {
-            sql.push_str(" AND (recordings.rowid IN (SELECT rowid FROM recordings_fts WHERE transcript MATCH ?) OR recordings.id IN (SELECT recording_id FROM recording_tags rts JOIN tags ts ON ts.id = rts.tag_id WHERE ts.name LIKE ?) OR recordings.model LIKE ? OR recordings.cleanup_model LIKE ? OR recordings.summary_model LIKE ? OR recordings.title_model LIKE ? OR recordings.tag_model LIKE ? OR recordings.diarization_model LIKE ?)");
-        }
-        if let Some(tag_id) = filter.tag_id {
-            // `tag_id` is an `i64`, so formatting it directly is injection-safe —
-            // an integer can't carry SQL. Same rationale as the `u32` LIMIT/OFFSET
-            // below. String filters (FTS, status) go through bound `?` parameters.
-            sql.push_str(&format!(" AND rt.tag_id = {tag_id}"));
-        }
-        if filter.status.is_some() {
-            sql.push_str(" AND recordings.status = ?");
-        }
-        // Kind, favorites, and pinned are filtered in SQL, not client-side: they
-        // must apply before LIMIT/OFFSET, or pages of the chosen kind come back
-        // mostly empty (post-pagination filtering only ever thins the fetched
-        // page).
-        match filter.kind {
-            Some(crate::types::ListKind::Single) => {
-                sql.push_str(" AND recordings.meeting_id IS NULL");
-            }
-            Some(crate::types::ListKind::Meeting) => {
-                sql.push_str(" AND recordings.meeting_id IS NOT NULL");
-            }
-            None => {}
-        }
-        match filter.favorite {
-            Some(true) => sql.push_str(" AND recordings.favorite = 1"),
-            Some(false) => sql.push_str(" AND recordings.favorite = 0"),
-            None => {}
-        }
-        match filter.pinned {
-            Some(true) => sql.push_str(" AND recordings.pinned = 1"),
-            Some(false) => sql.push_str(" AND recordings.pinned = 0"),
-            None => {}
-        }
-        match filter.in_place {
-            Some(true) => sql.push_str(" AND recordings.in_place = 1"),
-            Some(false) => sql.push_str(" AND recordings.in_place = 0"),
-            None => {}
-        }
-        // Tag-presence filter (sidebar "All Tags" / "Untagged"). A static subquery
-        // over recording_tags — no bound params, injection-safe. Independent of the
-        // single-tag `tag_id` JOIN above, so the two compose.
-        match filter.tagged {
-            Some(true) => {
-                sql.push_str(" AND recordings.id IN (SELECT recording_id FROM recording_tags)")
-            }
-            Some(false) => {
-                sql.push_str(" AND recordings.id NOT IN (SELECT recording_id FROM recording_tags)")
-            }
-            None => {}
-        }
-        // Entity facet filter (sidebar browse-by-entity). A subquery over the
-        // `entities` child table, the entity counterpart of the `tag_id` JOIN:
-        // keep recordings that mention this exact entity `value`, optionally
-        // pinned to one `kind`. Both are user-supplied strings, so they go through
-        // bound `?` params (injection-safe) — unlike the integer `tag_id`. Applied
-        // before LIMIT/OFFSET so it composes with pagination.
-        if filter.entity_value.is_some() {
-            if filter.entity_kind.is_some() {
-                sql.push_str(
-                    " AND recordings.id IN (SELECT recording_id FROM entities WHERE value = ? AND kind = ?)",
-                );
-            } else {
-                sql.push_str(
-                    " AND recordings.id IN (SELECT recording_id FROM entities WHERE value = ?)",
-                );
-            }
-        }
-        // Task-presence filter (sidebar Tasks section). A subquery over the
-        // `tasks` child table, the task counterpart of the entity facet: keep only
-        // recordings with any extracted task ("has_tasks") or any not-done task
-        // ("has_open"). Both subqueries are static (no bound params), injection-
-        // safe; an unrecognized value falls through to no filter so older/newer
-        // clients degrade safely. Applied before LIMIT/OFFSET so it composes with
-        // pagination.
-        match filter.task_state.as_deref() {
-            Some("has_open") => {
-                sql.push_str(
-                    " AND recordings.id IN (SELECT recording_id FROM tasks WHERE done = 0)",
-                );
-            }
-            Some("has_tasks") => {
-                sql.push_str(" AND recordings.id IN (SELECT recording_id FROM tasks)");
-            }
-            _ => {}
-        }
-        // Low-confidence filter: only recordings with a non-NULL mean confidence
-        // strictly below the threshold (carried in the filter, set by the daemon
-        // from `[whisper].low_confidence_threshold`). The `IS NOT NULL` guard keeps
-        // older rows and cloud transcripts (no per-word confidence → NULL) out of
-        // the result, so the filter never wrongly flags them. Applied in SQL before
-        // LIMIT/OFFSET, like the other predicates, via a bound `?` parameter.
-        if filter.low_confidence_below.is_some() {
-            sql.push_str(
-                " AND recordings.mean_confidence IS NOT NULL AND recordings.mean_confidence < ?",
-            );
-        }
-        if filter.since.is_some() {
-            sql.push_str(" AND recordings.started_at >= ?");
-        }
-        if filter.until.is_some() {
-            sql.push_str(" AND recordings.started_at <= ?");
-        }
-        let dir = if filter.sort_desc.unwrap_or(true) {
-            "DESC"
-        } else {
-            "ASC"
-        };
-        // Pinned recordings always float to the top, independent of the date sort
-        // direction (`pinned DESC` puts 1s before 0s), then the chosen order
-        // applies within each group. So pins lead the list whether the user sorts
-        // newest- or oldest-first.
-        sql.push_str(&format!(
-            " ORDER BY recordings.pinned DESC, recordings.started_at {dir}, recordings.id {dir}"
-        ));
-        // LIMIT / OFFSET for pagination. SQLite requires a LIMIT before an OFFSET,
-        // so an offset given on its own uses `LIMIT -1` (no row cap). `limit` and
-        // `offset` are `u32`, so formatting them directly is injection-safe.
-        match (filter.limit, filter.offset) {
-            (Some(n), Some(m)) => sql.push_str(&format!(" LIMIT {n} OFFSET {m}")),
-            (Some(n), None) => sql.push_str(&format!(" LIMIT {n}")),
-            (None, Some(m)) => sql.push_str(&format!(" LIMIT -1 OFFSET {m}")),
-            (None, None) => {}
-        }
-
+        let (suffix, binds) = list_query_suffix(filter);
+        let sql = format!("SELECT recordings.* FROM recordings{suffix}");
         let mut q = sqlx::query(&sql);
-        if let Some(fq) = &fts_query {
-            q = q.bind(fq);
-        }
-        if let Some(tq) = &tag_search_query {
-            q = q.bind(tq);
-        }
-        if let Some(mq) = &model_search_query {
-            // One bind per model column in the WHERE OR above (transcription +
-            // cleanup + summary + title + tag + diarization), in that order.
-            for _ in 0..6 {
-                q = q.bind(mq);
-            }
-        }
-        if let Some(s) = filter.status {
-            q = q.bind(s.as_str().to_string());
-        }
-        // Bound in WHERE order: the entity facet subquery sits between the
-        // tag-presence filter and the low-confidence clause. `value` first, then
-        // `kind` (only when the kind-qualified subquery was emitted).
-        if let Some(value) = &filter.entity_value {
-            q = q.bind(value);
-            if let Some(kind) = &filter.entity_kind {
-                q = q.bind(kind);
-            }
-        }
-        // Bound in WHERE order: the low-confidence threshold clause sits between the
-        // tag-presence filter and the date-range clauses above.
-        if let Some(thresh) = filter.low_confidence_below {
-            q = q.bind(thresh);
-        }
-        if let Some(t) = filter.since {
-            q = q.bind(t.to_rfc3339());
-        }
-        if let Some(t) = filter.until {
-            q = q.bind(t.to_rfc3339());
+        for b in &binds {
+            q = match b {
+                ListBind::Text(s) => q.bind(s.clone()),
+                ListBind::F32(f) => q.bind(*f),
+            };
         }
         let rows = q.fetch_all(&self.pool).await?;
         let mut recs: Vec<Recording> = rows
@@ -1011,6 +1038,32 @@ impl Catalog {
             rec.speaker_names = speaker_names.remove(&key).unwrap_or_default();
         }
         Ok(recs)
+    }
+
+    /// Just the `(id, meeting_id)` pairs matching a filter — no row
+    /// deserialization, no tags/entities/tasks/speaker child queries. Shares the
+    /// exact filter SQL with [`Self::list`] via [`list_query_suffix`]. `fuse_hybrid`
+    /// uses this to build the in-scope key set for a filtered semantic search,
+    /// where the full `list()` would fetch then immediately discard every
+    /// `Recording` and all four of its child collections.
+    pub async fn list_ids(&self, filter: &ListFilter) -> Result<Vec<(String, Option<String>)>> {
+        let (suffix, binds) = list_query_suffix(filter);
+        let sql = format!("SELECT recordings.id, recordings.meeting_id FROM recordings{suffix}");
+        let mut q = sqlx::query(&sql);
+        for b in &binds {
+            q = match b {
+                ListBind::Text(s) => q.bind(s.clone()),
+                ListBind::F32(f) => q.bind(*f),
+            };
+        }
+        let rows = q.fetch_all(&self.pool).await?;
+        rows.into_iter()
+            .map(|row| {
+                let id: String = row.try_get("id")?;
+                let meeting_id: Option<String> = row.try_get("meeting_id")?;
+                Ok((id, meeting_id))
+            })
+            .collect()
     }
 
     /// Batched counterpart of [`Self::tags_for`]: every page recording's tags in

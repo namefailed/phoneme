@@ -59,12 +59,19 @@ pub trait Tool: Send + Sync {
 /// The set of tools the agent can call.
 pub struct ToolRegistry {
     tools: Vec<Box<dyn Tool>>,
+    /// `tool name → index into `tools``, built at registration time so
+    /// [`Self::to_request`] is an O(1) lookup instead of a linear scan that
+    /// called `spec()` (allocating a `ToolSpec`) on every tool until it matched.
+    by_name: std::collections::HashMap<&'static str, usize>,
 }
 
 impl ToolRegistry {
     /// An empty registry.
     pub fn new() -> Self {
-        Self { tools: Vec::new() }
+        Self {
+            tools: Vec::new(),
+            by_name: std::collections::HashMap::new(),
+        }
     }
 
     /// The canonical Phoneme toolset — the one source of truth `phoneme-mcp`
@@ -92,6 +99,19 @@ impl ToolRegistry {
         r.register(Box::new(GetSegments));
         r.register(Box::new(ApproveTagSuggestion));
         r.register(Box::new(DismissTagSuggestion));
+        // Ask the archive (grounded Q&A), find/replace, and the on-demand
+        // enrichment + read tools (entities / tasks / chapters).
+        r.register(Box::new(AskArchive));
+        r.register(Box::new(FindReplaceTool));
+        r.register(Box::new(FindReplaceLibraryTool));
+        r.register(Box::new(SuggestEntitiesTool));
+        r.register(Box::new(GetEntitiesTool));
+        r.register(Box::new(SuggestTasksTool));
+        r.register(Box::new(SetTaskDoneTool));
+        r.register(Box::new(SuggestChaptersTool));
+        r.register(Box::new(GetChaptersTool));
+        r.register(Box::new(DismissSpeakerSuggestionTool));
+        r.register(Box::new(UndoForgetNamedVoiceTool));
         // Meetings.
         r.register(Box::new(StartMeeting));
         r.register(Box::new(StopMeeting));
@@ -113,9 +133,13 @@ impl ToolRegistry {
         r
     }
 
-    /// Add a tool (e.g. a host-specific extension).
+    /// Add a tool (e.g. a host-specific extension). Indexes it by name so
+    /// dispatch stays O(1); `spec()` is called once here, not per call.
     pub fn register(&mut self, tool: Box<dyn Tool>) {
+        let name = tool.spec().name;
+        let idx = self.tools.len();
         self.tools.push(tool);
+        self.by_name.insert(name, idx);
     }
 
     /// Every registered tool's spec — the "tools/list" surface.
@@ -124,12 +148,13 @@ impl ToolRegistry {
     }
 
     /// Map a named tool call to its `Request`, or an error the host can surface.
+    /// O(1) name lookup via the registration-time index.
     pub fn to_request(&self, name: &str, args: &Value) -> Result<Request, ToolError> {
-        self.tools
-            .iter()
-            .find(|t| t.spec().name == name)
-            .ok_or_else(|| ToolError::Unknown(name.to_string()))?
-            .to_request(args)
+        let idx = *self
+            .by_name
+            .get(name)
+            .ok_or_else(|| ToolError::Unknown(name.to_string()))?;
+        self.tools[idx].to_request(args)
     }
 }
 
@@ -1290,6 +1315,320 @@ impl Tool for DeleteTagTool {
     }
 }
 
+/// Read an optional non-negative integer (e.g. `top_k`), defaulting to `default`.
+/// Rejects negatives / non-integers; `0` is allowed (the daemon reads it as
+/// "use the server default").
+fn opt_usize(args: &Value, key: &str, default: usize, tool: &str) -> Result<usize, ToolError> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => {
+            let n = v.as_u64().ok_or_else(|| ToolError::BadArgs {
+                tool: tool.to_string(),
+                reason: format!("`{key}` must be a non-negative integer"),
+            })?;
+            usize::try_from(n).map_err(|_| ToolError::BadArgs {
+                tool: tool.to_string(),
+                reason: format!("`{key}` {n} exceeds the maximum allowed value"),
+            })
+        }
+    }
+}
+
+struct AskArchive;
+impl Tool for AskArchive {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "ask_archive",
+            description: "Ask a natural-language question and get an answer grounded in the \
+                recording library (retrieval-augmented). Returns the answer plus the source \
+                recordings it cited.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "The question to answer." },
+                    "top_k": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Max grounding chunks to retrieve (0 = server default)."
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let query = require_str(args, "query", "ask_archive")?;
+        let top_k = opt_usize(args, "top_k", 0, "ask_archive")?;
+        // `to_request` is pure (no clock / RNG), but the daemon needs a correlation
+        // id to tag this Ask's activity events. Derive a stable one from the query
+        // so it's deterministic; the host filters the shared event bus by it.
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        query.hash(&mut h);
+        let request_id = format!("agent-ask-{:016x}", h.finish());
+        Ok(Request::Ask {
+            request_id,
+            query,
+            top_k,
+            filter: None,
+        })
+    }
+}
+
+struct FindReplaceTool;
+impl Tool for FindReplaceTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "find_replace",
+            description: "Find and replace literal text in one recording's transcript. \
+                Case-insensitive by default.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "The recording id." },
+                    "find": { "type": "string", "description": "Literal text to find (empty = no-op)." },
+                    "replace": { "type": "string", "description": "Replacement text." },
+                    "case_sensitive": { "type": "boolean", "description": "Exact-case match (default false)." }
+                },
+                "required": ["id", "find", "replace"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "find_replace")?;
+        let find = require_present_str(args, "find", "find_replace")?;
+        let replace = require_present_str(args, "replace", "find_replace")?;
+        let case_sensitive = args
+            .get("case_sensitive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        Ok(Request::FindReplace {
+            id,
+            find,
+            replace,
+            case_sensitive,
+        })
+    }
+}
+
+struct FindReplaceLibraryTool;
+impl Tool for FindReplaceLibraryTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "find_replace_library",
+            description: "Find and replace literal text across EVERY recording's transcript in \
+                the library. Case-insensitive by default. Returns how many recordings changed.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "find": { "type": "string", "description": "Literal text to find (empty = no-op)." },
+                    "replace": { "type": "string", "description": "Replacement text." },
+                    "case_sensitive": { "type": "boolean", "description": "Exact-case match (default false)." }
+                },
+                "required": ["find", "replace"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let find = require_present_str(args, "find", "find_replace_library")?;
+        let replace = require_present_str(args, "replace", "find_replace_library")?;
+        let case_sensitive = args
+            .get("case_sensitive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        Ok(Request::FindReplaceLibrary {
+            find,
+            replace,
+            case_sensitive,
+        })
+    }
+}
+
+struct SuggestEntitiesTool;
+impl Tool for SuggestEntitiesTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "suggest_entities",
+            description: "Run the LLM entity-extraction step for one recording on demand \
+                (people / orgs / topics / terms). Awaits completion.",
+            input_schema: id_only_schema(),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        Ok(Request::SuggestEntities {
+            id: require_recording_id(args, "suggest_entities")?,
+        })
+    }
+}
+
+struct GetEntitiesTool;
+impl Tool for GetEntitiesTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "get_entities",
+            description: "Fetch one recording's structured entities (person / org / topic / \
+                term), kind- then value-sorted.",
+            input_schema: id_only_schema(),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        Ok(Request::GetEntities {
+            id: require_recording_id(args, "get_entities")?,
+        })
+    }
+}
+
+struct SuggestTasksTool;
+impl Tool for SuggestTasksTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "suggest_tasks",
+            description: "Run the LLM task-extraction step for one recording on demand \
+                (action items). Awaits completion.",
+            input_schema: id_only_schema(),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        Ok(Request::SuggestTasks {
+            id: require_recording_id(args, "suggest_tasks")?,
+        })
+    }
+}
+
+struct SetTaskDoneTool;
+impl Tool for SetTaskDoneTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "set_task_done",
+            description: "Toggle (or set) one extracted task's done flag.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "The recording the task belongs to." },
+                    "task_id": { "type": "integer", "description": "The task row id." },
+                    "done": { "type": "boolean", "description": "The new done state." }
+                },
+                "required": ["id", "task_id", "done"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "set_task_done")?;
+        let task_id = require_i64(args, "task_id", "set_task_done")?;
+        let done = args
+            .get("done")
+            .and_then(|v| v.as_bool())
+            .ok_or_else(|| ToolError::BadArgs {
+                tool: "set_task_done".to_string(),
+                reason: "missing required boolean `done`".to_string(),
+            })?;
+        Ok(Request::SetTaskDone { id, task_id, done })
+    }
+}
+
+struct SuggestChaptersTool;
+impl Tool for SuggestChaptersTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "suggest_chapters",
+            description: "Run the LLM auto-chapter step for one recording on demand. \
+                Awaits completion.",
+            input_schema: id_only_schema(),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        Ok(Request::SuggestChapters {
+            id: require_recording_id(args, "suggest_chapters")?,
+        })
+    }
+}
+
+struct GetChaptersTool;
+impl Tool for GetChaptersTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "get_chapters",
+            description: "Fetch one recording's auto-chapters in chronological order \
+                (start/end offsets, title, optional summary).",
+            input_schema: id_only_schema(),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        Ok(Request::GetChapters {
+            id: require_recording_id(args, "get_chapters")?,
+        })
+    }
+}
+
+struct DismissSpeakerSuggestionTool;
+impl Tool for DismissSpeakerSuggestionTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "dismiss_speaker_suggestion",
+            description: "Dismiss the recognized-name suggestion for one speaker label in a \
+                recording (keeps the generic Speaker N label).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "The recording id." },
+                    "speaker_label": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The 1-based [Speaker N] label whose suggestion to dismiss."
+                    }
+                },
+                "required": ["id", "speaker_label"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "dismiss_speaker_suggestion")?;
+        let speaker_label = require_i64_min(args, "speaker_label", 1, "dismiss_speaker_suggestion")?;
+        Ok(Request::DismissSpeakerSuggestion { id, speaker_label })
+    }
+}
+
+struct UndoForgetNamedVoiceTool;
+impl Tool for UndoForgetNamedVoiceTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "undo_forget_named_voice",
+            description: "Restore a named voice that was previously forgotten, back into the \
+                recognition library.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "The named-voice id to restore." }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_str(args, "id", "undo_forget_named_voice")?;
+        Ok(Request::UndoForgetNamedVoice { id })
+    }
+}
+
+/// The shared `{ "id": <recording id> }` input schema used by the many tools that
+/// take exactly one recording id.
+fn id_only_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": { "type": "string", "description": "The recording id." }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1319,6 +1658,17 @@ mod tests {
                 "get_segments",
                 "approve_tag_suggestion",
                 "dismiss_tag_suggestion",
+                "ask_archive",
+                "find_replace",
+                "find_replace_library",
+                "suggest_entities",
+                "get_entities",
+                "suggest_tasks",
+                "set_task_done",
+                "suggest_chapters",
+                "get_chapters",
+                "dismiss_speaker_suggestion",
+                "undo_forget_named_voice",
                 "start_meeting",
                 "stop_meeting",
                 "list_meeting",

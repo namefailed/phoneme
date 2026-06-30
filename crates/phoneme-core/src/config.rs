@@ -3237,6 +3237,20 @@ impl Config {
         }
         let body = toml::to_string_pretty(self)
             .map_err(|e| Error::Internal(format!("failed to serialize config: {e}")))?;
+        // Serializing ran every secret through `secret_crypto::protect`. If DPAPI
+        // failed for any of them the key is now plaintext in `body` — keep the
+        // save (dropping it would lose the user's other changes for a transient
+        // credential-service hiccup), but escalate to a single consolidated error
+        // so the condition lands in the log + diagnostics bundle, not just a
+        // per-key line buried mid-serialization.
+        if crate::secret_crypto::take_plaintext_fallback() {
+            tracing::error!(
+                path = %path.display(),
+                "at-rest key protection (DPAPI) failed for this save — one or more API keys were \
+                 written to config.toml UNENCRYPTED. Re-save Settings once the Windows credential \
+                 service is healthy to re-encrypt them."
+            );
+        }
         let tmp = path.with_extension("toml.tmp");
         std::fs::write(&tmp, body)?;
         if let Err(e) = std::fs::rename(&tmp, &path) {

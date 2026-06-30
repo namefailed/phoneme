@@ -380,8 +380,10 @@ struct OpenAiResponse {
 
 #[derive(Debug, Deserialize)]
 struct OpenAiSegment {
-    start: f32,
-    end: f32,
+    // f64 (not f32): the API returns f64-precision floats; deserializing into f32
+    // would drop the lower mantissa bits and re-widening to f64 can't recover them.
+    start: f64,
+    end: f64,
     text: String,
     /// whisper.cpp's server nests the per-word timings inside each segment
     /// (`segments[].words[]`) rather than returning a single top-level array.
@@ -393,8 +395,9 @@ struct OpenAiSegment {
 #[derive(Debug, Clone, Deserialize)]
 struct OpenAiWord {
     word: String,
-    start: f32,
-    end: f32,
+    // f64 for the same reason as `OpenAiSegment::start`/`end`.
+    start: f64,
+    end: f64,
     /// whisper.cpp's per-word probability (0..1), captured as `confidence`. The
     /// OpenAI/Groq cloud omits it, so cloud words stay `confidence: None`.
     probability: Option<f32>,
@@ -413,6 +416,18 @@ fn truncate_error_body(body: String) -> String {
     } else {
         body
     }
+}
+
+/// Open `path` as a streaming HTTP body plus its byte length, so a multi-GB WAV
+/// is uploaded straight from disk instead of read fully into a `Vec<u8>` first.
+/// The length lets callers set `Content-Length` (multipart `stream_with_length`
+/// or a manual header) so the wire bytes match the old buffered upload exactly —
+/// only the resident memory changes.
+async fn file_streaming_body(path: &Path) -> Result<(reqwest::Body, u64)> {
+    let file = fs::File::open(path).await?;
+    let len = file.metadata().await?.len();
+    let stream = tokio_util::io::ReaderStream::new(file);
+    Ok((reqwest::Body::wrap_stream(stream), len))
 }
 
 /// Provider for any OpenAI-compatible `/v1/audio/transcriptions` endpoint.
@@ -510,8 +525,8 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         language: Option<&str>,
         track: DiarizationTrack,
     ) -> Result<Transcription> {
-        let bytes = fs::read(audio_path).await?;
-        let part = multipart::Part::bytes(bytes)
+        let (body, len) = file_streaming_body(audio_path).await?;
+        let part = multipart::Part::stream_with_length(body, len)
             .file_name(
                 audio_path
                     .file_name()
@@ -615,8 +630,8 @@ impl TranscriptionProvider for OpenAiCompatProvider {
                     nested_words.extend(ws);
                 }
                 crate::diarization::TextSegment {
-                    start: s.start as f64,
-                    end: s.end as f64,
+                    start: s.start,
+                    end: s.end,
                     text: s.text,
                 }
             })
@@ -735,8 +750,8 @@ fn words_from_response(
         .unwrap_or(segment_words)
         .into_iter()
         .map(|w| TranscriptWord {
-            start_ms: secs_to_ms(w.start as f64),
-            end_ms: secs_to_ms(w.end as f64),
+            start_ms: secs_to_ms(w.start),
+            end_ms: secs_to_ms(w.end),
             // whisper marks word starts with a leading space; capture it before
             // trimming so the diarized turn text can rejoin subword tokens
             // ("over"+"ste"+"pped") without inserting spurious spaces.
@@ -1172,7 +1187,7 @@ impl TranscriptionProvider for DeepgramProvider {
         // (Meeting Mode) is a local-pass concept, so it is ignored here.
         _track: DiarizationTrack,
     ) -> Result<Transcription> {
-        let bytes = fs::read(audio_path).await?;
+        let (audio_body, audio_len) = file_streaming_body(audio_path).await?;
         let url = format!("{}/v1/listen", self.base_url.trim_end_matches('/'));
         let mut query: Vec<(&str, &str)> =
             vec![("model", self.model.as_str()), ("smart_format", "true")];
@@ -1192,8 +1207,12 @@ impl TranscriptionProvider for DeepgramProvider {
             .query(&query)
             .header("Authorization", format!("Token {}", self.api_key))
             .header("Content-Type", "audio/wav")
+            // Stream the WAV from disk; set Content-Length explicitly so the
+            // request stays length-delimited (not chunked) exactly like the old
+            // buffered upload — only the resident memory changes.
+            .header(reqwest::header::CONTENT_LENGTH, audio_len)
             .timeout(self.timeout)
-            .body(bytes)
+            .body(audio_body)
             .send()
             .await
         {
@@ -1503,7 +1522,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
         // (Meeting Mode) is a local-pass concept, so it is ignored here.
         _track: DiarizationTrack,
     ) -> Result<Transcription> {
-        let bytes = fs::read(audio_path).await?;
+        let (audio_body, audio_len) = file_streaming_body(audio_path).await?;
         let base = self.base_url.trim_end_matches('/').to_string();
         // One overall budget: subtract upload+create time from the poll wait so
         // the whole operation stays within timeout_secs rather than ~3x it.
@@ -1517,7 +1536,10 @@ impl TranscriptionProvider for AssemblyAiProvider {
                     .post(&upload_url)
                     .header("Authorization", &self.api_key)
                     .header("Content-Type", "application/octet-stream")
-                    .body(bytes),
+                    // Stream from disk with an explicit Content-Length so the
+                    // upload stays length-delimited like the old buffered body.
+                    .header(reqwest::header::CONTENT_LENGTH, audio_len)
+                    .body(audio_body),
                 &upload_url,
             )
             .await?;
@@ -1762,8 +1784,8 @@ impl TranscriptionProvider for ElevenLabsProvider {
         // (Meeting Mode) is a local-pass concept, so it is ignored here.
         _track: DiarizationTrack,
     ) -> Result<Transcription> {
-        let bytes = fs::read(audio_path).await?;
-        let part = multipart::Part::bytes(bytes)
+        let (body, len) = file_streaming_body(audio_path).await?;
+        let part = multipart::Part::stream_with_length(body, len)
             .file_name(
                 audio_path
                     .file_name()
@@ -2098,7 +2120,7 @@ mod tests {
         assert_eq!(t.words.len(), 2);
     }
 
-    fn word(text: &str, start: f32, end: f32, prob: Option<f32>) -> OpenAiWord {
+    fn word(text: &str, start: f64, end: f64, prob: Option<f32>) -> OpenAiWord {
         OpenAiWord {
             word: text.to_string(),
             start,
