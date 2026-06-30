@@ -139,12 +139,24 @@ mod tests {
     use chrono::Local;
     use phoneme_core::RecordingId;
 
+    /// Render one [`Event`] to the exact bytes axum would write on the wire by
+    /// pushing it through `Sse` → `IntoResponse` → body, so tests can assert on
+    /// the real `data: …\n\n` frame rather than the (non-wire) `Debug` form.
+    async fn render_event_wire(event: Event) -> String {
+        let stream = futures::stream::once(async move { Ok::<_, Infallible>(event) });
+        let resp = Sse::new(stream).into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
     /// An event serialized into an SSE frame must carry the same JSON the
     /// daemon put on the wire — i.e. `serde_json::to_string(event)` — so a
     /// browser `EventSource` can `JSON.parse(e.data)` straight back into the
     /// event shape clients already know.
-    #[test]
-    fn sse_data_line_is_the_event_json_roundtrip() {
+    #[tokio::test]
+    async fn sse_data_line_is_the_event_json_roundtrip() {
         let event = DaemonEvent::RecordingStarted {
             id: RecordingId::parse("20260519T143500042").unwrap(),
             started_at: Local::now(),
@@ -153,21 +165,46 @@ mod tests {
         };
         let expected = serde_json::to_string(&event).unwrap();
 
-        let sse = event_to_sse(&event);
-        // `Event` renders to the full `data: <json>\n\n` field block; assert the
-        // JSON payload is embedded verbatim and parses back to the same event.
-        let rendered = format!("{sse:?}");
-        // The Debug form isn't the wire form, so assert via re-parse instead:
-        // pull the data back out by re-serializing what we put in.
-        assert!(
-            expected.contains("recording_started"),
-            "tagged event JSON should name the variant"
+        // Render what `event_to_sse` actually produced to its wire form. A
+        // single-line JSON payload frames as exactly `data: <json>\n\n`.
+        let wire = render_event_wire(event_to_sse(&event)).await;
+        assert_eq!(
+            wire,
+            format!("data: {expected}\n\n"),
+            "the SSE data line must be exactly serde_json::to_string(event)"
         );
-        // Round-trip: the JSON we embedded deserializes back to an equal event.
-        let parsed: DaemonEvent = serde_json::from_str(&expected).unwrap();
+
+        // And the data: payload, pulled back out, deserializes to the same event
+        // — what a browser `EventSource` does with `JSON.parse(e.data)`.
+        let data = wire
+            .strip_prefix("data: ")
+            .and_then(|s| s.strip_suffix("\n\n"))
+            .expect("frame must be a single `data: …` field block");
+        assert_eq!(data, expected);
+        let parsed: DaemonEvent = serde_json::from_str(data).unwrap();
         assert_eq!(parsed, event);
-        // And the rendered SSE event is non-empty (carries our data).
-        assert!(!rendered.is_empty());
+    }
+
+    /// The serialize-failure fallback (`event_to_sse`'s `Err` arm) must still
+    /// emit a well-formed JSON error object on the `data:` line so the stream
+    /// stays parseable, never a dropped/blank frame. `DaemonEvent` is infallible
+    /// to serialize, so drive the same fallback `Event` directly: it is the exact
+    /// value the `Err` arm constructs, byte-for-byte.
+    #[tokio::test]
+    async fn sse_serialize_failure_emits_well_formed_error_object() {
+        // The literal the Err arm builds (see `event_to_sse`): a JSON object with
+        // a single "error" string starting "serialize: ".
+        let fallback = Event::default().data(r#"{"error":"serialize: boom"}"#);
+        let wire = render_event_wire(fallback).await;
+        assert_eq!(wire, "data: {\"error\":\"serialize: boom\"}\n\n");
+
+        // The error payload is itself valid JSON with the documented shape.
+        let data = wire
+            .strip_prefix("data: ")
+            .and_then(|s| s.strip_suffix("\n\n"))
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(parsed["error"], "serialize: boom");
     }
 
     /// With every SSE slot already taken, a further subscriber is turned away

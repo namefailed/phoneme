@@ -155,6 +155,98 @@ mod tests {
         );
     }
 
+    /// `--run-hooks` maps to `run_hooks: Some(true)` on the wire.
+    #[tokio::test]
+    async fn run_hooks_flag_sends_some_true() {
+        let id = RecordingId::new();
+        let mock = MockDaemon::spawn("retx-hooks-on", |_req| {
+            Response::Ok(serde_json::Value::Null)
+        });
+        let mut cfg = Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+
+        let mut args = base_args(&id.to_string(), None);
+        args.run_hooks = true;
+
+        let code = tokio::time::timeout(Duration::from_secs(5), run(args, &cfg))
+            .await
+            .expect("retranscribe must return promptly");
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            mock.received(),
+            vec![Request::RetranscribeRecording {
+                id,
+                model: None,
+                run_hooks: Some(true),
+                post_process: None,
+                all_overrides: None,
+                recipe_id: None,
+            }]
+        );
+    }
+
+    /// `--no-run-hooks` maps to `run_hooks: Some(false)` on the wire.
+    #[tokio::test]
+    async fn no_run_hooks_flag_sends_some_false() {
+        let id = RecordingId::new();
+        let mock = MockDaemon::spawn("retx-hooks-off", |_req| {
+            Response::Ok(serde_json::Value::Null)
+        });
+        let mut cfg = Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+
+        let mut args = base_args(&id.to_string(), None);
+        args.no_run_hooks = true;
+
+        let code = tokio::time::timeout(Duration::from_secs(5), run(args, &cfg))
+            .await
+            .expect("retranscribe must return promptly");
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            mock.received(),
+            vec![Request::RetranscribeRecording {
+                id,
+                model: None,
+                run_hooks: Some(false),
+                post_process: None,
+                all_overrides: None,
+                recipe_id: None,
+            }]
+        );
+    }
+
+    /// `--no-post-process` maps to `post_process: Some(false)`, and `--model`
+    /// forwards verbatim. (Neither flag is otherwise covered.)
+    #[tokio::test]
+    async fn no_post_process_and_model_forward() {
+        let id = RecordingId::new();
+        let mock = MockDaemon::spawn("retx-nopp-model", |_req| {
+            Response::Ok(serde_json::Value::Null)
+        });
+        let mut cfg = Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+
+        let mut args = base_args(&id.to_string(), None);
+        args.no_post_process = true;
+        args.model = Some("large-v3".into());
+
+        let code = tokio::time::timeout(Duration::from_secs(5), run(args, &cfg))
+            .await
+            .expect("retranscribe must return promptly");
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            mock.received(),
+            vec![Request::RetranscribeRecording {
+                id,
+                model: Some("large-v3".into()),
+                run_hooks: None,
+                post_process: Some(false),
+                all_overrides: None,
+                recipe_id: None,
+            }]
+        );
+    }
+
     /// An unmatched `--recipe` errors before any request is sent.
     #[tokio::test]
     async fn unknown_recipe_errors_without_sending() {

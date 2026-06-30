@@ -91,9 +91,17 @@ describe("SettingsView", () => {
     element.switchTab("appearance");
     await element.updateComplete;
     
-    // SectionTray shouldn't show up in the appearance tab
+    // The appearance tab mounts the appearance sections (SectionInterface +
+    // SectionEditor) and NONE of the system sections. Assert a real appearance
+    // heading is present AND a genuine system heading is absent — the old
+    // `not.toContain("System")` was vacuous ("System" is a tab name, never an
+    // <h3>), so the appearance tab could have rendered the system sections and
+    // still passed.
     const headingsInAppearance = Array.from(element.querySelectorAll("h3")).map((h: any) => h.textContent);
-    expect(headingsInAppearance).not.toContain("System");
+    expect(headingsInAppearance).toContain("Theme");
+    expect(headingsInAppearance).not.toContain("Storage & backup");
+    expect(headingsInAppearance).not.toContain("Startup & tray");
+    expect(headingsInAppearance).not.toContain("Diagnostics");
     
     // Switch to system tab
     element.switchTab("system");

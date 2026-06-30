@@ -181,7 +181,24 @@ mod tests {
         let expected = phoneme_agent_core::ToolRegistry::with_phoneme_tools()
             .specs()
             .len();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), expected);
+        let tools = list["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), expected);
+        // The framed payload carries real catalog content, not just a count: each
+        // entry has a string name + object inputSchema, and a known tool is there.
+        let names: Vec<&str> = tools
+            .iter()
+            .map(|t| {
+                assert!(
+                    t["inputSchema"].is_object(),
+                    "each tool needs an inputSchema object, got: {t}"
+                );
+                t["name"].as_str().expect("each tool needs a string name")
+            })
+            .collect();
+        assert!(
+            names.contains(&"start_recording"),
+            "loop tools/list payload missing start_recording: {names:?}"
+        );
     }
 
     /// A malformed JSON line is answered with a parse error and the loop keeps

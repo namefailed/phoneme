@@ -248,12 +248,38 @@ mod tests {
     async fn tools_list_returns_all_tools() {
         let (srv, _) = server_with(|_| ok_null());
         let r = unwrap_response(srv.handle("tools/list", &json!({}), json!(2)).await);
+        // The handler echoes the request id unchanged.
+        assert_eq!(r.id, json!(2));
         // Derive the expected count from the shared registry so adding a tool
         // there can't silently desync this assertion.
         let expected = phoneme_agent_core::ToolRegistry::with_phoneme_tools()
             .specs()
             .len();
-        assert_eq!(r.result["tools"].as_array().unwrap().len(), expected);
+        let tools = r.result["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), expected);
+
+        // Every entry carries the real protocol shape: a string `name` and an
+        // object `inputSchema` (catches a handler that returned N empty objects
+        // or N copies of one tool).
+        let names: Vec<&str> = tools
+            .iter()
+            .map(|t| {
+                assert!(
+                    t["inputSchema"].is_object(),
+                    "each tool needs an inputSchema object, got: {t}"
+                );
+                t["name"].as_str().expect("each tool needs a string name")
+            })
+            .collect();
+        // Known catalog members are actually present (not a shuffled stand-in),
+        // and names are unique (rules out N copies of one tool).
+        for known in ["start_recording", "stop_recording", "search_recordings"] {
+            assert!(names.contains(&known), "missing {known} in {names:?}");
+        }
+        let mut unique = names.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len(), "duplicate tool names in {names:?}");
     }
 
     #[tokio::test]

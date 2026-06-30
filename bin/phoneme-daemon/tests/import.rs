@@ -62,7 +62,7 @@ async fn import_recording_creates_row_and_transcribes() {
     // pipeline wrote a transcript back to the row.
     let rid = phoneme_core::RecordingId::parse(id.clone()).expect("returned id is canonical");
     let deadline = Instant::now() + Duration::from_secs(15);
-    let mut got_transcript = false;
+    let mut transcript: Option<String> = None;
     while Instant::now() < deadline {
         let r = h
             .client
@@ -70,18 +70,24 @@ async fn import_recording_creates_row_and_transcribes() {
             .await
             .unwrap();
         if let Response::Ok(value) = r {
-            // A non-null `transcript` (any text) means the pipeline ran and
-            // persisted a result for the imported file.
-            if value["transcript"].is_string() {
-                got_transcript = true;
+            // A non-null `transcript` means the pipeline ran and persisted a
+            // result for the imported file.
+            if let Some(t) = value["transcript"].as_str() {
+                transcript = Some(t.to_string());
                 break;
             }
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    assert!(
-        got_transcript,
-        "imported recording should flow through the transcription pipeline and get a transcript"
+    // The persisted transcript is exactly the mocked whisper response ("hello"),
+    // not just *some* string — proving the stubbed transcription result flowed
+    // end-to-end into THIS recording's row (cleanup is off in the harness, so the
+    // raw text is stored verbatim). A pipeline that wrote a placeholder, an error,
+    // or text from elsewhere would fail here.
+    assert_eq!(
+        transcript.as_deref(),
+        Some("hello"),
+        "imported recording's transcript must be the stubbed whisper output"
     );
 }
 

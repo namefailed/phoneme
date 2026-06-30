@@ -245,4 +245,34 @@ mod tests {
         // never surfaced as a garbage key.
         assert_eq!(unprotect("dpapi:v1:deadbeef"), "");
     }
+
+    #[test]
+    fn take_plaintext_fallback_is_read_and_clear() {
+        // The latch surfaces a DPAPI failure to the config-write path after the
+        // fact. `protect`'s failure branch is Windows-only and not deterministically
+        // triggerable, so drive the shared static directly to pin the swap-and-clear
+        // contract on every platform: it must report a raised latch exactly once,
+        // then read back cleared.
+        //
+        // Clear first so any leftover state from a real DPAPI fallback elsewhere in
+        // the run doesn't poison this assertion. `protect` only ever *sets* the
+        // latch (on failure), never clears it, so there is no racing writer that
+        // could re-raise it between these calls.
+        PLAINTEXT_FALLBACK.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            !take_plaintext_fallback(),
+            "a cleared latch must read false"
+        );
+
+        // Simulate the failure branch latching the flag.
+        PLAINTEXT_FALLBACK.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            take_plaintext_fallback(),
+            "a raised latch must read true exactly once"
+        );
+        assert!(
+            !take_plaintext_fallback(),
+            "the latch must clear after one read (a second read is false)"
+        );
+    }
 }

@@ -35,14 +35,19 @@ beforeEach(() => {
 });
 
 describe('IPC Services', () => {
-  it('calls list_recordings with correct filter', async () => {
-    vi.mocked(tauriCore.invoke).mockResolvedValueOnce([]);
+  it('calls list_recordings with correct filter and returns the daemon result by reference', async () => {
+    // A distinctive sentinel + reference-identity check: listRecordings does no
+    // transformation, so it must hand back the EXACT array the IPC layer returned
+    // (a wrapper that rebuilt the value would fail toBe). `toEqual([])` would not
+    // catch that, since it only re-asserts the mock's own return.
+    const sentinel = [{ id: '20260519T150000000' }];
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce(sentinel);
 
     const filter = { status: 'done' };
     const res = await listRecordings(filter);
 
     expect(tauriCore.invoke).toHaveBeenCalledWith('list_recordings', { filter });
-    expect(res).toEqual([]);
+    expect(res).toBe(sentinel);
   });
 
   it('calls list_meeting with the camelCase meetingId arg', async () => {
@@ -119,6 +124,8 @@ describe('IPC Services', () => {
     const res = await getWords('20260519T143500823');
 
     expect(tauriCore.invoke).toHaveBeenCalledWith('get_words', { id: '20260519T143500823' });
+    // Pass-through: the same array reference the IPC layer returned, untransformed.
+    expect(res).toBe(words);
     expect(res).toEqual(words);
   });
 
@@ -200,21 +207,21 @@ describe('Tag IPC functions', () => {
     { id: 2, name: 'personal', color: null },
   ];
 
-  it('listTags calls list_tags and returns the result', async () => {
+  it('listTags calls list_tags and returns the daemon result by reference', async () => {
     vi.mocked(tauriCore.invoke).mockResolvedValueOnce(fakeTags);
     const result = await listTags();
     expect(tauriCore.invoke).toHaveBeenCalledWith('list_tags');
-    expect(result).toEqual(fakeTags);
+    expect(result).toBe(fakeTags); // untransformed pass-through
   });
 
-  it('listAllTags calls list_all_tags and returns the result', async () => {
+  it('listAllTags calls list_all_tags and returns the daemon result by reference', async () => {
     vi.mocked(tauriCore.invoke).mockResolvedValueOnce(fakeTags);
     const result = await listAllTags();
     expect(tauriCore.invoke).toHaveBeenCalledWith('list_all_tags');
-    expect(result).toEqual(fakeTags);
+    expect(result).toBe(fakeTags);
   });
 
-  it('listAllEntities calls list_all_entities and returns the facet', async () => {
+  it('listAllEntities calls list_all_entities and returns the facet by reference', async () => {
     const fakeFacets: EntityFacet[] = [
       { kind: 'org', value: 'ACME', count: 1 },
       { kind: 'person', value: 'Alice', count: 2 },
@@ -222,7 +229,7 @@ describe('Tag IPC functions', () => {
     vi.mocked(tauriCore.invoke).mockResolvedValueOnce(fakeFacets);
     const result = await listAllEntities();
     expect(tauriCore.invoke).toHaveBeenCalledWith('list_all_entities');
-    expect(result).toEqual(fakeFacets);
+    expect(result).toBe(fakeFacets);
   });
 
   it('addTag calls add_tag with name and color', async () => {
@@ -278,6 +285,6 @@ describe('Tag IPC functions', () => {
     vi.mocked(tauriCore.invoke).mockResolvedValueOnce(tags);
     const result = await tagsFor('rec-xyz');
     expect(tauriCore.invoke).toHaveBeenCalledWith('tags_for', { recordingId: 'rec-xyz' });
-    expect(result).toEqual(tags);
+    expect(result).toBe(tags); // untransformed pass-through
   });
 });

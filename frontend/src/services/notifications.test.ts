@@ -285,6 +285,74 @@ describe("summary / tag-suggestion toasts follow the step gate", () => {
   });
 });
 
+describe("best-effort step failures route to their own labels", () => {
+  // Each *_failed event maps to a distinct human label in onEvent (a hand-written
+  // copy/paste table where a swap — tag_failed labeling 'Cleanup' — would ship
+  // silently). Pin every branch's exact label.
+  const CASES: Array<{ event: string; label: string; key: "id" | "meeting_id" }> = [
+    { event: "cleanup_failed", label: "Cleanup", key: "id" },
+    { event: "title_failed", label: "Title generation", key: "id" },
+    { event: "tag_failed", label: "Auto-tagging", key: "id" },
+    { event: "entities_failed", label: "Entity extraction", key: "id" },
+    { event: "tasks_failed", label: "Tasks", key: "id" },
+    { event: "chapters_failed", label: "Chapters", key: "id" },
+    { event: "summary_failed", label: "Summary", key: "id" },
+    { event: "meeting_digest_failed", label: "Meeting digest", key: "meeting_id" },
+    { event: "period_digest_failed", label: "Period digest", key: "key" as "id" },
+  ];
+
+  for (const { event, label, key } of CASES) {
+    it(`${event} toasts a '${label} failed: …' error with the real reason`, () => {
+      emit({ event, [key]: "x", error: "boom" } as unknown as DaemonEvent);
+      expect(toast).toHaveBeenCalledWith(`${label} failed: boom`, "error");
+    });
+
+    it(`${event} strips the daemon 'internal error:' wrapper`, () => {
+      emit({ event, [key]: "x", error: "internal error: real cause" } as unknown as DaemonEvent);
+      expect(toast).toHaveBeenCalledWith(`${label} failed: real cause`, "error");
+    });
+
+    it(`${event} reads as a skip (info), gated by step notifications`, () => {
+      emit({ event, [key]: "x", error: "step skipped by user" } as unknown as DaemonEvent);
+      expect(toast).toHaveBeenCalledWith(`${label} skipped`, "info");
+
+      // The skip notice honors the gate (a real error would not).
+      toast.mockClear();
+      setStepNotifications(false);
+      emit({ event, [key]: "x", error: "step skipped by user" } as unknown as DaemonEvent);
+      expect(toast).not.toHaveBeenCalled();
+    });
+  }
+
+  it("an empty failure reason falls back to actionable wording", () => {
+    emit({ event: "tag_failed", id: "r1", error: "" });
+    expect(toast).toHaveBeenCalledWith(
+      "Auto-tagging failed: check the AI provider in Settings",
+      "error",
+    );
+  });
+});
+
+describe("gated success toasts use their own messages", () => {
+  const CASES: Array<{ event: string; message: string; key: "id" | "meeting_id" }> = [
+    { event: "entities_updated", message: "Entities extracted", key: "id" },
+    { event: "meeting_digest_updated", message: "Meeting digest ready", key: "meeting_id" },
+    { event: "period_digest_updated", message: "Period digest ready", key: "key" as "id" },
+  ];
+
+  for (const { event, message, key } of CASES) {
+    it(`${event} toasts '${message}' only when steps are ON`, () => {
+      emit({ event, [key]: "x" } as unknown as DaemonEvent);
+      expect(toast).toHaveBeenCalledWith(message, "success");
+
+      toast.mockClear();
+      setStepNotifications(false);
+      emit({ event, [key]: "x" } as unknown as DaemonEvent);
+      expect(toast).not.toHaveBeenCalled();
+    });
+  }
+});
+
 describe("per-recording stage memory (ordering / dedup)", () => {
   it("tracks each recording's previous stage independently", () => {
     // Interleave two recordings; each 'done' must reflect ITS own predecessor.

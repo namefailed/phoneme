@@ -539,11 +539,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_response_preserves_single_newlines() {
-        assert_eq!(normalize_response("hello\nworld"), "hello world"); // single newlines collapse despite the test name
-    }
-
-    #[test]
     fn normalize_response_preserves_double_newlines() {
         assert_eq!(normalize_response("hello\n\nworld"), "hello\n\nworld");
     }

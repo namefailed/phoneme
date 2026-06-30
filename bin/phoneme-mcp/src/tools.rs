@@ -404,6 +404,33 @@ mod tests {
             .map(|t| t["name"].as_str().unwrap())
             .collect();
 
+        // A non-empty catalog (an empty registry would make this test vacuous).
+        assert!(names.len() >= 40, "catalog shrank unexpectedly: {names:?}");
+
+        // The tools whose every argument is optional: calling them with empty
+        // args is fully valid and MUST route to an `Ok(Request)` — this catches a
+        // name advertised in `tools/list` whose `to_request` mapping is missing or
+        // broken, which the "no unknown-tool sentinel" check below cannot.
+        let no_arg_tools = [
+            "start_recording",
+            "stop_recording",
+            "list_recent",
+            "list_tags",
+            "start_meeting",
+            "stop_meeting",
+            "list_named_voices",
+        ];
+        for name in &no_arg_tools {
+            assert!(
+                names.contains(name),
+                "{name} should still be advertised in tools/list"
+            );
+            assert!(
+                build_request(name, &json!({})).is_ok(),
+                "{name} is advertised but does not route to a Request on empty args"
+            );
+        }
+
         // Every advertised name must be dispatchable in `build_request` — a name
         // is only "unknown" when it never appears in `tools_list`. Calling with
         // empty args may fail validation (missing `id`/`query`), but it must

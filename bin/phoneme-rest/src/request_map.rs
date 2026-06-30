@@ -439,9 +439,19 @@ mod tests {
             in_place: Some(true),
             tagged: Some(true),
             since: Some("2026-01-01T00:00:00Z".into()),
+            until: Some("2026-02-01T00:00:00Z".into()),
             sort_desc: Some(false),
             ..ListQuery::default()
         };
+        // The two facets that go through real parsing must land on the *exact*
+        // value, not merely Some(_): a wrong status variant or a shifted instant
+        // would otherwise slip through.
+        let expected_since = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Local);
+        let expected_until = chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Local);
         match list_recordings(&q) {
             Request::ListRecordings { filter } => {
                 assert_eq!(filter.search.as_deref(), Some("budget"));
@@ -451,8 +461,31 @@ mod tests {
                 assert_eq!(filter.in_place, Some(true));
                 assert_eq!(filter.tagged, Some(true));
                 assert_eq!(filter.sort_desc, Some(false));
-                assert!(filter.status.is_some());
-                assert!(filter.since.is_some());
+                // `status="done"` → RecordingStatus::Done (not just "some status").
+                assert_eq!(filter.status, Some(RecordingStatus::Done));
+                // `since`/`until` map to their own exact instants, and the two are
+                // distinct — so swapping or dropping either mapping fails here.
+                assert_eq!(filter.since, Some(expected_since));
+                assert_eq!(filter.until, Some(expected_until));
+                assert_ne!(filter.since, filter.until);
+            }
+            other => panic!("expected ListRecordings, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_recordings_drops_malformed_date_bounds() {
+        // A non-RFC-3339 since/until must be ignored (parse_dt → None), never
+        // error or forwarded as a bogus bound.
+        let q = ListQuery {
+            since: Some("not-a-date".into()),
+            until: Some("2026-13-99T99:99:99Z".into()),
+            ..ListQuery::default()
+        };
+        match list_recordings(&q) {
+            Request::ListRecordings { filter } => {
+                assert_eq!(filter.since, None);
+                assert_eq!(filter.until, None);
             }
             other => panic!("expected ListRecordings, got {other:?}"),
         }
@@ -508,6 +541,22 @@ mod tests {
                 variant: Some(v), ..
             } => assert_eq!(v, "cleaned"),
             other => panic!("expected cleaned GetSegments, got {other:?}"),
+        }
+        // Whitespace around `cleaned` is trimmed back to the canonical value.
+        match get_segments(id.clone(), Some(" cleaned ")) {
+            Request::GetSegments {
+                variant: Some(v), ..
+            } => assert_eq!(v, "cleaned"),
+            other => panic!("expected trimmed-cleaned GetSegments, got {other:?}"),
+        }
+        // Any other variant string collapses to None (raw transcript), so a
+        // bogus value never reaches the daemon as an invalid variant.
+        match get_segments(id.clone(), Some("bogus")) {
+            Request::GetSegments {
+                variant: None,
+                id: got,
+            } => assert_eq!(got, id),
+            other => panic!("expected raw (None) GetSegments, got {other:?}"),
         }
         match get_chapters(id.clone()) {
             Request::GetChapters { id: got } => assert_eq!(got, id),

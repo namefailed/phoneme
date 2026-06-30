@@ -57,7 +57,7 @@ async fn record_start_stop_creates_row_and_transcribes() {
     let rid = phoneme_core::RecordingId::parse(id.clone()).expect("id should be canonical");
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut done = false;
-    let mut got_transcript = false;
+    let mut transcript: Option<String> = None;
     let mut track = None;
     while Instant::now() < deadline {
         let r = h
@@ -69,7 +69,7 @@ async fn record_start_stop_creates_row_and_transcribes() {
             let status = value["status"].as_str().unwrap_or("");
             if status == "done" {
                 done = true;
-                got_transcript = value["transcript"].is_string();
+                transcript = value["transcript"].as_str().map(|s| s.to_string());
                 track = value["track"].as_str().map(|s| s.to_string());
                 break;
             }
@@ -78,9 +78,15 @@ async fn record_start_stop_creates_row_and_transcribes() {
     }
 
     assert!(done, "recording should reach 'done' status within 20 s");
-    assert!(
-        got_transcript,
-        "pipeline should write a transcript for the completed recording"
+    // The stored transcript is exactly the mocked whisper response ("hello"), not
+    // just *some* string: this proves the daemon actually called the configured
+    // external whisper endpoint and persisted its output (cleanup is off in the
+    // harness, so the raw text is stored verbatim). An empty/placeholder transcript
+    // or one that bypassed the mocked endpoint would fail here.
+    assert_eq!(
+        transcript.as_deref(),
+        Some("hello"),
+        "the completed recording's transcript must be the mocked whisper output"
     );
     // A single recording records its real capture source on `track` (the list's
     // Source column reads this); the global default is the microphone, so it must

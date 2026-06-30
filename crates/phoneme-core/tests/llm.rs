@@ -31,9 +31,12 @@ async fn ollama_provider_processes_text() {
         .and(path("/api/generate"))
         // prompt + text are combined into the Ollama `prompt` field.
         .and(body_string_contains("Clean this up"))
-        // the context window is capped via options.num_ctx so Ollama doesn't
-        // reserve a KV cache for the model's full 128k window (~16 GiB).
-        .and(body_string_contains("num_ctx"))
+        // the context window is capped via options.num_ctx to the configured
+        // value (8192) so Ollama doesn't reserve a KV cache for the model's full
+        // 128k window (~16 GiB). Match the VALUE, not just the key name — a
+        // regression sending num_ctx:0 or a hardcoded wrong cap would still carry
+        // the key, but not the configured 8192.
+        .and(body_string_contains("\"num_ctx\":8192"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(serde_json::json!({"response": "cleaned"})),
         )

@@ -183,19 +183,23 @@ mod tests {
     fn long_text_is_cut_at_a_word_boundary_under_the_cap() {
         let text = "This is a very long opening sentence that keeps going and going far beyond any sensible title length";
         let title = heuristic_title(text).unwrap();
-        assert!(
-            title.chars().count() <= 60,
-            "got {} chars",
-            title.chars().count()
+        // The exact word-boundary cut: the longest whole-word prefix that fits in
+        // 60 chars. "...going and" is 57 chars; adding the next word ("going")
+        // would push it to 63, over the 60 cap — so the cut lands right there.
+        assert_eq!(
+            title,
+            "This is a very long opening sentence that keeps going and"
         );
+        assert_eq!(title.chars().count(), 57);
+        // It is the LONGEST such prefix: appending the next source word exceeds
+        // the cap, proving the cut isn't short of the boundary it could reach.
+        let next_word = text[title.len()..].split_whitespace().next().unwrap();
         assert!(
-            text.starts_with(&title),
-            "the cut keeps a prefix of the text"
+            title.chars().count() + 1 + next_word.chars().count() > MAX_TITLE_CHARS,
+            "the next word would fit under the cap — cut is too short"
         );
+        assert!(text.starts_with(&title), "the cut keeps a prefix of the text");
         assert!(!title.ends_with(' '), "no dangling separator");
-        // Word boundary: the title's last word is complete in the source.
-        let last = title.split_whitespace().last().unwrap();
-        assert!(text.split_whitespace().any(|w| w == last));
     }
 
     #[test]

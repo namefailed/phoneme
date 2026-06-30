@@ -1,5 +1,5 @@
 use chrono::{Local, TimeZone};
-use phoneme_core::queue::{InboxQueue, InboxState};
+use phoneme_core::queue::{FailedPayload, InboxQueue, InboxState};
 use phoneme_core::{HookMetadata, HookPayload, RecordingId};
 use tempfile::TempDir;
 
@@ -83,11 +83,23 @@ async fn claim_next_quarantines_corrupt_payload() {
     assert!(q.claim_next().await.unwrap().is_none());
     // It must be out of pending/ and quarantined in failed/.
     assert!(!bad.exists());
-    assert!(dir
+    let failed_path = dir
         .path()
         .join("failed")
-        .join("20260519T143500000.json")
-        .exists());
+        .join("20260519T143500000.json");
+    assert!(failed_path.exists());
+    // The quarantine record must classify a structurally-corrupt payload as
+    // "corrupt_payload" specifically — that's what lets the failure surface
+    // tell a parse error apart from a transcription/hook failure. (The 18-char
+    // file stem is the record key.)
+    let record: FailedPayload =
+        serde_json::from_str(&std::fs::read_to_string(&failed_path).unwrap()).unwrap();
+    assert_eq!(record.id.as_str(), "20260519T143500000");
+    assert_eq!(record.error_kind, "corrupt_payload");
+    assert!(
+        !record.error_message.is_empty(),
+        "the parse error detail must be preserved"
+    );
 }
 
 #[tokio::test]
@@ -151,11 +163,15 @@ async fn finish_failed_moves_processing_to_failed() {
     q.finish_failed(&claimed.id, "whisper_unreachable", "connection refused")
         .await
         .unwrap();
-    assert!(dir
-        .path()
-        .join("failed")
-        .join(format!("{id}.json"))
-        .exists());
+    let failed_path = dir.path().join("failed").join(format!("{id}.json"));
+    assert!(failed_path.exists());
+    // The whole point of failed/ is to preserve *why* an item was quarantined.
+    // Read the record back and pin the fields the GUI/CLI surface.
+    let text = std::fs::read_to_string(&failed_path).unwrap();
+    let record: FailedPayload = serde_json::from_str(&text).unwrap();
+    assert_eq!(record.id, id);
+    assert_eq!(record.error_kind, "whisper_unreachable");
+    assert_eq!(record.error_message, "connection refused");
 }
 
 #[tokio::test]
@@ -283,10 +299,27 @@ async fn enqueue_is_atomic_under_observation() {
     let id = RecordingId::new();
     let payload = make_payload(id.clone());
     q.enqueue(&payload).await.unwrap();
-    let path = dir.path().join("pending").join(format!("{id}.json"));
+    let pending = dir.path().join("pending");
+    let path = pending.join(format!("{id}.json"));
     let text = std::fs::read_to_string(&path).unwrap();
     let parsed: HookPayload = serde_json::from_str(&text).unwrap();
     assert_eq!(parsed.id, id);
+
+    // Atomicity guard: enqueue writes a `.json.tmp` then renames it to the final
+    // name, so a reader never sees a half-written `{id}.json`. After a clean
+    // enqueue the temp must be gone (the rename consumed it) — if it lingered,
+    // the write+rename path regressed to a non-atomic direct write.
+    let stale_tmp = pending.join(format!("{id}.json.tmp"));
+    assert!(
+        !stale_tmp.exists(),
+        "enqueue must rename its temp file away; a lingering .json.tmp means a non-atomic write"
+    );
+    // And nothing but the final payload (no leaked partials) is left in pending/.
+    let names: Vec<String> = std::fs::read_dir(&pending)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec![format!("{id}.json")]);
 }
 
 #[test]
@@ -367,13 +400,59 @@ proptest! {
 
             // Invariants: (1) no .tmp files left behind, (2) every json file
             // appears in exactly one subdirectory.
+            let mut seen_stems: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             for sub in ["pending", "processing", "done", "failed"] {
                 for entry in std::fs::read_dir(dir.path().join(sub)).unwrap() {
                     let p = entry.unwrap().path();
                     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
+                    // (1) No leaked temp/partial files — only finished .json payloads.
                     assert!(ext == "json", "leaked file: {}", p.display());
+                    // (2) The four-directory state machine never overlaps: a given
+                    // recording id must live in exactly one subdir at a time. A
+                    // rename that copied instead of moved (or a claim/finish that
+                    // failed to remove the source) would leave the same stem in two
+                    // dirs — the HashSet insert returning false catches it.
+                    let stem = p
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .expect("json file has a utf8 stem")
+                        .to_string();
+                    assert!(
+                        seen_stems.insert(stem.clone()),
+                        "id {stem} appears in more than one subdirectory ({})",
+                        p.display()
+                    );
                 }
             }
+
+            // (3) Reconcile the model against disk: every id we believe is still
+            // "in processing" must be exactly the set of files in processing/, and
+            // processing/ never holds more than the worker's one-at-a-time invariant
+            // would allow it to accumulate. (Each id is unique, so the model vec has
+            // no dups, but assert it explicitly to catch a double-push.)
+            let mut model: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for id in &in_processing {
+                assert!(
+                    model.insert(id.as_str().to_string()),
+                    "model double-tracked {} in processing",
+                    id.as_str()
+                );
+            }
+            let mut on_disk: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for entry in std::fs::read_dir(dir.path().join("processing")).unwrap() {
+                let p = entry.unwrap().path();
+                if p.extension().and_then(|s| s.to_str()) == Some("json") {
+                    on_disk.insert(
+                        p.file_stem().and_then(|s| s.to_str()).unwrap().to_string(),
+                    );
+                }
+            }
+            assert_eq!(
+                model, on_disk,
+                "tracked in_processing set must match processing/ on disk exactly"
+            );
         });
     }
 }

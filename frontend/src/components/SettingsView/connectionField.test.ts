@@ -88,12 +88,35 @@ describe("deriveConnectionId — stt", () => {
 });
 
 describe("connectionEntries", () => {
-  it("every catalog ends in an Advanced escape hatch and carries hints", () => {
+  it("every catalog carries a hint on every entry", () => {
     for (const catalog of ["llm", "stt"] as const) {
       const entries = connectionEntries(catalog);
-      expect(entries.some((e) => e.group === "advanced")).toBe(true);
+      expect(entries.length).toBeGreaterThan(0);
       expect(entries.every((e) => e.hint.length > 0)).toBe(true);
     }
+  });
+
+  it("the llm catalog exposes the expected named providers plus a Custom advanced escape hatch", () => {
+    const entries = connectionEntries("llm");
+    const ids = entries.map((e) => e.id);
+    // Real providers the picker must offer.
+    expect(ids).toEqual(expect.arrayContaining(["ollama", "openai", "anthropic", "groq"]));
+    // The canonical escape hatch sits in the Advanced group and is the only one there.
+    const advanced = entries.filter((e) => e.group === "advanced");
+    expect(advanced.map((e) => e.id)).toEqual(["custom"]);
+    expect(advanced[0].kind).toBe("openai");
+    // ollama runs locally; openai is a cloud provider — group wiring is real.
+    expect(entries.find((e) => e.id === "ollama")!.group).toBe("local");
+    expect(entries.find((e) => e.id === "openai")!.group).toBe("cloud");
+  });
+
+  it("the stt catalog exposes local + named clouds plus a Custom advanced escape hatch", () => {
+    const entries = connectionEntries("stt");
+    const ids = entries.map((e) => e.id);
+    expect(ids).toEqual(expect.arrayContaining(["local", "openai", "groq", "deepgram", "assemblyai"]));
+    const advanced = entries.filter((e) => e.group === "advanced");
+    expect(advanced.map((e) => e.id)).toEqual(["custom"]);
+    expect(entries.find((e) => e.id === "local")!.group).toBe("local");
   });
 });
 

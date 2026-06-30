@@ -58,6 +58,29 @@ describe('toWireFilter', () => {
     expect(toWireFilter({ kind: 'single' }).favorite).toBeUndefined();
   });
 
+  it('maps the in_place kind onto the wire in_place flag, not kind', () => {
+    const wire = toWireFilter({ kind: 'in_place' });
+    expect(wire.in_place).toBe(true);
+    expect(wire.kind).toBeUndefined();
+    expect(wire.favorite).toBeUndefined();
+    expect(wire.pinned).toBeUndefined();
+  });
+
+  it('maps lowConfidence onto low_confidence_below ONLY when a threshold is supplied', () => {
+    // With a threshold: the numeric wire field carries that exact value.
+    expect(toWireFilter({ lowConfidence: true }, 0.5).low_confidence_below).toBe(0.5);
+    expect(toWireFilter({ lowConfidence: true }, 0).low_confidence_below).toBe(0);
+  });
+
+  it('drops the low-confidence filter entirely when no threshold is passed', () => {
+    // The deliberate "don't guess a number" branch — otherwise the list would
+    // come back empty. The field must be ABSENT, not undefined-with-key.
+    const wire = toWireFilter({ lowConfidence: true });
+    expect('low_confidence_below' in wire).toBe(false);
+    // And it never appears when lowConfidence isn't set, threshold or not.
+    expect('low_confidence_below' in toWireFilter({}, 0.5)).toBe(false);
+  });
+
   it('maps the favorite kind onto the wire favorite flag, not kind', () => {
     const wire = toWireFilter({ kind: 'favorite' });
     expect(wire.favorite).toBe(true);

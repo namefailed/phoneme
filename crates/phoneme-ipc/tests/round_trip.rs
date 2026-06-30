@@ -95,10 +95,13 @@ async fn server_handles_sequential_clients() {
     let mut listener = NamedPipeListener::bind(&name).expect("bind");
 
     let server_handle = tokio::spawn(async move {
-        for _ in 0..3 {
+        // Each iteration re-arms the listener and answers with a *distinct* Ok
+        // value (the loop index), so a dropped/duplicated/mismatched response is
+        // caught on the client side — not just "some response came back".
+        for i in 0..3i64 {
             let mut conn = listener.accept().await.expect("accept");
             let _ = conn.recv().await.expect("recv");
-            conn.send_response(Response::Ok(serde_json::Value::Null))
+            conn.send_response(Response::Ok(serde_json::json!({ "seq": i })))
                 .await
                 .expect("send");
         }
@@ -106,12 +109,19 @@ async fn server_handles_sequential_clients() {
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    for _ in 0..3 {
+    for i in 0..3i64 {
         let mut client = NamedPipeTransport::connect(&name).await.expect("connect");
-        let _ = client
+        let resp = client
             .request(Request::DaemonStatus)
             .await
             .expect("request");
+        match resp {
+            // The fresh connection's response is the matching iteration's value —
+            // proves the accept()/re-bind loop served this exact request, not a
+            // stale or duplicated reply from another connection.
+            Response::Ok(val) => assert_eq!(val["seq"], i, "client {i} got the wrong response: {val}"),
+            Response::Err(e) => panic!("client {i} expected ok, got err: {e:?}"),
+        }
     }
 
     server_handle.await.expect("server task");

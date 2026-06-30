@@ -3035,10 +3035,23 @@ async fn normal_recording_runs_default_recipe_and_configured_model() {
         })))
         .mount(&server)
         .await;
+    // Cleanup and summary each get a sentinel-gated mock so the summary value is
+    // load-bearing: the summary step must send the SUMMARY entry's own prompt (it
+    // 404s otherwise), proving the default recipe runs a real summary step rather
+    // than re-running cleanup. The cleanup step returns a distinct "CLEANED".
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
+        .and(body_string_contains("CLEANUP_SENTINEL"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "choices": [{ "message": { "role": "assistant", "content": "CLEANED" } }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_string_contains("SUMMARY_SENTINEL"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "SUMMARY" } }]
         })))
         .mount(&server)
         .await;
@@ -3052,10 +3065,16 @@ async fn normal_recording_runs_default_recipe_and_configured_model() {
     cfg.llm_post_process.provider = "openai".into();
     cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
     cfg.llm_post_process.model = "test-llm".into();
+    // Distinct per-step prompts; `test_state`'s `migrate_playbook` copies each
+    // legacy prompt into its matching Playbook entry, which the recipe executor
+    // dispatches. The cleanup mock only matches the cleanup prompt, the summary
+    // mock only the summary prompt — so a step sending the wrong prompt 404s.
+    cfg.llm_post_process.prompt = "CLEANUP_SENTINEL rewrite the transcript".into();
     cfg.summary.auto = true;
     cfg.summary.provider = "openai".into();
     cfg.summary.api_url = format!("{}/v1/chat/completions", server.uri());
     cfg.summary.model = "test-llm".into();
+    cfg.summary.prompt = "SUMMARY_SENTINEL summarize the transcript".into();
     cfg.diarization.provider = DiarizationBackend::None;
     cfg.hook.run_on_transcribe = false;
 
@@ -3079,11 +3098,18 @@ async fn normal_recording_runs_default_recipe_and_configured_model() {
     let rec = state.catalog.get(&id).await.unwrap().unwrap();
     assert_eq!(rec.status, RecordingStatus::Done);
     assert_eq!(rec.transcript.as_deref(), Some("CLEANED"));
-    // The default recipe does summarize.
+    // The default recipe runs the summary step with its OWN prompt: the summary
+    // value comes from the summary-sentinel mock, not cleanup's output. A summary
+    // step that re-ran cleanup's prompt would store "CLEANED" (or 404 and fail).
     assert_eq!(
         rec.summary.as_deref(),
-        Some("CLEANED"),
-        "the default recipe runs the summary step"
+        Some("SUMMARY"),
+        "the default recipe runs the summary step with the summary entry's prompt"
+    );
+    assert_eq!(
+        rec.summary_model.as_deref(),
+        Some("test-llm"),
+        "the summary step records its configured model"
     );
     // The configured STT model is recorded (no override).
     assert_eq!(rec.model.as_deref(), Some("configured-stt"));
