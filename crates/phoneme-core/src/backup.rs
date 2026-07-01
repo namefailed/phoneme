@@ -73,6 +73,25 @@ pub struct RecordingChapters {
     pub chapters: Vec<Chapter>,
 }
 
+/// Which of a recording's tasks/entities were user-added (`source = 'manual'`)
+/// at export time, keyed the way the setters dedupe (task `text`, entity
+/// `(kind, value)`). Carried out-of-band like chapters because the
+/// `Task`/`Entity` DTOs don't serialize `source`: the restore setters insert
+/// everything as `'llm'`, and without flipping these keys back to manual the
+/// first re-extraction's `DELETE ... WHERE source='llm'` would silently remove
+/// user-owned rows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManualSources {
+    /// The recording the manual rows belong to.
+    pub recording_id: RecordingId,
+    /// The `text` of each `source='manual'` task.
+    #[serde(default)]
+    pub task_texts: Vec<String>,
+    /// The `(kind, value)` of each `source='manual'` entity.
+    #[serde(default)]
+    pub entity_keys: Vec<(String, String)>,
+}
+
 /// The deserialized `catalog.json` envelope.
 ///
 /// `recordings`/`tags`/`meeting_digests` are the same DTOs the IPC layer emits,
@@ -105,6 +124,26 @@ pub struct BackupManifest {
     /// `#[serde(default)]` keeps a pre-chapters backup readable (restores none).
     #[serde(default)]
     pub chapters: Vec<RecordingChapters>,
+    /// Which task/entity rows were user-added (`source='manual'`) at export
+    /// time, so restore can flip them back after the setters insert everything
+    /// as `'llm'`. `#[serde(default)]` keeps older backups readable (nothing to
+    /// flip — matching their pre-fix behavior).
+    #[serde(default)]
+    pub manual_sources: Vec<ManualSources>,
+}
+
+/// Serialize-only twin of [`BackupManifest`] that borrows the caller's slices,
+/// so the writer never clones the whole library just to serialize it. Field
+/// names and order match the owned struct exactly — the JSON is identical.
+#[derive(Serialize)]
+struct BackupManifestRef<'a> {
+    version: u32,
+    recordings: &'a [Recording],
+    tags: &'a [Tag],
+    meeting_digests: &'a [MeetingDigest],
+    period_digests: &'a [PeriodDigest],
+    chapters: &'a [RecordingChapters],
+    manual_sources: &'a [ManualSources],
 }
 
 /// What a [`restore_from_zip`] did: how many recordings were newly imported and
@@ -151,16 +190,20 @@ pub fn write_to_zip(
     meeting_digests: &[MeetingDigest],
     period_digests: &[PeriodDigest],
     chapters: &[RecordingChapters],
+    manual_sources: &[ManualSources],
     audio_dir: &Path,
     out: &Path,
 ) -> Result<()> {
-    let manifest = BackupManifest {
+    // Borrowing manifest: serializes the caller's slices directly instead of
+    // cloning the whole library into an owned envelope first.
+    let manifest = BackupManifestRef {
         version: BACKUP_VERSION,
-        recordings: recordings.to_vec(),
-        tags: tags.to_vec(),
-        meeting_digests: meeting_digests.to_vec(),
-        period_digests: period_digests.to_vec(),
-        chapters: chapters.to_vec(),
+        recordings,
+        tags,
+        meeting_digests,
+        period_digests,
+        chapters,
+        manual_sources,
     };
     let json_bytes = serde_json::to_vec_pretty(&manifest)?;
 
@@ -312,6 +355,25 @@ pub async fn restore_from_zip(
         // it); without this the restore silently dropped them, unlike entities.
         if !rec.tasks.is_empty() {
             catalog.set_tasks(&rec.id, &rec.tasks).await?;
+        }
+
+        // Flip the user-added rows back to `source='manual'`. The setters above
+        // insert everything as 'llm'; without this the first re-extraction's
+        // `DELETE ... WHERE source='llm'` would remove the user's own rows.
+        // Older backups carry no manual_sources — nothing to flip.
+        if let Some(ms) = manifest
+            .manual_sources
+            .iter()
+            .find(|m| m.recording_id == rec.id)
+        {
+            if !ms.task_texts.is_empty() {
+                catalog.mark_tasks_manual(&rec.id, &ms.task_texts).await?;
+            }
+            if !ms.entity_keys.is_empty() {
+                catalog
+                    .mark_entities_manual(&rec.id, &ms.entity_keys)
+                    .await?;
+            }
         }
 
         // Restore the recording's auto-generated chapters (a per-recording side
@@ -619,6 +681,7 @@ mod tests {
             &digests,
             &period_digests,
             &chapters,
+            &[],
             &src_audio,
             &zip_path,
         )
@@ -719,6 +782,132 @@ mod tests {
         assert_eq!(restored_period.until, p_until);
     }
 
+    /// A user-added ('manual') task and entity must survive backup → restore →
+    /// the NEXT re-extraction. The restore setters insert everything as 'llm';
+    /// the manifest's `manual_sources` array is what flips the user rows back,
+    /// so a later `set_tasks`/`set_entities` (whose DELETE only targets 'llm')
+    /// can't remove them. This is the round-trip half of the manual/llm split.
+    #[tokio::test]
+    async fn manual_tasks_and_entities_survive_restore_then_reextraction() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src_audio = tmp.path().join("src-audio");
+        let src = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r1 = rec_at(2026, 5, 19, 14, 35, 0);
+        src.insert_restored(&r1).await.unwrap();
+        write_audio(&src_audio, &r1, b"RIFF-manual-audio");
+
+        // One extracted set + one user-added row each.
+        src.set_tasks(
+            &r1.id,
+            &[crate::Task {
+                id: 0,
+                text: "Ship the release".into(),
+                due_hint: None,
+                done: false,
+            }],
+        )
+        .await
+        .unwrap();
+        src.add_task(&r1.id, "Call Alice", Some("tomorrow"))
+            .await
+            .unwrap();
+        src.set_entities(
+            &r1.id,
+            &[crate::Entity {
+                kind: "person".into(),
+                value: "Bob".into(),
+            }],
+        )
+        .await
+        .unwrap();
+        src.add_entity(&r1.id, "person", "Alice").await.unwrap();
+
+        // Export the way the CLI does: recordings + the manual-source keys.
+        let recordings = src.list(&Default::default()).await.unwrap();
+        let manual_tasks = src.manual_task_texts_all().await.unwrap();
+        let mut manual_entities = src.manual_entity_keys_all().await.unwrap();
+        let manual_sources: Vec<ManualSources> = manual_tasks
+            .into_iter()
+            .map(|(rid, task_texts)| {
+                let entity_keys = manual_entities.remove(&rid).unwrap_or_default();
+                ManualSources {
+                    recording_id: rid,
+                    task_texts,
+                    entity_keys,
+                }
+            })
+            .collect();
+        assert_eq!(manual_sources.len(), 1, "one recording carries manual rows");
+        assert_eq!(manual_sources[0].task_texts, vec!["Call Alice".to_string()]);
+        assert_eq!(
+            manual_sources[0].entity_keys,
+            vec![("person".to_string(), "Alice".to_string())]
+        );
+
+        let zip_path = tmp.path().join("backup.zip");
+        write_to_zip(
+            &recordings,
+            &[],
+            &[],
+            &[],
+            &[],
+            &manual_sources,
+            &src_audio,
+            &zip_path,
+        )
+        .unwrap();
+
+        // Restore into a FRESH catalog, then run a re-extraction with a
+        // DIFFERENT llm set — the deletion the manual rows must survive.
+        let dst_audio = tmp.path().join("dst-audio");
+        let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        restore_from_zip(&zip_path, &dst, &dst_audio).await.unwrap();
+        dst.set_tasks(
+            &r1.id,
+            &[crate::Task {
+                id: 0,
+                text: "Totally new extracted task".into(),
+                due_hint: None,
+                done: false,
+            }],
+        )
+        .await
+        .unwrap();
+        dst.set_entities(
+            &r1.id,
+            &[crate::Entity {
+                kind: "topic".into(),
+                value: "release planning".into(),
+            }],
+        )
+        .await
+        .unwrap();
+
+        let tasks = dst.list_tasks(&r1.id).await.unwrap();
+        let task_texts: Vec<&str> = tasks.iter().map(|t| t.text.as_str()).collect();
+        assert!(
+            task_texts.contains(&"Call Alice"),
+            "the manual task must survive re-extraction, got {task_texts:?}"
+        );
+        assert!(
+            !task_texts.contains(&"Ship the release"),
+            "the old llm task is replaced by the new extraction"
+        );
+        let entities = dst.list_entities(&r1.id).await.unwrap();
+        let entity_keys: Vec<(&str, &str)> = entities
+            .iter()
+            .map(|e| (e.kind.as_str(), e.value.as_str()))
+            .collect();
+        assert!(
+            entity_keys.contains(&("person", "Alice")),
+            "the manual entity must survive re-extraction, got {entity_keys:?}"
+        );
+        assert!(
+            !entity_keys.contains(&("person", "Bob")),
+            "the old llm entity is replaced by the new extraction"
+        );
+    }
+
     #[tokio::test]
     async fn reimport_is_idempotent_and_skips_existing_ids() {
         let tmp = tempfile::tempdir().unwrap();
@@ -730,7 +919,7 @@ mod tests {
 
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
-        write_to_zip(&recordings, &[], &[], &[], &[], &src_audio, &zip_path).unwrap();
+        write_to_zip(&recordings, &[], &[], &[], &[], &[], &src_audio, &zip_path).unwrap();
 
         let dst_audio = tmp.path().join("dst");
         let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
@@ -776,7 +965,7 @@ mod tests {
 
         let zip_path = tmp.path().join("backup.zip");
         let recordings = src.list(&Default::default()).await.unwrap();
-        write_to_zip(&recordings, &[], &[], &[], &[], &src_audio, &zip_path).unwrap();
+        write_to_zip(&recordings, &[], &[], &[], &[], &[], &src_audio, &zip_path).unwrap();
 
         let dst_audio = tmp.path().join("dst");
         let dst = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();

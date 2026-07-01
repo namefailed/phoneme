@@ -152,23 +152,7 @@ export type MeetingDigest = {
   digest_model?: string | null;
 };
 
-/** A period digest: one LLM rollup across every recording in a date window
- *  (what was discussed, decisions, open items), distinct from a single track's
- *  `summary` and from the meeting-scoped {@link MeetingDigest}. Keyed by `key`,
- *  a stable id derived from the range bounds; `since`/`until` are RFC3339
- *  strings; `digest_model` is the LLM that produced it (null when unknown);
- *  `source_count` is how many recordings were rolled up. */
-export type PeriodDigest = {
-  key: string;
-  label: string;
-  since: string;
-  until: string;
-  digest: string;
-  digest_model?: string | null;
-  source_count: number;
-};
-
-/** How a recording started via `recordStart` decides to stop: "hold" = on the
+/** How a recording started via the `record_start` command decides to stop: "hold" = on the
  *  explicit stop signal (Stop click / hotkey release), "oneshot" = by itself
  *  on silence (or the max-duration ceiling), `duration:N` = after exactly N
  *  seconds. See services/recordStopMode.ts for the UI-level mapping. */
@@ -569,42 +553,6 @@ export async function rerunMeetingDigest(
 }
 
 /**
- * Fetch a stored period digest by its range `key` (the rollup across every
- * recording in a date window), or `null` when none has been generated for that
- * range. The digest panel fetches this by the key {@link rerunPeriodDigest}
- * derives from the same range.
- */
-export async function getPeriodDigest(key: string): Promise<PeriodDigest | null> {
-  return await tauriInvoke<PeriodDigest | null>("get_period_digest", { key });
-}
-
-/** List every stored period digest, newest range first. Powers the digest
- *  panel's history. */
-export async function listPeriodDigests(): Promise<PeriodDigest[]> {
-  return await tauriInvoke<PeriodDigest[]>("list_period_digests");
-}
-
-/**
- * Generate (or regenerate) a period digest on demand — one LLM rollup across
- * every recording in the `since`..`until` window (RFC3339 strings). `label` is
- * the human period name shown in the UI; `model` overrides the configured
- * summary model for this run only (never persisted). The digest arrives via the
- * `period_digest_updated` daemon event — re-fetch (by the same key) when it
- * fires.
- */
-export async function rerunPeriodDigest(
-  since: string,
-  until: string,
-  label: string,
-  model: string | null = null,
-  provider: string | null = null,
-  apiUrl: string | null = null,
-  apiKey: string | null = null,
-): Promise<void> {
-  await tauriInvoke("rerun_period_digest", { since, until, label, model, provider, apiUrl, apiKey });
-}
-
-/**
  * Deletes a recording by ID. If keepAudio is true, the catalog entry is removed
  * but the raw `.wav` file is preserved on disk.
  */
@@ -621,54 +569,10 @@ export async function deleteSession(meetingId: string, keepAudio = false): Promi
   await tauriInvoke("delete_session", { meetingId, keepAudio });
 }
 
-/**
- * Initiates a new recording session. Returns the generated recording ID.
- */
-export async function recordStart(mode: RecordMode): Promise<{ id: string }> {
-  return await tauriInvoke<{ id: string }>("record_start", { mode });
-}
-
-/** Stop the active recording; it finalizes and enters the transcription
- *  queue (`recording_stopped` fires, then the pipeline events follow). */
-export async function recordStop(): Promise<void> {
-  await tauriInvoke("record_stop");
-}
-
-/** Pause the active recording's capture (a `recording_paused` event fires;
- *  the audio file simply stops growing until resume). */
-export async function recordPause(): Promise<void> {
-  await tauriInvoke("record_pause");
-}
-
-/** Resume a paused recording (`recording_resumed` fires). */
-export async function recordResume(): Promise<void> {
-  await tauriInvoke("record_resume");
-}
-
 /** Set (or clear, with `null`) the display name of a meeting session. Shown
  *  on the list's group header; the tracks themselves are untouched. */
 export async function updateMeetingName(meetingId: string, name: string | null): Promise<void> {
   await tauriInvoke("update_meeting_name", { meetingId, name });
-}
-
-/** Abort the active recording and discard its audio: nothing is transcribed and
- *  no catalog row survives (`recording_cancelled` fires). */
-export async function recordCancel(): Promise<void> {
-  await tauriInvoke("record_cancel");
-}
-
-/**
- * Meeting Mode (v1.6): start a dual-track recording. The daemon captures the
- * microphone and the system audio (WASAPI loopback) concurrently as two
- * separate recordings linked by a shared `meeting_id`. Returns the session id.
- */
-export async function startMeeting(): Promise<{ meeting_id: string }> {
-  return await tauriInvoke<{ meeting_id: string }>("start_meeting");
-}
-
-/** Stop the active meeting. Both tracks are finalized and transcribed. */
-export async function stopMeeting(): Promise<{ meeting_id: string }> {
-  return await tauriInvoke<{ meeting_id: string }>("stop_meeting");
 }
 
 /**
@@ -1362,13 +1266,6 @@ export async function mergeNamedVoices(fromId: string, intoId: string): Promise<
 export async function forgetNamedVoice(id: string): Promise<boolean> {
   const r = await tauriInvoke<{ removed: boolean }>("forget_named_voice", { id });
   return r.removed;
-}
-
-/** Whether the daemon process is running, and its pid. The tray answers this
- *  (it owns the daemon process), so it works even when the daemon is down —
- *  the Doctor surfaces use it as the "is anything alive" check. */
-export async function daemonStatus(): Promise<{ running: boolean; pid: number }> {
-  return await tauriInvoke("daemon_status");
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────────────

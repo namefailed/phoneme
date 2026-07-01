@@ -188,6 +188,17 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
 
+    // Which task/entity rows are user-added ('manual'), so restore can flip
+    // them back after the setters re-insert everything as 'llm'. Best-effort:
+    // an older daemon without the request just yields an empty list (matching
+    // pre-fix backups).
+    let manual_sources: Vec<backup::ManualSources> = conn
+        .send(phoneme_ipc::Request::ManualSources)
+        .await
+        .ok()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
     // Auto-generated chapters are a per-recording side table (keyed by id), so
     // there's no list request — fetch them one recording at a time over the same
     // client and keep only the recordings that have any. A failed fetch on one
@@ -235,6 +246,7 @@ async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
         &meeting_digests,
         &period_digests,
         &chapters,
+        &manual_sources,
         audio_dir,
         Path::new(zip_path),
     ) {

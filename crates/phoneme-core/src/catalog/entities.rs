@@ -50,6 +50,54 @@ impl Catalog {
         Ok(res.rows_affected())
     }
 
+    /// Every `source='manual'` entity `(kind, value)` in the library, grouped by
+    /// recording — what the backup export captures so restore can flip the rows
+    /// back to manual (the `Entity` DTO doesn't carry `source`).
+    pub async fn manual_entity_keys_all(
+        &self,
+    ) -> Result<std::collections::HashMap<RecordingId, Vec<(String, String)>>> {
+        let rows = sqlx::query(
+            "SELECT recording_id, kind, value FROM entities WHERE source = 'manual' \
+             ORDER BY kind, value",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out: std::collections::HashMap<RecordingId, Vec<(String, String)>> =
+            std::collections::HashMap::new();
+        for r in rows {
+            let rid: String = r.try_get("recording_id")?;
+            let Some(rid) = RecordingId::parse(rid) else {
+                continue;
+            };
+            out.entry(rid)
+                .or_default()
+                .push((r.try_get("kind")?, r.try_get("value")?));
+        }
+        Ok(out)
+    }
+
+    /// Flip the given entity `(kind, value)` keys back to `source='manual'` —
+    /// the restore half of [`Catalog::manual_entity_keys_all`]. A key the
+    /// recording no longer has is a silent no-op.
+    pub async fn mark_entities_manual(
+        &self,
+        id: &RecordingId,
+        keys: &[(String, String)],
+    ) -> Result<()> {
+        for (kind, value) in keys {
+            sqlx::query(
+                "UPDATE entities SET source = 'manual' \
+                 WHERE recording_id = ? AND kind = ? AND value = ?",
+            )
+            .bind(id.as_str())
+            .bind(kind)
+            .bind(value)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
     /// Edit one entity in place (fix a wrong kind/value), scoped to its recording
     /// and keyed by its current `(kind, value)`. Marks it `'manual'` so the fix
     /// survives re-extraction. `UPDATE OR IGNORE` so renaming onto an entity the

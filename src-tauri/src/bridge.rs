@@ -168,6 +168,9 @@ fn is_retry_safe(req: &Request) -> bool {
         | ListMeetingDigests
         | GetPeriodDigest { .. }
         | ListPeriodDigests
+        // Pure read of the manual task/entity keys (the backup export's
+        // source-flip sidecar); idempotent like the digest lists.
+        | ManualSources
         | GetSegments { .. }
         | GetWords { .. }
         // Pure read of a recording's stored auto-chapters; idempotent like

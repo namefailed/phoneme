@@ -400,6 +400,37 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::ListPeriodDigests => {
             catalog_call!(state.catalog.list_all_period_digests().await => serialize)
         }
+        // The library's user-added (`source='manual'`) task/entity keys, grouped
+        // by recording — read by the backup export so restore can flip the rows
+        // back to manual (the Task/Entity DTOs don't carry `source`).
+        Request::ManualSources => {
+            let tasks = match state.catalog.manual_task_texts_all().await {
+                Ok(t) => t,
+                Err(e) => return err_response(&e),
+            };
+            let mut entities = match state.catalog.manual_entity_keys_all().await {
+                Ok(e) => e,
+                Err(e) => return err_response(&e),
+            };
+            let mut out: Vec<phoneme_core::backup::ManualSources> = Vec::new();
+            for (rid, task_texts) in tasks {
+                let entity_keys = entities.remove(&rid).unwrap_or_default();
+                out.push(phoneme_core::backup::ManualSources {
+                    recording_id: rid,
+                    task_texts,
+                    entity_keys,
+                });
+            }
+            // Recordings with manual entities but no manual tasks.
+            for (rid, entity_keys) in entities {
+                out.push(phoneme_core::backup::ManualSources {
+                    recording_id: rid,
+                    task_texts: Vec::new(),
+                    entity_keys,
+                });
+            }
+            serialize_response(out)
+        }
         // An unknown id yields an empty list, not `NotFound`: "no segments" is a
         // normal state (pre-capture recordings, providers without timing) and
         // callers treat the two identically.
