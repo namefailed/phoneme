@@ -255,6 +255,39 @@ impl Catalog {
         Ok(res.last_insert_rowid())
     }
 
+    /// Every `source='manual'` task text in the library, grouped by recording —
+    /// what the backup export captures so restore can flip the rows back to
+    /// manual (the `Task` DTO doesn't carry `source`).
+    pub async fn manual_task_texts_all(&self) -> Result<HashMap<RecordingId, Vec<String>>> {
+        let rows =
+            sqlx::query("SELECT recording_id, text FROM tasks WHERE source = 'manual' ORDER BY id")
+                .fetch_all(&self.pool)
+                .await?;
+        let mut out: HashMap<RecordingId, Vec<String>> = HashMap::new();
+        for r in rows {
+            let rid: String = r.try_get("recording_id")?;
+            let Some(rid) = RecordingId::parse(rid) else {
+                continue;
+            };
+            out.entry(rid).or_default().push(r.try_get("text")?);
+        }
+        Ok(out)
+    }
+
+    /// Flip the given task texts back to `source='manual'` — the restore half of
+    /// [`Catalog::manual_task_texts_all`]. Keyed by exact text, the same key the
+    /// export captured; a text the recording no longer has is a silent no-op.
+    pub async fn mark_tasks_manual(&self, id: &RecordingId, texts: &[String]) -> Result<()> {
+        for text in texts {
+            sqlx::query("UPDATE tasks SET source = 'manual' WHERE recording_id = ? AND text = ?")
+                .bind(id.as_str())
+                .bind(text)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
     /// Edit one task's text (and optional due hint), scoped to its recording like
     /// [`Catalog::set_task_done`]. Returns the affected row count (0 = not found).
     pub async fn update_task(

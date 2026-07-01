@@ -333,6 +333,13 @@ pub enum Request {
     /// their own side table, not carried by `ListRecordings`). The many-ranges
     /// sibling of [`Request::GetPeriodDigest`].
     ListPeriodDigests,
+    /// Which task/entity rows are user-added (`source='manual'`), grouped by
+    /// recording. Ok = a JSON array (possibly empty) of `ManualSources` objects
+    /// (`recording_id`, `task_texts`, `entity_keys`). A pure read used by the
+    /// library-backup export: the `Task`/`Entity` DTOs don't carry `source`, so
+    /// without this side-channel a restore would flatten user-added rows to
+    /// `'llm'` and the next re-extraction would delete them.
+    ManualSources,
     /// Fetch one recording's machine transcript segments in timeline order.
     /// Ok = JSON array (possibly empty) of `TranscriptSegment` objects:
     /// `start_ms`/`end_ms` offsets into the track's audio, the segment text,

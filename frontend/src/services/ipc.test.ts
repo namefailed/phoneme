@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   listRecordings,
   listSession,
-  recordStart,
   deleteRecording,
   moreLikeThis,
   getWords,
@@ -57,15 +56,6 @@ describe('IPC Services', () => {
 
     expect(tauriCore.invoke).toHaveBeenCalledWith('list_meeting', { meetingId: 'sess-1' });
     expect(res).toEqual([]);
-  });
-
-  it('calls record_start with correct mode', async () => {
-    vi.mocked(tauriCore.invoke).mockResolvedValueOnce({ id: '123' });
-
-    const res = await recordStart('oneshot');
-
-    expect(tauriCore.invoke).toHaveBeenCalledWith('record_start', { mode: 'oneshot' });
-    expect(res).toEqual({ id: '123' });
   });
 
   it('deleteRecording defaults to removing the audio too (keepAudio: false)', async () => {

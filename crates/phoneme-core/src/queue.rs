@@ -17,7 +17,7 @@
 //!
 //! [`recover_orphans`]: InboxQueue::recover_orphans
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::id::RecordingId;
 use crate::types::HookPayload;
 use serde::{Deserialize, Serialize};
@@ -390,9 +390,16 @@ impl InboxQueue {
             if path.extension().and_then(|s| s.to_str()) != Some("json") {
                 continue;
             }
-            let id_str = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
-                Error::Internal(format!("bad orphan filename: {}", path.display()))
-            })?;
+            // Same skip-don't-starve philosophy as `claim_next`: one weird file
+            // in processing/ must never abort recovery of the REST of the
+            // orphans. A non-UTF8 name gets quarantined like a malformed id.
+            let Some(id_str) = path.file_stem().and_then(|s| s.to_str()) else {
+                if let Some(name) = path.file_name() {
+                    let _ = fs::rename(&path, self.root.join("failed").join(name)).await;
+                }
+                tracing::warn!(file = %path.display(), "quarantined orphan with non-utf8 name");
+                continue;
+            };
             // Skip/quarantine orphans whose name isn't a valid RecordingId
             // instead of slicing out of bounds on them.
             let Some(id) = RecordingId::parse(id_str) else {
@@ -419,7 +426,13 @@ impl InboxQueue {
                 .root
                 .join("pending")
                 .join(format!("{}.json", id.as_str()));
-            fs::rename(&path, &dest).await?;
+            // A locked orphan (AV scan, dangling handle) must not abort the
+            // recovery of every LATER orphan — skip it; it stays in processing/
+            // and the next daemon start retries it.
+            if let Err(e) = fs::rename(&path, &dest).await {
+                tracing::warn!(file = %path.display(), error = %e, "could not recover orphan (locked?); leaving for next start");
+                continue;
+            }
             recovered.push(id);
         }
         Ok(recovered)

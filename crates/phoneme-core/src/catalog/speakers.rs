@@ -642,10 +642,9 @@ impl Catalog {
     /// are ordered by score, highest first.
     ///
     /// Cost is O(unnamed-captures x cohort): every unnamed capture's centroid is
-    /// JSON-parsed and scored against the live library here on the calling task.
-    /// Bounded by the count of un-enrolled captures (not corpus growth) and only
-    /// runs on explicit user-triggered propagation, so it's left inline; if the
-    /// unnamed cohort ever grows large this is the place to page or offload.
+    /// JSON-parsed and scored against the live library. The parse+score loop runs
+    /// on a blocking thread so a large unnamed cohort can't stall the async
+    /// runtime; it only runs on explicit user-triggered propagation.
     ///
     /// Returns empty when the voice is unknown, forgotten, or has no centroid yet.
     pub async fn propagation_candidates(
@@ -691,26 +690,50 @@ impl Catalog {
         .fetch_all(&self.pool)
         .await?;
 
-        let mut out: Vec<PropagationCandidate> = Vec::new();
-        for r in rows {
-            let centroid = serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
-            // A dimension mismatch (cross-model capture) scores cosine 0.0 and
-            // won't clear any sane threshold — the same skip the recognizer makes.
-            let score = crate::voiceprint::normalized_score(&centroid, &cohort, target_idx, mode);
-            if score >= threshold {
-                let recording_id: String = r.try_get("recording_id")?;
-                let speaker_label: i64 = r.try_get("speaker_label")?;
-                let rid = match RecordingId::parse(recording_id) {
-                    Some(rid) => rid,
-                    None => continue, // a malformed id can't be a real recording
+        // Pull the raw columns out cheaply, then do the CPU work (a JSON parse +
+        // cosine per capture, over the whole unnamed cohort) on a blocking
+        // thread so a big library doesn't stall the async runtime.
+        let raw: Vec<(String, i64, String)> = rows
+            .into_iter()
+            .map(|r| {
+                Ok((
+                    r.try_get::<String, _>("recording_id")?,
+                    r.try_get::<i64, _>("speaker_label")?,
+                    r.try_get::<String, _>("centroid")?,
+                ))
+            })
+            .collect::<Result<_>>()?;
+        let mut out = tokio::task::spawn_blocking(move || {
+            let mut out: Vec<PropagationCandidate> = Vec::new();
+            for (recording_id, speaker_label, centroid_json) in raw {
+                // One corrupt centroid must not abort the whole scan — skip it,
+                // like the malformed-id skip below.
+                let Ok(centroid) = serde_json::from_str::<Vec<f32>>(&centroid_json) else {
+                    tracing::warn!(%recording_id, speaker_label, "skipping voiceprint with corrupt centroid");
+                    continue;
                 };
-                out.push(PropagationCandidate {
-                    recording_id: rid,
-                    speaker_label,
-                    score,
-                });
+                // A dimension mismatch (cross-model capture) scores cosine 0.0 and
+                // won't clear any sane threshold — the same skip the recognizer makes.
+                let score =
+                    crate::voiceprint::normalized_score(&centroid, &cohort, target_idx, mode);
+                if score >= threshold {
+                    let rid = match RecordingId::parse(recording_id) {
+                        Some(rid) => rid,
+                        None => continue, // a malformed id can't be a real recording
+                    };
+                    out.push(PropagationCandidate {
+                        recording_id: rid,
+                        speaker_label,
+                        score,
+                    });
+                }
             }
-        }
+            out
+        })
+        .await
+        .map_err(|e| {
+            crate::error::Error::Internal(format!("propagation scoring task panicked: {e}"))
+        })?;
         out.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
