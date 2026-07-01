@@ -628,8 +628,8 @@ impl DaemonRecorder {
     }
 
     /// Finalize one cleanly-stopped meeting track: write its aligned samples
-    /// to WAV, flip the catalog row to `Transcribing` with the shared
-    /// wall-clock duration, enqueue it for the normal pipeline, and emit
+    /// to WAV, flip the catalog row to `Queued` with the shared wall-clock
+    /// duration, enqueue it for the normal pipeline, and emit
     /// `RecordingStopped`. Any step failing aborts this track alone — the
     /// caller (`stop_meeting`) isolates tracks from each other and routes a
     /// failure to the normal TranscribeFailed path.

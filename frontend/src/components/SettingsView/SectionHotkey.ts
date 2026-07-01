@@ -1,4 +1,4 @@
-import { renderField, bindFieldEvents } from "./form";
+import { renderField, bindFieldEvents, getByPath } from "./form";
 
 /**
  * Settings → Global Hotkey: the system-wide record hotkey the TRAY registers
@@ -157,6 +157,11 @@ export class SectionHotkey {
 
       comboInput.addEventListener("focus", () => {
         comboInput.value = "Press combination...";
+      });
+      comboInput.addEventListener("blur", () => {
+        // Restore the saved combo if the user focuses then leaves without
+        // pressing a non-modifier key, so "Press combination..." doesn't stick.
+        comboInput.value = String(getByPath(config, key) ?? "");
       });
     };
 

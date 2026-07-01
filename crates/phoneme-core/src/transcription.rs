@@ -1600,10 +1600,24 @@ impl TranscriptionProvider for AssemblyAiProvider {
                                 confidence: w.confidence,
                             });
                         }
+                        // The two callers of this are the PLAIN-PROSE paths
+                        // (not diarized, or a single detected speaker). They must
+                        // not carry per-word speaker labels — a prose transcript
+                        // with a speaker-tagged word layer diverges from what the
+                        // text shows, and from the Deepgram/ElevenLabs single-
+                        // speaker contract. Strip speakers here; the multi-speaker
+                        // branch below keeps the labeled `words` untouched.
                         let with_words = |text: String| Transcription {
                             text,
                             segments: Vec::new(),
-                            words: words.clone(),
+                            words: words
+                                .iter()
+                                .cloned()
+                                .map(|w| TranscriptWord {
+                                    speaker: None,
+                                    ..w
+                                })
+                                .collect(),
                             fixed_speaker_applied: false,
                             speaker_voiceprints: Vec::new(),
                             language: detected_language.clone(),

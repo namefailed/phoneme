@@ -212,7 +212,11 @@ export function openOllamaModelManager(): Promise<void> {
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay && !pulling) settle();
     });
-    overlay.querySelector<HTMLButtonElement>("#om-close")!.addEventListener("click", settle);
+    // Guard Close the same as Esc + backdrop: don't dismiss mid-pull (which would
+    // orphan the in-flight pull with no progress surface).
+    overlay.querySelector<HTMLButtonElement>("#om-close")!.addEventListener("click", () => {
+      if (!pulling) settle();
+    });
     document.addEventListener("keydown", onKey, true);
 
     document.body.appendChild(overlay);
