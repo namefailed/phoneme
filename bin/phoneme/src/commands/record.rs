@@ -304,6 +304,21 @@ mod tests {
                                     *subscriber.lock().await = Some(conn);
                                     return;
                                 }
+                                Request::DaemonStatus => {
+                                    // The spawning connect path probes DaemonStatus
+                                    // (via auto_spawn::ensure_running) and restarts a
+                                    // version-mismatched daemon. Report this build's
+                                    // version so the mock reads as a healthy same-build
+                                    // daemon rather than a stale one to be replaced.
+                                    let res = Response::Ok(serde_json::json!({
+                                        "running": true,
+                                        "pid": std::process::id(),
+                                        "version": env!("CARGO_PKG_VERSION"),
+                                    }));
+                                    if conn.send_response(res).await.is_err() {
+                                        return;
+                                    }
+                                }
                                 Request::RecordStart { .. } => {
                                     // Absorb in-flight scheduling (the client's
                                     // SubscribeEvents bytes may still be landing),

@@ -42,19 +42,24 @@ impl Client {
     /// For read-only or inspection commands use [`Client::connect_observe`].
     pub async fn connect(cfg: &Config) -> Result<Self, ExitCode> {
         let pipe_name = &cfg.daemon.pipe_name;
-        let transport = match NamedPipeTransport::connect(pipe_name).await {
-            Ok(t) => t,
-            Err(_) => {
-                if let Err(e) = auto_spawn::ensure_running(cfg).await {
-                    eprintln!("error: failed to auto-spawn daemon: {e}");
-                    return Err(ExitCode::from(exit::DAEMON_NOT_REACHABLE));
-                }
-                NamedPipeTransport::connect(pipe_name).await.map_err(|e| {
-                    eprintln!("error: daemon not reachable: {e}");
-                    ExitCode::from(exit::DAEMON_NOT_REACHABLE)
-                })?
-            }
-        };
+        // Always run `ensure_running` first, not just when the pipe is
+        // unreachable. It is idempotent: it returns immediately when a
+        // version-matching daemon already answers, and only restarts/spawns
+        // otherwise. Gating it on connect failure (as before) skipped the
+        // version check for a stale-but-reachable daemon — one whose IPC
+        // protocol still handshakes as compatible but which fails to
+        // deserialize this build's newer requests and drops the pipe mid-work.
+        // Routing every spawning command through the same check restarts such a
+        // daemon cleanly instead of letting it fail later with an opaque
+        // transport error.
+        if let Err(e) = auto_spawn::ensure_running(cfg).await {
+            eprintln!("error: failed to auto-spawn daemon: {e}");
+            return Err(ExitCode::from(exit::DAEMON_NOT_REACHABLE));
+        }
+        let transport = NamedPipeTransport::connect(pipe_name).await.map_err(|e| {
+            eprintln!("error: daemon not reachable: {e}");
+            ExitCode::from(exit::DAEMON_NOT_REACHABLE)
+        })?;
         let mut client = Self { transport };
         client.verify_protocol().await?;
         Ok(client)
