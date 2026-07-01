@@ -46,6 +46,7 @@ as additive and parse defensively (ignore fields you don't know).
 | GET | `/api/recordings/{id}/segments` · `/words` · `/chapters` | `GetSegments` · `GetWords` · `GetChapters` |
 | GET | `/api/recordings/{id}/versions` | `ListTranscriptVersions` *(cross-platform alternative to the pipe)* |
 | POST | `/api/recordings/{id}/clip` `{start_ms,end_ms[,out_path]}` | `ExportClip` → `{path}` |
+| POST | `/api/import` `{path[,recipe_id,ext_ref]}` | `ImportRecording` → `{id[,reused]}` *(local file by absolute path)* |
 | GET | `/api/recordings/{id}/similar` · `/api/search?q=` | `MoreLikeThis` · `SemanticSearch` |
 | GET | `/api/tags` · `/api/recordings/{id}/tags` · `/api/queue` | `ListTags` · `TagsFor` · `ListQueue` |
 | POST | `/api/recordings/{id}/{title,favorite,pinned,tags,cleanup,summary}` | the matching mutation |
@@ -60,7 +61,8 @@ payload on stdin as JSON.
 
 ## Known gaps (not yet on REST/CLI — pipe-only)
 
-- **Import over HTTP** — `POST /api/import {url}` is not yet exposed; URL import is CLI-only
-  (`phoneme import <url>`), because the yt-dlp pipeline lives in the CLI. Shell out for now.
+- **URL import over HTTP** — `POST /api/import` is live for a **local file by absolute path**
+  (`{path[,recipe_id,ext_ref]}`, see the table above). Only **URL/yt-dlp** import stays CLI-only
+  (`phoneme import <url>`), because the yt-dlp pipeline lives in the CLI.
 - **RAG `Ask`** — streaming Q&A is named-pipe-only (`Ask` request → `AskActivity` events).
 - These are tracked as follow-ups; the CLI/REST surfaces above cover the common path.
