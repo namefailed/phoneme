@@ -78,6 +78,24 @@ impl MockDaemon {
                                 }
                                 continue;
                             }
+                            // The spawning `Client::connect` path also probes
+                            // `DaemonStatus` (via `auto_spawn::ensure_running`) to
+                            // confirm the reachable daemon matches this build before
+                            // reusing it. Answer transparently with a matching
+                            // version — un-recorded, responder not invoked — so the
+                            // mock reads as a healthy same-build daemon and command
+                            // tests still assert only their subcommand's request.
+                            if let Request::DaemonStatus = req {
+                                let resp = Response::Ok(serde_json::json!({
+                                    "running": true,
+                                    "pid": std::process::id(),
+                                    "version": env!("CARGO_PKG_VERSION"),
+                                }));
+                                if conn.send_response(resp).await.is_err() {
+                                    return;
+                                }
+                                continue;
+                            }
                             let response = responder(&req);
                             received.lock().unwrap().push(req);
                             if conn.send_response(response).await.is_err() {
