@@ -176,10 +176,24 @@ pub(crate) fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), Stri
     let mut current = doc.as_table_mut();
     for (i, &part) in parts.iter().enumerate() {
         if i == parts.len() - 1 {
-            // This is the final key - set the value
-            // Try to parse the value as various types
+            // This is the final key - set the value. Type-sniff the input, but if
+            // the field already holds a float (the node was serialized from the
+            // live typed Config), keep it a float: otherwise a whole-number input
+            // like `merge_gap_secs 1` would parse as i64 first, write an integer
+            // literal, and fail the strict `toml::from_str::<Config>` parse-back
+            // below (toml 0.8 won't widen int -> f64).
+            let existing_is_float = current
+                .get(part)
+                .and_then(|it| it.as_value())
+                .map(|v| v.is_float())
+                .unwrap_or(false);
             let toml_val = if let Ok(b) = value.parse::<bool>() {
                 toml_edit::Value::from(b)
+            } else if existing_is_float {
+                match value.parse::<f64>() {
+                    Ok(n) => toml_edit::Value::from(n),
+                    Err(_) => toml_edit::Value::from(value),
+                }
             } else if let Ok(n) = value.parse::<i64>() {
                 toml_edit::Value::from(n)
             } else if let Ok(n) = value.parse::<f64>() {
@@ -371,6 +385,25 @@ api_key = "{sentinel}"
         assert!(
             !override_path.exists(),
             "nothing may be written when validation fails"
+        );
+    }
+
+    #[test]
+    fn set_value_accepts_a_whole_number_for_a_float_field() {
+        let tmp = tempfile::tempdir().unwrap();
+        let override_path = tmp.path().join("override.toml");
+        let _env = ConfigEnvOverride::set(&override_path);
+
+        let cfg = Config::default();
+        // `merge_gap_secs` is an f64 field. A whole-number input must be stored
+        // as a float literal, not a TOML integer — toml 0.8 won't widen int->f64
+        // on the parse-back, so `1` has to succeed just like `1.0` would.
+        set_value(&cfg, "diarization.merge_gap_secs", "1")
+            .expect("a whole number for a float field must be accepted");
+        let written = std::fs::read_to_string(&override_path).unwrap();
+        assert!(
+            written.contains("merge_gap_secs = 1.0"),
+            "the value must be stored as a float literal, got:\n{written}"
         );
     }
 

@@ -213,7 +213,9 @@ export class RecordingsListElement extends LitElement {
     if (kind === "single") return rows.filter((r) => !r.meeting_id);
     if (kind === "favorite") return rows.filter((r) => !!r.favorite);
     if (kind === "in_place") return rows.filter((r) => !!r.in_place);
-    return rows.filter((r) => !!r.meeting_id);
+    if (kind === "pinned") return rows.filter((r) => !!r.pinned);
+    if (kind === "meeting") return rows.filter((r) => !!r.meeting_id);
+    return rows; // unknown kind: don't drop rows (the server already filtered)
   }
 
   /** Build the wire filter from the UI filter, injecting the configured

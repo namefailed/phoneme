@@ -317,6 +317,11 @@ async fn main() -> Result<()> {
     // daemon process crashes rather than continuing as a zombie.
     let server_state = state.clone();
     let mut server_signal = state.shutdown.signal.clone();
+    // If a crash branch fires, that `&mut handle` has been driven to Ready and its
+    // output consumed — the cleanup below must NOT await it again (tokio panics on
+    // a JoinHandle polled after completion). Track which handle the select ate.
+    let mut worker_consumed = false;
+    let mut supervisor_consumed = false;
     let server_result: Result<()> = tokio::select! {
         r = ipc_server::serve(server_state) => r,
         _ = server_signal.wait() => {
@@ -324,10 +329,12 @@ async fn main() -> Result<()> {
             Ok(())
         }
         res = &mut worker_handle => {
+            worker_consumed = true;
             tracing::error!("queue worker handle unexpectedly exited: {:?}", res);
             Err(anyhow::anyhow!("queue worker crashed"))
         }
         res = &mut supervisor_handle => {
+            supervisor_consumed = true;
             tracing::error!("supervisor handle unexpectedly exited: {:?}", res);
             Err(anyhow::anyhow!("whisper supervisor crashed"))
         }
@@ -357,8 +364,14 @@ async fn main() -> Result<()> {
         }
     }
 
-    let _ = worker_handle.await;
-    let _ = supervisor_handle.await;
+    // Skip a handle the select already drove to completion (crash path) — re-await
+    // would panic; on every graceful path both are still pending and awaited once.
+    if !worker_consumed {
+        let _ = worker_handle.await;
+    }
+    if !supervisor_consumed {
+        let _ = supervisor_handle.await;
+    }
     // Wait for the preview supervisor too, so its dedicated whisper-server (if
     // any) is killed before we exit — same cleanup guarantee as the main server.
     let _ = preview_supervisor_handle.await;
