@@ -193,6 +193,30 @@ normalize_target_dbfs = -1.0
 #   "both"   — one loop per track, captions stacked (~double the preview work)
 meeting_preview = "toggle"
 
+# Meeting "both" mode only: spawn a SECOND live-preview whisper-server so the two
+# tracks caption concurrently instead of alternating (preview port + 2, default
+# 5812). Keeps a second model resident — opt-in for capable machines only. Needs
+# streaming_preview + meeting_preview = "both" + a local [preview_whisper] bundle.
+meeting_preview_own_server = false
+
+# When a preview transcription tick overruns its interval, back the cadence off
+# toward the tick's own cost (clamped to 8 s) so a heavy model on a weak box
+# self-throttles instead of wedging the recording. false = fixed cadence.
+preview_adaptive = true
+
+# Overlay token-bucket reveal speed — live words stream toward the latest text at
+# this many words/second (with an instant snap when Whisper revises earlier
+# words). 0 = render each update immediately (no smoothing).
+preview_reveal_words_per_sec = 12.0
+
+# After this long (ms) with no new preview words, the overlay label switches from
+# LIVE to LISTENING.
+preview_idle_ms = 2500
+
+# Show the "it hears me" audio-level waveform pill in the desktop overlay (a cheap
+# RMS loop, no whisper permit). Runs for single recordings, dictation, meetings.
+preview_waveform = true
+
 
 # -----------------------------------------------------------------------------
 # [in_place] — dictation (transcription typed at the cursor): the fast lane
